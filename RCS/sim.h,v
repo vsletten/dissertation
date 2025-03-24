@@ -1,0 +1,43 @@
+head	1.1;
+access;
+symbols;
+locks
+	sletten:1.1; strict;
+comment	@ * @;
+
+
+1.1
+date	98.06.25.03.29.36;	author sletten;	state Exp;
+branches;
+next	;
+
+
+desc
+@working baseline
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* sim.h: exports struct and function for simulation parameters */
+
+#ifndef sim_h
+#define sim_h
+
+struct simulation {
+  int nsteps,      /* total number of steps in simulation */
+      wsteps,      /* number of steps between data writes */
+      msteps,      /* number of steps between movie frames */
+      drawbonds;   /* TRUE = draw bonds, FALSE = don't */
+  long ranseed;    /* seed for initran2 */
+};
+typedef struct simulation *Simulation;
+
+Simulation readCond(void);
+void free_Simulation(Simulation s);
+
+#endif
+@
