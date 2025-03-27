@@ -1,0 +1,340 @@
+# MSI CERIUS2 DataModel File Version 2 0
+(1 Model
+ (A C Label kaolinite_surface)
+ (2 Atom
+  (A I ACL "14 Si")
+  (A F Charge 1.1)
+  (A D XYZ (0.0 0.0 0.0))
+  (A C Label Si1)
+ )
+ (3 Atom
+  (A I ACL "14 Si")
+  (A F Charge 1.1)
+  (A D XYZ (5.15 0.0 0.0))
+  (A C Label Si2)
+ )
+ (4 Atom
+  (A I ACL "14 Si")
+  (A F Charge 1.1)
+  (A D XYZ (2.58 4.45 0.0))
+  (A C Label Si3)
+ )
+ (5 Atom
+  (A I ACL "14 Si")
+  (A F Charge 1.1)
+  (A D XYZ (7.73 4.45 0.0))
+  (A C Label Si4)
+ )
+ (6 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.55)
+  (A D XYZ (1.28 1.11 -0.65))
+  (A C Label O1)
+ )
+ (7 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.55)
+  (A D XYZ (6.43 1.11 -0.65))
+  (A C Label O2)
+ )
+ (8 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.55)
+  (A D XYZ (3.86 5.56 -0.65))
+  (A C Label O3)
+ )
+ (9 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.55)
+  (A D XYZ (9.01 5.56 -0.65))
+  (A C Label O4)
+ )
+ (10 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.55)
+  (A D XYZ (1.30 3.34 -0.65))
+  (A C Label O5)
+ )
+ (11 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.55)
+  (A D XYZ (6.45 3.34 -0.65))
+  (A C Label O6)
+ )
+ (12 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.55)
+  (A D XYZ (3.88 7.80 -0.65))
+  (A C Label O7)
+ )
+ (13 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.55)
+  (A D XYZ (9.03 7.80 -0.65))
+  (A C Label O8)
+ )
+ (14 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.68)
+  (A D XYZ (0.00 0.00 -1.30))
+  (A C Label O9)
+ )
+ (15 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.68)
+  (A D XYZ (5.15 0.00 -1.30))
+  (A C Label O10)
+ )
+ (16 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.68)
+  (A D XYZ (2.58 4.45 -1.30))
+  (A C Label O11)
+ )
+ (17 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.68)
+  (A D XYZ (7.73 4.45 -1.30))
+  (A C Label O12)
+ )
+ (18 Atom
+  (A I ACL "13 Al")
+  (A F Charge 1.35)
+  (A D XYZ (1.29 2.23 -2.42))
+  (A C Label Al1)
+ )
+ (19 Atom
+  (A I ACL "13 Al")
+  (A F Charge 1.35)
+  (A D XYZ (6.44 2.23 -2.42))
+  (A C Label Al2)
+ )
+ (20 Atom
+  (A I ACL "13 Al")
+  (A F Charge 1.35)
+  (A D XYZ (3.87 6.68 -2.42))
+  (A C Label Al3)
+ )
+ (21 Atom
+  (A I ACL "13 Al")
+  (A F Charge 1.35)
+  (A D XYZ (9.02 6.68 -2.42))
+  (A C Label Al4)
+ )
+ (22 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.66)
+  (A D XYZ (0.00 2.23 -3.54))
+  (A C Label O13)
+ )
+ (23 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.66)
+  (A D XYZ (5.15 2.23 -3.54))
+  (A C Label O14)
+ )
+ (24 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.66)
+  (A D XYZ (2.58 6.68 -3.54))
+  (A C Label O15)
+ )
+ (25 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.66)
+  (A D XYZ (7.73 6.68 -3.54))
+  (A C Label O16)
+ )
+ (26 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.66)
+  (A D XYZ (2.58 0.00 -3.54))
+  (A C Label O17)
+ )
+ (27 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.66)
+  (A D XYZ (7.73 0.00 -3.54))
+  (A C Label O18)
+ )
+ (28 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.66)
+  (A D XYZ (0.00 4.45 -3.54))
+  (A C Label O19)
+ )
+ (29 Atom
+  (A I ACL "8 O")
+  (A F Charge -0.66)
+  (A D XYZ (5.15 4.45 -3.54))
+  (A C Label O20)
+ )
+ (30 Atom
+  (A I ACL "1 H")
+  (A F Charge 0.33)
+  (A D XYZ (0.00 2.23 -4.51))
+  (A C Label H1)
+ )
+ (31 Atom
+  (A I ACL "1 H")
+  (A F Charge 0.33)
+  (A D XYZ (5.15 2.23 -4.51))
+  (A C Label H2)
+ )
+ (32 Atom
+  (A I ACL "1 H")
+  (A F Charge 0.33)
+  (A D XYZ (2.58 6.68 -4.51))
+  (A C Label H3)
+ )
+ (33 Atom
+  (A I ACL "1 H")
+  (A F Charge 0.33)
+  (A D XYZ (7.73 6.68 -4.51))
+  (A C Label H4)
+ )
+ (34 Bond
+  (A O Atom1 2)
+  (A O Atom2 6)
+ )
+ (35 Bond
+  (A O Atom1 2)
+  (A O Atom2 14)
+ )
+ (36 Bond
+  (A O Atom1 3)
+  (A O Atom2 7)
+ )
+ (37 Bond
+  (A O Atom1 3)
+  (A O Atom2 15)
+ )
+ (38 Bond
+  (A O Atom1 4)
+  (A O Atom2 8)
+ )
+ (39 Bond
+  (A O Atom1 4)
+  (A O Atom2 16)
+ )
+ (40 Bond
+  (A O Atom1 5)
+  (A O Atom2 9)
+ )
+ (41 Bond
+  (A O Atom1 5)
+  (A O Atom2 17)
+ )
+ (42 Bond
+  (A O Atom1 6)
+  (A O Atom2 18)
+ )
+ (43 Bond
+  (A O Atom1 7)
+  (A O Atom2 19)
+ )
+ (44 Bond
+  (A O Atom1 8)
+  (A O Atom2 20)
+ )
+ (45 Bond
+  (A O Atom1 9)
+  (A O Atom2 21)
+ )
+ (46 Bond
+  (A O Atom1 10)
+  (A O Atom2 18)
+ )
+ (47 Bond
+  (A O Atom1 11)
+  (A O Atom2 19)
+ )
+ (48 Bond
+  (A O Atom1 12)
+  (A O Atom2 20)
+ )
+ (49 Bond
+  (A O Atom1 13)
+  (A O Atom2 21)
+ )
+ (50 Bond
+  (A O Atom1 14)
+  (A O Atom2 18)
+ )
+ (51 Bond
+  (A O Atom1 15)
+  (A O Atom2 19)
+ )
+ (52 Bond
+  (A O Atom1 16)
+  (A O Atom2 20)
+ )
+ (53 Bond
+  (A O Atom1 17)
+  (A O Atom2 21)
+ )
+ (54 Bond
+  (A O Atom1 18)
+  (A O Atom2 22)
+ )
+ (55 Bond
+  (A O Atom1 18)
+  (A O Atom2 26)
+ )
+ (56 Bond
+  (A O Atom1 18)
+  (A O Atom2 28)
+ )
+ (57 Bond
+  (A O Atom1 19)
+  (A O Atom2 23)
+ )
+ (58 Bond
+  (A O Atom1 19)
+  (A O Atom2 27)
+ )
+ (59 Bond
+  (A O Atom1 19)
+  (A O Atom2 29)
+ )
+ (60 Bond
+  (A O Atom1 20)
+  (A O Atom2 24)
+ )
+ (61 Bond
+  (A O Atom1 20)
+  (A O Atom2 28)
+ )
+ (62 Bond
+  (A O Atom1 20)
+  (A O Atom2 29)
+ )
+ (63 Bond
+  (A O Atom1 21)
+  (A O Atom2 25)
+ )
+ (64 Bond
+  (A O Atom1 21)
+  (A O Atom2 27)
+ )
+ (65 Bond
+  (A O Atom1 21)
+  (A O Atom2 29)
+ )
+ (66 Bond
+  (A O Atom1 22)
+  (A O Atom2 30)
+ )
+ (67 Bond
+  (A O Atom1 23)
+  (A O Atom2 31)
+ )
+ (68 Bond
+  (A O Atom1 24)
+  (A O Atom2 32)
+ )
+ (69 Bond
+  (A O Atom1 25)
+  (A O Atom2 33)
+ )
+)
