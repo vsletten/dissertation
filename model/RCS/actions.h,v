@@ -1,0 +1,39 @@
+head	1.1;
+access;
+symbols;
+locks
+	sletten:1.1; strict;
+comment	@ * @;
+
+
+1.1
+date	98.06.25.03.29.36;	author sletten;	state Exp;
+branches;
+next	;
+
+
+desc
+@working baseline
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* actions.h: exports functions for doing something */
+
+#ifndef actions_h
+#define actions_h
+
+#include "lattice.h"
+#include "evtlist.h"
+
+
+float doEvent(Lattice lattice, eventList el);
+void doReaction(Lattice lattice, int site, int rxn);
+
+
+#endif
+@

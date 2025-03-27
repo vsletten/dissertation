@@ -1,0 +1,33 @@
+head	1.1;
+access;
+symbols;
+locks
+	sletten:1.1; strict;
+comment	@ * @;
+
+
+1.1
+date	98.06.25.03.29.36;	author sletten;	state Exp;
+branches;
+next	;
+
+
+desc
+@working baseline
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@/* myerr.h: exports error handling routines */
+
+#ifndef myerr_h
+#define myerr_h
+
+void die(char *msg);
+
+#endif
+@

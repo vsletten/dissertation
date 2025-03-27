@@ -1,0 +1,5 @@
+5000000     # Number of steps in simulation
+1000        # Number of steps between data writes (0 for no data)
+0        # Number of steps between movie frames (0 for no movie)
+-2	# Seed for random number generator
+1        # Draw bonds? (0 No - only occupied, 1 Yes - entire lattice)

@@ -1,0 +1,87 @@
+head	1.3;
+access;
+symbols;
+locks
+	sletten:1.3; strict;
+comment	@ * @;
+
+
+1.3
+date	98.08.06.16.28.05;	author sletten;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	98.08.06.00.57.04;	author sletten;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	98.06.25.03.29.36;	author sletten;	state Exp;
+branches;
+next	;
+
+
+desc
+@working baseline
+@
+
+
+1.3
+log
+@adaptive solid size determination based on saturation state
+@
+text
+@/* rxnlist.h: exports types and functions for reaction list */
+
+#ifndef rxnlist_h
+#define rxnlist_h
+
+#define N300    2
+#define N400   14
+#define NHYD   16
+#define NADS   20
+#define NDES   24
+#define NRXN   28
+#define Kb 1.38066e-23  /* boltzman in J/mol/K */
+#define R  1.987e-3     /* R in kcal/mol/K */
+#define JtoCAL 4.1842   /* multiply cal by JtoCAL to get J */
+
+/* reaction: Gives reactant and product states for given reaction,
+ *           and reaction rate. */
+struct reaction {
+  int   reactant,  /* reactant state */
+        info,      /* multi-purpose info */
+        nrates;    /* number of actual rates */
+  float *rate;     /* reaction rate list since actual rate
+                    * depends on next neighbors' states */
+};
+typedef struct reaction *reactionList;
+
+reactionList readRxns(void);
+void free_rxnList(reactionList rl);
+void getChem(float *si, float *al);
+
+#endif
+@
+
+
+1.2
+log
+@*** empty log message ***
+@
+text
+@d29 1
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d6 2
+d12 3
+a14 1
+#define Kb 1.38066e-23
+@
