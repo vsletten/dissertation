@@ -1,6 +1,5 @@
 /* Libraries */
 #include <stdio.h>
-//#include "common.h"
 #include "rxnlist.h"
 #include "evtlist.h"
 #include "lattice.h"

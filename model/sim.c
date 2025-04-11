@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include "futil.h"
 #include "myerr.h"
-//#include "common.h"
 #include "sim.h"
 
 /* readCond: read in some more simulation conditions */
