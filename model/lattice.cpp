@@ -1,11 +1,11 @@
 #include <stdlib.h>
 #include <stdio.h>
-#include "futil.h"
-#include "myerr.h"
-#include "bfsearch.h"
-#include "common.h"
-#include "lattice.h"
-#include "rxnlist.h"
+#include "futil.hpp"
+#include "myerr.hpp"
+#include "bfsearch.hpp"
+#include "common.hpp"
+#include "lattice.hpp"
+#include "rxnlist.hpp"
 
 static int Acells;    /* number of cells in a direction */
 static int Bcells;    /* number of cells in b direction */
@@ -15,11 +15,11 @@ static int Nsites;    /* total number of sites in simulation */
 
 
 /* clusters: check for and remove any unattached clusters */
-void clusters(Lattice lattice)
+void lattice::clusters(lattice::Lattice lattice)
 {
   int i;
 
-  BFS(lattice, 0, Nsites);
+  BFSearch::BFS(lattice, 0, Nsites);
   for (i = 0; i < Nsites; i++) 
   {
     if (lattice[i].color == WHITE &&
@@ -28,7 +28,7 @@ void clusters(Lattice lattice)
     else if (lattice[i].color == GRAY) 
     {
       printf("bad color at %d  %d\n", i, lattice[i].state);
-      die("error in clusters");
+      Myerr::die("error in clusters");
     } 
   }
 }
@@ -37,11 +37,11 @@ void clusters(Lattice lattice)
 
 /* countNbrs: returns actual number of neighbors 
  *            (for lattice edge detection) */
-int countNbrs(Lattice lattice, int site)
+int lattice::countNbrs(lattice::Lattice lattice, int site)
 {
   int i;
 
-  for (i = 0; lattice[site].nbr[i] >= 0 && i < 6; i++)
+  for (i = 0; i < 6 && lattice[site].nbr[i] >= 0; i++)
     ;
   return i;
 }
@@ -50,7 +50,7 @@ int countNbrs(Lattice lattice, int site)
 
 
 /* findPairs: sets up the double bridge information */
-void findPairs(Lattice lattice)
+void lattice::findPairs(lattice::Lattice lattice)
 {
   int j, al1, al2, al3, al4, o1, o2, found;
 
@@ -85,13 +85,13 @@ void findPairs(Lattice lattice)
 
 
 
-void free_lattice(Lattice l)
+void lattice::free_lattice(lattice::Lattice l)
 {
   free(l);
 }
 
 
-void getDim(int *a, int *b)
+void lattice::getDim(int *a, int *b)
 {
   *a = Acells;
   *b = Bcells;
@@ -99,11 +99,11 @@ void getDim(int *a, int *b)
 
 /* getNeighbor: determine lattice index of nbr j for site i 
  *              depends upon index generation scheme in makeLattice */
-int getNeighbor(Lattice l, unitCell c, int i, int j)
+int lattice::getNeighbor(lattice::Lattice l, ucell::unitCell c, int i, int j)
 {
   int a, b, nbr, npos;
 
-  npos = getNpos();
+  npos = ucell::getNpos();
   a = l[i].a + c[l[i].n].nbr[j].a;
   b = l[i].b + c[l[i].n].nbr[j].b;
   if (c[l[i].n].nbr[j].n < 0) 
@@ -133,7 +133,7 @@ int getNeighbor(Lattice l, unitCell c, int i, int j)
 
 
 
-int getNsites(void)
+int lattice::getNsites(void)
 {
   return Nsites;
 }
@@ -143,19 +143,19 @@ int getNsites(void)
 /* makeLattice: repeat unit cell to make the lattice and
  *              initialize state of sites 
  *              index generation scheme important for getNeighbor */
-Lattice makeLattice(unitCell c)
+lattice::Lattice lattice::makeLattice(ucell::unitCell c)
 {
   int a, b, n, i, j, npos;
   FILE *f;
-  Lattice lattice;
+  lattice::Lattice lattice;
 
-  f = openFile("data.lattice","r");
+  f = Futil::openFile("data.lattice","r");
   fscanf(f, " %d %d %d", &Acells, &Bcells, &Surfplane);
-  closeFile(f);
+  Futil::closeFile(f);
 
-  npos = getNpos();
+  npos = ucell::getNpos();
   Nsites = Acells * Bcells * npos;
-  lattice = (Lattice) malloc (sizeof(*lattice) * Nsites);
+  lattice = (lattice::Lattice) malloc (sizeof(*lattice) * Nsites);
   for (a = 0; a < Acells; a++) 
   {
     for (b = 0; b < Bcells; b++) 
@@ -184,14 +184,14 @@ Lattice makeLattice(unitCell c)
 
 /* populateSolid: update state of sites which start as part of the solid
  *                as determined by input parameters */
-void populateSolid(Lattice lattice)
+void lattice::populateSolid(lattice::Lattice lattice)
 {
   int z, x, n, i, top, len, npos;
   float dms, dma, frac;
   char s[20];
 
-  npos = getNpos();
-  getChem(&dms, &dma);
+  npos = ucell::getNpos();
+  rxnlist::getChem(&dms, &dma);
   if (dms + dma > 0.5) 
   {
     frac = 0.3;
@@ -230,11 +230,11 @@ void populateSolid(Lattice lattice)
 
 /* terminateLattice: set to EDGE state of any atoms at very top or 
  *                   bottom of the lattice */
-void terminateLattice(Lattice lattice)
+void lattice::terminateLattice(lattice::Lattice lattice)
 {
   int top, len, x, i, n, npos;
 
-  npos = getNpos();
+  npos = ucell::getNpos();
   top = (Surfplane ? (Acells - 1) : (Bcells - 1));
   len = (Surfplane ? Bcells : Acells);
   for (x = 0; x < len; x++) 
@@ -243,12 +243,12 @@ void terminateLattice(Lattice lattice)
         (top * Bcells * npos + x * npos) :
         (x * Bcells * npos + top * npos));
     for (n = 0; n < npos; n++, i++) 
-      if (getNumNbrs(lattice[i].state) != countNbrs(lattice, i))
+      if (ucell::getNumNbrs(lattice[i].state) != countNbrs(lattice, i))
       	lattice[i].state = EDGE;
     i = (Surfplane ? (x * npos) :
 	      (x * Bcells * npos));
     for (n = 0; n < npos; n++, i++)
-      if (getNumNbrs(lattice[i].state) != countNbrs(lattice, i))
+      if (ucell::getNumNbrs(lattice[i].state) != countNbrs(lattice, i))
 	      lattice[i].state = EDGE;
   }
 }
@@ -258,7 +258,7 @@ void terminateLattice(Lattice lattice)
 
 /* terminateSurface: set state of O sites bonded to cations at surface 
  *                   so as to terminate dangling bonds with OH's */
-void terminateSurface(Lattice lattice)
+void lattice::terminateSurface(lattice::Lattice lattice)
 {
   int i, i2, j, type;
 

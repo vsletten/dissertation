@@ -3,6 +3,9 @@
 #ifndef myerr_h
 #define myerr_h
 
-void die(char *msg);
+class Myerr {
+public:
+    static void die(const char *msg);
+};
 
 #endif

@@ -1,25 +1,14 @@
 #include <stdlib.h>
-#include "myerr.h"
-//#include "common.h"
-#include "bfsearch.h"
-#include "lattice.h"
-
-/* Qnode: node of a queue used in BFS for clusters */
-struct Qnode {
-  int val;
-  struct Qnode *next;
-};
-
-static int deQ(struct Qnode **q);
-static void enQ(struct Qnode **q, int val);
-static int headQ(struct Qnode *q);
+#include "myerr.hpp"
+#include "bfsearch.hpp"
+#include "lattice.hpp"
 
 /* BFS: perform breadth-first search to mark all "solid" nodes
         start in a known occupied node and discover all 
         occupied neighbors. (discovered => BLACK)
         At the end, undiscovered, occupied nodes are unbonded
         clusters. */
-void BFS(Lattice lattice, int s, int n)
+void BFSearch::BFS(lattice::Lattice lattice, int s, int n)
 {
   int u, v, i;
   struct Qnode *Q = NULL;
@@ -46,25 +35,25 @@ void BFS(Lattice lattice, int s, int n)
 }
   
 /* enQ: add val to tail of queue */
-void enQ(struct Qnode **q, int val)
+void BFSearch::enQ(struct Qnode **q, int val)
 {
-  struct Qnode *new;
+  struct BFSearch::Qnode *newNode; 
 
-  if (!(new = (struct Qnode *) malloc (sizeof(struct Qnode))))
-    die("malloc failed");
-  new->val = val;
+  if (!(newNode = (struct Qnode *) malloc (sizeof(struct Qnode))))
+    Myerr::die("malloc failed");
+  newNode->val = val;
   if (NULL == *q) {
-    new->next = new;                         /* single el't; tail = head  */
+    newNode->next = newNode;                         /* single el't; tail = head  */
   } else { 
-    new->next = (*q)->next;                  /* tail points to head */
-    (*q)->next = new;                        /* old tail points to new tail */
+    newNode->next = (*q)->next;                  /* tail points to head */
+    (*q)->next = newNode;                        /* old tail points to new tail */
   }
-  *q = new;                                  /* queue points to new tail */ 
+  *q = newNode;                                  /* queue points to new tail */ 
 }
 
 
 /* headQ: return val for head of queue */
-int headQ(struct Qnode *q)
+int BFSearch::headQ(struct BFSearch::Qnode *q)
 {
   if (NULL == q) {                           /* empty queue */
     return -1;
@@ -75,10 +64,10 @@ int headQ(struct Qnode *q)
 
 
 /* deQ: remove head of queue */
-int deQ(struct Qnode **q)
+int BFSearch::deQ(struct BFSearch::Qnode **q)
 {
   int val;
-  struct Qnode *head;
+  struct BFSearch::Qnode *head;
 
   if (NULL == *q)                          /* empty queue */
     return -1;

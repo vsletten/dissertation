@@ -1,11 +1,11 @@
 #include <ctype.h>
-#include "common.h"
-#include "futil.h"
-#include "myerr.h"
+#include "common.hpp"
+#include "futil.hpp"
+#include "myerr.hpp"
 
 /* eatComment: advance file pointer to beginning of next line 
  *             flag is first character of all comments       */
-void eatComment(FILE *f, char flag)
+void Futil::eatComment(FILE *f, char flag)
 {
   int i;
   char c;
@@ -26,20 +26,20 @@ void eatComment(FILE *f, char flag)
 
 
 /* openFile: try to open a file die if unsuccessful */
-FILE *openFile(const char *name, const char *mode)
+FILE *Futil::openFile(const char *name, const char *mode)
 {
   FILE *f;
   char msg[100];
 
   if (!(f = fopen(name, mode))) {
     sprintf(msg, "could not open %s with mode %s", name, mode);
-    die(msg);
+    Myerr::die(msg);
   }
   return f;
 }
 
 
-int closeFile(FILE *f)
+int Futil::closeFile(FILE *f)
 {
   return (fclose(f));
 }

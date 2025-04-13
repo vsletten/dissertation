@@ -1,12 +1,21 @@
-CC = gcc
-CFLAGS = -O3 -ffast-math
-#CFLAGS = -ggdb
-LIBS = -lm
+CXX = g++
+CXXFLAGS = -std=c++11 -Wall -Wextra -O3 -ffast-math
+#CXXFLAGS = -std=c++11 -Wall -Wextra -ggdb
+LDFLAGS = -lm
+SOURCES = mckaol.cpp actions.cpp bfsearch.cpp envrn.cpp evtlist.cpp futil.cpp lattice.cpp myerr.cpp output.cpp ran2.cpp reactions.cpp rxnlist.cpp sim.cpp ucell.cpp
+OBJECTS = $(SOURCES:.cpp=.o)
+EXECUTABLE = mckaol
+HEADERS = $(wildcard *.hpp)
 
-all: mckaol 
+all: $(EXECUTABLE)
 
-mckaol: 
-	$(CC) $(CFLAGS) -o mckaol mckaol.c actions.c bfsearch.c envrn.c evtlist.c futil.c lattice.c myerr.c output.c ran2.c reactions.c rxnlist.c sim.c ucell.c $(LIBS)
+$(EXECUTABLE): $(OBJECTS)
+	$(CXX) $(CXXFLAGS) -o $@ $(OBJECTS) $(LDFLAGS)
+
+%.o: %.cpp $(HEADERS)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -f *.o *~ *.Addr *.Counts *.pixie mon.out logfile
+	rm -f $(OBJECTS) $(EXECUTABLE)
+
+.PHONY: all clean

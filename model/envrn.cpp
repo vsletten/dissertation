@@ -1,20 +1,13 @@
 #include <stdio.h>
-#include "common.h"
-#include "envrn.h"
-#include "myerr.h"
-#include "rxnlist.h"
-
-
-static int check100(Lattice lattice, int site);
-static int check200(Lattice lattice, int site);
-static int check300(Lattice lattice, int site);
-static int check400(Lattice lattice, int site);
-static int check500(Lattice lattice, int site);
+#include "common.hpp"
+#include "envrn.hpp"
+#include "myerr.hpp"
+#include "rxnlist.hpp"
 
 
 /* checkEnv: returns index which tells environment for determination
  *           of appropriate rate constant */
-int checkEnv(Lattice lattice, int site)
+int Environment::checkEnv(lattice::Lattice lattice, int site)
 {
   int status;
   char msg[100];
@@ -44,7 +37,7 @@ int checkEnv(Lattice lattice, int site)
       status = -1;
       sprintf(msg, "invalid environment: site %d, state %d", site,
 	      lattice[site].state);
-      die(msg);
+      Myerr::die(msg);
       break;
   }
   return status;
@@ -53,7 +46,7 @@ int checkEnv(Lattice lattice, int site)
 
 
 /* check100: returns index for environment of an Al */
-int check100(Lattice lattice, int site)
+int Environment::check100(lattice::Lattice lattice, int site)
 {
   int i, nbr, x, y;
 
@@ -64,7 +57,7 @@ int check100(Lattice lattice, int site)
   for (i = 0; i < 6; i++) {
     nbr = lattice[site].nbr[i];
     if (lattice[nbr].state == EDGE)
-      die("ran into lattice edge in check100");
+      Myerr::die("ran into lattice edge in check100");
     switch (lattice[nbr].state) {
       case 502: x++; break;
       case 403: case 405: case 407: case 409: case 410: y++; break;
@@ -77,7 +70,7 @@ int check100(Lattice lattice, int site)
 
 
 /* check200: returns index for environment of an Si */
-int check200(Lattice lattice, int site)
+int Environment::check200(lattice::Lattice lattice, int site)
 {
   int i, nbr, x, y;
 
@@ -89,7 +82,7 @@ int check200(Lattice lattice, int site)
   for (i = 0; i < 4; i++) {
     nbr = lattice[site].nbr[i];
     if (lattice[nbr].state == EDGE)
-      die("ran into lattice edge in check200");
+      Myerr::die("ran into lattice edge in check200");
     switch (lattice[nbr].state) {
       case 408: x = 0; break;
       case 302: y++; break;
@@ -102,7 +95,7 @@ int check200(Lattice lattice, int site)
 
 
 /* check300: returns index for environment of Si-O-Si type O */
-int check300(Lattice lattice, int site)
+int Environment::check300(lattice::Lattice lattice, int site)
 {
   int si1, si2, sio1, sio2, x, y;
 
@@ -117,7 +110,7 @@ int check300(Lattice lattice, int site)
   if (si1 < 0 || si2 < 0 || sio1 < 0 || sio2 < 0 ||
       lattice[si1].state == EDGE || lattice[si2].state ==EDGE ||
       lattice[sio1].state == EDGE || lattice[sio2].state == EDGE)
-    die("ran into lattice edge in check300");
+    Myerr::die("ran into lattice edge in check300");
 
   if (lattice[sio1].state == 402 ||    /* 400s */
       lattice[sio1].state == 403 ||
@@ -140,7 +133,7 @@ int check300(Lattice lattice, int site)
 
 
 /* check400: returns index for environment of Si-O-Al2 type O */
-int check400(Lattice lattice, int site)
+int Environment::check400(lattice::Lattice lattice, int site)
 {
   int i, x, y, al1, al2, si, o1, p;
 
@@ -155,11 +148,11 @@ int check400(Lattice lattice, int site)
   if (al1 < 0 || al2 < 0 || si < 0 || (p = lattice[site].pair) < 0 ||
       lattice[al1].state == EDGE || lattice[al2].state == EDGE ||
       lattice[si].state == EDGE || lattice[p].state == EDGE)
-    die("ran into lattice edge in check400");
+    Myerr::die("ran into lattice edge in check400");
 
   for (i = 1; i < 3; i++) {             /* 300s */
     if ((o1 = lattice[si].nbr[i]) < 0)  /* 400 site is Si nbr[0] */
-      die("ran into lattice edge");
+      Myerr::die("ran into lattice edge");
     if (lattice[o1].state > 301)
       x++;
   }
@@ -185,7 +178,7 @@ int check400(Lattice lattice, int site)
 
 
 /* check500: returns index of environment for Al-OH-Al type O */
-int check500(Lattice lattice, int site)
+int Environment::check500(lattice::Lattice lattice, int site)
 {
   int al1, al2, x, y, p;
 
@@ -198,7 +191,7 @@ int check500(Lattice lattice, int site)
   if ((p = lattice[site].pair) < 0 || al1 < 0 || al2 < 0 ||
       lattice[al1].state == EDGE || lattice[al2].state == EDGE ||
       lattice[p].state == EDGE)
-    die("ran into lattice edge in check500");
+    Myerr::die("ran into lattice edge in check500");
 
   if (lattice[p].state == 502 ||
       lattice[p].state == 403 ||
@@ -224,7 +217,7 @@ int check500(Lattice lattice, int site)
 
 /* isActive: determine whether site is active to do reaction rxn 
  *           return TRUE or FALSE */
-int isActive(int site, Lattice lattice, int rxn)
+int Environment::isActive(int site, lattice:: Lattice lattice, int rxn)
 {
   int result, nbr, nbr2, i, j;
 

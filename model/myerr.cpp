@@ -1,10 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
-//#include "common.h"
-#include "myerr.h"
+#include "myerr.hpp"
 
 /* die: print msg to stderr then exit */
-void die(char *msg)
+void Myerr::die(const char *msg)
 {
   fprintf(stderr, "mckaol: %s\n", msg);
   exit(1);

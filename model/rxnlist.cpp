@@ -1,13 +1,12 @@
+#include <cmath>
 #include <stdio.h>
 #include <stdlib.h>
-//#include "common.h"
-#include "futil.h"
-#include "rxnlist.h"
-#include "math.h"
+#include "futil.hpp"
+#include "rxnlist.hpp"
 
 static float dmsi, dmal;
 
-void free_rxnList(reactionList rl)
+void rxnlist::free_rxnList(reactionList rl)
 {
   int i;
 
@@ -21,18 +20,18 @@ void free_rxnList(reactionList rl)
 /* readRxns: read in rates, dE's for forward rxns
  *           calculate rates for reverse
  *           complete reactionList */
-reactionList readRxns(void)
+rxnlist::reactionList rxnlist::readRxns(void)
 {
   FILE *f;
-  reactionList l;
+  rxnlist::reactionList l;
   int rct, prd, i, j, nrts;
   float kp, de, t, a, rt, kt;
 
 
-  f = openFile("data.rxn","r");
-  fscanf(f, "%f", &t); eatComment(f, '#');
-  fscanf(f, "%f", &dmsi); eatComment(f, '#');
-  fscanf(f, "%f", &dmal); eatComment(f, '#');
+  f = Futil::openFile("data.rxn","r");
+  fscanf(f, "%f", &t); Futil::eatComment(f, '#');
+  fscanf(f, "%f", &dmsi); Futil::eatComment(f, '#');
+  fscanf(f, "%f", &dmal); Futil::eatComment(f, '#');
   l = (reactionList) malloc (sizeof(*l) * NRXN);
   rt = R * t;
   kt = Kb * t;
@@ -40,10 +39,10 @@ reactionList readRxns(void)
   /* hydrolysis reactions 
    * de is in kcal/mol/K */
   for (i = 0; i < NHYD; i += 2) {
-    fscanf(f, " %d %d", &rct, &prd); eatComment(f, '#');
+    fscanf(f, " %d %d", &rct, &prd); Futil::eatComment(f, '#');
     l[i].reactant = rct;
     l[i+1].reactant = prd;
-    fscanf(f, "%d", &nrts); eatComment(f, '#');
+    fscanf(f, "%d", &nrts); Futil::eatComment(f, '#');
     l[i].nrates = l[i+1].nrates = nrts;
     l[i].rate = (float *) malloc (sizeof(float) * nrts);
     l[i+1].rate = (float *) malloc (sizeof(float) * nrts);
@@ -56,10 +55,10 @@ reactionList readRxns(void)
 
   /* adsorption : a is \nu * exp(\mu_solid / RT) 
    * dm's are in kcal/mol/K                      */
-  eatComment(f, '#');
+  Futil::eatComment(f, '#');
   for (i = NHYD; i < NADS; i++) {
-    fscanf(f, " %d %d", &rct, &prd); eatComment(f, '#');
-    fscanf(f, " %f %f", &a, &de); eatComment(f, '#');
+    fscanf(f, " %d %d", &rct, &prd); Futil::eatComment(f, '#');
+    fscanf(f, " %f %f", &a, &de); Futil::eatComment(f, '#');
     l[i].reactant = rct;
     l[i].info = prd;
     l[i].nrates = 1;
@@ -71,9 +70,9 @@ reactionList readRxns(void)
   }
 
   /* desorption */
-  eatComment(f, '#');
+  Futil::eatComment(f, '#');
   for (i = NADS; i < NDES; i++) {
-    fscanf(f, " %d", &rct); eatComment(f, '#');
+    fscanf(f, " %d", &rct); Futil::eatComment(f, '#');
     l[i].reactant = rct;
     fscanf(f, " %d", &nrts);
     l[i].nrates = nrts;
@@ -100,7 +99,7 @@ reactionList readRxns(void)
 
 
 
-void getChem(float *si, float *al)
+void rxnlist::getChem(float *si, float *al)
 {
   *si = dmsi;
   *al = dmal;

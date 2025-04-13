@@ -1,4 +1,4 @@
-#include "ran2.h"
+#include "ran2.hpp"
 
 /* ran2: generates pseudo random number in open interval 0 to 1.0
          idum should not be changed between calls, and should be < 0 on first

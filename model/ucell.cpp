@@ -1,40 +1,40 @@
 /* ucell.c: functions for unit cell */
 #include <stdlib.h>
 #include <stdio.h>
-//#include "common.h"
-#include "ucell.h"
-#include "futil.h"
+//#include "common.hpp"
+#include "ucell.hpp"
+#include "futil.hpp"
 
 
 static float Alpha, Beta, Gamma, A, B, C;  /* unit cell params */
 static int Npos;
 
 
-void free_cell(unitCell c)
+void ucell::free_cell(unitCell c)
 {
   free(c);
 }
 
 
-cellDim *getCelldim(void)
+ucell::cellDim *ucell::getCelldim(void)
 {
-  cellDim *cd;
+  ucell::cellDim *cd;
 
-  cd = (cellDim *) malloc (sizeof(cellDim));
+  cd = (ucell::cellDim *) malloc (sizeof(ucell::cellDim));
   cd->a = A; cd->b = B; cd->c = C;
   cd->alpha = Alpha; cd->beta = Beta; cd->gamma = Gamma;
   return cd;
 }
 
 
-int getNpos(void)
+int ucell::getNpos(void)
 {
   return Npos;
 }
 
 /* getNumNbrs: returns the number of neighbors that a site should
  *             have based on what kind it is */
-int getNumNbrs(int state)
+int ucell::getNumNbrs(int state)
 {
   int nbrs;
 
@@ -52,20 +52,20 @@ int getNumNbrs(int state)
 
 
 /* readCell: read in unit cell parameters, and some simulation conditions */
-unitCell readCell(void)
+ucell::unitCell ucell::readCell(void)
 {
   int i, j;
-  unitCell c;
+  ucell::unitCell c;
   FILE *f;
 
-  f = openFile("data.cell", "r");
+  f = Futil::openFile("data.cell", "r");
   fscanf(f, " %f %f %f ", &A, &B, &C);
-  eatComment(f, '#');
+  Futil::eatComment(f, '#');
   fscanf(f, " %f %f %f ", &Alpha, &Beta, &Gamma);
-  eatComment(f, '#');
+  Futil::eatComment(f, '#');
   fscanf(f, " %d ", &Npos);
-  eatComment(f, '#');
-  c = (unitCell) malloc (sizeof(struct cellSite) * (Npos + 1));
+  Futil::eatComment(f, '#');
+  c = (ucell::unitCell) malloc (sizeof(struct ucell::cellSite) * (Npos + 1));
   for (i = 0; i < Npos; i++) {
     fscanf(f, " %d %d %f %f %f ", &c[i].n, &c[i].state, &c[i].x, &c[i].y, 
 	   &c[i].z);
@@ -76,7 +76,7 @@ unitCell readCell(void)
   }
   c[Npos].n = -1;
   return c;
-  closeFile(f);
+  Futil::closeFile(f);
 }
 
 

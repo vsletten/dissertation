@@ -1,11 +1,11 @@
 #include <stdio.h>
-//#include "common.h"
-#include "reactions.h"
-#include "myerr.h"
-#include "ran2.h"
+//#include "common.hpp"
+#include "reactions.hpp"
+#include "myerr.hpp"
+#include "ran2.hpp"
 
 /* adsorbAl: update state of O site upon adsorbing Al(OH,H2O)6 */
-void adsorbAl(Lattice lattice, int site)
+void Reactions::adsorbAl(lattice::Lattice lattice, int site)
 {
   int i, nbr;
 
@@ -26,7 +26,7 @@ void adsorbAl(Lattice lattice, int site)
 	  break;
 	default: 
 	  printf("state %d\n", lattice[nbr].state);
-	  die("invalid state in adsorbAl");
+	  Myerr::die("invalid state in adsorbAl");
 	  break;
       }
     }
@@ -38,7 +38,7 @@ void adsorbAl(Lattice lattice, int site)
 
 
 /* adsorbSi: update state of O site upon adsorbing Si(OH)4 */
-void adsorbSi(Lattice lattice, int site)
+void Reactions::adsorbSi(lattice::Lattice lattice, int site)
 {
   int i, nbr;
 
@@ -55,7 +55,7 @@ void adsorbSi(Lattice lattice, int site)
 	case 400: lattice[nbr].state = 408; break;
 	default:
 	  printf("state %d\n", lattice[nbr].state);
-	  die("invalid state in adsorbSi");
+	  Myerr::die("invalid state in adsorbSi");
 	  break;
       }
     }
@@ -66,7 +66,7 @@ void adsorbSi(Lattice lattice, int site)
 
 
 /* desorbAl: update state of O site upon desorbing Al(OH,H2O)6 */
-void desorbAl(Lattice lattice, int site)
+void Reactions::desorbAl(lattice::Lattice lattice, int site)
 {
   int i, nbr;
 
@@ -76,16 +76,16 @@ void desorbAl(Lattice lattice, int site)
       nbr = lattice[site].nbr[i];             /* nbr is an o site */
       switch (lattice[nbr].state) {
         case 502: lattice[nbr].state = 503; break;
-	case 503: lattice[nbr].state = 500; break;
-	case 403: lattice[nbr].state = 407; break;
-	case 405: lattice[nbr].state = 409; break;
-	case 407: lattice[nbr].state = 408; break;
-	case 409: lattice[nbr].state = 400; break;
-	case 410: 
-	  lattice[nbr].state = 406; 
-	  lattice[nbr].lostal = -1;
-	  break;
-	default: break;
+	      case 503: lattice[nbr].state = 500; break;
+	      case 403: lattice[nbr].state = 407; break;
+	      case 405: lattice[nbr].state = 409; break;
+	      case 407: lattice[nbr].state = 408; break;
+	      case 409: lattice[nbr].state = 400; break;
+	      case 410: 
+	        lattice[nbr].state = 406; 
+	        lattice[nbr].lostal = -1;
+	        break;
+	      default: break;
       }
     }
   } else {
@@ -96,7 +96,7 @@ void desorbAl(Lattice lattice, int site)
 
 
 /* desorbSi: update state of O site upon desorbing Si(OH)4 */
-void desorbSi(Lattice lattice, int site)
+void Reactions::desorbSi(lattice::Lattice lattice, int site)
 {
   int i, nbr;
 
@@ -122,7 +122,7 @@ void desorbSi(Lattice lattice, int site)
 
 
 
-void diffuse(Lattice lattice, int source, int target)
+void Reactions::diffuse(lattice::Lattice lattice, int source, int target)
 {
   if (lattice[source].state == 107 || lattice[source].state == 299) {
     desorbAl(lattice, source);
@@ -136,7 +136,7 @@ void diffuse(Lattice lattice, int source, int target)
 
 
 /* r0: =Si-O-Si= + H2O => 2(=Si-OH) */
-void r0(Lattice lattice, int site)
+void Reactions::r0(lattice::Lattice lattice, int site)
 {
   int si, i;
 
@@ -150,7 +150,7 @@ void r0(Lattice lattice, int site)
 
 
 /* r1: 2(=Si-OH) => =Si-O-Si= + H2O */
-void r1(Lattice lattice, int site)
+void Reactions::r1(lattice::Lattice lattice, int site)
 {
   int si, i;
 
@@ -164,7 +164,7 @@ void r1(Lattice lattice, int site)
 
 
 /* r2: =Si-O-2(Al=) + H2O => =Si-OH + =Al-OH-Al= */
-void r2(Lattice lattice, int site)
+void Reactions::r2(lattice::Lattice lattice, int site)
 {
   int nbr;
 
@@ -176,7 +176,7 @@ void r2(Lattice lattice, int site)
 
 
 /* r3: =Si-OH + =Al-OH-Al= => =Si-O-2(Al=) + H2O */
-void r3(Lattice lattice, int site)
+void Reactions::r3(lattice::Lattice lattice, int site)
 {
   int nbr;
 
@@ -188,7 +188,7 @@ void r3(Lattice lattice, int site)
 
 
 /* r4: =Si-O-2(Al=) + H2O => =Si-OH-Al= + =Al-OH */
-void r4(Lattice lattice, int site)
+void Reactions::r4(lattice::Lattice lattice, int site)
 {
   int nbr;
   float r;
@@ -206,7 +206,7 @@ void r4(Lattice lattice, int site)
 
 
 /* r5: =Si-OH-Al= + =Al-OH => =Si-O-2(Al=) + H2O */
-void r5(Lattice lattice, int site)
+void Reactions::r5(lattice::Lattice lattice, int site)
 {
   int nbr;
 
@@ -219,7 +219,7 @@ void r5(Lattice lattice, int site)
 
 
 /* r6: =Si-OH + =Al-OH-Al= + H2O => =Si-OH + =Al-OH + =Al-H2O */
-void r6(Lattice lattice, int site)
+void Reactions::r6(lattice::Lattice lattice, int site)
 {
   int i, nbr;
 
@@ -233,7 +233,7 @@ void r6(Lattice lattice, int site)
 
 
 /* r7: =Si-OH + =Al-OH + =Al-H2O => =Si-OH + =Al-OH-Al= + H2O */
-void r7(Lattice lattice, int site)
+void Reactions::r7(lattice::Lattice lattice, int site)
 {
   int i, nbr;
 
@@ -247,7 +247,7 @@ void r7(Lattice lattice, int site)
 
 
 /* r8: =Si-OH-Al= + =Al-OH + H2O => =Si-OH + =Al-OH + =Al-H2O */
-void r8(Lattice lattice, int site)
+void Reactions::r8(lattice::Lattice lattice, int site)
 {
   int nbr;
 
@@ -264,7 +264,7 @@ void r8(Lattice lattice, int site)
 
 
 /* r9: =Si-OH + =Al-OH + =Al-H2O => =Si-OH-Al= + =Al-OH + H2O */
-void r9(Lattice lattice, int site)
+void Reactions::r9(lattice::Lattice lattice, int site)
 {
   int nbr, lost;
   float r;
@@ -287,7 +287,7 @@ void r9(Lattice lattice, int site)
 
 
 /* r10: =Si-OH-Al= + H2O => =Si-OH + =Al=H2O */
-void r10(Lattice lattice, int site)
+void Reactions::r10(lattice::Lattice lattice, int site)
 {
   int nbr, al1, al2;
 
@@ -303,7 +303,7 @@ void r10(Lattice lattice, int site)
 
 
 /* r11: =Si-OH + =Al=H2O => =Si-OH-Al= + H2O */
-void r11(Lattice lattice, int site)
+void Reactions::r11(lattice::Lattice lattice, int site)
 {
   int nbr, al1, al2;
 
@@ -319,7 +319,7 @@ void r11(Lattice lattice, int site)
 
 
 /* r12: =Al-OH-Al= + H2O => =Al-OH + =Al-H2O  (400s) */
-void r12(Lattice lattice, int site)
+void Reactions::r12(lattice::Lattice lattice, int site)
 {
   int nbr, i;
 
@@ -333,7 +333,7 @@ void r12(Lattice lattice, int site)
 
 
 /* r13:  =Al-OH + =Al-H2O => =Al-OH-Al= + H2O  (400s) */
-void r13(Lattice lattice, int site)
+void Reactions::r13(lattice::Lattice lattice, int site)
 {
   int nbr, i;
 
@@ -347,7 +347,7 @@ void r13(Lattice lattice, int site)
 
 
 /* r14: =Al-OH-Al= + H2O => =Al-OH + =Al-H2O  (500s) */
-void r14(Lattice lattice, int site)
+void Reactions::r14(lattice::Lattice lattice, int site)
 {
   int nbr, i;
 
@@ -361,7 +361,7 @@ void r14(Lattice lattice, int site)
 
 
 /* r15:  =Al-OH + =Al-H2O => =Al-OH-Al= + H2O  (500s) */
-void r15(Lattice lattice, int site)
+void Reactions::r15(lattice::Lattice lattice, int site)
 {
   int nbr, i;
 

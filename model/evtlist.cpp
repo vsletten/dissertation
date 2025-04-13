@@ -1,13 +1,13 @@
 #include <stdlib.h>
 #include <stdio.h>
-#include "evtlist.h"
-#include "envrn.h"
-#include "myerr.h"
-#include "rxnlist.h"
+#include "evtlist.hpp"
+#include "envrn.hpp"
+#include "myerr.hpp"
+#include "rxnlist.hpp"
 
-eventList new_evtList(Lattice l, reactionList rl, int nsites)
+evtlist::eventList evtlist::new_evtList(lattice::Lattice l, rxnlist::reactionList rl, int nsites)
 {
-  eventList el = NULL;
+  evtlist::eventList el = NULL;
   struct event *e;
   int s, i, env, lo, hi;
   char msg[100];
@@ -26,17 +26,17 @@ eventList new_evtList(Lattice l, reactionList rl, int nsites)
     }
     for (i = lo; i < hi; i++) {
       if (l[s].state == rl[i].reactant   /* matches reactant and is active? */
-	  && isActive(s, l, i)) {
+	  && Environment::isActive(s, l, i)) {
 	if (!(e = (struct event *) malloc (sizeof(struct event))))
-	  die("malloc failed");
+	  Myerr::die("malloc failed");
 	e->next = el;
 	e->site = s;
 	e->rxn = i;
-	env = checkEnv(l, s);
+	env = Environment::checkEnv(l, s);
 	if (env < 0 || env >= rl[i].nrates) {
 	  sprintf(msg, "invalid environment: site %d state %d env %d nrates %d"
                   , s, l[s].state, env, rl[i].nrates);
-	  die(msg);
+	  Myerr::die(msg);
 	}
 	e->rate = rl[i].rate[env];
 	el = e;
@@ -48,7 +48,7 @@ eventList new_evtList(Lattice l, reactionList rl, int nsites)
 
 
 
-void free_evtList(eventList el)
+void evtlist::free_evtList(evtlist::eventList el)
 {
   struct event *e;
 
