@@ -1,2 +1,8 @@
 mckaol
 *.o
+*.lattice
+*.data
+*.sim
+*.msi
+*.dat
+CLAUDE.md
