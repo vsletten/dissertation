@@ -1,8 +1,8 @@
 mckaol
 *.o
-*.lattice
-*.data
-*.sim
-*.msi
-*.dat
+data.lattice
+results.dat
+data.sim
+start.msi
+end.msi
 CLAUDE.md
