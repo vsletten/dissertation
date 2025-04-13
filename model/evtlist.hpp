@@ -5,25 +5,25 @@
 
 #include "lattice.hpp"
 #include "rxnlist.hpp"
-#include "sim.hpp"
 
-class evtlist {
-public:
   /* event: Uniquely identifies an event which may occur. */
-  struct event {
-    int site,   /* site where reaction happens */
-        rxn;    /* reaction which happens
-                 * for diffusion, this will contain OFFSET + index
-                 * of target for jump */
-    float rate; /* specific rate for this event (e.g., adsorption at
-                 * a specific site) */
-    struct event *next;
-  };
+class Event {
+public:
+  int site,   /* site where reaction happens */
+      rxn;    /* reaction which happens
+               * for diffusion, this will contain OFFSET + index
+               * of target for jump */
+  float rate; /* specific rate for this event (e.g., adsorption at
+               * a specific site) */
+};
 
-  typedef struct event *eventList;
+class EventList : public Event {
+public:
+  EventList *next;
 
-  static evtlist::eventList new_evtList(lattice::Lattice l, rxnlist::reactionList rl, int nsites);
-  static void free_evtList(evtlist::eventList el);
+  static EventList *CreateEventList(Lattice *lattice, rxnlist::reactionList rxList, int nSites);
+
+  static void DisposeEventList(EventList *eventList);
 };
 
 #endif

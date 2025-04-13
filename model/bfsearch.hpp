@@ -10,9 +10,9 @@
 #define GRAY 1
 #define BLACK 2
 
-class BFSearch {
+class BreadthFirstSearch {
 public:
-  static void BFS(lattice::Lattice lattice, int s, int n);
+  static void ColorNodes(Lattice *lattice, int s, int n);
 
 private:
   /* Qnode: node of a queue used in BFS for clusters */

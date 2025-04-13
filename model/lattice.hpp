@@ -26,32 +26,52 @@
 #define ISOX(A) ((A).state > 299)
 #define WRONGCATION(A) ((A).state % 100 == WRONG)
 
-class lattice {
+class LatticeSite {
 public:
   /* latticeSite: Uniquely identifies a lattice site and describes
    *              its current state. */
-  struct latticeSite {
-    int a, b,   /* unit cell coordinates (for single sheet) */
-        n,      /* site within unit cell */
-        state,  /* current state */
-        color,  /* for BFS for clusters, WHITE, GRAY, BLACK */
-        pair,   /* for 400s and 500s, other part of double bridge */
-        lostal, /* for 400s, when lose one al which it is */
-        nbr[6]; /* neighbor list */
-  };
-  typedef struct latticeSite *Lattice;
+  int a, b,   /* unit cell coordinates (for single sheet) */
+      n,      /* site within unit cell */
+      state,  /* current state */
+      color,  /* for BFS for clusters, WHITE, GRAY, BLACK */
+      pair,   /* for 400s and 500s, other part of double bridge */
+      lostal, /* for 400s, when lose one al which it is */
+      nbr[6]; /* neighbor list */
+};
 
-  static void clusters(Lattice lattice);
-  static int countNbrs(Lattice l, int s);
-  static void findPairs(Lattice l);
-  static void free_lattice(Lattice l);
-  static int getNeighbor(Lattice l, ucell::unitCell c, int i, int j);
-  static int getNsites(void);
-  static Lattice makeLattice(ucell::unitCell uc);
-  static void populateSolid(Lattice lattice);
-  static void terminateLattice(Lattice lattice);
-  static void terminateSurface(Lattice lattice);
-  static void getDim(int *a, int *b);
+class Lattice {
+private:
+  int Num_aCells;   /* number of cells in a direction */
+  int Num_bCells;   /* number of cells in b direction */
+  int Num_Sites;    /* total number of sites in simulation */
+  int SurfacePlane; /* 0 for ac surface, 1 for bc surface */
+  Lattice()
+      : Num_aCells(0), Num_bCells(0), Num_Sites(0),
+        SurfacePlane(0), sites(nullptr) {}
+
+public:
+  static Lattice *CreateLattice(ucell::unitCell uc);
+  static void DisposeLoattice();
+
+  LatticeSite *sites = nullptr;
+
+  ~Lattice()
+  {
+    if (this->sites != nullptr) { 
+      delete[] this->sites;
+      this->sites = nullptr;
+    }
+  }
+  
+  void RemoveUnattachedClusters();
+  int CountNbrs(int s);
+  void FindPairs();
+  int GetNeighbor(ucell::unitCell c, int i, int j);
+  int GetNsites(void);
+  void PopulateSolid();
+  void TerminateLattice();
+  void TerminateSurface();
+  void GetDim(int *a, int *b);
 };
 
 #endif

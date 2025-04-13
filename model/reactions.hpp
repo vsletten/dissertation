@@ -8,27 +8,27 @@
 class Reactions
 {
 public:
-  static void adsorbAl(lattice::Lattice lattice, int site);
-  static void adsorbSi(lattice::Lattice lattice, int site);
-  static void desorbAl(lattice::Lattice lattice, int site);
-  static void desorbSi(lattice::Lattice lattice, int site);
-  static void diffuse(lattice::Lattice lattice, int source, int target);
-  static void r0(lattice::Lattice lattice, int site);
-  static void r1(lattice::Lattice lattice, int site);
-  static void r2(lattice::Lattice lattice, int site);
-  static void r3(lattice::Lattice lattice, int site);
-  static void r4(lattice::Lattice lattice, int site);
-  static void r5(lattice::Lattice lattice, int site);
-  static void r6(lattice::Lattice lattice, int site);
-  static void r7(lattice::Lattice lattice, int site);
-  static void r8(lattice::Lattice lattice, int site);
-  static void r9(lattice::Lattice lattice, int site);
-  static void r10(lattice::Lattice lattice, int site);
-  static void r11(lattice::Lattice lattice, int site);
-  static void r12(lattice::Lattice lattice, int site);
-  static void r13(lattice::Lattice lattice, int site);
-  static void r14(lattice::Lattice lattice, int site);
-  static void r15(lattice::Lattice lattice, int site);
+  static void adsorbAl(Lattice *lattice, int site);
+  static void adsorbSi(Lattice *lattice, int site);
+  static void desorbAl(Lattice *lattice, int site);
+  static void desorbSi(Lattice *lattice, int site);
+  static void diffuse(Lattice *lattice, int source, int target);
+  static void r0(Lattice *lattice, int site);
+  static void r1(Lattice *lattice, int site);
+  static void r2(Lattice *lattice, int site);
+  static void r3(Lattice *lattice, int site);
+  static void r4(Lattice *lattice, int site);
+  static void r5(Lattice *lattice, int site);
+  static void r6(Lattice *lattice, int site);
+  static void r7(Lattice *lattice, int site);
+  static void r8(Lattice *lattice, int site);
+  static void r9(Lattice *lattice, int site);
+  static void r10(Lattice *lattice, int site);
+  static void r11(Lattice *lattice, int site);
+  static void r12(Lattice *lattice, int site);
+  static void r13(Lattice *lattice, int site);
+  static void r14(Lattice *lattice, int site);
+  static void r15(Lattice *lattice, int site);
 };
 
 

@@ -1,177 +1,127 @@
-#include <stdlib.h>
-#include <stdio.h>
-#include "futil.hpp"
-#include "myerr.hpp"
+#include "lattice.hpp"
 #include "bfsearch.hpp"
 #include "common.hpp"
-#include "lattice.hpp"
+#include "futil.hpp"
+#include "myerr.hpp"
 #include "rxnlist.hpp"
-
-static int Acells;    /* number of cells in a direction */
-static int Bcells;    /* number of cells in b direction */
-static int Surfplane; /* 0 for ac surface, 1 for bc surface */
-static int Nsites;    /* total number of sites in simulation */
-
-
+#include <stdio.h>
+#include <stdlib.h>
 
 /* clusters: check for and remove any unattached clusters */
-void lattice::clusters(lattice::Lattice lattice)
-{
+void Lattice::RemoveUnattachedClusters() {
   int i;
 
-  BFSearch::BFS(lattice, 0, Nsites);
-  for (i = 0; i < Nsites; i++) 
-  {
-    if (lattice[i].color == WHITE &&
-	      lattice[i].state != 9)
-      lattice[i].state = (int) (lattice[i].state / 100) * 100;
-    else if (lattice[i].color == GRAY) 
-    {
-      printf("bad color at %d  %d\n", i, lattice[i].state);
+  BreadthFirstSearch::ColorNodes(this, 0, Num_Sites);
+  for (i = 0; i < Num_Sites; i++) {
+    if (this->sites[i].color == WHITE && this->sites[i].state != 9)
+      this->sites[i].state = (int)(this->sites[i].state / 100) * 100;
+    else if (this->sites[i].color == GRAY) {
+      printf("bad color at %d  %d\n", i, this->sites[i].state);
       Myerr::die("error in clusters");
-    } 
+    }
   }
 }
 
-
-
-/* countNbrs: returns actual number of neighbors 
+/* countNbrs: returns actual number of neighbors
  *            (for lattice edge detection) */
-int lattice::countNbrs(lattice::Lattice lattice, int site)
-{
+int Lattice::CountNbrs(int site) {
   int i;
 
-  for (i = 0; i < 6 && lattice[site].nbr[i] >= 0; i++)
+  for (i = 0; i < 6 && this->sites[site].nbr[i] >= 0; i++)
     ;
   return i;
 }
 
-
-
-
 /* findPairs: sets up the double bridge information */
-void lattice::findPairs(lattice::Lattice lattice)
-{
+void Lattice::FindPairs() {
   int j, al1, al2, al3, al4, o1, o2, found;
 
-  for (o1 = 0; o1 < Nsites; o1++) 
-  {
-    if (lattice[o1].state < 400 || lattice[o1].pair >= 0)
+  for (o1 = 0; o1 < Num_Sites; o1++) {
+    if (this->sites[o1].state < 400 || this->sites[o1].pair >= 0)
       continue;
-    al1 = lattice[o1].nbr[0];
-    al2 = lattice[o1].nbr[1];
+    al1 = this->sites[o1].nbr[0];
+    al2 = this->sites[o1].nbr[1];
     if (al1 == -1 || al2 == -1)
       continue;
     found = FALSE;
-    for (j = 0; j < 6 && !found; j++) 
-    {
-      if ((o2 = lattice[al1].nbr[j]) < 0) /* no neighbor, must be edge */
-	      found = TRUE;
-      else 
-      {
-        al3 = lattice[o2].nbr[0];
-        al4 = lattice[o2].nbr[1];
-        if ((al1 == al3 || al1 == al4) &&
-            (al2 == al3 || al2 == al4)) 
-        {
+    for (j = 0; j < 6 && !found; j++) {
+      if ((o2 = this->sites[al1].nbr[j]) < 0) /* no neighbor, must be edge */
+        found = TRUE;
+      else {
+        al3 = this->sites[o2].nbr[0];
+        al4 = this->sites[o2].nbr[1];
+        if ((al1 == al3 || al1 == al4) && (al2 == al3 || al2 == al4)) {
           found = TRUE;
-          lattice[o1].pair = o2;
-          lattice[o2].pair = o1;
+          this->sites[o1].pair = o2;
+          this->sites[o2].pair = o1;
         }
       }
     }
   }
 }
 
-
-
-void lattice::free_lattice(lattice::Lattice l)
-{
-  free(l);
+void Lattice::GetDim(int *a, int *b) {
+  *a = Num_aCells;
+  *b = Num_bCells;
 }
 
-
-void lattice::getDim(int *a, int *b)
-{
-  *a = Acells;
-  *b = Bcells;
-}
-
-/* getNeighbor: determine lattice index of nbr j for site i 
+/* getNeighbor: determine lattice index of nbr j for site i
  *              depends upon index generation scheme in makeLattice */
-int lattice::getNeighbor(lattice::Lattice l, ucell::unitCell c, int i, int j)
-{
+int Lattice::GetNeighbor(ucell::unitCell c, int i, int j) {
   int a, b, nbr, npos;
 
   npos = ucell::getNpos();
-  a = l[i].a + c[l[i].n].nbr[j].a;
-  b = l[i].b + c[l[i].n].nbr[j].b;
-  if (c[l[i].n].nbr[j].n < 0) 
-  {      /* no jth neighbor */
-    nbr = c[l[i].n].nbr[j].n;
-  } 
-  else if (((a == Acells || a < 0) && Surfplane) ||
-	        ((b == Bcells || b < 0) && !Surfplane)) 
-  {
+  a = this->sites[i].a + c[this->sites[i].n].nbr[j].a;
+  b = this->sites[i].b + c[this->sites[i].n].nbr[j].b;
+  if (c[this->sites[i].n].nbr[j].n < 0) { /* no jth neighbor */
+    nbr = c[this->sites[i].n].nbr[j].n;
+  } else if (((a == Num_aCells || a < 0) && SurfacePlane) ||
+             ((b == Num_bCells || b < 0) && !SurfacePlane)) {
     nbr = -1;
-  } 
-  else 
-  {
-    if (a >= Acells )                   /* boundary conditions - a */
+  } else {
+    if (a >= Num_aCells) /* boundary conditions - a */
       a = 0;
     else if (a < 0)
-      a = Acells - 1;
-    if (b >= Bcells)                    /* boundary conditions - b */
+      a = Num_aCells - 1;
+    if (b >= Num_bCells) /* boundary conditions - b */
       b = 0;
     else if (b < 0)
-      b = Bcells - 1;
-    nbr = a * Bcells * npos + b * npos + c[l[i].n].nbr[j].n;
+      b = Num_bCells - 1;
+    nbr = a * Num_bCells * npos + b * npos + c[this->sites[i].n].nbr[j].n;
   }
   return nbr;
 }
 
-
-
-
-int lattice::getNsites(void)
-{
-  return Nsites;
-}
-
-
+int Lattice::GetNsites(void) { return this->Num_Sites; }
 
 /* makeLattice: repeat unit cell to make the lattice and
- *              initialize state of sites 
+ *              initialize state of sites
  *              index generation scheme important for getNeighbor */
-lattice::Lattice lattice::makeLattice(ucell::unitCell c)
-{
+Lattice *Lattice::CreateLattice(ucell::unitCell c) {
   int a, b, n, i, j, npos;
   FILE *f;
-  lattice::Lattice lattice;
+  Lattice *lattice = new Lattice();
 
-  f = Futil::openFile("data.lattice","r");
-  fscanf(f, " %d %d %d", &Acells, &Bcells, &Surfplane);
+  f = Futil::openFile("data.lattice", "r");
+  fscanf(f, " %d %d %d", &lattice->Num_aCells, &lattice->Num_bCells,
+         &lattice->SurfacePlane);
   Futil::closeFile(f);
 
   npos = ucell::getNpos();
-  Nsites = Acells * Bcells * npos;
-  lattice = (lattice::Lattice) malloc (sizeof(*lattice) * Nsites);
-  for (a = 0; a < Acells; a++) 
-  {
-    for (b = 0; b < Bcells; b++) 
-    {
-      i = a * Bcells * npos + b * npos;
-      for (n = 0; n < npos; n++) 
-      {
-        lattice[i].a = a;
-        lattice[i].b = b;
-        lattice[i].n = n;
-        lattice[i].state = c[n].state;
-        lattice[i].pair = -1;
-        lattice[i].lostal = -1;
-        for (j = 0; j < 6; j++) 
-        {
-          lattice[i].nbr[j] = getNeighbor(lattice, c, i, j);
+  lattice->Num_Sites = lattice->Num_aCells * lattice->Num_bCells * npos;
+  lattice->sites = new LatticeSite[lattice->Num_Sites];
+  for (a = 0; a < lattice->Num_aCells; a++) {
+    for (b = 0; b < lattice->Num_bCells; b++) {
+      i = a * lattice->Num_bCells * npos + b * npos;
+      for (n = 0; n < npos; n++) {
+        lattice->sites[i].a = a;
+        lattice->sites[i].b = b;
+        lattice->sites[i].n = n;
+        lattice->sites[i].state = c[n].state;
+        lattice->sites[i].pair = -1;
+        lattice->sites[i].lostal = -1;
+        for (j = 0; j < 6; j++) {
+          lattice->sites[i].nbr[j] = lattice->GetNeighbor(c, i, j);
         }
         i++;
       }
@@ -180,179 +130,180 @@ lattice::Lattice lattice::makeLattice(ucell::unitCell c)
   return lattice;
 }
 
-
-
 /* populateSolid: update state of sites which start as part of the solid
  *                as determined by input parameters */
-void lattice::populateSolid(lattice::Lattice lattice)
-{
+void Lattice::PopulateSolid() {
   int z, x, n, i, top, len, npos;
   float dms, dma, frac;
   char s[20];
 
   npos = ucell::getNpos();
   rxnlist::getChem(&dms, &dma);
-  if (dms + dma > 0.5) 
-  {
+  if (dms + dma > 0.5) {
     frac = 0.3;
     sprintf(s, "supersaturated");
-  } 
-  else if (dms + dma < -0.5) 
-  {
+  } else if (dms + dma < -0.5) {
     frac = 0.7;
     sprintf(s, "undersaturated");
-  } 
-  else 
-  {
+  } else {
     frac = 0.5;
     sprintf(s, "near equilibrium");
   }
-  top = (Surfplane ? (Acells * frac) : (Bcells * frac));
+  top = (SurfacePlane ? (Num_aCells * frac) : (Num_bCells * frac));
   printf("Detected %s conditions -- filling %d unit cells\n", s, top);
-  len = (Surfplane ? Bcells : Acells);
-  for (z = 0; z < top; z++) 
-  {
-    for (x = 0; x < len; x++) 
-    {  /* if bc, then x = b else x = a */
-      i = (Surfplane ? (z * Bcells * npos + x * npos) : 
-	   (x * Bcells * npos + z * npos));
-      for (n = 0; n < npos; n++) 
-      {
-        lattice[i].state++;
+  len = (SurfacePlane ? Num_bCells : Num_aCells);
+  for (z = 0; z < top; z++) {
+    for (x = 0; x < len; x++) { /* if bc, then x = b else x = a */
+      i = (SurfacePlane ? (z * Num_bCells * npos + x * npos)
+                        : (x * Num_bCells * npos + z * npos));
+      for (n = 0; n < npos; n++) {
+        this->sites[i].state++;
         i++;
       }
     }
   }
 }
 
-
-
-
-/* terminateLattice: set to EDGE state of any atoms at very top or 
+/* terminateLattice: set to EDGE state of any atoms at very top or
  *                   bottom of the lattice */
-void lattice::terminateLattice(lattice::Lattice lattice)
-{
+void Lattice::TerminateLattice() {
   int top, len, x, i, n, npos;
 
   npos = ucell::getNpos();
-  top = (Surfplane ? (Acells - 1) : (Bcells - 1));
-  len = (Surfplane ? Bcells : Acells);
-  for (x = 0; x < len; x++) 
-  {  /* if bc, then x = b else x = a */
-    i = (Surfplane ? 
-        (top * Bcells * npos + x * npos) :
-        (x * Bcells * npos + top * npos));
-    for (n = 0; n < npos; n++, i++) 
-      if (ucell::getNumNbrs(lattice[i].state) != countNbrs(lattice, i))
-      	lattice[i].state = EDGE;
-    i = (Surfplane ? (x * npos) :
-	      (x * Bcells * npos));
+  top = (SurfacePlane ? (Num_aCells - 1) : (Num_bCells - 1));
+  len = (SurfacePlane ? Num_bCells : Num_aCells);
+  for (x = 0; x < len; x++) { /* if bc, then x = b else x = a */
+    i = (SurfacePlane ? (top * Num_bCells * npos + x * npos)
+                      : (x * Num_bCells * npos + top * npos));
     for (n = 0; n < npos; n++, i++)
-      if (ucell::getNumNbrs(lattice[i].state) != countNbrs(lattice, i))
-	      lattice[i].state = EDGE;
+      if (ucell::getNumNbrs(this->sites[i].state) != this->CountNbrs(i))
+        this->sites[i].state = EDGE;
+    i = (SurfacePlane ? (x * npos) : (x * Num_bCells * npos));
+    for (n = 0; n < npos; n++, i++)
+      if (ucell::getNumNbrs(this->sites[i].state) != this->CountNbrs(i))
+        this->sites[i].state = EDGE;
   }
 }
 
-
-
-
-/* terminateSurface: set state of O sites bonded to cations at surface 
+/* terminateSurface: set state of O sites bonded to cations at surface
  *                   so as to terminate dangling bonds with OH's */
-void lattice::terminateSurface(lattice::Lattice lattice)
-{
+void Lattice::TerminateSurface() {
   int i, i2, j, type;
 
   /* "dangle" the O's which are missing cations */
-  for (i = 0; i < Nsites; i++) 
-  {
-    if (lattice[i].state % 100 == 0 || lattice[i].state / 100 < 3 ||
-      	lattice[i].state == EDGE)
+  for (i = 0; i < this->Num_Sites; i++) {
+    if (this->sites[i].state % 100 == 0 || this->sites[i].state / 100 < 3 ||
+        this->sites[i].state == EDGE)
       continue;
-    for (j = 0; j < 6; j++) 
-    {
-      i2 = lattice[i].nbr[j];
-      if (i2 >= 0 && (type = lattice[i2].state % 100) == 0) 
-      {
-        switch (lattice[i].state) 
-        {
-          case 401: lattice[i].state = (type == 2) ? 404 : 406; break;
-          case 404: lattice[i].state = 409; break;
-          case 406: lattice[i].state = (type == 2) ? 408 : 409; break;
-          case 409: case 408: lattice[i].state = 400; break;
-          case 301: lattice[i].state = 303; break;
-          case 303: lattice[i].state = 300; break;
-          case 501: lattice[i].state = 503; break;
-          case 503: lattice[i].state = 500; break;
-          default: break;
+    for (j = 0; j < 6; j++) {
+      i2 = this->sites[i].nbr[j];
+      if (i2 >= 0 && (type = this->sites[i2].state % 100) == 0) {
+        switch (this->sites[i].state) {
+        case 401:
+          this->sites[i].state = (type == 2) ? 404 : 406;
+          break;
+        case 404:
+          this->sites[i].state = 409;
+          break;
+        case 406:
+          this->sites[i].state = (type == 2) ? 408 : 409;
+          break;
+        case 409:
+        case 408:
+          this->sites[i].state = 400;
+          break;
+        case 301:
+          this->sites[i].state = 303;
+          break;
+        case 303:
+          this->sites[i].state = 300;
+          break;
+        case 501:
+          this->sites[i].state = 503;
+          break;
+        case 503:
+          this->sites[i].state = 500;
+          break;
+        default:
+          break;
         }
       }
     }
   }
 
   /* turn on dangling oxygens to terminate dangling bonds */
-  for (i = 0; i < Nsites; i++) 
-  {
-    if ((type = lattice[i].state / 100) > 2 || 
-	      lattice[i].state % 100 != 1) 
+  for (i = 0; i < this->Num_Sites; i++) {
+    if ((type = this->sites[i].state / 100) > 2 ||
+        this->sites[i].state % 100 != 1)
       continue;
-    for (j = 0; j < 6; j++) 
-    {
-      i2 = lattice[i].nbr[j];
-      if (i2 >= 0 &&lattice[i2].state % 100 != 1)
-      switch (lattice[i2].state) 
-      {
-        case 300: lattice[i2].state = 303; break;
-        case 400: lattice[i2].state = ((type == 2) ? 408 : 409); break;
-        case 408: lattice[i2].state = 406; break;
-        case 409: lattice[i2].state = ((type == 2) ? 406 : 404); break;
-        case 404: lattice[i2].state = 401; break;
-        case 406: lattice[i2].state = 401; break;
-        case 500: lattice[i2].state = 503; break;
-        case 503: lattice[i2].state = 501; break;
-        default: break;
-      }
+    for (j = 0; j < 6; j++) {
+      i2 = this->sites[i].nbr[j];
+      if (i2 >= 0 && this->sites[i2].state % 100 != 1)
+        switch (this->sites[i2].state) {
+        case 300:
+          this->sites[i2].state = 303;
+          break;
+        case 400:
+          this->sites[i2].state = ((type == 2) ? 408 : 409);
+          break;
+        case 408:
+          this->sites[i2].state = 406;
+          break;
+        case 409:
+          this->sites[i2].state = ((type == 2) ? 406 : 404);
+          break;
+        case 404:
+          this->sites[i2].state = 401;
+          break;
+        case 406:
+          this->sites[i2].state = 401;
+          break;
+        case 500:
+          this->sites[i2].state = 503;
+          break;
+        case 503:
+          this->sites[i2].state = 501;
+          break;
+        default:
+          break;
+        }
     }
   }
 
   /* update state of Si and Al to reflect terminal OH's */
-  for (i = 0; i < Nsites; i++) 
-  {  
-    if (lattice[i].state % 100 == 0 ||  /* unoccupied */
-	      lattice[i].state / 100 > 2 ||   /* O or OH */
-	      lattice[i].state == EDGE)       /* edge */
+  for (i = 0; i < this->Num_Sites; i++) {
+    if (this->sites[i].state % 100 == 0 || /* unoccupied */
+        this->sites[i].state / 100 > 2 ||  /* O or OH */
+        this->sites[i].state == EDGE)      /* edge */
       continue;
-    if (lattice[i].state / 100 == 1) 
-    {  /* Al */
-      for (j = 0; j < 6; j++) 
-      {
-        i2 = lattice[i].nbr[j];
+    if (this->sites[i].state / 100 == 1) { /* Al */
+      for (j = 0; j < 6; j++) {
+        i2 = this->sites[i].nbr[j];
         if (i2 < 0)
           continue;
-        switch (lattice[i2].state) 
-        {
-          case 503: case 409: lattice[i].state++; break;
-          default: break;
+        switch (this->sites[i2].state) {
+        case 503:
+        case 409:
+          this->sites[i].state++;
+          break;
+        default:
+          break;
         }
       }
-    } 
-    else 
-    {
-      for (j = 0; j < 6; j++) 
-      {
-        i2 = lattice[i].nbr[j];
+    } else {
+      for (j = 0; j < 6; j++) {
+        i2 = this->sites[i].nbr[j];
         if (i2 < 0)
           continue;
-        switch (lattice[i2].state) 
-        {
-          case 303: case 408: lattice[i].state++; break;
-          default: break;
+        switch (this->sites[i2].state) {
+        case 303:
+        case 408:
+          this->sites[i].state++;
+          break;
+        default:
+          break;
         }
       }
     }
   }
 }
-
-
-
-
-

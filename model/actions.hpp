@@ -6,11 +6,10 @@
 #include "lattice.hpp"
 #include "evtlist.hpp"
 
-
 class Actions {
 public:
-    static float doEvent(lattice::Lattice lattice, evtlist::eventList el);
-    static void doReaction(lattice::Lattice lattice, int site, int rxn);
+    static float doEvent(Lattice *lattice, EventList *eventList);
+    static void doReaction(Lattice *lattice, int site, int rxn);
 };
 
 

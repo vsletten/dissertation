@@ -1,64 +1,63 @@
-#include <stdlib.h>
-#include <stdio.h>
 #include "evtlist.hpp"
 #include "envrn.hpp"
 #include "myerr.hpp"
 #include "rxnlist.hpp"
+#include <stdio.h>
+#include <stdlib.h>
 
-evtlist::eventList evtlist::new_evtList(lattice::Lattice l, rxnlist::reactionList rl, int nsites)
-{
-  evtlist::eventList el = NULL;
-  struct event *e;
+EventList *EventList::CreateEventList(Lattice *lattice, rxnlist::reactionList rxList,
+                           int nSites) {
+  EventList *eventList = nullptr;
+  EventList *e = nullptr;
   int s, i, env, lo, hi;
   char msg[100];
 
-  for (s = 0; s < nsites; s++) {   /* build event list */
-    if ((l[s].state % 100 == 0) && l[s].state > 200) {
+  for (s = 0; s < nSites; s++) { /* build event list */
+    if ((lattice->sites[s].state % 100 == 0) && lattice->sites[s].state > 200) {
       continue;
-    } else if (l[s].state > 500) {
-      lo = N400; hi = NHYD;
-    } else if (l[s].state > 400) {
-      lo = N300; hi = N400;
-    } else if (l[s].state > 300) {
-      lo = 0; hi = N300;
+    } else if (lattice->sites[s].state > 500) {
+      lo = N400;
+      hi = NHYD;
+    } else if (lattice->sites[s].state > 400) {
+      lo = N300;
+      hi = N400;
+    } else if (lattice->sites[s].state > 300) {
+      lo = 0;
+      hi = N300;
     } else {
-      lo = NHYD; hi = NRXN;
+      lo = NHYD;
+      hi = NRXN;
     }
     for (i = lo; i < hi; i++) {
-      if (l[s].state == rl[i].reactant   /* matches reactant and is active? */
-	  && Environment::isActive(s, l, i)) {
-	if (!(e = (struct event *) malloc (sizeof(struct event))))
-	  Myerr::die("malloc failed");
-	e->next = el;
-	e->site = s;
-	e->rxn = i;
-	env = Environment::checkEnv(l, s);
-	if (env < 0 || env >= rl[i].nrates) {
-	  sprintf(msg, "invalid environment: site %d state %d env %d nrates %d"
-                  , s, l[s].state, env, rl[i].nrates);
-	  Myerr::die(msg);
-	}
-	e->rate = rl[i].rate[env];
-	el = e;
+      if (lattice->sites[s].state == rxList[i].reactant /* matches reactant and is active? */
+          && Environment::isActive(s, lattice, i)) {
+        e = new EventList();
+        if (e == nullptr)
+          Myerr::die("out of memory in CreateEventList");
+        e->next = eventList;
+        e->site = s;
+        e->rxn = i;
+        env = Environment::checkEnv(lattice, s);
+        if (env < 0 || env >= rxList[i].nrates) {
+          sprintf(msg, "invalid environment: site %d state %d env %d nrates %d",
+                  s, lattice->sites[s].state, env, rxList[i].nrates);
+          Myerr::die(msg);
+        }
+        e->rate = rxList[i].rate[env];
+        eventList = e;
       }
     }
   }
-  return el;
+  return eventList;
 }
 
+void EventList::DisposeEventList(EventList *eventList) {
+  EventList *current = eventList;
+  EventList *next = nullptr;  
 
-
-void evtlist::free_evtList(evtlist::eventList el)
-{
-  struct event *e;
-
-  while(el) {
-    e = el->next;
-    free(el);
-    el = e;
+  while (current != nullptr) {
+    next = current->next;
+    delete current;
+    current = next;
   }
 }
-
-
-
-

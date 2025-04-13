@@ -1,8 +1,8 @@
 //#include <stdio.h>
 //#include "common.hpp"
 #include "actions.hpp"
-#include "bfsearch.hpp"
 #include "reactions.hpp"
+#include "lattice.hpp"
 #include "ran2.hpp"
 #include "myerr.hpp"
 #include <cmath>
@@ -10,12 +10,12 @@
 
 /* doEvent: randomly pick event and update state accordingly
  *          return time increment for the event */
-float Actions::doEvent(lattice::Lattice lattice, evtlist::eventList el)
+float Actions::doEvent(Lattice *lattice, EventList *eventList)
 {
   float ratesum, partsum, eps, dt;
-  evtlist::event *e;
+  EventList *e;
 
-  e = el;
+  e = eventList;
   ratesum = 0;
 
   while (e->next) {
@@ -30,7 +30,7 @@ float Actions::doEvent(lattice::Lattice lattice, evtlist::eventList el)
 
   eps = ran2();
   partsum = 0;
-  e = el;
+  e = eventList;
   while (e->next) {
     partsum += e->rate / ratesum;
     if (eps <= partsum)
@@ -46,7 +46,7 @@ float Actions::doEvent(lattice::Lattice lattice, evtlist::eventList el)
 
 
 /* doReaction: update state of site and its nbrs based on reaction rxn */
-void Actions::doReaction(lattice::Lattice lattice, int site, int rxn)
+void Actions::doReaction(Lattice *lattice, int site, int rxn)
 {
   switch (rxn) {
     case 0: Reactions::r0(lattice, site); break;
@@ -73,10 +73,10 @@ void Actions::doReaction(lattice::Lattice lattice, int site, int rxn)
     case 21: Reactions::desorbSi(lattice, site); break;
     case 22: Reactions::desorbSi(lattice, site); break;
     case 23: Reactions::desorbAl(lattice, site); break;
-             lattice::clusters(lattice);
+             lattice->RemoveUnattachedClusters();
              break;
     default: Reactions::diffuse(lattice, site, rxn); 
-             lattice::clusters(lattice);
+             lattice->RemoveUnattachedClusters();
              break;
   }
 }
