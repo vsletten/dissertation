@@ -1,0 +1,14 @@
+# Object files
+*.o
+
+# Executables
+mckaol
+
+# Build directories
+build/
+obj/
+bin/
+
+# IDE specific
+.vscode/
+.cursor/ 
