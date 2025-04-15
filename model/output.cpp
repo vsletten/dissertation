@@ -2,17 +2,18 @@
 #include "futil.hpp"
 #include "myerr.hpp"
 #include <cmath>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
+#include <cstdio>
+#include <iostream>
+#include <fstream>
+#include <string>
 
-void output::initDatafile(void) { unlink("results.dat"); }
+void output::initDatafile(void) { std::remove("results.dat"); }
 
 void output::writeData(Lattice *lattice, int n, float t) {
-  FILE *f;
+  std::ofstream f;
   int i, nsi[5], nal[7], oh, type, sitot, altot;
 
-  f = Futil::openFile("results.dat", "a");
+  f = Futil::OpenOutputFile("results.dat");
   sitot = altot = 0;
   for (i = 0; i < 5; i++)
     nsi[i] = 0;
@@ -33,22 +34,22 @@ void output::writeData(Lattice *lattice, int n, float t) {
     }
   }
 
-  fprintf(f, "%f", t);
-  fprintf(f, ",%d", sitot);
+  f << t;
+  f << "," << sitot;
   for (i = 0; i < 5; i++)
-    fprintf(f, ",%d", nsi[i]);
-  fprintf(f, ",%d", altot);
+    f << "," << nsi[i];
+  f << "," << altot;
   for (i = 0; i < 7; i++)
-    fprintf(f, ",%d", nal[i]);
-  fprintf(f, "\n");
+    f << "," << nal[i];
+  f << "\n";
 
-  Futil::closeFile(f);
+  Futil::CloseFile(f);
 }
 
-void output::writeXYZ(Lattice *lattice, ucell::unitCell cell) {
-  int i, j, natom, acells, bcells;
+void output::writeXYZ(Lattice *lattice) {
+  int idxSite, nAtoms, numAcells, numBcells;
   float x, y, z, al, bl, cl;
-  FILE *xyz;
+  std::ofstream xyzFile;
   float cd[][3] = {{4.9725, -0.0262374, -1.3362},
                    {0.0, 8.92893, -0.30084},
                    {0.0, 0.0, 7.384}};
@@ -56,39 +57,40 @@ void output::writeXYZ(Lattice *lattice, ucell::unitCell cell) {
   bl = sqrt(cd[1][1] * cd[1][1] + cd[1][2] * cd[1][2]);
   cl = cd[2][2];
 
-  lattice->GetDim(&acells, &bcells);
+  lattice->GetDim(&numAcells, &numBcells);
   /* open file and print header */
-  xyz = Futil::openFile("start.xyz", "w");
+  xyzFile = Futil::OpenOutputFile("start.xyz");
 
-  natom = lattice->GetNsites();
+  nAtoms = lattice->GetNsites();
 
-  for (i = 0; i < natom; i++) {
-    if ((lattice->sites[i].state > 200 && lattice->sites[i].state < 206) ||
-        (lattice->sites[i].state > 100 && lattice->sites[i].state < 108) ||
-        (lattice->sites[i].state > 300 && lattice->sites[i].state < 400) ||
-        (lattice->sites[i].state > 400 && lattice->sites[i].state < 500) ||
-        (lattice->sites[i].state > 500 && lattice->sites[i].state < 600)) {
-      x = (cell[lattice->sites[i].n].x / al + lattice->sites[i].a) * cd[0][0] +
-          (cell[lattice->sites[i].n].y / bl + lattice->sites[i].b) * cd[0][1] +
-          (cell[lattice->sites[i].n].z / cl) * cd[0][2];
-      y = (cell[lattice->sites[i].n].y / bl + lattice->sites[i].b) * cd[1][1] +
-          (cell[lattice->sites[i].n].z / cl) * cd[1][2];
-      z = (cell[lattice->sites[i].n].z / cl) * cd[2][2];
-      if (lattice->sites[i].state / 100 == 1)
-        fprintf(xyz, "%d,%f,%f,%f\n", 13, x, y, z);
-      else if (lattice->sites[i].state / 100 == 2)
-        fprintf(xyz, "%d,%f,%f,%f\n", 14, x, y, z);
+  for (idxSite = 0; idxSite < nAtoms; idxSite++) {
+    if ((lattice->sites[idxSite].state > 200 && lattice->sites[idxSite].state < 206) ||
+        (lattice->sites[idxSite].state > 100 && lattice->sites[idxSite].state < 108) ||
+        (lattice->sites[idxSite].state > 300 && lattice->sites[idxSite].state < 400) ||
+        (lattice->sites[idxSite].state > 400 && lattice->sites[idxSite].state < 500) ||
+        (lattice->sites[idxSite].state > 500 && lattice->sites[idxSite].state < 600)) {
+      x = (lattice->GetUnitCell()->GetCellSites()[lattice->sites[idxSite].n].x / al + lattice->sites[idxSite].a) * cd[0][0] +
+          (lattice->GetUnitCell()->GetCellSites()[lattice->sites[idxSite].n].y / bl + lattice->sites[idxSite].b) * cd[0][1] +
+          (lattice->GetUnitCell()->GetCellSites()[lattice->sites[idxSite].n].z / cl) * cd[0][2];
+      y = (lattice->GetUnitCell()->GetCellSites()[lattice->sites[idxSite].n].y / bl + lattice->sites[idxSite].b) * cd[1][1] +
+          (lattice->GetUnitCell()->GetCellSites()[lattice->sites[idxSite].n].z / cl) * cd[1][2];
+      z = (lattice->GetUnitCell()->GetCellSites()[lattice->sites[idxSite].n].z / cl) * cd[2][2];
+      if (lattice->sites[idxSite].state / 100 == 1)
+        xyzFile << 13 << "," << x << "," << y << "," << z << "\n";
+      else if (lattice->sites[idxSite].state / 100 == 2)
+        xyzFile << 14 << "," << x << "," << y << "," << z << "\n";
       else
-        fprintf(xyz, "%d,%f,%f,%f\n", 8, x, y, z);
+        xyzFile << 8 << "," << x << "," << y << "," << z << "\n";
     }
   }
-  Futil::closeFile(xyz);
+  Futil::CloseFile(xyzFile);
 }
 
-void output::writeSurf(Lattice *lattice, ucell::unitCell cell) {
+void output::writeSurf(Lattice *lattice) {
   int i, j, nbr, flag, natom, acells, bcells;
-  float x, y, z, al, bl, cl;
-  FILE *fsi, *fal;
+  float x, y, al, bl, cl;
+  // float z; // for 3D
+  std::ofstream siSurfaceFile, alSurfaceFile;
   float cd[][3] = {{4.9725, -0.0262374, -1.3362},
                    {0.0, 8.92893, -0.30084},
                    {0.0, 0.0, 7.384}};
@@ -98,8 +100,8 @@ void output::writeSurf(Lattice *lattice, ucell::unitCell cell) {
 
   lattice->GetDim(&acells, &bcells);
   /* open file and print header */
-  fsi = Futil::openFile("surfSi.out", "w");
-  fal = Futil::openFile("surfAl.out", "w");
+  siSurfaceFile = Futil::OpenOutputFile("surfSi.out");
+  alSurfaceFile = Futil::OpenOutputFile("surfAl.out");
 
   natom = lattice->GetNsites();
 
@@ -114,31 +116,30 @@ void output::writeSurf(Lattice *lattice, ucell::unitCell cell) {
           flag = 1;
       }
       if (flag == 1) {
-        x = (cell[lattice->sites[i].n].x / al + lattice->sites[i].a) * cd[0][0] +
-            (cell[lattice->sites[i].n].y / bl + lattice->sites[i].b) * cd[0][1] +
-            (cell[lattice->sites[i].n].z / cl) * cd[0][2];
-        y = (cell[lattice->sites[i].n].y / bl + lattice->sites[i].b) * cd[1][1] +
-            (cell[lattice->sites[i].n].z / cl) * cd[1][2];
-        z = (cell[lattice->sites[i].n].z / cl) * cd[2][2];
+        x = (lattice->GetUnitCell()->GetCellSites()[lattice->sites[i].n].x / al + lattice->sites[i].a) * cd[0][0] +
+            (lattice->GetUnitCell()->GetCellSites()[lattice->sites[i].n].y / bl + lattice->sites[i].b) * cd[0][1] +
+            (lattice->GetUnitCell()->GetCellSites()[lattice->sites[i].n].z / cl) * cd[0][2];
+        y = (lattice->GetUnitCell()->GetCellSites()[lattice->sites[i].n].y / bl + lattice->sites[i].b) * cd[1][1] +
+            (lattice->GetUnitCell()->GetCellSites()[lattice->sites[i].n].z / cl) * cd[1][2];
+        // z = (cell[lattice->sites[i].n].z / cl) * cd[2][2]; // for 3D
         if (lattice->sites[i].state > 200) {
-          fprintf(fsi, "%f,%f\n", x, y);
+          siSurfaceFile << x << "," << y << "\n";
         } else {
-          fprintf(fal, "%f,%f\n", x, y);
+          alSurfaceFile << x << "," << y << "\n";
         }
       }
     }
   }
 
-  Futil::closeFile(fal);
-  Futil::closeFile(fsi);
+  Futil::CloseFile(alSurfaceFile);
+  Futil::CloseFile(siSurfaceFile);
 }
 
-void output::writeMSI(Lattice *lattice, ucell::unitCell cell, const char *name,
-                      int bonds) {
+void output::writeMSI(Lattice *lattice, const char *name, int bonds) {
   int i, j, natom, nthing = 1, *id, i2, acells, bcells;
   char fname[100];
   float x, y, z, al, bl, cl;
-  FILE *fxyz;
+  std::ofstream fxyz;
   float cd[][3] = {{4.9725, -0.0262374, -1.3362},
                    {0.0, 8.92893, -0.30084},
                    {0.0, 0.0, 7.384}};
@@ -149,11 +150,11 @@ void output::writeMSI(Lattice *lattice, ucell::unitCell cell, const char *name,
   lattice->GetDim(&acells, &bcells);
   /* open file and print header */
   sprintf(fname, "%s.msi", name);
-  fxyz = Futil::openFile(fname, "w");
-  fprintf(fxyz, "# MSI CERIUS2 DataModel File Version 3 5\n");
-  fprintf(fxyz, "(1 Model\n");
-  fprintf(fxyz, "(A I Id 1)\n");
-  fprintf(fxyz, " (A C Label \"%s\")\n", name);
+  fxyz = Futil::OpenOutputFile(fname);
+  fxyz << "# MSI CERIUS2 DataModel File Version 3 5\n";
+  fxyz << "(1 Model\n";
+  fxyz << "(A I Id 1)\n";
+  fxyz << " (A C Label \"" << name << "\")\n";
 
   natom = lattice->GetNsites();
   if (!(id = (int *)malloc(sizeof(int) * natom)))
@@ -161,67 +162,67 @@ void output::writeMSI(Lattice *lattice, ucell::unitCell cell, const char *name,
 
   for (i = 0; i < natom; i++) {
     if (lattice->sites[i].state % 100 > 0 && lattice->sites[i].state != EDGE) {
-      fprintf(fxyz, " (%d Atom\n", ++nthing);
+      fxyz << " (" << ++nthing << " Atom\n";
       id[i] = nthing;
-      fprintf(fxyz, "  (A C ACL ");
+      fxyz << "  (A C ACL ";
       switch (lattice->sites[i].state / 100) {
       case 0:
-        fprintf(fxyz, "\"10 Ne\")\n");
+        fxyz << "\"10 Ne\")\n";
         break;
       case 1:
-        fprintf(fxyz, "\"13 Al\")\n");
+        fxyz << "\"13 Al\")\n";
         break;
       case 2:
-        fprintf(fxyz, "\"14 Si\")\n");
+        fxyz << "\"14 Si\")\n";
         break;
       case 3:
       case 4:
         if (lattice->sites[i].state % 100 > 1)
-          fprintf(fxyz, "\"1 H\")\n");
+          fxyz << "\"1 H\")\n";
         else
-          fprintf(fxyz, "\"8 O\")\n");
+          fxyz << "\"8 O\")\n";
         break;
       case 5:
         if (lattice->sites[i].state % 100 > 1)
-          fprintf(fxyz, "\"1 H\")\n");
+          fxyz << "\"1 H\")\n";
         else
-          fprintf(fxyz, "\"9 F\")\n");
+          fxyz << "\"9 F\")\n";
         break;
       default:
         break;
       }
-      x = (cell[lattice->sites[i].n].x / al + lattice->sites[i].a) * cd[0][0] +
-          (cell[lattice->sites[i].n].y / bl + lattice->sites[i].b) * cd[0][1] +
-          (cell[lattice->sites[i].n].z / cl) * cd[0][2];
-      y = (cell[lattice->sites[i].n].y / bl + lattice->sites[i].b) * cd[1][1] +
-          (cell[lattice->sites[i].n].z / cl) * cd[1][2];
-      z = (cell[lattice->sites[i].n].z / cl) * cd[2][2];
-      fprintf(fxyz, "  (A D XYZ (%f %f %f))\n", x, y, z);
-      fprintf(fxyz, "  (A I Id %d)\n", nthing - 1);
-      fprintf(fxyz, "  (A C Label \"");
+      x = (lattice->GetUnitCell()->GetCellSites()[lattice->sites[i].n].x / al + lattice->sites[i].a) * cd[0][0] +
+          (lattice->GetUnitCell()->GetCellSites()[lattice->sites[i].n].y / bl + lattice->sites[i].b) * cd[0][1] +
+          (lattice->GetUnitCell()->GetCellSites()[lattice->sites[i].n].z / cl) * cd[0][2];
+      y = (lattice->GetUnitCell()->GetCellSites()[lattice->sites[i].n].y / bl + lattice->sites[i].b) * cd[1][1] +
+          (lattice->GetUnitCell()->GetCellSites()[lattice->sites[i].n].z / cl) * cd[1][2];
+      z = (lattice->GetUnitCell()->GetCellSites()[lattice->sites[i].n].z / cl) * cd[2][2];
+      fxyz << "  (A D XYZ (" << x << " " << y << " " << z << "))\n";
+      fxyz << "  (A I Id " << nthing - 1 << ")\n";
+      fxyz << "  (A C Label \"";
       switch (lattice->sites[i].state / 100) {
       case 0:
-        fprintf(fxyz, "Edge");
+        fxyz << "Edge";
         break;
       case 1:
-        fprintf(fxyz, "Al");
+        fxyz << "Al";
         break;
       case 2:
-        fprintf(fxyz, "Si");
+        fxyz << "Si";
         break;
       case 3:
       case 4:
-        fprintf(fxyz, "O");
+        fxyz << "O";
         break;
       case 5:
-        fprintf(fxyz, "OH");
+        fxyz << "OH";
         break;
       default:
         break;
       }
-      fprintf(fxyz, "%d\")\n", i);
-      fprintf(fxyz, "  (A I LabelType 0)\n");
-      fprintf(fxyz, " )\n");
+      fxyz << i << "\")\n";
+      fxyz << "  (A I LabelType 0)\n";
+      fxyz << " )\n";
     }
   }
 
@@ -231,24 +232,24 @@ void output::writeMSI(Lattice *lattice, ucell::unitCell cell, const char *name,
         if ((i2 = lattice->sites[i].nbr[j]) >= 0 && i2 < i && lattice->sites[i2].state % 100 != 0 &&
             lattice->sites[i2].state != EDGE &&
             !(lattice->sites[i].a == 0 && lattice->sites[i2].a == acells - 1 &&
-              cell[lattice->sites[i].n].nbr[j].a == -1) &&
+              lattice->GetUnitCell()->GetCellSites()[lattice->sites[i].n].nbr[j].a == -1) &&
             !(lattice->sites[i].a == acells - 1 && lattice->sites[i2].a == 0 &&
-              cell[lattice->sites[i].n].nbr[j].a == 1) &&
+              lattice->GetUnitCell()->GetCellSites()[lattice->sites[i].n].nbr[j].a == 1) &&
             !(lattice->sites[i].b == 0 && lattice->sites[i2].b == bcells - 1 &&
-              cell[lattice->sites[i].n].nbr[j].b == -1) &&
+              lattice->GetUnitCell()->GetCellSites()[lattice->sites[i].n].nbr[j].b == -1) &&
             !(lattice->sites[i].b == bcells - 1 && lattice->sites[i2].b == 0 &&
-              cell[lattice->sites[i].n].nbr[j].b == 1)) {
-          fprintf(fxyz, " (%d Bond\n", ++nthing);
-          fprintf(fxyz, "  (A O Atom1 %d)\n", id[i]);
-          fprintf(fxyz, "  (A O Atom2 %d)\n", id[i2]);
-          fprintf(fxyz, " )\n");
+              lattice->GetUnitCell()->GetCellSites()[lattice->sites[i].n].nbr[j].b == 1)) {
+          fxyz << " (" << ++nthing << " Bond\n";
+          fxyz << "  (A O Atom1 " << id[i] << ")\n";
+          fxyz << "  (A O Atom2 " << id[i2] << ")\n";
+          fxyz << " )\n";
         }
       }
     }
   }
 
-  fprintf(fxyz, ")\n");
-  Futil::closeFile(fxyz);
+  fxyz << ")\n";
+  Futil::CloseFile(fxyz);
 
   free(id);
 }

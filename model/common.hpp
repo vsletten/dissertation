@@ -167,6 +167,9 @@
   #define TRUE !FALSE
 #endif
 
+typedef enum {UNREACHABLE, ENQUEUED, DISCOVERED} Color;
+
+
 
 #endif
 

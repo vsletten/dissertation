@@ -5,10 +5,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-EventList *EventList::CreateEventList(Lattice *lattice, rxnlist::reactionList rxList,
+EventList *EventList::CreateEventList(Lattice *lattice, Reaction *rxList,
                            int nSites) {
   EventList *eventList = nullptr;
-  EventList *e = nullptr;
+  EventList *currEvent = nullptr;
   int s, i, env, lo, hi;
   char msg[100];
 
@@ -31,20 +31,20 @@ EventList *EventList::CreateEventList(Lattice *lattice, rxnlist::reactionList rx
     for (i = lo; i < hi; i++) {
       if (lattice->sites[s].state == rxList[i].reactant /* matches reactant and is active? */
           && Environment::isActive(s, lattice, i)) {
-        e = new EventList();
-        if (e == nullptr)
+        currEvent = new EventList();
+        if (currEvent == nullptr)
           Myerr::die("out of memory in CreateEventList");
-        e->next = eventList;
-        e->site = s;
-        e->rxn = i;
+        currEvent->next = eventList;
+        currEvent->site = s;
+        currEvent->rxn = i;
         env = Environment::checkEnv(lattice, s);
         if (env < 0 || env >= rxList[i].nrates) {
           sprintf(msg, "invalid environment: site %d state %d env %d nrates %d",
                   s, lattice->sites[s].state, env, rxList[i].nrates);
           Myerr::die(msg);
         }
-        e->rate = rxList[i].rate[env];
-        eventList = e;
+        currEvent->rate = rxList[i].rate[env];
+        eventList = currEvent;
       }
     }
   }

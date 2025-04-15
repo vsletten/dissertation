@@ -13,22 +13,29 @@
 #define R 1.987e-3     /* R in kcal/mol/K */
 #define JtoCAL 4.1842  /* multiply cal by JtoCAL to get J */
 
-class rxnlist {
+class Reaction {
 public:
-  /* reaction: Gives reactant and product states for given reaction,
-   *           and reaction rate. */
-  struct reaction {
-    int reactant, /* reactant state */
-        info,     /* multi-purpose info */
-        nrates;   /* number of actual rates */
-    float *rate;  /* reaction rate list since actual rate
-                   * depends on next neighbors' states */
-  };
-  typedef struct reaction *reactionList;
+  int reactant, /* reactant state */
+      info,     /* multi-purpose info */
+      nrates;   /* number of actual rates */
+  float *rate;  /* reaction rate list since actual rate
+                 * depends on next neighbors' states */
+};
 
-  static reactionList readRxns(void);
-  static void free_rxnList(reactionList rl);
-  static void getChem(float *si, float *al);
+class ReactionList {
+private:
+  float dmsi, dmal;
+  Reaction *reactions = nullptr;
+
+  ReactionList(Reaction *reactions) : reactions(reactions) {}
+  
+public:
+  static ReactionList *CreateReactionList(void);
+  static void DisposeReactionList(ReactionList *rl);
+
+  float GetSiPotential(void) { return this->dmsi; }
+  float GetAlPotential(void) { return this->dmal; }
+  Reaction *GetReactions(void) { return this->reactions; }
 };
 
 #endif

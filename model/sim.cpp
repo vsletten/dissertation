@@ -1,41 +1,40 @@
-#include <stdio.h>
 #include <stdlib.h>
 #include "futil.hpp"
 #include "myerr.hpp"
 #include "sim.hpp"
 
 /* readCond: read in some more simulation conditions */
-sim::Simulation sim::readCond(void)
+Simulation *Simulation::CreateSimulation(void)
 {
-  FILE *f;
-  Simulation s;
+  std::ifstream f;
+  Simulation *s;
 
-  f = Futil::openFile("data.sim","r");
-  s = (Simulation) malloc (sizeof(*s));
-  if (fscanf(f, " %d ", &s->nsteps) != 1)
+  f = Futil::OpenInputFile("data.sim");
+  s = new Simulation();
+  if (!(f >> s->nsteps))
     Myerr::die("invalid number of steps in input file");
-  Futil::eatComment(f, '#');
-  if (fscanf(f, " %d ", &s->wsteps) != 1)
+  Futil::EatComment(f, '#');
+  if (!(f >> s->wsteps))
     Myerr::die("invalid number of data write steps in input file");
-  Futil::eatComment(f, '#');
-  if (fscanf(f, " %d ", &s->msteps) != 1)
+  Futil::EatComment(f, '#');
+  if (!(f >> s->msteps))
     Myerr::die("invalid number of movie write steps in input file");
   if (s->msteps == -1)
     s->msteps = s->nsteps + 1;
-  Futil::eatComment(f, '#');
-  if (fscanf(f, " %ld ", &s->ranseed) != 1)
+  Futil::EatComment(f, '#');
+  if (!(f >> s->drawbonds))
     Myerr::die("invalid number of steps in input file");
-  Futil::eatComment(f, '#');
-  if (fscanf(f, " %d ", &s->drawbonds) != 1)
+  Futil::EatComment(f, '#');
+  if (!(f >> s->drawbonds))
     Myerr::die("invalid draw bonds? parameter in input file");
 
+  Futil::CloseFile(f);
   return s;
-  Futil::closeFile(f);
 }
 
 
-void sim::free_Simulation(Simulation s)
+void Simulation::DisposeSimulation(Simulation *s)
 {
-  free(s);
+  delete s;
 }
 

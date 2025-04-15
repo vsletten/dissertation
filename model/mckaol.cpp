@@ -12,52 +12,52 @@
 
 int main()
 {
-  sim::Simulation sc;
-  rxnlist::reactionList rl;
-  EventList *el;
-  ucell::unitCell uc;
+  Simulation *sc;
+  ReactionList *reactionList;
+  EventList *eventList;
+  UnitCell *unitCell;
   Lattice *lattice;
   int i, nsites;
   float time = 0;
   char fname[50];
 
-  sc = sim::readCond();
+  sc = Simulation::CreateSimulation();
   initran2(&sc->ranseed);
   output::initDatafile();
-  rl = rxnlist::readRxns();
-  uc = ucell::readCell();
+  reactionList = ReactionList::CreateReactionList();
+  unitCell = UnitCell::CreateUnitCell();
 
-  lattice = Lattice::CreateLattice(uc);
+  lattice = Lattice::CreateLattice(*unitCell);
   nsites = lattice->GetNsites();
   lattice->FindPairs();
-  lattice->PopulateSolid();
+  lattice->PopulateSolid(reactionList->GetSiPotential(), reactionList->GetAlPotential());
   lattice->TerminateSurface();
   lattice->TerminateLattice();
-
-  output::writeMSI(lattice, uc, "start", sc->drawbonds);
+  output::writeMSI(lattice, "start", sc->drawbonds);
   for (i = 0; i < sc->nsteps; i++) {
-    el = EventList::CreateEventList(lattice, rl, nsites);
-    if (!el) {                  /* no events possible */
-      output::writeMSI(lattice, uc, "end", sc->drawbonds);
+    eventList = EventList::CreateEventList(lattice, reactionList->GetReactions(), nsites);
+    Actions actions(lattice);
+    if (!eventList) {                  /* no events possible */
+      output::writeMSI(lattice, "end", sc->drawbonds);
       if (sc->wsteps)
 	  output::writeData(lattice, nsites, time);
       Myerr::die("out of events");
     }
-    time += Actions::doEvent(lattice, el);
-    EventList::DisposeEventList(el);            /* check if time to write stuff */
+    time += actions.DoEvent(eventList);
+    EventList::DisposeEventList(eventList);            /* check if time to write stuff */
     if (sc->wsteps && (i % sc->wsteps == 0 || i == 0))
       output::writeData(lattice, nsites, time);
     if (sc->msteps && i && i % sc->msteps == 0) {
       sprintf(fname, "step%d", i);
-      output::writeMSI(lattice, uc, fname, sc->drawbonds);
+      output::writeMSI(lattice, fname, sc->drawbonds);
     }
   }
-  output::writeSurf(lattice, uc);
-  output::writeXYZ(lattice, uc);
-  output::writeMSI(lattice, uc, "end", sc->drawbonds);
-  rxnlist::free_rxnList(rl);
+  output::writeSurf(lattice);
+  output::writeXYZ(lattice);
+  output::writeMSI(lattice, "end", sc->drawbonds);
+  ReactionList::DisposeReactionList(reactionList);
   lattice->TerminateLattice();
-  ucell::free_cell(uc);
-  sim::free_Simulation(sc);
+  UnitCell::DisposeUnitCell(unitCell);
+  Simulation::DisposeSimulation(sc);
   return 0;
 }

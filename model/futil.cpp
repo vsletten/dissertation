@@ -1,24 +1,27 @@
-#include <ctype.h>
+#include <cctype>
+#include <iostream>
 #include "common.hpp"
 #include "futil.hpp"
 #include "myerr.hpp"
 
+using namespace std;
+
 /* eatComment: advance file pointer to beginning of next line 
  *             flag is first character of all comments       */
-void Futil::eatComment(FILE *f, char flag)
+void Futil::EatComment(ifstream &f, char flag)
 {
   int i;
   char c;
   
   i = TRUE;
   while (i) {              /* do this for multiline comments */
-    while (isspace(c = fgetc(f)))  /* eat leading whitespace */
+    while (f.get(c) && isspace(c))  /* eat leading whitespace */
       ;
     if (c == flag) {
-      while ((c = fgetc(f)) != '\n')  /* comment, read to end of line */
+      while (f.get(c) && c != '\n')  /* comment, read to end of line */
 	;
     } else {
-      ungetc(c, f);
+      f.putback(c);
       i = FALSE;
     }
   }
@@ -26,22 +29,36 @@ void Futil::eatComment(FILE *f, char flag)
 
 
 /* openFile: try to open a file die if unsuccessful */
-FILE *Futil::openFile(const char *name, const char *mode)
+ifstream Futil::OpenInputFile(const string &name)
 {
-  FILE *f;
-  char msg[100];
+  ifstream f(name);
 
-  if (!(f = fopen(name, mode))) {
-    sprintf(msg, "could not open %s with mode %s", name, mode);
-    Myerr::die(msg);
+  if (!f) {
+    string msg = "could not open " + name + " for reading";
+    Myerr::die(msg.c_str());
   }
   return f;
 }
 
-
-int Futil::closeFile(FILE *f)
+ofstream Futil::OpenOutputFile(const string &name)
 {
-  return (fclose(f));
+  ofstream f(name);
+
+  if (!f) {
+    string msg = "could not open " + name + " for writing";
+    Myerr::die(msg.c_str());
+  }
+  return f;
 }
 
+int Futil::CloseFile(ifstream &f)
+{
+  f.close();
+  return 0;
+}
 
+int Futil::CloseFile(ofstream &f)
+{
+  f.close();
+  return 0;
+}

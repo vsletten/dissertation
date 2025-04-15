@@ -6,13 +6,9 @@
 
 #include "lattice.hpp"
 
-#define WHITE 0
-#define GRAY 1
-#define BLACK 2
-
 class BreadthFirstSearch {
 public:
-  static void ColorNodes(Lattice *lattice, int s, int n);
+  static void ColorNodes(Lattice *lattice, int startSiteIdx);
 
 private:
   /* Qnode: node of a queue used in BFS for clusters */

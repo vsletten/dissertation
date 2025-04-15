@@ -21,7 +21,7 @@ class EventList : public Event {
 public:
   EventList *next;
 
-  static EventList *CreateEventList(Lattice *lattice, rxnlist::reactionList rxList, int nSites);
+  static EventList *CreateEventList(Lattice *lattice, Reaction *rxList, int nSites);
 
   static void DisposeEventList(EventList *eventList);
 };

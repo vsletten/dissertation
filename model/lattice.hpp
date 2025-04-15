@@ -4,8 +4,8 @@
 #ifndef lattice_h
 #define lattice_h
 
-#include "sim.hpp"
 #include "ucell.hpp"
+#include "common.hpp"
 
 #define EDGE 9
 #define WRONG 99
@@ -33,10 +33,11 @@ public:
   int a, b,   /* unit cell coordinates (for single sheet) */
       n,      /* site within unit cell */
       state,  /* current state */
-      color,  /* for BFS for clusters, WHITE, GRAY, BLACK */
       pair,   /* for 400s and 500s, other part of double bridge */
       lostal, /* for 400s, when lose one al which it is */
       nbr[6]; /* neighbor list */
+  Color color;/* for BFS for clusters, WHITE, GRAY, BLACK */
+
 };
 
 class Lattice {
@@ -45,12 +46,13 @@ private:
   int Num_bCells;   /* number of cells in b direction */
   int Num_Sites;    /* total number of sites in simulation */
   int SurfacePlane; /* 0 for ac surface, 1 for bc surface */
+  UnitCell *unitCell;
   Lattice()
       : Num_aCells(0), Num_bCells(0), Num_Sites(0),
-        SurfacePlane(0), sites(nullptr) {}
+        SurfacePlane(0), unitCell(nullptr) {}
 
 public:
-  static Lattice *CreateLattice(ucell::unitCell uc);
+  static Lattice *CreateLattice(UnitCell &uc);
   static void DisposeLoattice();
 
   LatticeSite *sites = nullptr;
@@ -64,11 +66,12 @@ public:
   }
   
   void RemoveUnattachedClusters();
+  UnitCell *GetUnitCell(void) { return this->unitCell; }  
   int CountNbrs(int s);
   void FindPairs();
-  int GetNeighbor(ucell::unitCell c, int i, int j);
+  int GetNeighbor(int i, int j);
   int GetNsites(void);
-  void PopulateSolid();
+  void PopulateSolid(float dmSi, float dmAl);
   void TerminateLattice();
   void TerminateSurface();
   void GetDim(int *a, int *b);

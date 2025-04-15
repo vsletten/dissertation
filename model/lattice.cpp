@@ -3,20 +3,22 @@
 #include "common.hpp"
 #include "futil.hpp"
 #include "myerr.hpp"
-#include "rxnlist.hpp"
-#include <stdio.h>
 #include <stdlib.h>
+#include <iostream>
+#include <cstdio>
+#include <string>
 
+using namespace std;
 /* clusters: check for and remove any unattached clusters */
 void Lattice::RemoveUnattachedClusters() {
   int i;
 
-  BreadthFirstSearch::ColorNodes(this, 0, Num_Sites);
+  BreadthFirstSearch::ColorNodes(this, 0);
   for (i = 0; i < Num_Sites; i++) {
-    if (this->sites[i].color == WHITE && this->sites[i].state != 9)
+    if (this->sites[i].color == UNREACHABLE && this->sites[i].state != 9)
       this->sites[i].state = (int)(this->sites[i].state / 100) * 100;
-    else if (this->sites[i].color == GRAY) {
-      printf("bad color at %d  %d\n", i, this->sites[i].state);
+    else if (this->sites[i].color == ENQUEUED) {
+      std::cout << "bad color at " << i << "; state is " << this->sites[i].state << std::endl;
       Myerr::die("error in clusters");
     }
   }
@@ -67,14 +69,14 @@ void Lattice::GetDim(int *a, int *b) {
 
 /* getNeighbor: determine lattice index of nbr j for site i
  *              depends upon index generation scheme in makeLattice */
-int Lattice::GetNeighbor(ucell::unitCell c, int i, int j) {
+int Lattice::GetNeighbor(int i, int j) {
   int a, b, nbr, npos;
 
-  npos = ucell::getNpos();
-  a = this->sites[i].a + c[this->sites[i].n].nbr[j].a;
-  b = this->sites[i].b + c[this->sites[i].n].nbr[j].b;
-  if (c[this->sites[i].n].nbr[j].n < 0) { /* no jth neighbor */
-    nbr = c[this->sites[i].n].nbr[j].n;
+  npos = this->unitCell->GetNumPositions();
+  a = this->sites[i].a + this->unitCell->GetCellSites()[this->sites[i].n].nbr[j].a;
+  b = this->sites[i].b + this->unitCell->GetCellSites()[this->sites[i].n].nbr[j].b;
+  if (this->unitCell->GetCellSites()[this->sites[i].n].nbr[j].n < 0) { /* no jth neighbor */
+    nbr = this->unitCell->GetCellSites()[this->sites[i].n].nbr[j].n;
   } else if (((a == Num_aCells || a < 0) && SurfacePlane) ||
              ((b == Num_bCells || b < 0) && !SurfacePlane)) {
     nbr = -1;
@@ -87,7 +89,7 @@ int Lattice::GetNeighbor(ucell::unitCell c, int i, int j) {
       b = 0;
     else if (b < 0)
       b = Num_bCells - 1;
-    nbr = a * Num_bCells * npos + b * npos + c[this->sites[i].n].nbr[j].n;
+    nbr = a * Num_bCells * npos + b * npos + this->unitCell->GetCellSites()[this->sites[i].n].nbr[j].n;
   }
   return nbr;
 }
@@ -97,17 +99,17 @@ int Lattice::GetNsites(void) { return this->Num_Sites; }
 /* makeLattice: repeat unit cell to make the lattice and
  *              initialize state of sites
  *              index generation scheme important for getNeighbor */
-Lattice *Lattice::CreateLattice(ucell::unitCell c) {
+Lattice *Lattice::CreateLattice(UnitCell &unitCell) {
   int a, b, n, i, j, npos;
-  FILE *f;
+  ifstream f;
   Lattice *lattice = new Lattice();
+  lattice->unitCell = &unitCell;
 
-  f = Futil::openFile("data.lattice", "r");
-  fscanf(f, " %d %d %d", &lattice->Num_aCells, &lattice->Num_bCells,
-         &lattice->SurfacePlane);
-  Futil::closeFile(f);
+  f = Futil::OpenInputFile("data.lattice");
+  f >> lattice->Num_aCells >> lattice->Num_bCells >> lattice->SurfacePlane;
+  Futil::CloseFile(f);
 
-  npos = ucell::getNpos();
+  npos = lattice->unitCell->GetNumPositions();
   lattice->Num_Sites = lattice->Num_aCells * lattice->Num_bCells * npos;
   lattice->sites = new LatticeSite[lattice->Num_Sites];
   for (a = 0; a < lattice->Num_aCells; a++) {
@@ -117,11 +119,11 @@ Lattice *Lattice::CreateLattice(ucell::unitCell c) {
         lattice->sites[i].a = a;
         lattice->sites[i].b = b;
         lattice->sites[i].n = n;
-        lattice->sites[i].state = c[n].state;
+        lattice->sites[i].state = lattice->unitCell->GetCellSites()[n].state;
         lattice->sites[i].pair = -1;
         lattice->sites[i].lostal = -1;
         for (j = 0; j < 6; j++) {
-          lattice->sites[i].nbr[j] = lattice->GetNeighbor(c, i, j);
+          lattice->sites[i].nbr[j] = lattice->GetNeighbor(i, j);
         }
         i++;
       }
@@ -132,17 +134,16 @@ Lattice *Lattice::CreateLattice(ucell::unitCell c) {
 
 /* populateSolid: update state of sites which start as part of the solid
  *                as determined by input parameters */
-void Lattice::PopulateSolid() {
+void Lattice::PopulateSolid(float dmSi, float dmAl) {
   int z, x, n, i, top, len, npos;
-  float dms, dma, frac;
+  float frac;
   char s[20];
 
-  npos = ucell::getNpos();
-  rxnlist::getChem(&dms, &dma);
-  if (dms + dma > 0.5) {
+  npos = this->unitCell->GetNumPositions();
+  if (dmSi + dmAl > 0.5) {
     frac = 0.3;
     sprintf(s, "supersaturated");
-  } else if (dms + dma < -0.5) {
+  } else if (dmSi + dmAl < -0.5) {
     frac = 0.7;
     sprintf(s, "undersaturated");
   } else {
@@ -169,18 +170,18 @@ void Lattice::PopulateSolid() {
 void Lattice::TerminateLattice() {
   int top, len, x, i, n, npos;
 
-  npos = ucell::getNpos();
+  npos = this->unitCell->GetNumPositions();
   top = (SurfacePlane ? (Num_aCells - 1) : (Num_bCells - 1));
   len = (SurfacePlane ? Num_bCells : Num_aCells);
   for (x = 0; x < len; x++) { /* if bc, then x = b else x = a */
     i = (SurfacePlane ? (top * Num_bCells * npos + x * npos)
                       : (x * Num_bCells * npos + top * npos));
     for (n = 0; n < npos; n++, i++)
-      if (ucell::getNumNbrs(this->sites[i].state) != this->CountNbrs(i))
+      if (this->unitCell->GetNumNeighbors(this->sites[i].state) != this->CountNbrs(i))
         this->sites[i].state = EDGE;
     i = (SurfacePlane ? (x * npos) : (x * Num_bCells * npos));
     for (n = 0; n < npos; n++, i++)
-      if (ucell::getNumNbrs(this->sites[i].state) != this->CountNbrs(i))
+      if (this->unitCell->GetNumNeighbors(this->sites[i].state) != this->CountNbrs(i))
         this->sites[i].state = EDGE;
   }
 }

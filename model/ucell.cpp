@@ -1,40 +1,37 @@
 /* ucell.c: functions for unit cell */
 #include <stdlib.h>
-#include <stdio.h>
-//#include "common.hpp"
 #include "ucell.hpp"
 #include "futil.hpp"
 
 
-static float Alpha, Beta, Gamma, A, B, C;  /* unit cell params */
-static int Npos;
-
-
-void ucell::free_cell(unitCell c)
+void UnitCell::DisposeUnitCell(UnitCell *unitCell)
 {
-  free(c);
+  if (unitCell != nullptr) {
+    delete[] unitCell->sites;
+    delete unitCell;
+  }
 }
 
 
-ucell::cellDim *ucell::getCelldim(void)
+CellDimensions *UnitCell::GetCellDimensions(void)
 {
-  ucell::cellDim *cd;
+  CellDimensions *cd;
 
-  cd = (ucell::cellDim *) malloc (sizeof(ucell::cellDim));
-  cd->a = A; cd->b = B; cd->c = C;
-  cd->alpha = Alpha; cd->beta = Beta; cd->gamma = Gamma;
+  cd = new CellDimensions();
+  cd->a = this->A; cd->b = this->B; cd->c = this->C;
+  cd->alpha = this->Alpha; cd->beta = this->Beta; cd->gamma = this->Gamma;
   return cd;
 }
 
 
-int ucell::getNpos(void)
+int UnitCell::GetNumPositions(void)
 {
-  return Npos;
+  return this->Npos;
 }
 
 /* getNumNbrs: returns the number of neighbors that a site should
  *             have based on what kind it is */
-int ucell::getNumNbrs(int state)
+int UnitCell::GetNumNeighbors(int state)
 {
   int nbrs;
 
@@ -52,31 +49,29 @@ int ucell::getNumNbrs(int state)
 
 
 /* readCell: read in unit cell parameters, and some simulation conditions */
-ucell::unitCell ucell::readCell(void)
+UnitCell *UnitCell::CreateUnitCell(void)
 {
   int i, j;
-  ucell::unitCell c;
-  FILE *f;
+  UnitCell *unitCell = new UnitCell();
+  std::ifstream f;
 
-  f = Futil::openFile("data.cell", "r");
-  fscanf(f, " %f %f %f ", &A, &B, &C);
-  Futil::eatComment(f, '#');
-  fscanf(f, " %f %f %f ", &Alpha, &Beta, &Gamma);
-  Futil::eatComment(f, '#');
-  fscanf(f, " %d ", &Npos);
-  Futil::eatComment(f, '#');
-  c = (ucell::unitCell) malloc (sizeof(struct ucell::cellSite) * (Npos + 1));
-  for (i = 0; i < Npos; i++) {
-    fscanf(f, " %d %d %f %f %f ", &c[i].n, &c[i].state, &c[i].x, &c[i].y, 
-	   &c[i].z);
+  f = Futil::OpenInputFile("data.cell");
+  f >> unitCell->A >> unitCell->B >> unitCell->C;
+  Futil::EatComment(f, '#');
+  f >> unitCell->Alpha >> unitCell->Beta >> unitCell->Gamma;
+  Futil::EatComment(f, '#');
+  f >> unitCell->Npos;
+  unitCell->sites = new CellSite[unitCell->Npos + 1];
+  Futil::EatComment(f, '#');
+  for (i = 0; i < unitCell->Npos; i++) {
+    f >> unitCell->sites[i].n >> unitCell->sites[i].state >> unitCell->sites[i].x >> unitCell->sites[i].y >> unitCell->sites[i].z;
     for (j = 0; j < 6; j++) {
-      fscanf(f, "%d %d %d %d ", &c[i].nbr[j].n, &c[i].nbr[j].a, &c[i].nbr[j].b,
-	     &c[i].nbr[j].c);
+      f >> unitCell->sites[i].nbr[j].n >> unitCell->sites[i].nbr[j].a >> unitCell->sites[i].nbr[j].b >> unitCell->sites[i].nbr[j].c;
     }
   }
-  c[Npos].n = -1;
-  return c;
-  Futil::closeFile(f);
+  unitCell->sites[unitCell->Npos].n = -1;
+  Futil::CloseFile(f);
+  return unitCell;
 }
 
 
