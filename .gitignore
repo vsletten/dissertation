@@ -1,1 +1,6 @@
 mckaol
+*.o
+results.dat
+start.msi
+end.msi
+CLAUDE.md
