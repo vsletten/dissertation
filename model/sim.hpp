@@ -12,7 +12,7 @@ public:
   long ranseed;    /* seed for initran2 */
 
   static Simulation *CreateSimulation(void);
-  static void DisposeSimulation(Simulation *s);
+  static void DisposeSimulation(Simulation *&s);
 };
 
 #endif

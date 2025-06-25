@@ -1,6 +1,9 @@
 mckaol
 *.o
-results.dat
-start.msi
-end.msi
 CLAUDE.md
+start.*
+model/*.msi
+model/*.dat
+model/*.xyz
+model/*.out
+model/.vscode/

@@ -31,7 +31,7 @@ private:
   
 public:
   static ReactionList *CreateReactionList(void);
-  static void DisposeReactionList(ReactionList *rl);
+  static void DisposeReactionList(ReactionList *&rl);
 
   float GetSiPotential(void) { return this->dmsi; }
   float GetAlPotential(void) { return this->dmal; }

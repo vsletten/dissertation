@@ -5,15 +5,16 @@
 #include <cstdio>
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <string>
 
 void output::initDatafile(void) { std::remove("results.dat"); }
 
-void output::writeData(Lattice *lattice, int n, float t) {
+void output::writeData(const char *filename, Lattice *lattice, int n, float t) {
   std::ofstream f;
   int i, nsi[5], nal[7], oh, type, sitot, altot;
 
-  f = Futil::OpenOutputFile("results.dat");
+  f = Futil::OpenOutputFile(filename);
   sitot = altot = 0;
   for (i = 0; i < 5; i++)
     nsi[i] = 0;
@@ -137,7 +138,7 @@ void output::writeSurf(Lattice *lattice) {
 
 void output::writeMSI(Lattice *lattice, const char *name, int bonds) {
   int i, j, natom, nthing = 1, *id, i2, acells, bcells;
-  char fname[100];
+  std::stringstream fname;
   float x, y, z, al, bl, cl;
   std::ofstream fxyz;
   float cd[][3] = {{4.9725, -0.0262374, -1.3362},
@@ -149,8 +150,8 @@ void output::writeMSI(Lattice *lattice, const char *name, int bonds) {
 
   lattice->GetDim(&acells, &bcells);
   /* open file and print header */
-  sprintf(fname, "%s.msi", name);
-  fxyz = Futil::OpenOutputFile(fname);
+  fname << name << ".msi";
+  fxyz = Futil::OpenOutputFile(fname.str().c_str());
   fxyz << "# MSI CERIUS2 DataModel File Version 3 5\n";
   fxyz << "(1 Model\n";
   fxyz << "(A I Id 1)\n";

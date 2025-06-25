@@ -2,15 +2,72 @@
 #include "bfsearch.hpp"
 #include "common.hpp"
 #include "futil.hpp"
-#include "myerr.hpp"
+#include <sstream>
 #include <stdlib.h>
 #include <iostream>
 #include <cstdio>
 #include <string>
 
 using namespace std;
+
+/* makeLattice: repeat unit cell to make the lattice and
+ *              initialize state of sites
+ *              index generation scheme important for getNeighbor */
+Lattice *Lattice::CreateLattice(UnitCell &unitCell) {
+  int a, b, n, i, j, npos;
+  ifstream f;
+  Lattice *lattice = new Lattice();
+  lattice->unitCell = &unitCell;
+
+  f = Futil::OpenInputFile("data.lattice");
+  if (!f.is_open()) {
+    std::cerr << "Error: Could not open data.lattice" << std::endl;
+    return nullptr;
+  }
+  f >> lattice->Num_aCells >> lattice->Num_bCells >> lattice->SurfacePlane;
+  Futil::CloseFile(f);
+
+  npos = lattice->unitCell->GetNumPositions();
+  lattice->Num_Sites = lattice->Num_aCells * lattice->Num_bCells * npos;
+  lattice->sites = new LatticeSite[lattice->Num_Sites];
+  for (a = 0; a < lattice->Num_aCells; a++) {
+    for (b = 0; b < lattice->Num_bCells; b++) {
+      i = a * lattice->Num_bCells * npos + b * npos;
+      for (n = 0; n < npos; n++) {
+        lattice->sites[i].a = a;
+        lattice->sites[i].b = b;
+        lattice->sites[i].n = n;
+        lattice->sites[i].state = lattice->unitCell->GetCellSites()[n].state;
+        lattice->sites[i].pair = -1;
+        lattice->sites[i].lostal = -1;
+        for (j = 0; j < 6; j++) {
+          lattice->sites[i].nbr[j] = lattice->GetNeighbor(i, j);
+        }
+        i++;
+      }
+    }
+  }
+  return lattice;
+}
+
+void Lattice::DisposeLattice(Lattice *&lattice) 
+{
+  if (lattice == nullptr)
+  {
+    return;
+  }
+
+  if (lattice->sites != nullptr) 
+  {
+    delete[] lattice->sites;
+    lattice->sites = nullptr;
+  }
+  delete lattice;
+  lattice = nullptr;
+}
+
 /* clusters: check for and remove any unattached clusters */
-void Lattice::RemoveUnattachedClusters() {
+bool Lattice::RemoveUnattachedClusters() {
   int i;
 
   BreadthFirstSearch::ColorNodes(this, 0);
@@ -19,9 +76,10 @@ void Lattice::RemoveUnattachedClusters() {
       this->sites[i].state = (int)(this->sites[i].state / 100) * 100;
     else if (this->sites[i].color == ENQUEUED) {
       std::cout << "bad color at " << i << "; state is " << this->sites[i].state << std::endl;
-      Myerr::die("error in clusters");
+      return false;
     }
   }
+  return true;
 }
 
 /* countNbrs: returns actual number of neighbors
@@ -96,62 +154,26 @@ int Lattice::GetNeighbor(int i, int j) {
 
 int Lattice::GetNsites(void) { return this->Num_Sites; }
 
-/* makeLattice: repeat unit cell to make the lattice and
- *              initialize state of sites
- *              index generation scheme important for getNeighbor */
-Lattice *Lattice::CreateLattice(UnitCell &unitCell) {
-  int a, b, n, i, j, npos;
-  ifstream f;
-  Lattice *lattice = new Lattice();
-  lattice->unitCell = &unitCell;
-
-  f = Futil::OpenInputFile("data.lattice");
-  f >> lattice->Num_aCells >> lattice->Num_bCells >> lattice->SurfacePlane;
-  Futil::CloseFile(f);
-
-  npos = lattice->unitCell->GetNumPositions();
-  lattice->Num_Sites = lattice->Num_aCells * lattice->Num_bCells * npos;
-  lattice->sites = new LatticeSite[lattice->Num_Sites];
-  for (a = 0; a < lattice->Num_aCells; a++) {
-    for (b = 0; b < lattice->Num_bCells; b++) {
-      i = a * lattice->Num_bCells * npos + b * npos;
-      for (n = 0; n < npos; n++) {
-        lattice->sites[i].a = a;
-        lattice->sites[i].b = b;
-        lattice->sites[i].n = n;
-        lattice->sites[i].state = lattice->unitCell->GetCellSites()[n].state;
-        lattice->sites[i].pair = -1;
-        lattice->sites[i].lostal = -1;
-        for (j = 0; j < 6; j++) {
-          lattice->sites[i].nbr[j] = lattice->GetNeighbor(i, j);
-        }
-        i++;
-      }
-    }
-  }
-  return lattice;
-}
-
 /* populateSolid: update state of sites which start as part of the solid
  *                as determined by input parameters */
 void Lattice::PopulateSolid(float dmSi, float dmAl) {
   int z, x, n, i, top, len, npos;
   float frac;
-  char s[20];
+  std::stringstream s;
 
   npos = this->unitCell->GetNumPositions();
   if (dmSi + dmAl > 0.5) {
     frac = 0.3;
-    sprintf(s, "supersaturated");
+    s << "supersaturated";
   } else if (dmSi + dmAl < -0.5) {
     frac = 0.7;
-    sprintf(s, "undersaturated");
+    s << "undersaturated";
   } else {
     frac = 0.5;
-    sprintf(s, "near equilibrium");
+    s << "near equilibrium";
   }
   top = (SurfacePlane ? (Num_aCells * frac) : (Num_bCells * frac));
-  printf("Detected %s conditions -- filling %d unit cells\n", s, top);
+  std::cout << "Detected " << s.str() << " conditions -- filling " << top << " unit cells" << std::endl;
   len = (SurfacePlane ? Num_bCells : Num_aCells);
   for (z = 0; z < top; z++) {
     for (x = 0; x < len; x++) { /* if bc, then x = b else x = a */
