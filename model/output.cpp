@@ -199,7 +199,7 @@ void output::writeMSI(Lattice *lattice, const char *name, int bonds) {
           (lattice->GetUnitCell()->GetCellSites()[lattice->sites[i].n].z / cl) * cd[1][2];
       z = (lattice->GetUnitCell()->GetCellSites()[lattice->sites[i].n].z / cl) * cd[2][2];
       fxyz << "  (A D XYZ (" << x << " " << y << " " << z << "))\n";
-      fxyz << "  (A I Id " << nthing - 1 << ")\n";
+      fxyz << "  (A I Id " << nthing << ")\n";
       fxyz << "  (A C Label \"";
       switch (lattice->sites[i].state / 100) {
       case 0:

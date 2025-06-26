@@ -113,10 +113,18 @@ int Environment::Check300(int site) {
 
   x = y = 0;
   si1 = this->lattice->sites[site].nbr[0];
-  sio1 = this->lattice->sites[si1].nbr[0]; /* Si-O-Al is Si nbr[0] */
   si2 = this->lattice->sites[site].nbr[1];
+  
+  if (si1 < 0 || si2 < 0) {
+    std::cerr << "ran into lattice edge in check300" << std::endl;
+    std::cerr << "DEBUG: site " << site << " has missing Si neighbors: si1=" << si1 << " si2=" << si2 << std::endl;
+    return -1;
+  }
+  
+  sio1 = this->lattice->sites[si1].nbr[0]; /* Si-O-Al is Si nbr[0] */
   sio2 = this->lattice->sites[si2].nbr[0];
-  if (si1 < 0 || si2 < 0 || sio1 < 0 || sio2 < 0 ||
+  
+  if (sio1 < 0 || sio2 < 0 ||
       this->lattice->sites[si1].state == EDGE ||
       this->lattice->sites[si2].state == EDGE ||
       this->lattice->sites[sio1].state == EDGE ||

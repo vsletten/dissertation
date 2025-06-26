@@ -180,7 +180,33 @@ void Lattice::PopulateSolid(float dmSi, float dmAl) {
       i = (SurfacePlane ? (z * Num_bCells * npos + x * npos)
                         : (x * Num_bCells * npos + z * npos));
       for (n = 0; n < npos; n++) {
-        this->sites[i].state++;
+        /* Check if this site can safely have its state incremented */
+        bool canIncrement = true;
+        int currentState = this->sites[i].state;
+        
+        /* For oxygen sites (300-level) that would become bridges (301),
+         * ensure their full connectivity chain exists */
+        if (currentState == 300) {
+          /* State 301 (Si-O-Si) requires a complete connectivity chain */
+          int si1 = this->sites[i].nbr[0];
+          int si2 = this->sites[i].nbr[1];
+          
+          if (si1 < 0 || si2 < 0) {
+            canIncrement = false;
+          } else {
+            /* Also check that the Si atoms have their required connections */
+            int sio1 = this->sites[si1].nbr[0];
+            int sio2 = this->sites[si2].nbr[0];
+            
+            if (sio1 < 0 || sio2 < 0) {
+              canIncrement = false;
+            }
+          }
+        }
+        
+        if (canIncrement) {
+          this->sites[i].state++;
+        }
         i++;
       }
     }
@@ -195,6 +221,8 @@ void Lattice::TerminateLattice() {
   npos = this->unitCell->GetNumPositions();
   top = (SurfacePlane ? (Num_aCells - 1) : (Num_bCells - 1));
   len = (SurfacePlane ? Num_bCells : Num_aCells);
+  
+  /* First pass: set boundary sites to EDGE */
   for (x = 0; x < len; x++) { /* if bc, then x = b else x = a */
     i = (SurfacePlane ? (top * Num_bCells * npos + x * npos)
                       : (x * Num_bCells * npos + top * npos));
@@ -205,6 +233,27 @@ void Lattice::TerminateLattice() {
     for (n = 0; n < npos; n++, i++)
       if (this->unitCell->GetNumNeighbors(this->sites[i].state) != this->CountNbrs(i))
         this->sites[i].state = EDGE;
+  }
+  
+  /* Second pass: invalidate sites that depend on EDGE sites */
+  for (i = 0; i < Num_Sites; i++) {
+    if (this->sites[i].state == 301) { /* Si-O-Si oxygen bridges */
+      int si1 = this->sites[i].nbr[0];
+      int si2 = this->sites[i].nbr[1];
+      
+      if (si1 >= 0 && si2 >= 0) {
+        int sio1 = this->sites[si1].nbr[0];
+        int sio2 = this->sites[si2].nbr[0];
+        
+        /* If any site in the connectivity chain is EDGE, invalidate this site */
+        if ((si1 >= 0 && this->sites[si1].state == EDGE) ||
+            (si2 >= 0 && this->sites[si2].state == EDGE) ||
+            (sio1 >= 0 && this->sites[sio1].state == EDGE) ||
+            (sio2 >= 0 && this->sites[sio2].state == EDGE)) {
+          this->sites[i].state = 300; /* Revert to empty state */
+        }
+      }
+    }
   }
 }
 
