@@ -1,18 +1,30 @@
 #include <cmath>
+#include <iostream>
 #include <stdlib.h>
 #include "futil.hpp"
-#include "myerr.hpp"
 #include "rxnlist.hpp"
 
 
-void ReactionList::DisposeReactionList(ReactionList  *rl)
+void ReactionList::DisposeReactionList(ReactionList *&rl)
 {
   int i;
 
-  for (i = 0; i < NRXN; i++)
-    delete[] rl->reactions[i].rate;
-  delete[] rl->reactions;
+  if (rl == nullptr) {
+    return;
+  }
+
+  if (rl->reactions != nullptr) {
+    for (i = 0; i < NRXN; i++) {
+      if (rl->reactions[i].rate != nullptr) {
+        delete[] rl->reactions[i].rate;
+        rl->reactions[i].rate = nullptr;
+      }
+    }
+    delete[] rl->reactions; 
+    rl->reactions = nullptr;
+  }
   delete rl;
+  rl = nullptr;
 }
 
 
@@ -30,7 +42,8 @@ ReactionList *ReactionList::CreateReactionList(void)
 
   f = Futil::OpenInputFile("data.rxn");
   if (!f.is_open()) {
-    Myerr::die("Error: Could not open data.rxn");
+    std::cerr << "Error: Could not open data.rxn" << std::endl;
+    return nullptr;
   }
   f >> t; 
   Futil::EatComment(f, '#');

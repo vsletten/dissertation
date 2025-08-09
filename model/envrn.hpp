@@ -7,15 +7,19 @@
 
 class Environment {
 public:
-    static int checkEnv(Lattice *lattice, int site);
-    static int isActive(int site, Lattice *lattice, int rxn);
+    Environment(Lattice *lattice) : lattice(lattice) { }
+
+    int CheckEnv(int site);
+    int IsActive(int site, int rxn);
 
 private:
-    static int check100(Lattice *lattice, int site);
-    static int check200(Lattice *lattice, int site);
-    static int check300(Lattice *lattice, int site);
-    static int check400(Lattice *lattice, int site);
-    static int check500(Lattice *lattice, int site);
+    Lattice *lattice;
+
+    int Check100(int site);
+    int Check200(int site);
+    int Check300(int site);
+    int Check400(int site);
+    int Check500(int site);
 };
 
 #endif

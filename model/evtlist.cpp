@@ -2,17 +2,16 @@
 #include "envrn.hpp"
 #include "myerr.hpp"
 #include "rxnlist.hpp"
-#include <stdio.h>
+#include <iostream>
 #include <stdlib.h>
 
-EventList *EventList::CreateEventList(Lattice *lattice, Reaction *rxList,
-                           int nSites) {
+EventList *EventList::CreateEventList(Lattice *lattice, Environment *environment, Reaction *rxList) {
   EventList *eventList = nullptr;
   EventList *currEvent = nullptr;
   int s, i, env, lo, hi;
-  char msg[100];
 
-  for (s = 0; s < nSites; s++) { /* build event list */
+  /* build event list */
+  for (s = 0; s < lattice->GetNsites(); s++) {
     if ((lattice->sites[s].state % 100 == 0) && lattice->sites[s].state > 200) {
       continue;
     } else if (lattice->sites[s].state > 500) {
@@ -29,19 +28,27 @@ EventList *EventList::CreateEventList(Lattice *lattice, Reaction *rxList,
       hi = NRXN;
     }
     for (i = lo; i < hi; i++) {
-      if (lattice->sites[s].state == rxList[i].reactant /* matches reactant and is active? */
-          && Environment::isActive(s, lattice, i)) {
+       /* matches reactant and is active? */
+      if (lattice->sites[s].state ==
+              rxList[i].reactant
+          && environment->IsActive(s, i)) 
+      {
         currEvent = new EventList();
         if (currEvent == nullptr)
+        {
           Myerr::die("out of memory in CreateEventList");
+        }
         currEvent->next = eventList;
         currEvent->site = s;
         currEvent->rxn = i;
-        env = Environment::checkEnv(lattice, s);
-        if (env < 0 || env >= rxList[i].nrates) {
-          sprintf(msg, "invalid environment: site %d state %d env %d nrates %d",
-                  s, lattice->sites[s].state, env, rxList[i].nrates);
-          Myerr::die(msg);
+        env = environment->CheckEnv(s);
+        if (env < 0 || env >= rxList[i].nrates) 
+        {
+          std::cerr << "invalid environment: site " << s 
+            << " state " << lattice->sites[s].state 
+            << " env " << env 
+            << " nrates " << rxList[i].nrates << std::endl;
+          return nullptr;
         }
         currEvent->rate = rxList[i].rate[env];
         eventList = currEvent;
@@ -51,13 +58,14 @@ EventList *EventList::CreateEventList(Lattice *lattice, Reaction *rxList,
   return eventList;
 }
 
-void EventList::DisposeEventList(EventList *eventList) {
+void EventList::DisposeEventList(EventList *&eventList) {
   EventList *current = eventList;
-  EventList *next = nullptr;  
+  EventList *next = nullptr;
 
   while (current != nullptr) {
     next = current->next;
     delete current;
     current = next;
   }
+  eventList = nullptr;
 }
