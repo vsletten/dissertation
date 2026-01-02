@@ -202,133 +202,134 @@ export default function ModelInfo({ fileName, atoms, bonds, onSelectAtom }: Mode
         .model-info-panel {
           width: 100%;
           height: 100%;
-          padding: 4px 6px;
+          padding: 8px 10px;
           color: #7AFFB2;
           overflow: hidden;
           display: flex;
           flex-direction: column;
           font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+          font-size: 11px;
         }
-        
+
         .model-file-info {
-          margin-bottom: 6px;
+          margin-bottom: 8px;
         }
-        
+
         .model-file-info h2 {
-          margin: 0 0 1px;
-          font-size: 0.5rem;
+          margin: 0 0 2px;
+          font-size: 12px;
           color: #07DBFA;
           letter-spacing: 1px;
           text-shadow: 0 0 5px rgba(7, 219, 250, 0.5);
         }
-        
+
         .model-file-info p {
           margin: 0;
-          font-size: 0.4rem;
+          font-size: 10px;
           color: #7AFFB2;
           opacity: 0.8;
         }
-        
+
         .tabs {
           display: flex;
           border-bottom: 1px solid rgba(7, 219, 250, 0.3);
-          margin-bottom: 6px;
+          margin-bottom: 8px;
         }
-        
+
         .tabs button {
-          padding: 2px 6px;
+          padding: 4px 8px;
           background: none;
           border: none;
-          border-bottom: 1px solid transparent;
+          border-bottom: 2px solid transparent;
           cursor: pointer;
-          font-size: 0.45rem;
+          font-size: 10px;
           font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
           color: #A6A8F8;
           transition: all 0.2s;
           text-transform: uppercase;
-          letter-spacing: 1px;
+          letter-spacing: 0.5px;
         }
-        
+
         .tabs button:hover {
           color: #07DBFA;
         }
-        
+
         .tabs button.active {
           color: #07DBFA;
-          border-bottom: 1px solid #07DBFA;
+          border-bottom: 2px solid #07DBFA;
         }
-        
+
         .tab-content {
-          padding: 3px 0;
+          padding: 4px 0;
           flex: 1;
           overflow-y: auto;
-          max-height: 220px;
+          max-height: 280px;
         }
-        
+
         .stats-group {
-          margin-bottom: 6px;
+          margin-bottom: 10px;
         }
-        
+
         .stats-group h3 {
-          margin: 0 0 3px;
-          font-size: 0.45rem;
+          margin: 0 0 4px;
+          font-size: 11px;
           color: #F8D2A6;
           border-bottom: 1px dotted rgba(248, 210, 166, 0.3);
-          padding-bottom: 1px;
+          padding-bottom: 2px;
           text-transform: uppercase;
         }
-        
+
         .element-list {
           display: flex;
           flex-wrap: wrap;
-          gap: 4px;
+          gap: 6px;
         }
-        
+
         .element-item {
           display: flex;
           align-items: center;
-          gap: 2px;
-          padding: 1px 3px;
+          gap: 4px;
+          padding: 2px 6px;
           background-color: rgba(7, 219, 250, 0.1);
-          border-radius: 2px;
-          font-size: 0.4rem;
+          border-radius: 3px;
+          font-size: 11px;
           border: 1px solid rgba(7, 219, 250, 0.3);
         }
-        
+
         .element-symbol {
           font-weight: bold;
         }
-        
+
         .stats-table {
           width: 100%;
           border-collapse: collapse;
-          font-size: 0.4rem;
+          font-size: 11px;
         }
-        
+
         .stats-table td {
-          padding: 2px 6px;
+          padding: 3px 8px;
           border-bottom: 1px solid rgba(7, 219, 250, 0.2);
         }
-        
+
         .stats-table td:first-child {
           font-weight: 500;
           color: #F8D2A6;
         }
-        
+
         .atom-list-container, .bond-list-container {
-          max-height: 220px;
+          max-height: 280px;
           overflow-y: auto;
         }
-        
+
         .atom-table, .bond-table {
           width: 100%;
           border-collapse: collapse;
-          font-size: 0.4rem;
+          font-size: 10px;
         }
-        
+
         .atom-table th, .bond-table th {
           background-color: rgba(0, 0, 0, 0.4);
-          padding: 2px 3px;
+          padding: 4px 6px;
           text-align: left;
           position: sticky;
           top: 0;
@@ -336,20 +337,20 @@ export default function ModelInfo({ fileName, atoms, bonds, onSelectAtom }: Mode
           font-weight: normal;
           text-transform: uppercase;
           letter-spacing: 0.5px;
-          font-size: 0.4rem;
+          font-size: 10px;
         }
-        
+
         .atom-row, .bond-row {
           cursor: pointer;
           transition: background-color 0.2s;
         }
-        
+
         .atom-row:hover, .bond-row:hover {
           background-color: rgba(122, 255, 178, 0.1);
         }
-        
+
         .atom-table td, .bond-table td {
-          padding: 1px 3px;
+          padding: 2px 6px;
           border-bottom: 1px solid rgba(7, 219, 250, 0.2);
         }
       `}</style>

@@ -1,104 +1,103 @@
 # Cerius2 Molecular Viewer
 
-A web-based viewer for Cerius2 molecular model files, focusing on kaolinite mineral surfaces.
+A web-based 3D viewer for Cerius2 molecular model files (.msi), designed for visualizing kaolinite mineral surfaces from Monte Carlo simulations.
 
-## Features
-
-- 3D visualization of molecular structures using Three.js
-- Support for Cerius2 Model Structure Interface (.msi) and Cartesian (.car) files
-- Interactive rotation, zoom, and pan controls
-- Multiple visualization modes (ball-and-stick, space-filling, wireframe)
-- Element-based or charge-based coloring
-- Detailed atom and bond information
-- Structure statistics and measurements
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js (v14 or later)
-- npm (v6 or later)
-
-### Installation
-
-1. Clone the repository or download the source code
-2. Install dependencies:
+## Quick Start
 
 ```bash
 npm install
-```
-
-### Development
-
-To start the development server:
-
-```bash
 npm run dev
 ```
 
-This will launch the application at http://localhost:5173.
+Then open http://localhost:5173 and upload an MSI file.
 
-### Building for Production
+## Features
 
-To build the application for production:
-
-```bash
-npm run build
-```
-
-The built files will be in the `dist` directory.
-
-## Usage
-
-1. Upload a Cerius2 model file (.msi, .car, .pdb, or .xyz)
-2. The application will parse the file and display the 3D model
-3. Use the mouse to interact with the model:
-   - Left-click and drag to rotate
-   - Right-click and drag to pan
-   - Scroll to zoom in/out
-4. Use the control panel to adjust display options:
-   - Toggle atom labels
-   - Change display style
-   - Adjust atom and bond sizes
-   - Change coloring scheme
+- **3D Visualization**: Interactive molecular structure rendering using Three.js
+- **File Support**: Cerius2 Model Structure Interface (.msi) files
+- **Display Modes**:
+  - Ball-and-stick (default)
+  - Space-filling
+  - Wireframe
+- **Coloring**: Element-based (CPK) or charge-based
+- **Controls**:
+  - Left-click + drag: Rotate
+  - Right-click + drag: Pan
+  - Scroll: Zoom
+- **Atom Labels**: Toggle element/label display
+- **Model Info**: Composition, dimensions, and charge statistics
 
 ## Project Structure
 
 ```
-/
-├── public/             # Static assets
+viewer/
 ├── src/
-│   ├── components/     # React components
-│   │   ├── FileUploader.tsx
-│   │   ├── MoleculeViewer.tsx
-│   │   └── ModelInfo.tsx
-│   ├── types/          # TypeScript type definitions
-│   │   └── cerius2.ts
-│   ├── utils/          # Utility functions
-│   │   ├── cerius2Parser.ts
-│   │   └── elementColors.ts
-│   ├── App.tsx         # Main application component
-│   └── main.tsx        # Application entry point
-├── index.html          # HTML entry point
-└── package.json        # Project configuration
+│   ├── components/
+│   │   ├── FileUploader.tsx   # Drag-and-drop file upload
+│   │   ├── MoleculeViewer.tsx # Three.js 3D scene
+│   │   └── ModelInfo.tsx      # Structure statistics panel
+│   ├── utils/
+│   │   ├── cerius2Parser.ts   # MSI file parser
+│   │   └── elementColors.ts   # CPK colors and atomic radii
+│   ├── types/
+│   │   └── cerius2.ts         # TypeScript interfaces
+│   ├── App.tsx                # Main application
+│   └── main.tsx               # Entry point
+├── public/
+│   └── example_kaolinite.msi  # Sample model file
+├── sample_data/               # Additional test files
+└── msi-schema.md              # MSI file format documentation
 ```
 
-## Kaolinite Specifics
+## MSI File Format
 
-This viewer is specially designed for visualizing kaolinite mineral surfaces. Kaolinite has a layered structure with alternating silica tetrahedral and alumina octahedral sheets, with a chemical formula of Al₂Si₂O₅(OH)₄.
+The viewer parses Cerius2 MSI files with the following structure:
 
-The viewer supports:
-- Visualizing the layered sheet structure
-- Identifying hydroxyl groups on the octahedral sheet
-- Examining mineral surface interactions
+```
+# MSI CERIUS2 DataModel File Version 2 0
+(1 Model
+ (2 Atom
+  (A I ACL "14 Si")           # Element (atomic number + symbol)
+  (A F Charge 1.1)            # Partial charge
+  (A D XYZ (0.0 0.0 0.0))     # 3D coordinates
+  (A C Label Si1)             # Atom label
+ )
+ (34 Bond
+  (A O Atom1 2)               # First atom ID
+  (A O Atom2 6)               # Second atom ID
+ )
+)
+```
 
-## Technologies Used
+See `msi-schema.md` for detailed format documentation.
 
-- React
-- TypeScript
-- Three.js with @react-three/fiber and @react-three/drei
-- Vite
+## Development
+
+```bash
+npm run dev      # Start dev server with hot reload
+npm run build    # Production build
+npm run lint     # Run ESLint
+npm run preview  # Preview production build
+```
+
+## Technologies
+
+- **React 19** - UI framework
+- **TypeScript** - Type safety
+- **Vite** - Build tool
+- **Three.js** - 3D rendering
+- **@react-three/fiber** - React renderer for Three.js
+- **@react-three/drei** - Useful helpers (OrbitControls, Text, Billboard)
+
+## Kaolinite Context
+
+This viewer is designed for the dissertation project studying kaolinite (Al2Si2O5(OH)4) mineral surfaces. Kaolinite has a layered structure with:
+- **Silica tetrahedral sheet**: Si atoms (tan) bonded to O atoms (red)
+- **Alumina octahedral sheet**: Al atoms (grey) coordinated with O and OH groups
+- **Interlayer**: Hydroxyl groups
+
+The viewer supports visualizing output from the Monte Carlo simulation in the `model/` directory.
 
 ## License
 
-This project is licensed under the ISC License.
+ISC

@@ -105,8 +105,8 @@ export function parseModelFile(content: string): { atoms: Atom[], bonds: Bond[] 
       }
       // Parse atom attributes
       else if (currentObject === 'atom') {
-        // Parse ACL for element
-        if (line.includes('(A C ACL')) {
+        // Parse ACL for element (can be "A C ACL" or "A I ACL")
+        if (line.includes('ACL')) {
           const match = line.match(/"([^"]+)"/);
           if (match) {
             const aclValue = match[1];

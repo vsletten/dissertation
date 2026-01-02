@@ -1,8 +1,8 @@
 import { useRef, useState, useMemo, useCallback } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, PerspectiveCamera, Line } from '@react-three/drei';
+import { Canvas, useThree } from '@react-three/fiber';
+import { OrbitControls, PerspectiveCamera, Line, Text, Billboard } from '@react-three/drei';
 import * as THREE from 'three';
-import { getElementColor, getElementRadius } from '../utils/elementColors';
+import { getElementColor, getCovalentRadius, getVdwRadius } from '../utils/elementColors';
 
 interface Atom {
   id: number;
@@ -48,17 +48,19 @@ const Controls = ({ controlsRef }: { controlsRef: React.RefObject<any> }) => {
 };
 
 // Individual atom representation
-const AtomSphere = ({ 
-  position, 
-  element, 
-  radius, 
-  charge, 
-  label, 
+const AtomSphere = ({
+  position,
+  element,
+  covalentRadius,
+  vdwRadius,
+  charge,
+  label,
   options,
-}: { 
-  position: [number, number, number]; 
+}: {
+  position: [number, number, number];
   element: string;
-  radius: number;
+  covalentRadius: number;
+  vdwRadius: number;
   charge: number;
   label: string;
   options: DisplayOptions;
@@ -81,58 +83,38 @@ const AtomSphere = ({
   }, [element, charge, options.colorScheme]);
 
   // Adjust radius based on display style
+  // Space-filling uses van der Waals radii (true atomic volume)
+  // Ball-and-stick and wireframe use covalent radii (bonding size)
   const displayRadius = useMemo(() => {
     if (options.displayStyle === 'space-filling') {
-      return radius * options.atomSizeScale;
+      return vdwRadius * options.atomSizeScale;
     } else if (options.displayStyle === 'ball-and-stick') {
-      return radius * 0.5 * options.atomSizeScale;
+      return covalentRadius * 0.5 * options.atomSizeScale;
     } else {
-      return radius * 0.3 * options.atomSizeScale;
+      return covalentRadius * 0.3 * options.atomSizeScale;
     }
-  }, [radius, options.displayStyle, options.atomSizeScale]);
+  }, [covalentRadius, vdwRadius, options.displayStyle, options.atomSizeScale]);
 
-  // Text label for the atom
+  // Text label for the atom using Billboard to always face camera
   const TextLabel = () => {
-    const { camera } = useThree();
-    const labelRef = useRef<THREE.Group>(null);
-    
-    useFrame(() => {
-      if (labelRef.current) {
-        labelRef.current.lookAt(camera.position);
-      }
-    });
-    
-    return options.showLabels ? (
-      <group position={position} ref={labelRef}>
-        <sprite position={[0, displayRadius + 0.2, 0]} scale={[1, 0.5, 1]}>
-          <spriteMaterial attach="material" color="#ffffff">
-            <canvasTexture args={[makeTextCanvas(label || element)]} attach="map" />
-          </spriteMaterial>
-        </sprite>
-      </group>
-    ) : null;
-  };
+    if (!options.showLabels) return null;
 
-  // Create a text canvas for the label
-  const makeTextCanvas = (text: string): HTMLCanvasElement => {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d')!;
-    const scale = 5;
-    
-    canvas.width = text.length * 12 * scale;
-    canvas.height = 20 * scale;
-    
-    ctx.scale(scale, scale);
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-    ctx.fillRect(0, 0, canvas.width / scale, canvas.height / scale);
-    
-    ctx.font = '12px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(text, canvas.width / (2 * scale), canvas.height / (2 * scale));
-    
-    return canvas;
+    const labelText = label || element;
+
+    return (
+      <Billboard position={[position[0], position[1] + displayRadius + 0.3, position[2]]}>
+        <Text
+          fontSize={0.4}
+          color="#ffffff"
+          anchorX="center"
+          anchorY="middle"
+          outlineWidth={0.02}
+          outlineColor="#000000"
+        >
+          {labelText}
+        </Text>
+      </Billboard>
+    );
   };
 
   // Render based on display style
@@ -155,13 +137,13 @@ const AtomSphere = ({
 };
 
 // Bond representation
-const Bond = ({ 
-  start, 
-  end, 
+const Bond = ({
+  start,
+  end,
   options,
-}: { 
-  start: [number, number, number]; 
-  end: [number, number, number]; 
+}: {
+  start: [number, number, number];
+  end: [number, number, number];
   options: DisplayOptions;
 }) => {
   // Don't show bonds in space-filling mode
@@ -170,23 +152,26 @@ const Bond = ({
   }
 
   const middlePoint = useMemo(() => {
-    return [
+    return new THREE.Vector3(
       (start[0] + end[0]) / 2,
       (start[1] + end[1]) / 2,
       (start[2] + end[2]) / 2
-    ];
+    );
   }, [start, end]);
 
   // Calculate bond direction and length
-  const direction = useMemo(() => {
-    const dx = end[0] - start[0];
-    const dy = end[1] - start[1];
-    const dz = end[2] - start[2];
-    const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    return {
-      vector: [dx / length, dy / length, dz / length],
-      length,
-    };
+  const { length, quaternion } = useMemo(() => {
+    const startVec = new THREE.Vector3(...start);
+    const endVec = new THREE.Vector3(...end);
+    const direction = new THREE.Vector3().subVectors(endVec, startVec);
+    const len = direction.length();
+
+    // Cylinder is created along Y-axis, so we need to rotate from Y to the bond direction
+    const yAxis = new THREE.Vector3(0, 1, 0);
+    const quat = new THREE.Quaternion();
+    quat.setFromUnitVectors(yAxis, direction.clone().normalize());
+
+    return { length: len, quaternion: quat };
   }, [start, end]);
 
   // Determine bond radius based on display style
@@ -213,20 +198,8 @@ const Bond = ({
 
   // For ball-and-stick, use a cylinder
   return (
-    <mesh
-      position={middlePoint as [number, number, number]}
-      rotation={[
-        Math.atan2(
-          Math.sqrt(direction.vector[0] * direction.vector[0] + direction.vector[1] * direction.vector[1]),
-          direction.vector[2]
-        ),
-        0,
-        Math.atan2(direction.vector[1], direction.vector[0])
-      ]}
-    >
-      <cylinderGeometry
-        args={[bondRadius, bondRadius, direction.length, 12]}
-      />
+    <mesh position={middlePoint} quaternion={quaternion}>
+      <cylinderGeometry args={[bondRadius, bondRadius, length, 12]} />
       <meshPhongMaterial color="#CCCCCC" />
     </mesh>
   );
@@ -270,7 +243,8 @@ const Molecule = ({
           key={`atom-${atom.id}`}
           position={atom.centeredPosition}
           element={atom.element}
-          radius={getElementRadius(atom.element)}
+          covalentRadius={getCovalentRadius(atom.element)}
+          vdwRadius={getVdwRadius(atom.element)}
           charge={atom.charge}
           label={atom.label}
           options={options}
@@ -302,7 +276,8 @@ const Molecule = ({
 // Main viewer component
 export default function MoleculeViewer({ atoms, bonds }: MoleculeViewerProps): React.ReactElement {
   const controlsRef = useRef<any>(null);
-  
+  const [controlsCollapsed, setControlsCollapsed] = useState(false);
+
   // Display options with defaults
   const [options, setOptions] = useState<DisplayOptions>({
     showLabels: true,
@@ -381,79 +356,96 @@ export default function MoleculeViewer({ atoms, bonds }: MoleculeViewerProps): R
 
   return (
     <div className="molecule-viewer">
-      <div className="viewer-controls">
-        <div className="control-group">
-          <label>
-            <input
-              type="checkbox"
-              checked={options.showLabels}
-              onChange={(e) => handleOptionChange('showLabels', e.target.checked)}
-            />
-            Show Labels
-          </label>
-        </div>
-        
-        <div className="control-group">
-          <label>Display Style:</label>
-          <select
-            value={options.displayStyle}
-            onChange={(e) => handleOptionChange('displayStyle', e.target.value as any)}
+      {controlsCollapsed ? (
+        <button
+          className="controls-toggle collapsed"
+          onClick={() => setControlsCollapsed(false)}
+          title="Show controls"
+        >
+          <span className="toggle-icon">+</span>
+        </button>
+      ) : (
+        <div className="viewer-controls">
+          <button
+            className="controls-collapse-btn"
+            onClick={() => setControlsCollapsed(true)}
+            title="Hide controls"
           >
-            <option value="ball-and-stick">Ball and Stick</option>
-            <option value="space-filling">Space Filling</option>
-            <option value="wireframe">Wireframe</option>
-          </select>
-        </div>
-        
-        <div className="control-group">
-          <label>Color By:</label>
-          <select
-            value={options.colorScheme}
-            onChange={(e) => handleOptionChange('colorScheme', e.target.value as any)}
-          >
-            <option value="element">Element</option>
-            <option value="charge">Charge</option>
-          </select>
-        </div>
-        
-        <div className="control-group">
-          <label>
-            Atom Size: {options.atomSizeScale.toFixed(1)}
-          </label>
-          <input
-            type="range"
-            min="0.5"
-            max="2.0"
-            step="0.1"
-            value={options.atomSizeScale}
-            onChange={(e) => handleOptionChange('atomSizeScale', parseFloat(e.target.value))}
-          />
-        </div>
-        
-        <div className="control-group">
-          <label>
-            Bond Size: {options.bondRadius.toFixed(1)}
-          </label>
-          <input
-            type="range"
-            min="0.5"
-            max="2.0"
-            step="0.1"
-            value={options.bondRadius}
-            onChange={(e) => handleOptionChange('bondRadius', parseFloat(e.target.value))}
-          />
-        </div>
-        
-        <div className="control-group">
-          <button 
-            className="reset-view-button" 
-            onClick={resetView}
-            title="Reset camera view"
-          >
-            Reset View
+            -
           </button>
+          <div className="control-group">
+            <label>
+              <input
+                type="checkbox"
+                checked={options.showLabels}
+                onChange={(e) => handleOptionChange('showLabels', e.target.checked)}
+              />
+              Show Labels
+            </label>
+          </div>
+
+          <div className="control-group">
+            <label>Display Style:</label>
+            <select
+              value={options.displayStyle}
+              onChange={(e) => handleOptionChange('displayStyle', e.target.value as any)}
+            >
+              <option value="ball-and-stick">Ball and Stick</option>
+              <option value="space-filling">Space Filling</option>
+              <option value="wireframe">Wireframe</option>
+            </select>
+          </div>
+
+          <div className="control-group">
+            <label>Color By:</label>
+            <select
+              value={options.colorScheme}
+              onChange={(e) => handleOptionChange('colorScheme', e.target.value as any)}
+            >
+              <option value="element">Element</option>
+              <option value="charge">Charge</option>
+            </select>
+          </div>
+
+          <div className="control-group">
+            <label>
+              Atom Size: {options.atomSizeScale.toFixed(1)}
+            </label>
+            <input
+              type="range"
+              min="0.5"
+              max="2.0"
+              step="0.1"
+              value={options.atomSizeScale}
+              onChange={(e) => handleOptionChange('atomSizeScale', parseFloat(e.target.value))}
+            />
+          </div>
+
+          <div className="control-group">
+            <label>
+              Bond Size: {options.bondRadius.toFixed(1)}
+            </label>
+            <input
+              type="range"
+              min="0.5"
+              max="2.0"
+              step="0.1"
+              value={options.bondRadius}
+              onChange={(e) => handleOptionChange('bondRadius', parseFloat(e.target.value))}
+            />
+          </div>
+
+          <div className="control-group">
+            <button
+              className="reset-view-button"
+              onClick={resetView}
+              title="Reset camera view"
+            >
+              Reset View
+            </button>
+          </div>
         </div>
-      </div>
+      )}
       
       <div className="viewer-container">
         <Canvas dpr={[1, 2]} style={{ background: '#111' }}>
@@ -486,16 +478,17 @@ export default function MoleculeViewer({ atoms, bonds }: MoleculeViewerProps): R
           width: 100%;
           height: 100%;
         }
-        
+
         .viewer-controls {
           position: absolute;
           top: 10px;
           left: 10px;
           display: flex;
           flex-wrap: wrap;
-          gap: 6px 8px;
-          padding: 4px 6px;
-          background-color: rgba(10, 20, 30, 0.7);
+          gap: 10px 16px;
+          padding: 10px 14px;
+          padding-top: 28px;
+          background-color: rgba(10, 20, 30, 0.85);
           backdrop-filter: blur(5px);
           color: #7AFFB2;
           z-index: 10;
@@ -503,58 +496,113 @@ export default function MoleculeViewer({ atoms, bonds }: MoleculeViewerProps): R
           font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
           border: 1px solid rgba(7, 219, 250, 0.3);
           box-shadow: 0 0 15px rgba(7, 219, 250, 0.2);
-          width: 480px;
+          max-width: 520px;
         }
-        
+
+        .controls-collapse-btn {
+          position: absolute;
+          top: 4px;
+          right: 4px;
+          width: 20px;
+          height: 20px;
+          padding: 0;
+          background-color: rgba(7, 219, 250, 0.2);
+          color: #07DBFA;
+          border: 1px solid rgba(7, 219, 250, 0.4);
+          border-radius: 3px;
+          font-size: 16px;
+          font-weight: bold;
+          line-height: 1;
+          cursor: pointer;
+          transition: all 0.2s;
+          font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        }
+
+        .controls-collapse-btn:hover {
+          background-color: rgba(7, 219, 250, 0.4);
+          box-shadow: 0 0 8px rgba(7, 219, 250, 0.4);
+        }
+
+        .controls-toggle.collapsed {
+          position: absolute;
+          top: 10px;
+          left: 10px;
+          width: 36px;
+          height: 36px;
+          padding: 0;
+          background-color: rgba(10, 20, 30, 0.85);
+          backdrop-filter: blur(5px);
+          color: #07DBFA;
+          border: 1px solid rgba(7, 219, 250, 0.3);
+          border-radius: 4px;
+          font-size: 20px;
+          font-weight: bold;
+          cursor: pointer;
+          transition: all 0.2s;
+          z-index: 10;
+          box-shadow: 0 0 15px rgba(7, 219, 250, 0.2);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .controls-toggle.collapsed:hover {
+          background-color: rgba(7, 219, 250, 0.2);
+          box-shadow: 0 0 20px rgba(7, 219, 250, 0.4);
+        }
+
+        .toggle-icon {
+          line-height: 1;
+        }
+
         .control-group {
           display: flex;
           flex-direction: column;
-          min-width: 145px;
-          margin-bottom: 2px;
+          min-width: 140px;
+          margin-bottom: 4px;
         }
-        
+
         .control-group label {
-          margin-bottom: 1px;
-          font-size: 0.45rem;
+          margin-bottom: 4px;
+          font-size: 11px;
           color: #07DBFA;
           text-transform: uppercase;
           letter-spacing: 0.5px;
         }
-        
+
         .control-group select,
         .control-group input[type="range"] {
-          padding: 0px 2px;
+          padding: 4px 8px;
           background-color: rgba(0, 0, 0, 0.4);
           color: #7AFFB2;
           border: 1px solid rgba(7, 219, 250, 0.4);
-          border-radius: 2px;
+          border-radius: 3px;
           font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-          font-size: 0.45rem;
-          height: 16px;
+          font-size: 11px;
+          height: 26px;
         }
-        
+
         .reset-view-button {
-          margin-top: 2px;
+          margin-top: 4px;
           background-color: rgba(7, 219, 250, 0.2);
           color: #07DBFA;
           border: 1px solid rgba(7, 219, 250, 0.4);
-          padding: 1px 2px;
-          border-radius: 2px;
-          font-size: 0.45rem;
+          padding: 6px 10px;
+          border-radius: 3px;
+          font-size: 11px;
           font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
           cursor: pointer;
           transition: all 0.2s;
           text-transform: uppercase;
           letter-spacing: 1px;
           width: 100%;
-          height: 16px;
         }
-        
+
         .reset-view-button:hover {
           background-color: rgba(7, 219, 250, 0.3);
           box-shadow: 0 0 10px rgba(7, 219, 250, 0.4);
         }
-        
+
         .viewer-container {
           flex-grow: 1;
           height: 100%;

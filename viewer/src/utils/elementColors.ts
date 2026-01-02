@@ -35,36 +35,79 @@ export function getElementColor(element: string): string {
 }
 
 /**
- * Get radius for a chemical element (in Angstroms)
- * These are approximations of van der Waals radii
+ * Covalent radii for chemical elements (in Angstroms)
+ * Used for ball-and-stick visualization to represent bonding distances
+ * Source: Cordero et al. (2008) "Covalent radii revisited"
  */
-export const ELEMENT_RADII: Record<string, number> = {
-  H: 0.32,
-  C: 0.75,
+export const COVALENT_RADII: Record<string, number> = {
+  H: 0.31,
+  C: 0.76,
   N: 0.71,
-  O: 0.60,
-  F: 0.50,
-  P: 1.10,
-  S: 1.02,
-  Cl: 0.99,
-  Si: 1.15,
-  Al: 1.18,
-  Na: 1.16,
-  Mg: 1.10,
-  K: 1.52,
-  Ca: 1.26,
-  Fe: 1.16,
-  Mn: 1.17,
-  Ti: 1.32,
-  Zn: 1.09,
+  O: 0.66,
+  F: 0.57,
+  P: 1.07,
+  S: 1.05,
+  Cl: 1.02,
+  Si: 1.11,
+  Al: 1.21,
+  Na: 1.66,
+  Mg: 1.41,
+  K: 2.03,
+  Ca: 1.76,
+  Fe: 1.32,
+  Mn: 1.39,
+  Ti: 1.60,
+  Zn: 1.22,
 };
 
-// Default radius for elements not in the map
-export const DEFAULT_ELEMENT_RADIUS = 0.75;
+/**
+ * Van der Waals radii for chemical elements (in Angstroms)
+ * Used for space-filling visualization to represent atomic volume
+ * Source: Bondi (1964), Mantina et al. (2009)
+ */
+export const VDW_RADII: Record<string, number> = {
+  H: 1.20,
+  C: 1.70,
+  N: 1.55,
+  O: 1.52,
+  F: 1.47,
+  P: 1.80,
+  S: 1.80,
+  Cl: 1.75,
+  Si: 2.10,
+  Al: 1.84,
+  Na: 2.27,
+  Mg: 1.73,
+  K: 2.75,
+  Ca: 2.31,
+  Fe: 2.04,
+  Mn: 2.05,
+  Ti: 2.11,
+  Zn: 2.01,
+};
+
+// Default radii for elements not in the map
+export const DEFAULT_COVALENT_RADIUS = 0.75;
+export const DEFAULT_VDW_RADIUS = 1.50;
+
+/**
+ * Get covalent radius for a chemical element (for ball-and-stick mode)
+ */
+export function getCovalentRadius(element: string): number {
+  return COVALENT_RADII[element] || DEFAULT_COVALENT_RADIUS;
+}
+
+/**
+ * Get van der Waals radius for a chemical element (for space-filling mode)
+ */
+export function getVdwRadius(element: string): number {
+  return VDW_RADII[element] || DEFAULT_VDW_RADIUS;
+}
 
 /**
  * Get display radius for a chemical element
+ * @deprecated Use getCovalentRadius or getVdwRadius instead
  */
 export function getElementRadius(element: string): number {
-  return ELEMENT_RADII[element] || DEFAULT_ELEMENT_RADIUS;
+  return getCovalentRadius(element);
 }
