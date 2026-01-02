@@ -15,6 +15,7 @@ function App() {
   }>>([]);
   const [bonds, setBonds] = useState<Array<{ from: number; to: number }>>([]);
   const [error, setError] = useState<string | null>(null);
+  const [infoCollapsed, setInfoCollapsed] = useState(false);
 
   const handleFileLoaded = (content: string, name: string) => {
     try {
@@ -57,25 +58,42 @@ function App() {
           <div className="viewer-container">
             <MoleculeViewer atoms={atoms} bonds={bonds} />
             
-            <div className="model-info-overlay">
-              <ModelInfo 
-                fileName={fileName}
-                atoms={atoms}
-                bonds={bonds}
-              />
-              
+            {infoCollapsed ? (
               <button
-                className="new-file-button"
-                onClick={() => {
-                  setFileName('');
-                  setAtoms([]);
-                  setBonds([]);
-                  setError(null);
-                }}
+                className="info-toggle collapsed"
+                onClick={() => setInfoCollapsed(false)}
+                title="Show info panel"
               >
-                Load New File
+                <span className="toggle-icon">i</span>
               </button>
-            </div>
+            ) : (
+              <div className="model-info-overlay">
+                <button
+                  className="info-collapse-btn"
+                  onClick={() => setInfoCollapsed(true)}
+                  title="Hide info panel"
+                >
+                  -
+                </button>
+                <ModelInfo
+                  fileName={fileName}
+                  atoms={atoms}
+                  bonds={bonds}
+                />
+
+                <button
+                  className="new-file-button"
+                  onClick={() => {
+                    setFileName('');
+                    setAtoms([]);
+                    setBonds([]);
+                    setError(null);
+                  }}
+                >
+                  Load New File
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -144,37 +162,95 @@ function App() {
           position: absolute;
           bottom: 20px;
           right: 20px;
-          width: 220px;
-          max-height: 280px;
-          background-color: rgba(10, 20, 30, 0.7);
+          width: 280px;
+          max-height: 380px;
+          background-color: rgba(10, 20, 30, 0.85);
           backdrop-filter: blur(5px);
           border: 1px solid rgba(7, 219, 250, 0.3);
           border-radius: 4px;
           color: #7AFFB2;
           overflow: auto;
           padding: 0;
+          padding-top: 24px;
           box-shadow: 0 0 15px rgba(7, 219, 250, 0.2),
                      inset 0 0 5px rgba(7, 219, 250, 0.05);
           z-index: 10;
         }
-        
+
+        .info-collapse-btn {
+          position: absolute;
+          top: 4px;
+          right: 4px;
+          width: 20px;
+          height: 20px;
+          padding: 0;
+          background-color: rgba(7, 219, 250, 0.2);
+          color: #07DBFA;
+          border: 1px solid rgba(7, 219, 250, 0.4);
+          border-radius: 3px;
+          font-size: 16px;
+          font-weight: bold;
+          line-height: 1;
+          cursor: pointer;
+          transition: all 0.2s;
+          font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+          z-index: 11;
+        }
+
+        .info-collapse-btn:hover {
+          background-color: rgba(7, 219, 250, 0.4);
+          box-shadow: 0 0 8px rgba(7, 219, 250, 0.4);
+        }
+
+        .info-toggle.collapsed {
+          position: absolute;
+          bottom: 20px;
+          right: 20px;
+          width: 36px;
+          height: 36px;
+          padding: 0;
+          background-color: rgba(10, 20, 30, 0.85);
+          backdrop-filter: blur(5px);
+          color: #07DBFA;
+          border: 1px solid rgba(7, 219, 250, 0.3);
+          border-radius: 4px;
+          font-size: 18px;
+          font-weight: bold;
+          font-style: italic;
+          cursor: pointer;
+          transition: all 0.2s;
+          z-index: 10;
+          box-shadow: 0 0 15px rgba(7, 219, 250, 0.2);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .info-toggle.collapsed:hover {
+          background-color: rgba(7, 219, 250, 0.2);
+          box-shadow: 0 0 20px rgba(7, 219, 250, 0.4);
+        }
+
+        .info-toggle .toggle-icon {
+          line-height: 1;
+        }
+
         .new-file-button {
           background-color: rgba(7, 219, 250, 0.2);
           color: #07DBFA;
           border: 1px solid rgba(7, 219, 250, 0.4);
-          padding: 2px 4px;
-          border-radius: 2px;
-          font-size: 0.45rem;
+          padding: 6px 10px;
+          border-radius: 3px;
+          font-size: 11px;
           font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
           cursor: pointer;
           transition: all 0.2s;
-          margin: 2px 6px 4px;
-          width: calc(100% - 16px);
+          margin: 4px 10px 8px;
+          width: calc(100% - 20px);
           text-transform: uppercase;
           letter-spacing: 1px;
-          height: 16px;
         }
-        
+
         .new-file-button:hover {
           background-color: rgba(7, 219, 250, 0.3);
           box-shadow: 0 0 10px rgba(7, 219, 250, 0.4);
