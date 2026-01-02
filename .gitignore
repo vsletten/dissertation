@@ -6,3 +6,6 @@ model/*.dat
 model/*.xyz
 model/*.out
 model/.vscode/
+.DS_Store
+model/.DS_Store
+
