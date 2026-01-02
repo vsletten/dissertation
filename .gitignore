@@ -1,6 +1,5 @@
 mckaol
 *.o
-CLAUDE.md
 start.*
 model/*.msi
 model/*.dat
