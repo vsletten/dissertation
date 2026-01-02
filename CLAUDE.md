@@ -34,9 +34,11 @@ npm run preview     # Preview production build
 The Monte Carlo simulation models chemical reactions at the atomic level for alumina and silica sites on mineral surfaces using a lattice-based approach.
 
 ### Core Data Flow
-1. **Initialization** (mckaol.cpp:20-98): Load simulation parameters → create unit cell → build lattice → populate solid structure → terminate surface
-2. **Simulation Loop** (mckaol.cpp:101-139): For each step, generate event list → select and execute random event → update time → write output
-3. **Output** (mckaol.cpp:140-143): Write final state files (MSI, XYZ, surface analysis)
+1. **Initialization** (mckaol.cpp:13-58): Load simulation parameters → create unit cell → build lattice → populate solid structure → terminate surface
+2. **Simulation Loop** (mckaol.cpp:61-102): For each step, generate event list → select and execute random event → update time → write output
+3. **Output** (mckaol.cpp:103-115): Write final state files (MSI, XYZ, surface analysis)
+
+For detailed model documentation, see `model/CLAUDE.md`.
 
 ### Key Components
 
@@ -75,10 +77,6 @@ See common.hpp:1-160 for complete scheme. Key categories:
 - **results.dat**: Time series of site type populations
 - **surfSi.out, surfAl.out**: Surface composition analysis for Si and Al sites
 - **stepN.msi**: Optional intermediate snapshots at intervals
-
-### Known Issues
-- mckaol.cpp contains merge conflict markers (lines 5-70) that need resolution
-- Code has both old and new initialization paths visible in conflict
 
 ## Viewer Architecture
 
