@@ -1,4 +1,4 @@
-# Kinetic Monte Carlo Simulation for Kaolin Mineral Surface Reactions
+# Kinetic Monte Carlo Simulation for Kaolinite Mineral Surface Reactions
 
 A stochastic simulation tool for modeling surface reactions and transformations on kaolin minerals at the atomic level.
 
