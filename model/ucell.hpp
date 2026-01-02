@@ -32,7 +32,7 @@ private:
 
 public:
   static UnitCell *CreateUnitCell(void);
-  static void DisposeUnitCell(UnitCell *uc);
+  static void DisposeUnitCell(UnitCell *&uc);
 
   CellDimensions *GetCellDimensions(void);
   int GetNumPositions(void);

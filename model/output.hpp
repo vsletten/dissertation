@@ -8,7 +8,7 @@
 class output {
 public:
   static void initDatafile(void);
-  static void writeData(Lattice *lattice, int n, float t);
+  static void writeData(const char *filename, Lattice *lattice, int n, float t);
   static void writeMSI(Lattice *lattice, const char *name, int bonds);
   static void writeSurf(Lattice *lattice);
   static void writeXYZ(Lattice *lattice);

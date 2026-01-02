@@ -3,6 +3,7 @@
 #ifndef evtlist_h
 #define evtlist_h
 
+#include "envrn.hpp"
 #include "lattice.hpp"
 #include "rxnlist.hpp"
 
@@ -21,9 +22,9 @@ class EventList : public Event {
 public:
   EventList *next;
 
-  static EventList *CreateEventList(Lattice *lattice, Reaction *rxList, int nSites);
+  static EventList *CreateEventList(Lattice *lattice, Environment *environment, Reaction *rxList);
 
-  static void DisposeEventList(EventList *eventList);
+  static void DisposeEventList(EventList *&eventList);
 };
 
 #endif

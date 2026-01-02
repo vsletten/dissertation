@@ -53,7 +53,7 @@ private:
 
 public:
   static Lattice *CreateLattice(UnitCell &uc);
-  static void DisposeLoattice();
+  static void DisposeLattice(Lattice *&lattice);
 
   LatticeSite *sites = nullptr;
 
@@ -65,7 +65,7 @@ public:
     }
   }
   
-  void RemoveUnattachedClusters();
+  bool RemoveUnattachedClusters();
   UnitCell *GetUnitCell(void) { return this->unitCell; }  
   int CountNbrs(int s);
   void FindPairs();

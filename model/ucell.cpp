@@ -1,14 +1,16 @@
 /* ucell.c: functions for unit cell */
 #include <stdlib.h>
+#include <iostream>
 #include "ucell.hpp"
 #include "futil.hpp"
 
 
-void UnitCell::DisposeUnitCell(UnitCell *unitCell)
+void UnitCell::DisposeUnitCell(UnitCell *&unitCell)
 {
   if (unitCell != nullptr) {
     delete[] unitCell->sites;
     delete unitCell;
+    unitCell = nullptr;
   }
 }
 
@@ -56,6 +58,10 @@ UnitCell *UnitCell::CreateUnitCell(void)
   std::ifstream f;
 
   f = Futil::OpenInputFile("data.cell");
+  if (!f.is_open()) {
+    std::cerr << "Error: Could not open data.cell" << std::endl;
+    return nullptr;
+  }
   f >> unitCell->A >> unitCell->B >> unitCell->C;
   Futil::EatComment(f, '#');
   f >> unitCell->Alpha >> unitCell->Beta >> unitCell->Gamma;

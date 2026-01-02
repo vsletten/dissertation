@@ -33,8 +33,13 @@ Simulation *Simulation::CreateSimulation(void)
 }
 
 
-void Simulation::DisposeSimulation(Simulation *s)
+void Simulation::DisposeSimulation(Simulation *&s)  
 {
+  if (s == nullptr) {
+    return;
+  }
+  
   delete s;
+  s = nullptr;
 }
 
