@@ -1,0 +1,10 @@
+[package]
+name = "kmc-io"
+# [IDIOM] `version.workspace = true` pulls the field from the root
+# [workspace.package] table — single source of truth for shared metadata.
+version.workspace = true
+edition.workspace = true
+description = "Readers and writers for the legacy KMC text formats (data.sim/.cell/.lattice/.rxn, Cerius2 MSI)"
+
+[dependencies]
+# std-only at M0. kaolinite is added at M1 when domain types appear.

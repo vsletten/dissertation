@@ -1,0 +1,12 @@
+[package]
+name = "mckaol-cli"
+version.workspace = true
+edition.workspace = true
+description = "The mckaol binary: wires readers, model build, and writers together (port of mckaol.cpp)"
+
+# [IDIOM] A binary crate: src/main.rs instead of src/lib.rs. Same language,
+# different crate type — the analogue of "the translation unit with main()",
+# except the split is structural: everything reusable lives in the library
+# crates and this crate is deliberately thin glue.
+[dependencies]
+kmc-io = { path = "../kmc-io" }
