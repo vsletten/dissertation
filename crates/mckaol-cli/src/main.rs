@@ -7,11 +7,17 @@
 //! don't have to `cd` into a fixture tree to use it. With no argument it
 //! behaves exactly like the C++: everything relative to the CWD.
 //!
-//! At M0 the wiring stops after `data.sim`: read it, print it. Each later
-//! milestone extends `main` one stage further down the C++ `main()`.
+//! Wired through M3: read all four inputs, run the deterministic structural
+//! build in the C++'s exact order, and write `start.msi` — the file the
+//! golden gate diffs bitwise. The MC loop itself (event list, `DoEvent`,
+//! the step outputs) is M4–M6 territory and intentionally absent.
 
+use std::fs::File;
+use std::io::BufWriter;
 use std::path::PathBuf;
 use std::process::ExitCode;
+
+use kaolinite::{create_lattice, find_pairs, populate_solid, terminate_lattice, terminate_surface};
 
 /// Entry point.
 ///
@@ -31,14 +37,16 @@ fn main() -> ExitCode {
     }
 }
 
-/// The fallible body of the program.
+/// The fallible body of the program — `mckaol.cpp`'s `main`, stage by
+/// stage, through the structural build.
 ///
 /// \[IDIOM\] `Box<dyn Error>` — "some error, I only need to display it".
 /// Library crates define precise error enums (see `kmc_io::ReadError`);
 /// binaries that just report-and-exit can erase the type behind a trait
 /// object. `dyn` is Rust's *opt-in* dynamic dispatch: unlike C++ virtual
 /// functions, dynamism is visible in the type and paid for only where
-/// declared.
+/// declared. The `?`s below convert `ReadError` and `io::Error` into the
+/// box automatically (any `Error` type coerces).
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     // [IDIOM] Iterator chains over index arithmetic. `args().nth(1)` is
     // "second element if present" — no argc bounds check to get wrong, no
@@ -49,30 +57,62 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
 
+    // Input stage — same file order as mckaol.cpp lines 23–44.
     let sim = kmc_io::read_sim(&run_dir.join("data.sim"))?;
+    let rxns = kmc_io::read_rxn(&run_dir.join("data.rxn"))?;
     let cell = kmc_io::read_cell(&run_dir.join("data.cell"))?;
     let lattice_params = kmc_io::read_lattice(&run_dir.join("data.lattice"))?;
 
-    println!("data.sim ({}):", run_dir.join("data.sim").display());
-    println!("  nsteps    = {}", sim.nsteps);
-    println!("  wsteps    = {}", sim.wsteps);
-    println!("  msteps    = {}", sim.msteps);
-    println!("  drawbonds = {}", sim.drawbonds);
     println!(
-        "  ranseed   = {}   (always 0: the legacy reader swallows the seed — spec B2)",
-        sim.ranseed
+        "data.sim: nsteps={} wsteps={} msteps={} drawbonds={} ranseed={} (seed swallowed, spec B2)",
+        sim.nsteps, sim.wsteps, sim.msteps, sim.drawbonds, sim.ranseed
     );
-
-    println!("data.cell: {} positions, a/b/c = {} {} {}", cell.npos(), cell.a, cell.b, cell.c);
-
-    let structure = kaolinite::create_lattice(&cell, lattice_params);
     println!(
-        "lattice: {} x {} cells, surface plane {} -> {} sites",
+        "data.rxn: T={} K, dmu_si={}, dmu_al={}, {} reactions (diffusion tail unported, spec B6)",
+        rxns.temperature,
+        rxns.dm_si,
+        rxns.dm_al,
+        rxns.reactions.len()
+    );
+    println!("data.cell: {} positions", cell.npos());
+
+    // Structural build — mckaol.cpp lines 45–49, order is law.
+    let mut structure = create_lattice(&cell, lattice_params);
+    find_pairs(&mut structure);
+    let report = populate_solid(&mut structure, rxns.dm_si, rxns.dm_al);
+    // The C++ prints this from inside PopulateSolid; same words, same data.
+    println!(
+        "Detected {} conditions -- filling {} unit cells",
+        report.condition, report.filled_cells
+    );
+    terminate_surface(&mut structure);
+    terminate_lattice(&mut structure);
+
+    let occupied = structure
+        .graph
+        .sites
+        .iter()
+        .filter(|s| s.state.is_occupied() && !s.state.is_edge())
+        .count();
+    println!(
+        "lattice: {} x {} cells, surface plane {} -> {} sites, {} occupied",
         lattice_params.a_cells,
         lattice_params.b_cells,
         lattice_params.surface_plane,
-        structure.graph.len()
+        structure.graph.len(),
+        occupied
     );
+
+    // Initial-state snapshot — mckaol.cpp line 58. This is the M3 artifact.
+    let msi_path = run_dir.join("start.msi");
+    // [IDIOM] BufWriter: a raw File is unbuffered — every write! would be
+    // a syscall; wrapping it buffers the way ofstream does internally.
+    // Classic reviewer catch in agent-written code: unbuffered writers
+    // inside a loop.
+    let mut out = BufWriter::new(File::create(&msi_path)?);
+    kmc_io::write_msi(&mut out, &structure, &cell, "start", sim.drawbonds)?;
+    println!("wrote {}", msi_path.display());
+    println!("(MC dynamics not yet ported — M0-M3 stop at the initial state)");
 
     Ok(())
 }

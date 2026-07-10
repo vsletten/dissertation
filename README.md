@@ -49,7 +49,7 @@ Preserved warts are marked `WART (spec BN)` at the exact line they live on.
 | M0 | workspace, `data.sim` reader (bug-compatible, spec B2), CLI skeleton | done |
 | M1 | `data.cell` → `UnitCell` | done |
 | M2 | lattice tiling + neighbor resolution (periodic/open BCs) | done |
-| M3 | structural build (`find_pairs`, `populate_solid`, `terminate_*`), `data.rxn` reader, MSI writer, **bitwise golden gate** | pending |
+| M3 | structural build (`find_pairs`, `populate_solid`, `terminate_*`), `data.rxn` reader, MSI writer, **bitwise golden gate** | **done — gate green** |
 | M4+ | engine `Model` trait seam, `ran2`, reactions, dynamics parity | next |
 
 ## The M3 golden check
@@ -59,11 +59,15 @@ and RNG-free, so the port must reproduce the C++ **exactly** — not
 statistically. The gate: build the initial lattice from the golden inputs and
 write `start.msi`; the file must be **byte-identical** to the golden
 `start.msi` captured from the C++ binary (g++ 13.3, `-O3 -ffast-math`).
+**Status: green** — SHA-256 `68bc498e…` on both sides (1,000 atoms, 1,426
+bonds, every coordinate digit). Note the golden `start.xyz` is NOT an
+initial-state artifact — the C++ writes it at shutdown under a misleading
+name; `start.msi` is the initial state's only rendering.
 
 Run it:
 
 ```bash
-cargo test -p mckaol-cli --test golden_m3   # the gate itself
+cargo test -p kmc-io --test golden_m3       # the gate itself
 cargo test                                  # everything
 cargo run -p mckaol-cli -- data/golden/inputs   # writes start.msi there; diff it yourself:
 diff data/golden/inputs/start.msi data/golden/outputs/start.msi

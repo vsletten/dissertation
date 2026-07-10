@@ -103,7 +103,11 @@ impl<S> SiteGraph<S> {
     /// whether the chain still reads as one sentence. This one does; five
     /// combinators deep, it wouldn't.
     pub fn count_nbrs(&self, site: SiteId) -> i32 {
-        self.sites[site].nbr.iter().take_while(|n| n.is_some()).count() as i32
+        self.sites[site]
+            .nbr
+            .iter()
+            .take_while(|n| n.is_some())
+            .count() as i32
     }
 }
 

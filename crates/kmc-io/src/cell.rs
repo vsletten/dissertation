@@ -75,10 +75,25 @@ fn parse_cell(s: &mut Scanner) -> Result<UnitCell, ReadError> {
             slot.b = s.next_i32("invalid neighbor offset b")?;
             slot.c = s.next_i32("invalid neighbor offset c")?;
         }
-        sites.push(CellSite { x, y, z, n, state, nbr });
+        sites.push(CellSite {
+            x,
+            y,
+            z,
+            n,
+            state,
+            nbr,
+        });
     }
 
-    Ok(UnitCell { a, b, c, alpha, beta, gamma, sites })
+    Ok(UnitCell {
+        a,
+        b,
+        c,
+        alpha,
+        beta,
+        gamma,
+        sites,
+    })
 }
 
 #[cfg(test)]
@@ -86,7 +101,10 @@ mod tests {
     use super::*;
 
     fn golden() -> UnitCell {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/golden/inputs/data.cell");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../data/golden/inputs/data.cell"
+        );
         read_cell(Path::new(path)).unwrap()
     }
 
@@ -110,10 +128,34 @@ mod tests {
         assert_eq!(s0.n, 0);
         assert_eq!(s0.state, State(100));
         assert_eq!((s0.x, s0.y, s0.z), (1.76027, 4.49982, 2.84548));
-        assert_eq!(s0.nbr[0], NeighborTemplate { n: 8, a: 0, b: 0, c: 0 });
-        assert_eq!(s0.nbr[5], NeighborTemplate { n: 25, a: 0, b: 0, c: 0 });
+        assert_eq!(
+            s0.nbr[0],
+            NeighborTemplate {
+                n: 8,
+                a: 0,
+                b: 0,
+                c: 0
+            }
+        );
+        assert_eq!(
+            s0.nbr[5],
+            NeighborTemplate {
+                n: 25,
+                a: 0,
+                b: 0,
+                c: 0
+            }
+        );
         // Position 2: neighbor with a nonzero cell offset (crosses cells).
-        assert_eq!(uc.sites[2].nbr[1], NeighborTemplate { n: 19, a: 1, b: 1, c: 0 });
+        assert_eq!(
+            uc.sites[2].nbr[1],
+            NeighborTemplate {
+                n: 19,
+                a: 1,
+                b: 1,
+                c: 0
+            }
+        );
         // Position 4: first Si site.
         assert_eq!(uc.sites[4].state, State(200));
         assert_eq!(uc.sites[4].x, 0.308295);
@@ -123,7 +165,12 @@ mod tests {
     fn class_mix_matches_the_kaolinite_stoichiometry() {
         // 26 positions: 4 Al + 4 Si + 18 oxygens of three flavors.
         let uc = golden();
-        let count = |class: i32| uc.sites.iter().filter(|s| s.state.class_code() == class).count();
+        let count = |class: i32| {
+            uc.sites
+                .iter()
+                .filter(|s| s.state.class_code() == class)
+                .count()
+        };
         // [IDIOM] Iterator chains (`iter().filter().count()`) — the Rust
         // for-loop-with-accumulator. Zero-cost: compiles to the same loop,
         // but the *intent* (count matching) is the code, not a pattern the

@@ -153,11 +153,20 @@ mod tests {
     #[test]
     fn golden_fixture_file_matches_the_inline_copy() {
         // Belt and suspenders: the checked-in fixture parses identically.
-        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/golden/inputs/data.sim");
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../data/golden/inputs/data.sim"
+        );
         let p = read_sim(Path::new(root)).unwrap();
         assert_eq!(
             p,
-            SimParams { nsteps: 20000, wsteps: 1000, msteps: 1_000_000, drawbonds: 1, ranseed: 0 }
+            SimParams {
+                nsteps: 20000,
+                wsteps: 1000,
+                msteps: 1_000_000,
+                drawbonds: 1,
+                ranseed: 0
+            }
         );
     }
 
@@ -184,6 +193,9 @@ mod tests {
     fn truncated_file_reports_the_cpp_die_message() {
         let mut s = Scanner::from_text("10 # only nsteps\n", "data.sim");
         let err = parse_sim(&mut s).unwrap_err();
-        assert!(err.to_string().contains("invalid number of data write steps"));
+        assert!(
+            err.to_string()
+                .contains("invalid number of data write steps")
+        );
     }
 }

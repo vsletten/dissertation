@@ -25,7 +25,11 @@ pub fn read_lattice(path: &Path) -> Result<LatticeParams, ReadError> {
     let a_cells = s.next_i32("invalid number of a cells")?;
     let b_cells = s.next_i32("invalid number of b cells")?;
     let surface_plane = s.next_i32("invalid surface plane")?;
-    Ok(LatticeParams { a_cells, b_cells, surface_plane })
+    Ok(LatticeParams {
+        a_cells,
+        b_cells,
+        surface_plane,
+    })
 }
 
 #[cfg(test)]
@@ -34,8 +38,18 @@ mod tests {
 
     #[test]
     fn golden_lattice_is_20_by_3_plane_0() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/golden/inputs/data.lattice");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../data/golden/inputs/data.lattice"
+        );
         let p = read_lattice(Path::new(path)).unwrap();
-        assert_eq!(p, LatticeParams { a_cells: 20, b_cells: 3, surface_plane: 0 });
+        assert_eq!(
+            p,
+            LatticeParams {
+                a_cells: 20,
+                b_cells: 3,
+                surface_plane: 0
+            }
+        );
     }
 }
