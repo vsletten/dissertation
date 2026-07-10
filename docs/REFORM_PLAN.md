@@ -215,17 +215,80 @@ machinery.
 
 ---
 
+## R7. Author a non-flat `data.rxn`  (spec B4 — data authoring, not a bug fix)
+
+**The gap.** Every rate table in the shipped `data.rxn` is flat (identical
+(k, ΔE) across all environment buckets), so `CheckEnv`'s bucket selection
+never changes a rate. The environment machinery — the model's scientific
+point — is *unvalidated by construction*: no golden artifact can certify
+code the reference data never exercises.
+
+**The work.** Author a `data.rxn` with distinct per-bucket rates (physically
+motivated values need **Victor's domain read** — this is the M8 objective),
+plus a synthetic sharply-non-flat fixture for tests. Fixture runs become the
+validation target for R5 and the corrected `CheckEnv` path.
+
+**Expected physics effect.** None on legacy runs (data file, not code). It
+*enables* the neighbor-dependent kinetics the model was built to study.
+
+**Test strategy.** With a non-flat fixture: unit-test that `check_env`
+bucket selection changes selected rates; integration-test that two sites in
+different environments get different propensities. Until R5 lands, corrected
+mode still runs the legacy index formulas — R7 is what makes R5 observable.
+
+**Confidence.** High on mechanics; the *values* are Victor's. **Blocked on
+Victor for real parameters; unblocked for the synthetic fixture.**
+
+---
+
+## R8. `results.dat`: one appended time series  (spec B1)
+
+**The wart.** `output::initDatafile()` deletes `results.dat` at startup and
+nothing ever writes it. `writeData` truncates a fresh one-row file per
+snapshot (`step{i}.dat`, `end.dat`) — a 5M-step production run scatters the
+population series across thousands of one-row files. The committed
+`results.dat` in the legacy tree is a relic of an older version that
+appended. The M7 port reproduces all of it faithfully — the scatter *and*
+the startup delete — because the golden byte gate demands it
+(`tests/golden_m7.rs`).
+
+**The fix.** Corrected mode: open `results.dat` once, append one row per
+`wsteps` snapshot (restoring the documented, clearly original intent);
+keep `end.dat` or fold it into the series' final row. `--legacy` keeps the
+per-file scatter so the golden directory shape stays reproducible.
+
+**Expected physics effect.** None — output plumbing only. Big usability
+effect: the population time series becomes one plottable file instead of a
+directory-glob-and-concatenate exercise.
+
+**Test strategy.** Corrected mode: run N steps, assert `results.dat` has
+`N/wsteps + 1` rows and no `step*.dat` exist; row contents equal the legacy
+per-file rows for the same trajectory (same counting code — pinned by
+sharing `write_data`'s row serializer between both modes). Legacy mode: the
+M7 gate, unchanged.
+
+**Confidence.** High; the C++'s own README documents the appended series.
+Low risk; can land any time after the `RunMode` switch exists.
+
+---
+
 ## Sequencing for M7+
+
+(M7 landed the output writers bug-compatible and added the directory-shape
+gate `tests/golden_m7.rs`; still zero reforms implemented.)
 
 1. **R2 (seed)** first — it is the cheapest, most clearly-correct fix and it
    *creates the ensemble machinery* the statistical validations (R1, R6) need.
 2. **R1 (phantom)** next — biggest physics impact, unambiguous correction,
    isolated to one function.
 3. **R4 (40100)** — trivial data fix, restores one back-reaction.
-4. **R3 (dead ternaries)** and **R5 (Check100/200)** — *blocked on Victor's
-   domain read*; don't guess the intended maps. Pair with authoring the
-   non-flat `data.rxn` (spec B4), which R5 needs to even be observable.
-5. **R6 (f64)** last — the widest seam, and the formal handoff from bitwise to
+4. **R8 (results.dat)** — output plumbing, independent of physics; any time
+   after the `RunMode` switch exists.
+5. **R7 (non-flat `data.rxn`)** = the M8 objective — *needs Victor's
+   physics for real values*; the synthetic fixture can land first. **R3
+   (dead ternaries)** and **R5 (Check100/200)** remain *blocked on Victor's
+   domain read*; R7's fixture is what makes R5 observable at all.
+6. **R6 (f64)** last — the widest seam, and the formal handoff from bitwise to
    statistical validation.
 
 Throughout: `--legacy` stays green against `tests/parity_m6.rs`. The day that

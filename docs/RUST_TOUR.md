@@ -319,9 +319,9 @@ right, and where it lives:
 |---|---|---|
 | decimal→f32 parsing | `crates/kmc-io/src/scan.rs:154` | Rust `parse::<f32>()` and libstdc++ `num_get` are both correctly rounded — parsed constants match bit-for-bit |
 | fill-layer truncation | `crates/kaolinite/src/build.rs:251` | `int = cells × 0.7f` truncates an f32 product; 3×0.7f → 2 but 20×0.7f → exactly 14.0 → 14; any "cleaner" arithmetic shifts slab boundaries |
-| coordinate transform | `crates/kmc-io/src/msi.rs:78` | **the hard-won ulp**: the C++ *source* divides, but `-ffast-math` includes `-freciprocal-math`, so the golden *binary* multiplies by folded reciprocals; one atom ("OH20") rounds differently through the 6-digit window. The port follows the binary, not the source — with the receipt written at the site |
-| sum association | `crates/kmc-io/src/msi.rs:22` | fast-math *licenses* reassociation but g++ kept written order for these short chains; the gate certifies it |
-| no FMA | `crates/kmc-io/src/msi.rs:39` | golden binary is baseline SSE2; Rust never contracts implicitly — both round twice |
+| coordinate transform | `crates/kmc-io/src/view.rs:107` (shared by all three writers since M7) | **the hard-won ulp**: the C++ *source* divides, but `-ffast-math` includes `-freciprocal-math`, so the golden *binary* multiplies by folded reciprocals; one atom ("OH20") rounds differently through the 6-digit window. The port follows the binary, not the source — with the receipt written at the site |
+| sum association | `crates/kmc-io/src/msi.rs:29` | fast-math *licenses* reassociation but g++ kept written order for these short chains; the gate certifies it |
+| no FMA | `crates/kmc-io/src/msi.rs:42` | golden binary is baseline SSE2; Rust never contracts implicitly — both round twice |
 | float→text | `crates/kmc-io/src/fmt.rs:1` | `ostream << float` ≡ `printf("%g", (double)f)`; implemented per C17 7.21.6.1 from Rust's correctly-rounded primitives |
 | rate math f32/f64 dance | `crates/kmc-io/src/rxn.rs:63` | `f32` divide → f64 `exp` (same glibc libm) → narrow at assignment, per C++ promotion rules — matters at M6, pinned now |
 
@@ -337,7 +337,7 @@ analysis in mission-control `projects/kmc/02-model-spec.md` Part B:
 | Wart | Where preserved | Spec |
 |---|---|---|
 | doubled `drawbonds` read swallows the seed; `ranseed` always 0 | `crates/kmc-io/src/sim.rs:55` (+ pinning test `:140`) | B2 |
-| hard-coded render cell matrix ignores `data.cell` | `crates/kmc-io/src/msi.rs:51` | B5 |
+| hard-coded render cell matrix ignores `data.cell` | `crates/kmc-io/src/view.rs:73` (one named copy for the C++'s three) | B5 |
 | diffusion + BFS dead code — **not ported**; OOB read documented, not reproduced | `crates/kaolinite/src/reactions.rs:1` | B6, B7 |
 | flat rate tables make the environment machinery inert in-sample | `crates/kmc-io/src/rxn.rs` tests | B4 |
 | adsorption Δμ selected by `i < 18`, routing Al adsorption through dm_si | `crates/kmc-io/src/rxn.rs:91` | A5.4 |
@@ -437,3 +437,72 @@ parallel rebuild is a *reform-era* move (correct-by-default reorders freely,
 and draws the shared RNG), and only memo 04's sublattice decomposition
 parallelizes *that* — deliberately out of scope until the serial port is
 trusted.
+
+## 15. Output writers (M7): buffered IO, `Drop`, and the artifact contract
+
+M7 ports the remaining writers (`writeData`, `writeSurf`, `writeXYZ`, the
+movie-frame `writeMSI` calls) and gates the *whole directory* the binary
+leaves behind: `tests/golden_m7.rs` runs the real executable on the golden
+inputs and byte-compares every artifact class against the C++ capture.
+
+### 15.1 `BufWriter` and the `Drop`/flush trap
+A raw `File` is unbuffered — every `write!` a syscall — so writers wrap it in
+`BufWriter` (the C++ gets this silently from `ofstream`'s internal buffer).
+The trap: `BufWriter` flushes its buffer in `Drop`, and **`Drop` cannot
+return an error** — a disk-full on that final flush vanishes if the writer
+just falls off scope. The C++ has the identical hole (destructor flushes,
+nobody checks `badbit`) but nothing marks it; Rust at least *types* `flush()`
+as fallible so you can choose to hear the answer. The port's policy lives in
+one place, `mckaol-cli/src/main.rs::write_file`: create, stream the body,
+`flush()?` explicitly, so the eventual `Drop` is a no-op. **Reviewer's lens:**
+in agent-written IO, grep for `BufWriter` and demand a matching `.flush()?`
+or `.into_inner()?` — there is no clippy lint for the silent-drop-flush, so
+review is the only net. (Same family as `std::mem::forget`-style surprises:
+anything whose correctness depends on a destructor deserves an explicit call
+at the success path.)
+
+### 15.2 The borrowed view struct (`kmc-io/src/view.rs`)
+The C++ writers take `Lattice*` — a pointer to everything, forever mutable.
+The port's writers take `LatticeView<'a>`: a small struct of `&'a` borrows
+(graph, tiling coords, dims, unit cell). Two things earn it a section. First,
+the *lifetime does real work*: a view can't outlive its sources and freezes
+them (shared borrows) for as long as it exists — "who mutates the lattice
+while I render it?" is unaskable. Second, it exists because of the M4
+handoff: `Kaolinite::from_structure` dismembers the `Structure` (graph → the
+engine, `pair`/`lostal` → the model), so by `end.msi` time there is no
+`Structure` left; the view regroups the surviving pieces without copying.
+**Reviewer's lens:** when a parameter list of borrowed things that always
+travel together passes ~4, a view struct is the honest fix. The dishonest
+fixes to spot in agent code: cloning the world into an owned bundle "to make
+lifetimes easy", or passing the original fat object so the signature hides
+what's read.
+
+### 15.3 Generic sinks, and two of them (`write_surf`)
+Every writer is `fn(..., w: &mut W) where W: Write` — the golden tests hand
+a `Vec<u8>`, the CLI a buffered `File`, and the body can't tell (that's the
+point; see §7). `writeSurf` is the interesting one: the C++ opens
+`surfSi.out` and `surfAl.out` *inside* the writer, which is why it is
+untestable without a filesystem. The port takes **two independent sink type
+parameters** (`WS`, `WA`) and routes each row with a
+`let sink: &mut dyn Write = if si_class { si } else { al }` — a rare
+justified `dyn`: the two arms have different concrete types, so the
+unification has to happen at the value level, and the coercion re-borrows
+rather than consumes (usable again next iteration). File names and creation
+moved to the caller, where they belong.
+
+### 15.4 The artifact contract: absence is behavior too
+`golden_m7.rs` asserts more than file contents. It pins the *count* of
+`step*.dat` files (20 — the B1 scatter, preserved by decree), the absence of
+`results.dat` (deleted at startup, never written — the C++'s `initDatafile`
+ghost), the absence of `end.xyz` (the end-state XYZ goes to the hard-coded
+name `start.xyz` — the legacy misnomer), and the absence of movie frames
+under the primary config (`msteps=1e6 > nsteps`). And because the primary
+golden run never fires the movie path at all, M7 captured a *supplementary*
+oracle (scratch C++ rebuild, `msteps=5000` — provenance in
+`data/golden/outputs/movie-msteps5000/README.md`) so the movie writer is
+gated by real reference bytes, not by "looks right". **Reviewer's lens:** a
+port gated only on the files it happens to produce can silently produce
+extras or drop siblings; assert the whole directory shape. And when a code
+path exists that the reference run never exercises, the choice is capture a
+new oracle or admit the path is unvalidated — the one non-option is testing
+it against itself (§14.3's lesson wearing its IO hat).

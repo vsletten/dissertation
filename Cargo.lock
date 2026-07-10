@@ -18,6 +18,7 @@ name = "kmc-io"
 version = "0.1.0"
 dependencies = [
  "kaolinite",
+ "kmc-engine",
 ]
 
 [[package]]

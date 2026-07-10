@@ -44,7 +44,8 @@ fn build_start_msi() -> Vec<u8> {
     terminate_lattice(&mut structure);
 
     let mut buf = Vec::new();
-    kmc_io::write_msi(&mut buf, &structure, &cell, "start", sim.drawbonds)
+    let view = kmc_io::LatticeView::of_structure(&structure, &cell);
+    kmc_io::write_msi(&mut buf, &view, "start", sim.drawbonds)
         .expect("writing to a Vec cannot fail");
     buf
 }

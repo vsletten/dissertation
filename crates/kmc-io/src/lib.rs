@@ -22,11 +22,15 @@
 //! | [`cell`] | `ucell.cpp` | `data.cell` → [`kaolinite::UnitCell`] |
 //! | [`lattice`] | `lattice.cpp` (top) | `data.lattice` → [`kaolinite::LatticeParams`] |
 //! | [`rxn`] | `rxnlist.cpp` | `data.rxn` → [`kaolinite::reactions::ReactionSet`] |
-//! | [`msi`] | `output.cpp` (`writeMSI`) | structure → Cerius2 MSI (bug-compatible) |
+//! | [`view`] | (none — the C++ passes `Lattice*`) | the writers' borrowed view + shared render geometry |
+//! | [`msi`] | `output.cpp` (`writeMSI`) | lattice → Cerius2 MSI (bug-compatible) |
+//! | [`xyz`] | `output.cpp` (`writeXYZ`) | lattice → legacy comma-XYZ dialect |
+//! | [`dat`] | `output.cpp` (`writeData`) | population row (one per snapshot file, spec B1) |
+//! | [`surf`] | `output.cpp` (`writeSurf`) | surface x,y projections (`surfSi.out`/`surfAl.out`) |
 //! | [`fmt`] | `ostream <<` defaults | C++ `%g`-equivalent float formatting |
 //! | [`error`] | `myerr.cpp` (`Myerr::die`) | error type all readers return |
 //!
-//! (Later milestones add the remaining writers — xyz/dat/surf — and PGIF.)
+//! (A later milestone adds PGIF.)
 
 // [IDIOM] `#![warn(missing_docs)]` — a crate-wide lint gate. The compiler
 // itself becomes the documentation-coverage reviewer: any public item
@@ -37,6 +41,7 @@
 #![warn(missing_docs)]
 
 pub mod cell;
+pub mod dat;
 pub mod error;
 pub mod fmt;
 pub mod lattice;
@@ -44,6 +49,9 @@ pub mod msi;
 pub mod rxn;
 pub mod scan;
 pub mod sim;
+pub mod surf;
+pub mod view;
+pub mod xyz;
 
 // [IDIOM] `pub use` re-exports. C++ headers leak every name they include;
 // Rust modules hide everything by default and you *choose* the public face.
@@ -51,8 +59,12 @@ pub mod sim;
 // `kmc_io::SimParams` without knowing the module layout — the module tree is
 // an implementation detail, the re-exports are the API.
 pub use cell::read_cell;
+pub use dat::write_data;
 pub use error::ReadError;
 pub use lattice::read_lattice;
 pub use msi::write_msi;
 pub use rxn::read_rxn;
 pub use sim::{SimParams, read_sim};
+pub use surf::write_surf;
+pub use view::LatticeView;
+pub use xyz::write_xyz;

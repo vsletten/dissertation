@@ -53,7 +53,23 @@ Preserved warts are marked `WART (spec BN)` at the exact line they live on.
 | M4 | engine `Model` trait seam + bit-faithful `ran2` behind an `Rng` trait | done |
 | M5 | kaolinite dynamics: `is_active`/`check_env`, the 16 mechanisms, `impl Model` | done |
 | M6 | event loop + **dynamics parity gate** (20,000 steps bitwise vs the C++) | **done — gate green** |
-| M7+ | output writers (`.dat`/`.surf`/movie), then the reforms in `docs/REFORM_PLAN.md` | next |
+| M7 | output writers (`.dat`/`.surf`/XYZ/movie frames) + **full-artifact golden gate** | **done — gate green** |
+| M8+ | authored non-flat `data.rxn` (spec B4, needs Victor's physics), then the reforms in `docs/REFORM_PLAN.md` | next |
+
+## The M7 output-artifact check
+
+The port now writes **every** artifact the C++ writes, bug-compatible:
+the one-row `step{i}.dat` population snapshots (WART spec B1 — one file per
+row, scattered, faithfully), `end.dat`, `surfSi.out`/`surfAl.out`, the
+end-state XYZ under its legacy misnomer `start.xyz` (there is no `end.xyz`),
+`end.msi`, and `step{i}.msi` movie frames. The gate
+(`cargo test -p mckaol-cli --test golden_m7`) runs the real binary on the
+golden inputs and byte-compares the whole output directory — contents,
+counts, and required *absences* (`results.dat` is deleted, never written).
+Movie frames are gated against a supplementary C++ capture
+(`data/golden/outputs/movie-msteps5000/`, provenance in its README) because
+the primary golden config never fires that path. **Status: green** — every
+artifact class byte-identical.
 
 ## The M6 dynamics parity check
 
@@ -82,10 +98,15 @@ name; `start.msi` is the initial state's only rendering.
 Run it:
 
 ```bash
-cargo test -p kmc-io --test golden_m3       # the gate itself
-cargo test                                  # everything
-cargo run -p mckaol-cli -- data/golden/inputs   # writes start.msi there; diff it yourself:
-diff data/golden/inputs/start.msi data/golden/outputs/start.msi
+cargo test -p kmc-io --test golden_m3       # the M3 gate
+cargo test -p mckaol-cli --test golden_m7   # the M7 full-artifact gate
+cargo test                                  # everything (incl. the M6 parity gate)
+
+# or run the binary yourself — in a scratch copy, since a full run now
+# writes ~27 output files next to the inputs:
+cp -r data/golden/inputs /tmp/kmc-run
+cargo run -p mckaol-cli -- /tmp/kmc-run
+diff /tmp/kmc-run/end.msi data/golden/outputs/end.msi
 ```
 
 Numeric-care notes (why bitwise equality is even possible, and where it was
