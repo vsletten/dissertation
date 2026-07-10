@@ -51,6 +51,19 @@ pub struct ProposedEvent {
     pub rate: f32,
 }
 
+/// The result of a successful [`step`]: the waiting time plus which event
+/// fired. The C++ `DoEvent` returns only `dt` and swallows the choice; we
+/// surface the chosen event too, because it costs nothing and both the CLI
+/// (logging) and the parity harness (comparing the trajectory step by step)
+/// want it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Advance {
+    /// The exponential waiting time drawn for this step (C++ `dt`).
+    pub dt: f32,
+    /// The event that was selected and applied.
+    pub event: ProposedEvent,
+}
+
 /// Why a step could not advance — the two legacy stop conditions plus a
 /// model-defined error, as a value instead of the C++'s scattered
 /// `std::cerr` + `break`/`return -1`.
@@ -163,7 +176,7 @@ pub fn step<M, R>(
     model: &mut M,
     rng: &mut R,
     scratch: &mut Vec<ProposedEvent>,
-) -> Result<f32, StepStop<M::Error>>
+) -> Result<Advance, StepStop<M::Error>>
 where
     M: Model,
     R: Rng,
@@ -208,7 +221,7 @@ where
 
     let ev = scratch[chosen];
     model.apply(graph, &ev, rng).map_err(StepStop::Model)?;
-    Ok(dt)
+    Ok(Advance { dt, event: ev })
 }
 
 #[cfg(test)]
@@ -303,8 +316,12 @@ mod tests {
         };
         let mut rng = Ran2::legacy();
         let mut scratch = Vec::new();
-        let dt = step(&mut g, &mut TwoFixed, &mut rng, &mut scratch).unwrap();
-        assert!(dt > 0.0, "dt should be a positive waiting time, got {dt}");
+        let adv = step(&mut g, &mut TwoFixed, &mut rng, &mut scratch).unwrap();
+        assert!(
+            adv.dt > 0.0,
+            "dt should be a positive waiting time, got {}",
+            adv.dt
+        );
         // ratesum is 4.0; both events present.
         assert_eq!(scratch.len(), 2);
     }

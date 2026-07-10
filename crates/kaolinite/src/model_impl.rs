@@ -1,5 +1,5 @@
 //! `impl Model for Kaolinite` — the kaolinite chemistry bolted onto the
-//! engine's [`Model`](kmc_engine::Model) seam. This is where the C++'s
+//! engine's [`Model`] seam. This is where the C++'s
 //! `evtlist.cpp` (event enumeration), `envrn.cpp` (allow/bucket), and
 //! `actions.cpp` (mutation) meet, behind the one trait the engine speaks.
 //!

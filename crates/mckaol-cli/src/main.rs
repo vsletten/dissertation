@@ -7,17 +7,23 @@
 //! don't have to `cd` into a fixture tree to use it. With no argument it
 //! behaves exactly like the C++: everything relative to the CWD.
 //!
-//! Wired through M3: read all four inputs, run the deterministic structural
-//! build in the C++'s exact order, and write `start.msi` — the file the
-//! golden gate diffs bitwise. The MC loop itself (event list, `DoEvent`,
-//! the step outputs) is M4–M6 territory and intentionally absent.
+//! Wired through M6: read all four inputs, run the deterministic structural
+//! build in the C++'s exact order, write `start.msi` (the bitwise golden
+//! gate), then run the Monte Carlo loop — the generic `kmc_engine::step`
+//! driving the `Kaolinite` model under the legacy `ran2` seed (spec B2). The
+//! output writers beyond `start.msi` (population `.dat`, movie frames,
+//! `surf`) are M7 territory; here the loop runs and reports final populations.
 
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use kaolinite::{create_lattice, find_pairs, populate_solid, terminate_lattice, terminate_surface};
+use kaolinite::{
+    Kaolinite, State, create_lattice, find_pairs, populate_solid, terminate_lattice,
+    terminate_surface,
+};
+use kmc_engine::{Ran2, SiteGraph, StepStop, step};
 
 /// Entry point.
 ///
@@ -112,7 +118,62 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut out = BufWriter::new(File::create(&msi_path)?);
     kmc_io::write_msi(&mut out, &structure, &cell, "start", sim.drawbonds)?;
     println!("wrote {}", msi_path.display());
-    println!("(MC dynamics not yet ported — M0-M3 stop at the initial state)");
+
+    // Dynamics — mckaol.cpp's `for (i=0; i<nsteps; i++)` loop, generic.
+    // Hand the built structure to the model, seed the legacy RNG, and step.
+    let (mut graph, mut model) = Kaolinite::from_structure(structure, rxns);
+    // [IDIOM] The legacy fixed seed (spec B2). A future `--legacy` flag will
+    // toggle this against a correctly-seeded modern RNG (see docs/REFORM_PLAN);
+    // today the port reproduces the 2001 behavior by default so parity holds.
+    let mut rng = Ran2::legacy();
+    let mut scratch = Vec::new();
+    let mut time: f32 = 0.0;
+
+    let mut done = 0i32;
+    for i in 0..sim.nsteps {
+        match step(&mut graph, &mut model, &mut rng, &mut scratch) {
+            Ok(adv) => {
+                time += adv.dt;
+                done = i + 1;
+            }
+            Err(StepStop::NoEvents) => {
+                eprintln!("no events possible; stopping after {i} steps");
+                break;
+            }
+            Err(StepStop::ZeroRate) => {
+                eprintln!("total rate is zero; stopping after {i} steps");
+                break;
+            }
+            Err(StepStop::Model(e)) => {
+                eprintln!("reaction failed at step {i}: {e}");
+                break;
+            }
+        }
+    }
+
+    let (si_total, al_total) = cation_totals(&graph);
+    println!(
+        "ran {done} steps; simulated time {time:.6}; final populations: Si={si_total} Al={al_total}"
+    );
+    println!("(output writers .dat/.surf/movie frames land at M7)");
 
     Ok(())
+}
+
+/// Count occupied Si and Al cation sites — a cheap end-of-run summary until
+/// the full `writeData` population series lands (M7).
+fn cation_totals(graph: &SiteGraph<State>) -> (usize, usize) {
+    let mut si = 0;
+    let mut al = 0;
+    for s in &graph.sites {
+        if s.state.is_edge() || !s.state.is_occupied() {
+            continue;
+        }
+        match s.state.class_code() {
+            1 => al += 1,
+            2 => si += 1,
+            _ => {}
+        }
+    }
+    (si, al)
 }

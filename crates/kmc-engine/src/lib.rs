@@ -46,5 +46,5 @@ pub mod model;
 pub mod rng;
 
 pub use graph::{Site, SiteGraph, SiteId};
-pub use model::{Model, ProposedEvent, StepStop, step};
+pub use model::{Advance, Model, ProposedEvent, StepStop, step};
 pub use rng::{Ran2, Rng};

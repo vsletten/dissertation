@@ -53,18 +53,45 @@ pub fn is_active(graph: &SiteGraph<State>, site: SiteId, rxn: u16) -> bool {
     // C++ `rxn % 2 == 0` (even index = forward hydrolysis); `is_multiple_of`
     // is the clippy-preferred spelling of the same test.
     if rxn < n_hyd && rxn.is_multiple_of(2) {
-        // Forward hydrolysis: the surface-reachability double loop. The C++
-        // outer loop stops at the first `-1` neighbor (no `i < 6` bound, but
-        // O-sites are never fully coordinated, so the array never overruns);
-        // the inner loop is bounded `j < 6` and also stops at `-1`.
+        // Forward hydrolysis: the surface-reachability double loop — with a
+        // WART that is *load-bearing for parity* (spec §C2a).
+        //
+        // # WART (new — the `nbr[6]` out-of-bounds phantom)
+        //
+        // The C++ inner loop is
+        //   `for (j=0; (nbr2 = sites[nbr].nbr[j]) >= 0 && j < 6 && !result; j++)`
+        // — the `nbr[j]` read happens *before* the `j < 6` guard in the
+        // `&&` chain. When a neighbor `nbr` has all six neighbor slots
+        // filled, the loop reaches `j == 6` and evaluates `sites[nbr].nbr[6]`,
+        // one element past the fixed `nbr[6]` array. That read is undefined
+        // behavior; under the golden build (`g++ -O3 -ffast-math`) it
+        // manifests, deterministically, as **`result` becoming TRUE** whenever
+        // the inner loop reaches `j == 6`. (Reverse-engineered against the
+        // golden trajectory: the rule "a real 2nd-neighbor is hydrolyzed OR a
+        // neighbor is fully six-coordinated" reproduces every `IsActive`
+        // decision the golden binary makes — verified across all 20,000 steps
+        // by the parity gate. A bounds-clean loop drops step-0's event count
+        // from 660 to 180 and desynchronizes immediately.)
+        //
+        // So faithful behavior is: for each neighbor `nbr` of the site, the
+        // reaction is active if any of `nbr`'s *present* neighbors bears a
+        // hydrolyzed state {303,404,405,406,408,409}, **or** `nbr` has all six
+        // neighbor slots present (Al sites always do) — the latter is the
+        // phantom. Since topology is fixed for the whole run, the phantom
+        // condition is static per neighbor; only the real-state test is
+        // dynamic. This is not in spec Part B — discovered during the M6
+        // parity chase; a candidate for a spec 02 addendum and a REFORM_PLAN
+        // entry (bounds-clean is the corrected behavior).
+        //
+        // The site's own outer loop also lacks an `i < 6` bound, but every
+        // forward-hydrolysis reactant is an O-class state (≤3 neighbors), so
+        // the outer loop always meets a `None` within six slots and never
+        // reaches its own phantom — reproduced by stopping at the first
+        // `None` below.
         for &nbr in graph.sites[site].nbr.iter() {
             let Some(nbr) = nbr else { break };
-            for &nbr2 in graph.sites[nbr].nbr.iter() {
-                let Some(nbr2) = nbr2 else { break };
-                match graph.sites[nbr2].state.0 {
-                    303 | 404 | 405 | 406 | 408 | 409 => return true,
-                    _ => {}
-                }
+            if inner_surface_active(graph, nbr) {
+                return true;
             }
         }
         false
@@ -91,11 +118,38 @@ pub fn is_active(graph: &SiteGraph<State>, site: SiteId, rxn: u16) -> bool {
     }
 }
 
+/// The inner loop of the forward-hydrolysis surface test, over one neighbor
+/// `nbr` of the reacting site — **including the `nbr[6]` OOB phantom** (see
+/// the big WART note in [`is_active`]).
+///
+/// Returns TRUE if any of `nbr`'s present neighbors is in the hydrolyzed
+/// matchset, OR if all six of `nbr`'s neighbor slots are present (the loop
+/// would reach `j == 6` and the golden binary's out-of-bounds read forces the
+/// result true). If a `None` slot is met before the sixth, the loop stops
+/// with no phantom.
+fn inner_surface_active(graph: &SiteGraph<State>, nbr: SiteId) -> bool {
+    for &nbr2 in graph.sites[nbr].nbr.iter() {
+        match nbr2 {
+            Some(nbr2) => {
+                if matches!(graph.sites[nbr2].state.0, 303 | 404 | 405 | 406 | 408 | 409) {
+                    return true;
+                }
+            }
+            // A missing slot within the six: the C++ loop stops here, before
+            // the phantom `j == 6` read. No trigger from this neighbor.
+            None => return false,
+        }
+    }
+    // All six slots were present → the loop reached `j == 6` → the OOB
+    // phantom fires TRUE in the golden build.
+    true
+}
+
 /// `Environment::CheckEnv` — the environment bucket (rate index) for `site`.
 ///
 /// Dispatches by class to the `check_*` helpers. Note the class-4 split: 404
-/// and 405 (the two Al-OH-Al-like 400 states) route to [`check500`], every
-/// other 400 to [`check400`] — a quirk of the original worth preserving
+/// and 405 (the two Al-OH-Al-like 400 states) route to `check500`, every
+/// other 400 to `check400` — a quirk of the original worth preserving
 /// exactly. Returns `-1` for an invalid environment (the C++ abort signal).
 pub fn check_env(graph: &SiteGraph<State>, pair: &[Option<SiteId>], site: SiteId) -> i32 {
     let st = graph.sites[site].state.0;
@@ -281,7 +335,11 @@ fn check500(graph: &SiteGraph<State>, pair: &[Option<SiteId>], site: SiteId) -> 
     }
 
     let ps = graph.sites[p].state.0;
-    let x = if matches!(ps, 502 | 403 | 405 | 410) { 1 } else { 0 };
+    let x = if matches!(ps, 502 | 403 | 405 | 410) {
+        1
+    } else {
+        0
+    };
     let mut y = (graph.sites[al1].state.0 - 101) + (graph.sites[al2].state.0 - 101);
     if matches!(ps, 502 | 403 | 405) {
         y -= 1;

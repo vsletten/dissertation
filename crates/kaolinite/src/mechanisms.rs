@@ -29,7 +29,7 @@
 //!
 //! The C++ reads `sites[site].nbr[i]` as a raw index and dereferences it
 //! unconditionally — a valid reaction always has the neighbors it needs. We
-//! mirror that with [`nb`], which `expect`s the neighbor present: the
+//! mirror that with `nb`, which `expect`s the neighbor present: the
 //! invariant is "the event-list builder only proposed this reaction because
 //! its reactant state matched, which by construction means the required
 //! neighbors exist". A panic here would mean the *builder* is wrong, not the
@@ -337,7 +337,12 @@ fn adsorb_al(
                     set(graph, nbr, 410);
                     lostal[nbr] = Some(site);
                 }
-                other => return Err(KaolError::InvalidAdsorbState { site: nbr, state: other }),
+                other => {
+                    return Err(KaolError::InvalidAdsorbState {
+                        site: nbr,
+                        state: other,
+                    });
+                }
             }
         }
     } else {
@@ -362,7 +367,12 @@ fn adsorb_si(graph: &mut SiteGraph<State>, site: SiteId) -> Result<(), KaolError
                 405 => set(graph, nbr, 403),
                 409 => set(graph, nbr, 407),
                 400 => set(graph, nbr, 408),
-                other => return Err(KaolError::InvalidAdsorbState { site: nbr, state: other }),
+                other => {
+                    return Err(KaolError::InvalidAdsorbState {
+                        site: nbr,
+                        state: other,
+                    });
+                }
             }
         }
     } else {

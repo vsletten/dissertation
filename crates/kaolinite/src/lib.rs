@@ -39,5 +39,5 @@ pub use build::{
 };
 pub use cell::{CellSite, NeighborTemplate, UnitCell};
 pub use environment::{check_env, is_active};
-pub use model_impl::{Kaolinite, KaolError};
+pub use model_impl::{KaolError, Kaolinite};
 pub use state::State;
