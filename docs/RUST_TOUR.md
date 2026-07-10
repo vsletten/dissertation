@@ -345,11 +345,95 @@ analysis in mission-control `projects/kmc/02-model-spec.md` Part B:
 | `TerminateSurface` pass 1: `type` is always 0, so the 401→404 / 406→408 "Si branch" is unreachable (401 always →406, 406 always →409) |  `crates/kaolinite/src/build.rs:354` | **new** — found during this port, not in spec Part B; reported in TASK-016 Result |
 | `FindPairs` can transiently self-pair an oxygen | `crates/kaolinite/src/build.rs:178` (+ test) | new, same report |
 | `data.rxn`'s "40100" product token (likely a 405 typo) parsed as-is | `crates/kmc-io/src/rxn.rs` tests | new, same report |
+| `IsActive` forward-hydrolysis reads `sites[nbr].nbr[6]` (one past the array); under `-O3` the OOB forces the surface test TRUE for any fully-6-coordinated neighbor | `crates/kaolinite/src/environment.rs` (`inner_surface_active` + the WART note) | **new** — found during the M6 parity chase; the biggest behavioral wart in the port; REFORM_PLAN R1 |
 
-## 14. What M4+ will add to this tour
+Each of these now has a corresponding entry in `docs/REFORM_PLAN.md` — the
+fix, its expected physics effect, its test strategy, and the
+corrected-by-default-plus-`--legacy` design. The plan is drafted; **no fix is
+implemented** (the sequencing decree: parity first, reform after).
 
-Traits in anger (the `Model` seam — associated types, generic `step`),
-closures, the faithful `ran2` port behind an `Rng` trait, and the
-f32-parity-then-f64 dynamics story (spec §C2). The teaching pattern stays
-the same: `[IDIOM]` at first use, receipts at every wart, and a golden
-oracle before any "improvement".
+## 14. Dynamics (M4–M6): traits in anger, and the parity chase
+
+M4–M6 add the KMC engine loop and the kaolinite reactions behind it. The new
+teaching surface, section by section of the code:
+
+### 14.1 The `Rng` trait and a bit-faithful `ran2`
+`crates/kmc-engine/src/rng.rs`. The legacy `ran2` is a free function with
+**file-static** state (`static long iy`, `iv[]`) — untestable, unresettable,
+unsubstitutable. The port makes it a `struct Ran2` behind an `Rng` trait, and
+the win is threefold: the generator's state is a *value* (constructible,
+clonable for a side-experiment), the trait is a **seam** (parity `Ran2` today,
+a modern PRNG tomorrow, engine unchanged), and the whole thing is pinned by a
+20-value **bitwise** test against the C++ stream. Reviewer's lens: this is the
+rare "trait with one implementor" that is *not* premature — the second
+implementor is named and dated in the design doc, and the trait is why parity
+and production won't fork the engine. Note the deliberate deviation receipt:
+the trait returns `f32`, not the design doc's `f64`, because the C++
+`float ran2()` is 32-bit and every downstream consumer (`eps`, the `r < 0.5`
+coin) is a float — bit-parity demands it. Faithful now, `f64` at reform.
+
+### 14.2 The `Model` seam — the one trait that matters
+`crates/kmc-engine/src/model.rs`. This is the payoff of the whole crate split
+(tour §1): the C++ fused engine and model by direct call (`evtlist.cpp` names
+`environment->IsActive`, `actions.DoEvent`); here the lump is cut along a
+declared interface. Teaching points: an **associated type** (`type State`)
+says "exactly one state type per model" (contrast a type *parameter*
+`Model<S>`, which would invite two impls for one model); the generic `step<M,
+R>` monomorphizes to zero dispatch cost while the bounds document exactly what
+it needs; and `ProposedEvent` is a `Copy` POD in a reused `Vec`, retiring the
+C++'s `new EventList()`-per-event intrusive linked list (`EventList : public
+Event`, tour would call it the B9 idiom) — both faster and free of the
+dangling-`next` surface. Reviewer's lens on the `apply(&mut self, graph,
+ev, rng: &mut dyn Rng)` signature: the RNG is **threaded in**, not owned by
+the model, because the R4/R9 proton coin must draw from the *same* stream as
+the step's `dt`/`eps`, *after* them. A model that owned its own RNG would
+silently desync parity — the shared `&mut dyn Rng` makes the single ordered
+stream a type-level fact, at the cost of one virtual call per coin flip.
+
+### 14.3 The parity chase: three ways the trajectory tried to diverge
+`crates/mckaol-cli/tests/parity_m6.rs` is the M6 gate — 20,000 steps, bitwise.
+Getting there taught three lessons a reviewer of numeric/agentic ports should
+carry:
+
+1. **Float summation *order* is behavior.** The C++ builds its event list by
+   prepending (head = last/highest site) and sums from the head; `step` builds
+   a `Vec` ascending and must therefore fold **reversed** to match. `f32`
+   addition is not associative — the wrong order shifts `ratesum` by an ulp,
+   which flips which event crosses `eps`, and the trajectories part ways a few
+   steps later. The fix is one `.rev()`, but *finding* it required the oracle.
+
+2. **A bug you must reproduce, not fix.** The `is_active` `nbr[6]`
+   out-of-bounds read (warts ledger, above) makes the golden binary allow far
+   more forward-hydrolysis events than a correct loop would. A bounds-clean
+   port compiles, passes every unit test, and is *wrong* — it desyncs at step
+   0 (180 events vs the golden's 660). The only thing that caught it was
+   diffing against an independent oracle, and the only way to reproduce it was
+   to reverse-engineer the UB's *effect* ("TRUE whenever a neighbor is fully
+   coordinated") from the trajectory itself. Lesson: when the reference is a
+   compiled binary, "faithful to the source" and "faithful to the binary" can
+   differ by a whole code path, not just an ulp — and the binary is the
+   oracle.
+
+3. **The oracle's own quirks are part of the contract.** The trajectory's
+   state-hash used a digit-truncated FNV basis in the capture harness; the
+   Rust checker reproduces *that* constant, not the textbook one, because a
+   fingerprint only has to agree between capture and check. Don't "correct" a
+   value the oracle depends on.
+
+Reviewer's lens for agent-written faithful ports generally: **prize the
+external oracle above the tests the code ships with.** Every green unit test in
+this crate was consistent with a wrong `is_active`; the golden trajectory was
+not. A port that only tests itself certifies its own misreadings.
+
+### 14.4 Where `rayon` would enter (memo 04)
+`crates/kmc-engine/src/lib.rs` marks it: the per-step event rebuild
+(`for s in 0..len { events_at(&graph, s, ..) }`) is a read-only fan-out over
+an immutable `&graph` — the textbook `par_iter().flat_map().collect()`, and
+the borrow checker already proves the workers share no mutable state. But it
+must stay parity-gated: a parallel collect reorders the event list, and §14.3
+lesson 1 shows why reordering breaks the `f32` summation the oracle pins. So
+parallel rebuild is a *reform-era* move (correct-by-default reorders freely,
+`--legacy` keeps serial order); `apply` is intrinsically serial (it mutates
+and draws the shared RNG), and only memo 04's sublattice decomposition
+parallelizes *that* — deliberately out of scope until the serial port is
+trusted.

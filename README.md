@@ -50,7 +50,22 @@ Preserved warts are marked `WART (spec BN)` at the exact line they live on.
 | M1 | `data.cell` → `UnitCell` | done |
 | M2 | lattice tiling + neighbor resolution (periodic/open BCs) | done |
 | M3 | structural build (`find_pairs`, `populate_solid`, `terminate_*`), `data.rxn` reader, MSI writer, **bitwise golden gate** | **done — gate green** |
-| M4+ | engine `Model` trait seam, `ran2`, reactions, dynamics parity | next |
+| M4 | engine `Model` trait seam + bit-faithful `ran2` behind an `Rng` trait | done |
+| M5 | kaolinite dynamics: `is_active`/`check_env`, the 16 mechanisms, `impl Model` | done |
+| M6 | event loop + **dynamics parity gate** (20,000 steps bitwise vs the C++) | **done — gate green** |
+| M7+ | output writers (`.dat`/`.surf`/movie), then the reforms in `docs/REFORM_PLAN.md` | next |
+
+## The M6 dynamics parity check
+
+Under the legacy fixed seed (spec B2), the Rust simulation reproduces the C++
+trajectory **step-by-step and bitwise** for all 20,000 reference steps: the
+chosen `(site, rxn)`, the `f32` `dt` bit pattern, the occupied-site count, and
+a whole-lattice FNV state hash all match the oracle
+(`data/golden/trajectory/traj_seed0_full.txt`, captured from the read-only C++
+rebuilt in scratch — see that dir's README). **Status: green.** The reforms
+that will *fix* the preserved warts (behind a `--legacy` mode that keeps this
+gate green forever) are designed in `docs/REFORM_PLAN.md` — drafted, not
+implemented.
 
 ## The M3 golden check
 
