@@ -1,0 +1,10 @@
+[package]
+name = "kmc-engine"
+version.workspace = true
+edition.workspace = true
+description = "Generic kinetic Monte Carlo core: the site graph (and, from M4, the event loop and Model trait)"
+
+[dependencies]
+# None, ever, on purpose. The engine is the innermost hexagon: it must know
+# nothing about kaolinite, aluminum, or state code 401 (design doc §1). An
+# empty dependency list is that promise, compiler-enforced.

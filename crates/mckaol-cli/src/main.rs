@@ -51,6 +51,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let sim = kmc_io::read_sim(&run_dir.join("data.sim"))?;
     let cell = kmc_io::read_cell(&run_dir.join("data.cell"))?;
+    let lattice_params = kmc_io::read_lattice(&run_dir.join("data.lattice"))?;
 
     println!("data.sim ({}):", run_dir.join("data.sim").display());
     println!("  nsteps    = {}", sim.nsteps);
@@ -63,6 +64,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     println!("data.cell: {} positions, a/b/c = {} {} {}", cell.npos(), cell.a, cell.b, cell.c);
+
+    let structure = kaolinite::create_lattice(&cell, lattice_params);
+    println!(
+        "lattice: {} x {} cells, surface plane {} -> {} sites",
+        lattice_params.a_cells,
+        lattice_params.b_cells,
+        lattice_params.surface_plane,
+        structure.graph.len()
+    );
 
     Ok(())
 }

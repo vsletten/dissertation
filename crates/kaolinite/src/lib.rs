@@ -15,17 +15,19 @@
 //! |---|---|---|
 //! | [`state`] | `common.hpp` + `lattice.hpp` macros | the state encoding |
 //! | [`cell`] | `ucell.hpp` | the unit-cell motif that tiles into the lattice |
+//! | [`build`] | `lattice.cpp` | tile the motif into a site graph; structural setup |
 //!
-//! (The ladder adds `build` — lattice tiling and the structural setup — at
-//! M2/M3, and `reactions`/`environment`/the engine `Model` impl at M4+.)
+//! (The ladder adds `reactions`/`environment`/the engine `Model` impl at M4+.)
 //!
 //! Behavior contract: `mission-control/projects/kmc/02-model-spec.md`.
 //! Warts preserved on purpose are marked `WART (spec BN)` in place.
 
 #![warn(missing_docs)]
 
+pub mod build;
 pub mod cell;
 pub mod state;
 
+pub use build::{create_lattice, LatticeParams, Structure};
 pub use cell::{CellSite, NeighborTemplate, UnitCell};
 pub use state::State;

@@ -5,6 +5,13 @@ version = 4
 [[package]]
 name = "kaolinite"
 version = "0.1.0"
+dependencies = [
+ "kmc-engine",
+]
+
+[[package]]
+name = "kmc-engine"
+version = "0.1.0"
 
 [[package]]
 name = "kmc-io"
@@ -17,5 +24,6 @@ dependencies = [
 name = "mckaol-cli"
 version = "0.1.0"
 dependencies = [
+ "kaolinite",
  "kmc-io",
 ]

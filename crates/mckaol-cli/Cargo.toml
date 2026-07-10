@@ -9,4 +9,5 @@ description = "The mckaol binary: wires readers, model build, and writers togeth
 # except the split is structural: everything reusable lives in the library
 # crates and this crate is deliberately thin glue.
 [dependencies]
+kaolinite = { path = "../kaolinite" }
 kmc-io = { path = "../kmc-io" }

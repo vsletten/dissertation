@@ -20,6 +20,7 @@
 //! | [`scan`] | `futil.cpp` (`EatComment` + `operator>>`) | tokenizer for the input dialect |
 //! | [`sim`] | `sim.cpp` | `data.sim` → [`sim::SimParams`] |
 //! | [`cell`] | `ucell.cpp` | `data.cell` → [`kaolinite::UnitCell`] |
+//! | [`lattice`] | `lattice.cpp` (top) | `data.lattice` → [`kaolinite::LatticeParams`] |
 //! | [`error`] | `myerr.cpp` (`Myerr::die`) | error type all readers return |
 //!
 //! (Later milestones add the `lattice` and `rxn` readers and the `msi`
@@ -35,6 +36,7 @@
 
 pub mod cell;
 pub mod error;
+pub mod lattice;
 pub mod scan;
 pub mod sim;
 
@@ -44,5 +46,6 @@ pub mod sim;
 // `kmc_io::SimParams` without knowing the module layout — the module tree is
 // an implementation detail, the re-exports are the API.
 pub use cell::read_cell;
+pub use lattice::read_lattice;
 pub use error::ReadError;
 pub use sim::{read_sim, SimParams};
