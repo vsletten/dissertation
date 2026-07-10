@@ -47,7 +47,7 @@ Preserved warts are marked `WART (spec BN)` at the exact line they live on.
 | Milestone | Lands | Status |
 |---|---|---|
 | M0 | workspace, `data.sim` reader (bug-compatible, spec B2), CLI skeleton | done |
-| M1 | `data.cell` → `UnitCell` | pending |
+| M1 | `data.cell` → `UnitCell` | done |
 | M2 | lattice tiling + neighbor resolution (periodic/open BCs) | pending |
 | M3 | structural build (`find_pairs`, `populate_solid`, `terminate_*`), `data.rxn` reader, MSI writer, **bitwise golden gate** | pending |
 | M4+ | engine `Model` trait seam, `ran2`, reactions, dynamics parity | next |

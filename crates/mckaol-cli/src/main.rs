@@ -50,6 +50,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| PathBuf::from("."));
 
     let sim = kmc_io::read_sim(&run_dir.join("data.sim"))?;
+    let cell = kmc_io::read_cell(&run_dir.join("data.cell"))?;
 
     println!("data.sim ({}):", run_dir.join("data.sim").display());
     println!("  nsteps    = {}", sim.nsteps);
@@ -60,6 +61,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "  ranseed   = {}   (always 0: the legacy reader swallows the seed — spec B2)",
         sim.ranseed
     );
+
+    println!("data.cell: {} positions, a/b/c = {} {} {}", cell.npos(), cell.a, cell.b, cell.c);
 
     Ok(())
 }

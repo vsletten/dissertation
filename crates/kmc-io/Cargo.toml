@@ -7,4 +7,5 @@ edition.workspace = true
 description = "Readers and writers for the legacy KMC text formats (data.sim/.cell/.lattice/.rxn, Cerius2 MSI)"
 
 [dependencies]
-# std-only at M0. kaolinite is added at M1 when domain types appear.
+# The domain types this crate parses into / serializes from.
+kaolinite = { path = "../kaolinite" }

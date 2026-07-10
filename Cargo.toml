@@ -32,6 +32,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/kaolinite",
     "crates/kmc-io",
     "crates/mckaol-cli",
 ]

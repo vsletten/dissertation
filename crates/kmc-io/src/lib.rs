@@ -19,9 +19,10 @@
 //! |---|---|---|
 //! | [`scan`] | `futil.cpp` (`EatComment` + `operator>>`) | tokenizer for the input dialect |
 //! | [`sim`] | `sim.cpp` | `data.sim` → [`sim::SimParams`] |
+//! | [`cell`] | `ucell.cpp` | `data.cell` → [`kaolinite::UnitCell`] |
 //! | [`error`] | `myerr.cpp` (`Myerr::die`) | error type all readers return |
 //!
-//! (Later milestones add `cell`, `lattice`, `rxn` readers and the `msi`
+//! (Later milestones add the `lattice` and `rxn` readers and the `msi`
 //! writer — the module list above grows with the ladder.)
 
 // [IDIOM] `#![warn(missing_docs)]` — a crate-wide lint gate. The compiler
@@ -32,6 +33,7 @@
 // early and the codebase can never silently grow an undocumented API.
 #![warn(missing_docs)]
 
+pub mod cell;
 pub mod error;
 pub mod scan;
 pub mod sim;
@@ -41,5 +43,6 @@ pub mod sim;
 // Re-exporting the two most-used names at the crate root gives callers
 // `kmc_io::SimParams` without knowing the module layout — the module tree is
 // an implementation detail, the re-exports are the API.
+pub use cell::read_cell;
 pub use error::ReadError;
 pub use sim::{read_sim, SimParams};
