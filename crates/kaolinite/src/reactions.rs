@@ -23,6 +23,14 @@
 
 use crate::state::State;
 
+/// Reaction index where the "400-class" hydrolysis block begins (C++
+/// `N300`): reactions 0..2 are the Si-O-Si (300) pair R0/R1, 2..14 the
+/// 400-class R2..R13. Used by the event-list builder to pick the reaction
+/// window for a given site class (spec A7 / `evtlist.cpp`).
+pub const N_300: usize = 2;
+/// Reaction index where the "500-class" hydrolysis block begins (C++ `N400`):
+/// reactions 14..16 are the Al-OH-Al (500) pair R14/R15.
+pub const N_400: usize = 14;
 /// Number of hydrolysis reactions (C++ `NHYD`).
 pub const N_HYD: usize = 16;
 /// End of the adsorption block (C++ `NADS`).

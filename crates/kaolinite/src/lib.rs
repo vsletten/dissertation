@@ -27,6 +27,9 @@
 
 pub mod build;
 pub mod cell;
+pub mod environment;
+pub mod mechanisms;
+pub mod model_impl;
 pub mod reactions;
 pub mod state;
 
@@ -35,4 +38,6 @@ pub use build::{
     terminate_surface,
 };
 pub use cell::{CellSite, NeighborTemplate, UnitCell};
+pub use environment::{check_env, is_active};
+pub use model_impl::{Kaolinite, KaolError};
 pub use state::State;
