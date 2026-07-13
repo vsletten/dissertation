@@ -1,0 +1,51 @@
+# Workspace manifest.
+#
+# [IDIOM] Cargo workspace vs. a Makefile of translation units.
+# The C++ model is 13 .cpp files compiled and linked by a hand-written
+# Makefile where every .o depends on every header (model/Makefile). A Cargo
+# workspace is the Rust analogue of "one repo, several libraries, one lock
+# file": each crate below is an independently compiled unit with an explicit
+# dependency graph, and Cargo derives all build ordering from that graph —
+# there is nothing like the Makefile's static SOURCES list to keep in sync.
+# What it buys in guarantees: a crate can only use what it declares in its
+# Cargo.toml, so the layering rules from the design doc (engine knows nothing
+# about kaolinite; the model crate never does IO) are *compiler-enforced*,
+# not convention. The C++ codebase could not express "envrn.cpp must not
+# include output.hpp"; this workspace can, and does.
+#
+# Crate map (mirrors 03-rust-workspace-design.md §2):
+#   crates/kmc-engine   generic KMC core: the site graph (model-agnostic)
+#   crates/kaolinite    THE specific model: states, build rules, reactions
+#   crates/kmc-io       readers/writers for the legacy data.* / .msi formats
+#   crates/mckaol-cli   the binary that wires it all together (old mckaol.cpp)
+#
+# One deliberate deviation from the design doc's dependency sketch: the doc's
+# §2 diagram shows `kmc-io → kmc-engine` only, but its own prose says "kmc-io
+# knows engine + kaolinite state types to serialize them". Both cannot hold;
+# we resolve in favor of the prose: kmc-io depends on kaolinite (to parse and
+# serialize its domain types), kaolinite depends only on kmc-engine, and the
+# CLI sees everything. Layering stays acyclic:
+#   mckaol-cli → kmc-io → kaolinite → kmc-engine
+
+# (The members list grows one milestone at a time — M0 lands kmc-io and the
+# CLI; kaolinite arrives with M1, kmc-engine with M2.)
+[workspace]
+resolver = "3"
+members = [
+    "crates/kmc-engine",
+    "crates/kaolinite",
+    "crates/kmc-io",
+    "crates/mckaol-cli",
+]
+
+# [IDIOM] workspace.package: shared metadata inherited by member crates via
+# `edition.workspace = true` etc. — the analogue of common CXXFLAGS in a
+# Makefile, except versioned and structured.
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+# Empty on purpose. The design doc (§9) says "keep it boring": the whole
+# M0–M3 port is std-only. serde/rand enter only at later milestones (PGIF,
+# modern RNG), and they will be declared here once, workspace-wide.

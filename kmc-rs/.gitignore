@@ -1,0 +1,6 @@
+# Build artifacts. The C++ tree committed its .o files and the mckaol binary
+# (flagged in 01-codebase-map.md §8 as repo hygiene to NOT repeat) — target/
+# is the equivalent here and stays out.
+/target
+# Scratch outputs from running the CLI against the golden inputs in place.
+/data/golden/inputs/start.msi

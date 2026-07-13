@@ -1,0 +1,16 @@
+[package]
+name = "kmc-io"
+# [IDIOM] `version.workspace = true` pulls the field from the root
+# [workspace.package] table — single source of truth for shared metadata.
+version.workspace = true
+edition.workspace = true
+description = "Readers and writers for the legacy KMC text formats (data.sim/.cell/.lattice/.rxn, Cerius2 MSI)"
+
+[dependencies]
+# The domain types this crate parses into / serializes from.
+kaolinite = { path = "../kaolinite" }
+# For `SiteGraph` only: the M7 writers render the *live* graph the engine
+# owns during a run (the pre-dynamics `Structure` no longer exists by the
+# time end.msi is written). Still no dependency on the simulation loop --
+# this crate reads states, never steps them.
+kmc-engine = { path = "../kmc-engine" }
