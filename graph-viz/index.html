@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>graph-viz — property graphs at scale</title>
+  </head>
+  <body>
+    <div id="viewport"></div>
+
+    <aside id="panel">
+      <header id="panel-head">
+        <h1>graph-viz</h1>
+        <p class="sub">any property graph · PGIF native · instanced WebGL</p>
+      </header>
+
+      <section class="card" id="load-card">
+        <h2>Load</h2>
+        <div id="dropzone" tabindex="0">
+          <span class="dz-title">Drop a graph here</span>
+          <span class="dz-sub">.pgif.json · .pgif.bin · legacy .msi</span>
+        </div>
+        <input id="file-input" type="file" accept=".json,.pgif,.bin,.msi,application/json" hidden />
+        <div class="row" id="demo-row">
+          <label for="demo-select">Demo</label>
+          <select id="demo-select">
+            <option value="">choose…</option>
+            <optgroup label="Lattice (positioned)">
+              <option value="lattice:10k">lattice 10k</option>
+              <option value="lattice:100k">lattice 100k</option>
+              <option value="lattice:500k">lattice 500k</option>
+              <option value="lattice:1m">lattice 1M</option>
+            </optgroup>
+            <optgroup label="Social (layout engine)">
+              <option value="social:2000">social 2k</option>
+              <option value="social:10000">social 10k</option>
+              <option value="social:50000">social 50k</option>
+            </optgroup>
+          </select>
+        </div>
+      </section>
+
+      <section class="card hidden" id="graph-card">
+        <h2>Graph</h2>
+        <div id="graph-meta"></div>
+        <div class="row btn-row">
+          <button id="export-json" title="Save as PGIF JSON">⭳ .pgif.json</button>
+          <button id="export-bin" title="Save as PGIF binary">⭳ .pgif.bin</button>
+          <button id="reframe" title="Reframe camera">⌖ frame</button>
+        </div>
+      </section>
+
+      <section class="card hidden" id="legend-card">
+        <h2>Types <span class="hint">click to toggle</span></h2>
+        <div id="legend"></div>
+      </section>
+
+      <section class="card hidden" id="inspector-card">
+        <h2>Node</h2>
+        <div id="inspector"></div>
+      </section>
+    </aside>
+
+    <div id="hud"></div>
+    <div id="node-label" class="hidden"></div>
+    <div id="toast" class="hidden"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,399 @@
+/**
+ * App orchestration: load (file drop / picker / demo / ?demo= param) → layout
+ * if position-less → GraphScene → legend/inspector/HUD wiring → PGIF export.
+ */
+
+import './style.css';
+
+import { Vector3 } from 'three';
+
+import { generateLattice, generateSocial, LATTICE_SIZES, type LatticeSize } from './demo';
+import { nodeProperties, typeCounts, type Graph } from './graph';
+import { loadMsi } from './loaders/msi';
+import { encodeBinary, encodeJson } from './pgif/encode';
+import { loadPgif } from './pgif/decode';
+import { pickNode } from './render/picking';
+import { GraphScene } from './render/scene';
+import type { LayoutMessage } from './layout.worker';
+
+declare global {
+  interface Window {
+    __graphviz?: {
+      ready: boolean;
+      stats: () => ReturnType<GraphScene['getStats']>;
+      graph: () => { nodes: number; edges: number; types: string[] } | null;
+      loadDemo: (spec: string) => Promise<void>;
+      loadText: (name: string, text: string) => Promise<void>;
+      pickAtNdc: (x: number, y: number) => Record<string, unknown> | null;
+      projectNode: (i: number) => { x: number; y: number } | null;
+    };
+  }
+}
+
+const $ = <T extends HTMLElement>(sel: string): T => {
+  const el = document.querySelector<T>(sel);
+  if (!el) throw new Error(`missing element ${sel}`);
+  return el;
+};
+
+const viewport = $('#viewport');
+const dropzone = $('#dropzone');
+const fileInput = $<HTMLInputElement>('#file-input');
+const demoSelect = $<HTMLSelectElement>('#demo-select');
+const graphCard = $('#graph-card');
+const graphMeta = $('#graph-meta');
+const legendCard = $('#legend-card');
+const legendEl = $('#legend');
+const inspectorCard = $('#inspector-card');
+const inspectorEl = $('#inspector');
+const hud = $('#hud');
+const nodeLabel = $('#node-label');
+const toast = $('#toast');
+
+const scene = new GraphScene(viewport);
+let currentName = '';
+let pickedNode: number | null = null;
+const pickedWorld = new Vector3();
+
+// ---------- toast ----------
+let toastTimer: number | undefined;
+function showToast(msg: string, isError = false, sticky = false): void {
+  toast.textContent = msg;
+  toast.classList.toggle('error', isError);
+  toast.classList.remove('hidden');
+  if (toastTimer) clearTimeout(toastTimer);
+  if (!sticky) toastTimer = window.setTimeout(() => toast.classList.add('hidden'), 3500);
+}
+
+// ---------- loading ----------
+async function setGraph(name: string, graph: Graph): Promise<void> {
+  if (!graph.positions) {
+    graph = await layoutGraph(graph);
+  }
+  currentName = name;
+  pickedNode = null;
+  renderInspector();
+  scene.setGraph(graph);
+  renderMeta(graph);
+  renderLegend(graph);
+  graphCard.classList.remove('hidden');
+  legendCard.classList.remove('hidden');
+  inspectorCard.classList.remove('hidden');
+  showToast(`${name}: ${graph.count.toLocaleString()} nodes, ${graph.edgeCount.toLocaleString()} edges`);
+  if (window.__graphviz) window.__graphviz.ready = true;
+}
+
+function layoutGraph(graph: Graph): Promise<Graph> {
+  showToast(`layout: computing positions for ${graph.count.toLocaleString()} nodes…`, false, true);
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./layout.worker.ts', import.meta.url), { type: 'module' });
+    worker.onerror = e => {
+      worker.terminate();
+      reject(new Error(`layout worker failed: ${e.message}`));
+    };
+    worker.onmessage = (ev: MessageEvent<LayoutMessage>) => {
+      if (ev.data.kind === 'progress') {
+        showToast(`layout: ${Math.round((100 * ev.data.done) / ev.data.total)}%`, false, true);
+        return;
+      }
+      worker.terminate();
+      const positions = ev.data.positions;
+      const n = graph.count;
+      const xs = new Float32Array(n), ys = new Float32Array(n), zs = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        xs[i] = positions[i * 3];
+        ys[i] = positions[i * 3 + 1];
+        zs[i] = positions[i * 3 + 2];
+      }
+      graph.positions = positions;
+      graph.nodeColumns = {
+        ...graph.nodeColumns,
+        x: { type: 'f32', data: xs },
+        y: { type: 'f32', data: ys },
+        z: { type: 'f32', data: zs },
+      };
+      graph.meta = { ...graph.meta, layout: 'graph-viz force v0' };
+      resolve(graph);
+    };
+    worker.postMessage(
+      { count: graph.count, edgeSrc: graph.edgeSrc, edgeDst: graph.edgeDst, seed: 0x51f5 },
+    );
+  });
+}
+
+async function loadTextContent(name: string, text: string): Promise<void> {
+  try {
+    const lower = name.toLowerCase();
+    let graph: Graph;
+    if (lower.endsWith('.msi')) {
+      graph = loadMsi(text);
+      if (graph.count === 0) throw new Error('no atoms found — is this an MSI file?');
+    } else {
+      graph = loadPgif(text);
+    }
+    await setGraph(name, graph);
+  } catch (err) {
+    showToast(`load failed: ${err instanceof Error ? err.message : String(err)}`, true);
+  }
+}
+
+async function loadBinaryContent(name: string, bytes: ArrayBuffer): Promise<void> {
+  try {
+    await setGraph(name, loadPgif(bytes));
+  } catch (err) {
+    showToast(`load failed: ${err instanceof Error ? err.message : String(err)}`, true);
+  }
+}
+
+async function loadFile(file: File): Promise<void> {
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith('.msi') || lower.endsWith('.json') || lower.endsWith('.pgif')) {
+    await loadTextContent(file.name, await file.text());
+  } else {
+    await loadBinaryContent(file.name, await file.arrayBuffer());
+  }
+}
+
+async function loadDemo(spec: string): Promise<void> {
+  const [kind, size] = spec.split(':');
+  if (kind === 'lattice' && size in LATTICE_SIZES) {
+    await setGraph(`lattice ${size}`, generateLattice(LATTICE_SIZES[size as LatticeSize]));
+  } else if (kind === 'social') {
+    const n = parseInt(size, 10);
+    if (Number.isFinite(n) && n > 0 && n <= 500_000) {
+      await setGraph(`social ${n.toLocaleString()}`, generateSocial(n));
+    }
+  }
+}
+
+// ---------- panel rendering ----------
+function renderMeta(g: Graph): void {
+  const kind = typeof g.meta.kind === 'string' ? g.meta.kind : '—';
+  const producer = typeof g.meta.producer === 'string' ? g.meta.producer : '—';
+  graphMeta.innerHTML = '';
+  const rows: [string, string][] = [
+    ['file', currentName],
+    ['nodes', g.count.toLocaleString()],
+    ['edges', `${g.edgeCount.toLocaleString()}${g.directed ? ' (directed)' : ''}`],
+    ['kind', kind],
+    ['producer', producer],
+  ];
+  for (const [k, v] of rows) {
+    const div = document.createElement('div');
+    const key = document.createElement('span');
+    key.className = 'k';
+    key.textContent = `${k} `;
+    div.appendChild(key);
+    div.appendChild(document.createTextNode(v));
+    graphMeta.appendChild(div);
+  }
+}
+
+function renderLegend(g: Graph): void {
+  legendEl.innerHTML = '';
+  const counts = typeCounts(g);
+  scene.getStyles().forEach((style, t) => {
+    const row = document.createElement('div');
+    row.className = 'legend-row';
+    const swatch = document.createElement('span');
+    swatch.className = 'swatch';
+    swatch.style.background = style.color;
+    swatch.style.borderColor = style.color;
+    const name = document.createElement('span');
+    name.textContent = style.name;
+    const count = document.createElement('span');
+    count.className = 'count';
+    count.textContent = (counts.get(t) ?? 0).toLocaleString();
+    row.append(swatch, name, count);
+    row.addEventListener('click', () => {
+      scene.toggleType(t);
+      row.classList.toggle('off', scene.isTypeHidden(t));
+      if (pickedNode !== null && scene.isTypeHidden(g.typeIndex[pickedNode])) {
+        pickedNode = null;
+        renderInspector();
+      }
+    });
+    legendEl.appendChild(row);
+  });
+}
+
+function renderInspector(): void {
+  const g = scene.getGraph();
+  inspectorEl.innerHTML = '';
+  if (!g || pickedNode === null) {
+    const p = document.createElement('p');
+    p.className = 'empty';
+    p.textContent = 'click a node';
+    inspectorEl.appendChild(p);
+    nodeLabel.classList.add('hidden');
+    return;
+  }
+  const props = nodeProperties(g, pickedNode);
+  const table = document.createElement('table');
+  for (const [k, v] of Object.entries(props)) {
+    const tr = document.createElement('tr');
+    const kd = document.createElement('td');
+    kd.className = 'k';
+    kd.textContent = k;
+    const vd = document.createElement('td');
+    vd.className = 'v';
+    vd.textContent = typeof v === 'number' && !Number.isInteger(v) ? v.toPrecision(6) : String(v);
+    tr.append(kd, vd);
+    table.appendChild(tr);
+  }
+  inspectorEl.appendChild(table);
+
+  const label = (props['label'] || props['name'] || props['type'] || `#${props['id']}`) as string;
+  nodeLabel.textContent = String(label);
+  nodeLabel.classList.remove('hidden');
+  if (g.positions) {
+    pickedWorld.set(
+      g.positions[pickedNode * 3],
+      g.positions[pickedNode * 3 + 1],
+      g.positions[pickedNode * 3 + 2],
+    );
+  }
+}
+
+// project the picked node's label every frame (cheap: one node, not N)
+function updateLabelPosition(): void {
+  if (pickedNode === null) return;
+  const v = pickedWorld.clone().project(scene.camera);
+  if (v.z > 1) {
+    nodeLabel.classList.add('hidden');
+    return;
+  }
+  nodeLabel.classList.remove('hidden');
+  nodeLabel.style.left = `${((v.x + 1) / 2) * window.innerWidth}px`;
+  nodeLabel.style.top = `${((1 - v.y) / 2) * window.innerHeight}px`;
+}
+
+// ---------- HUD ----------
+scene.onFrame = stats => {
+  const cls = stats.fps >= 50 ? 'good' : stats.fps >= 25 ? 'ok' : 'bad';
+  hud.innerHTML = '';
+  const fps = document.createElement('div');
+  fps.className = `fps ${cls}`;
+  fps.textContent = `${stats.fps.toFixed(0)} fps`;
+  hud.appendChild(fps);
+  const lines: string[] = [
+    `frame ${stats.frameMs.toFixed(1)} ms`,
+    `draw calls ${stats.drawCalls}`,
+    `tris ${(stats.triangles / 1e6).toFixed(1)}M`,
+    `nodes ${stats.visibleNodes.toLocaleString()}`,
+    `edges ${stats.visibleEdges.toLocaleString()}`,
+  ];
+  for (const line of lines) {
+    const div = document.createElement('div');
+    div.textContent = line;
+    hud.appendChild(div);
+  }
+  updateLabelPosition();
+};
+
+// ---------- picking ----------
+let downAt: [number, number] | null = null;
+scene.renderer.domElement.addEventListener('pointerdown', e => {
+  downAt = [e.clientX, e.clientY];
+});
+scene.renderer.domElement.addEventListener('pointerup', e => {
+  if (!downAt) return;
+  const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
+  downAt = null;
+  if (moved > 4) return; // it was a drag, not a click
+  const g = scene.getGraph();
+  if (!g) return;
+  const rect = scene.renderer.domElement.getBoundingClientRect();
+  const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  const ndcY = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+  pickedNode = pickNode(ndcX, ndcY, scene.camera, g, scene.getStyles(), scene.getRadiusScale(), t =>
+    scene.isTypeHidden(t),
+  );
+  renderInspector();
+});
+
+// ---------- file input wiring ----------
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') fileInput.click();
+});
+fileInput.addEventListener('change', () => {
+  const f = fileInput.files?.[0];
+  if (f) void loadFile(f);
+  fileInput.value = '';
+});
+for (const target of [dropzone, document.body]) {
+  target.addEventListener('dragover', e => {
+    e.preventDefault();
+    dropzone.classList.add('drag');
+  });
+  target.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+  target.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.classList.remove('drag');
+    const f = (e as DragEvent).dataTransfer?.files?.[0];
+    if (f) void loadFile(f);
+  });
+}
+demoSelect.addEventListener('change', () => {
+  if (demoSelect.value) void loadDemo(demoSelect.value);
+});
+
+// ---------- export ----------
+function download(name: string, blob: Blob): void {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+$('#export-json').addEventListener('click', () => {
+  const g = scene.getGraph();
+  if (!g) return;
+  download(`${currentName.replace(/\.[^.]*$/, '') || 'graph'}.pgif.json`, new Blob([encodeJson(g)], { type: 'application/json' }));
+});
+$('#export-bin').addEventListener('click', () => {
+  const g = scene.getGraph();
+  if (!g) return;
+  const bytes = encodeBinary(g);
+  download(`${currentName.replace(/\.[^.]*$/, '') || 'graph'}.pgif.bin`, new Blob([bytes.buffer as ArrayBuffer], { type: 'application/octet-stream' }));
+});
+$('#reframe').addEventListener('click', () => scene.frameCamera());
+
+// ---------- automation hooks (verification + headless benchmarking) ----------
+window.__graphviz = {
+  ready: false,
+  stats: () => scene.getStats(),
+  graph: () => {
+    const g = scene.getGraph();
+    return g ? { nodes: g.count, edges: g.edgeCount, types: g.typeDict } : null;
+  },
+  loadDemo,
+  loadText: loadTextContent,
+  pickAtNdc: (x, y) => {
+    const g = scene.getGraph();
+    if (!g) return null;
+    const hit = pickNode(x, y, scene.camera, g, scene.getStyles(), scene.getRadiusScale(), t =>
+      scene.isTypeHidden(t),
+    );
+    if (hit === null) return null;
+    pickedNode = hit;
+    renderInspector();
+    return nodeProperties(g, hit);
+  },
+  projectNode: i => {
+    const g = scene.getGraph();
+    if (!g || !g.positions || i >= g.count) return null;
+    const v = new Vector3(g.positions[i * 3], g.positions[i * 3 + 1], g.positions[i * 3 + 2]).project(
+      scene.camera,
+    );
+    return { x: v.x, y: v.y };
+  },
+};
+
+// ?demo=lattice:100k etc.
+const demoParam = new URLSearchParams(location.search).get('demo');
+if (demoParam) {
+  demoSelect.value = demoParam;
+  void loadDemo(demoParam);
+}
