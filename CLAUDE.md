@@ -4,29 +4,48 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Overview
 
-This is a dissertation project studying kaolin mineral surface reactions through Monte Carlo simulation and visualization. The repository contains two main components:
+This is a dissertation project studying kaolin mineral surface reactions through Monte Carlo simulation and visualization. One model, three generations of code:
 
-1. **model/** - C++ kinetic Monte Carlo (KMC) simulation for modeling surface reactions on kaolin minerals
-2. **viewer/** - React/TypeScript web application for visualizing molecular structures from simulation output
+1. **legacy/cpp-model/** - the dissertation-era C/C++ kinetic Monte Carlo (KMC) simulation. Historical reference and the golden standard the Rust port is verified against. The C -> C++ evolution is in this repo's history (`git log --follow legacy/cpp-model/<file>`).
+2. **legacy/viewer/** - the original React/TypeScript visualizer for simulation output. Superseded by graph-viz.
+3. **kmc-rs/** - the living Rust port (imported subtree, full history). Milestone-gated parity with the C++: dynamics bitwise-identical over 20,000 steps, full-artifact golden gate green. Also a Rust teaching codebase - see kmc-rs/docs/RUST_TOUR.md.
+4. **graph-viz/** - the visualizer overhaul (imported subtree): PGIF-native instanced property-graph viewer.
+
+Active development happens in kmc-rs/ and graph-viz/. Treat legacy/ as read-only reference; changes there need explicit approval.
 
 ## Build, Test, and Development Commands
 
-### Model (C++ Simulation)
+### Legacy model (C++ simulation, reference)
 ```bash
-cd model
+cd legacy/cpp-model
 make                # Build the mckaol executable
 make clean          # Remove build artifacts
 ./mckaol            # Run simulation (requires input files)
 ```
 
-### Viewer (Web Application)
+### Legacy viewer (superseded by graph-viz)
 ```bash
-cd viewer
+cd legacy/viewer
 npm install         # Install dependencies
 npm run dev         # Start development server at http://localhost:5173
 npm run build       # Build for production (TypeScript compilation + Vite build)
 npm run lint        # Run ESLint on TypeScript/TSX files
 npm run preview     # Preview production build
+```
+
+### kmc-rs (Rust port - the living model)
+```bash
+cd kmc-rs
+cargo build --release
+cargo test          # includes the golden parity gates against legacy/cpp-model outputs
+```
+
+### graph-viz (visualizer overhaul)
+```bash
+cd graph-viz
+npm install
+npm run dev
+npm run build
 ```
 
 ## Model Architecture
@@ -38,7 +57,7 @@ The Monte Carlo simulation models chemical reactions at the atomic level for alu
 2. **Simulation Loop** (mckaol.cpp:61-102): For each step, generate event list → select and execute random event → update time → write output
 3. **Output** (mckaol.cpp:103-115): Write final state files (MSI, XYZ, surface analysis)
 
-For detailed model documentation, see `model/CLAUDE.md`.
+For detailed model documentation, see `legacy/cpp-model/CLAUDE.md`.
 
 ### Key Components
 
@@ -65,7 +84,7 @@ See common.hpp:1-160 for complete scheme. Key categories:
 - 400s: Si-O-Al2 bridging sites (most complex, 10 states)
 - 500s: Al-OH-Al bridging sites
 
-### Input Files (all in model/)
+### Input Files (all in legacy/cpp-model/)
 - **data.sim**: MC steps, output frequency, random seed
 - **data.rxn**: Temperature, chemical potentials, rate constants for 28 reactions
 - **data.cell**: Unit cell atomic positions and connectivity

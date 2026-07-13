@@ -2,7 +2,7 @@
 
 A faithful Rust port of `mckaol`, the 25-year-old C++ kinetic Monte Carlo
 model of kaolinite dissolution/growth from Victor's dissertation
-(`/mnt/data/vsletten/src/vsletten/dissertation/main/model`, read-only
+(`../legacy/cpp-model` in this repo — consolidated 2026-07-13, read-only
 reference). Ported behavior **as implemented**, warts included, per the
 faithful spec — and written to double as a **Rust teaching codebase** for a
 C++ veteran who reviews more than he writes.
