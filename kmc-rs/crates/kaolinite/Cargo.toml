@@ -1,0 +1,12 @@
+[package]
+name = "kaolinite"
+version.workspace = true
+edition.workspace = true
+description = "The kaolinite KMC model: state codes 100-599, unit cell, structural build rules, reactions"
+
+[dependencies]
+kmc-engine = { path = "../kmc-engine" }
+# This crate never
+# depends on kmc-io: it consumes already-parsed structs (design doc §2),
+# which is the hexagonal "domain doesn't know about adapters" rule made
+# literal by the crate graph.
