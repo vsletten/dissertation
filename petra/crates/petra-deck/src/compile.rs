@@ -33,6 +33,9 @@ pub struct CompiledDeck {
     pub kind_names: Vec<String>,
     /// `"Kind.state"`, indexed by `StateId`.
     pub state_names: Vec<String>,
+    /// Occupant species name per state (`None` = vacant), indexed by
+    /// `StateId` — for snapshots/exports that need chemical identity.
+    pub state_occupants: Vec<Option<String>>,
     pub n_states: usize,
     pub initial_per_template: Vec<StateId>,
     pub reactions: Vec<Reaction>,
@@ -85,6 +88,14 @@ impl Names {
     ) -> Result<(), CompileError> {
         if depth > 4 {
             return err(format!("alias nesting too deep at '{r}'"));
+        }
+        if r == "*" {
+            // Wildcard: every declared state. The caller's kind restriction
+            // (if any) still applies, turning this into a degree counter.
+            for ids in self.state_refs.values() {
+                out.extend(ids.iter().copied());
+            }
+            return Ok(());
         }
         if let Some(alias) = r.strip_prefix('@') {
             let members = self
@@ -170,6 +181,7 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         n_states: 0,
     };
     let mut state_names = Vec::new();
+    let mut state_occupants = Vec::new();
     let mut kind_names = Vec::new();
     let mut initial_by_kind = Vec::new();
 
@@ -195,6 +207,11 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
                 return err(format!("duplicate state '{}' in kind '{}'", st.name, k.name));
             }
             state_names.push(format!("{}.{}", k.name, st.name));
+            state_occupants.push(if st.occupant == "vacant" {
+                None
+            } else {
+                Some(st.occupant.clone())
+            });
             names
                 .state_refs
                 .entry(st.name.clone())
@@ -215,28 +232,46 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
     }
     names.n_states = state_names.len();
 
-    // --- unit cell: sites, then bonds expanded onto both endpoints ---
-    let cell = Cell {
-        a: deck.cell.a,
-        b: deck.cell.b,
-        c: deck.cell.c,
-        alpha: deck.cell.alpha,
-        beta: deck.cell.beta,
-        gamma: deck.cell.gamma,
+    // --- unit cell: geometry, sites, then bonds expanded onto both endpoints ---
+    let params = (
+        deck.cell.a,
+        deck.cell.b,
+        deck.cell.c,
+        deck.cell.alpha,
+        deck.cell.beta,
+        deck.cell.gamma,
+    );
+    let cell = match (deck.cell.matrix, params) {
+        (Some(m), (None, None, None, None, None, None)) => Cell::from_matrix(m),
+        (None, (Some(a), Some(b), Some(c), Some(al), Some(be), Some(ga))) => {
+            Cell::from_params(a, b, c, al, be, ga)
+        }
+        _ => {
+            return err(
+                "cell geometry must be either all of a,b,c,alpha,beta,gamma or a matrix, not a mix",
+            )
+        }
     };
     let mut tsites = Vec::new();
     let mut kinds_per_template = Vec::new();
     let mut initial_per_template = Vec::new();
-    for s in &deck.cell.sites {
+    for (si, s) in deck.cell.sites.iter().enumerate() {
         let ki = *names
             .kind_ids
             .get(&s.kind)
             .ok_or_else(|| CompileError(format!("cell site has unknown kind '{}'", s.kind)))?;
         kinds_per_template.push(KindId(ki));
         initial_per_template.push(initial_by_kind[ki as usize]);
+        let frac = match (s.frac, s.cart) {
+            (Some(f), None) => f,
+            (None, Some(c)) => cell
+                .to_fractional(c)
+                .map_err(|e| CompileError(format!("cell site {si}: {e}")))?,
+            _ => return err(format!("cell site {si}: exactly one of frac/cart")),
+        };
         tsites.push(TemplateSite {
             kind: KindId(ki),
-            frac: s.frac,
+            frac,
             bonds: Vec::new(),
         });
     }
@@ -411,6 +446,7 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         kinds_per_template,
         kind_names,
         state_names,
+        state_occupants,
         n_states: names.n_states,
         initial_per_template,
         reactions,
@@ -491,7 +527,7 @@ fn compile_effects(
                 }
                 (EffectTarget::Center, center_kind)
             }
-            "neighbor" => {
+            t @ ("neighbor" | "neighbors") => {
                 let sel = e.select.as_ref().ok_or_else(|| {
                     CompileError(format!("{ctx}: a neighbor effect requires a selector"))
                 })?;
@@ -501,7 +537,12 @@ fn compile_effects(
                         "{ctx}: neighbor-effect selectors must name a kind so 'set' resolves"
                     ))
                 })?;
-                (EffectTarget::FirstMatch(compiled), k.0)
+                let target = if t == "neighbor" {
+                    EffectTarget::FirstMatch(compiled)
+                } else {
+                    EffectTarget::AllMatches(compiled)
+                };
+                (target, k.0)
             }
             other => return err(format!("{ctx}: unknown effect target '{other}'")),
         };

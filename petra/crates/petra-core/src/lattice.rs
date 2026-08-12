@@ -174,14 +174,7 @@ mod tests {
             }
         }
         UnitCell {
-            cell: Cell {
-                a: 3.0,
-                b: 3.0,
-                c: 3.0,
-                alpha: 90.0,
-                beta: 90.0,
-                gamma: 90.0,
-            },
+            cell: Cell::from_params(3.0, 3.0, 3.0, 90.0, 90.0, 90.0),
             sites: vec![TemplateSite {
                 kind: KindId(0),
                 frac: [0.0; 3],

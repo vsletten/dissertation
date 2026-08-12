@@ -62,6 +62,10 @@ pub enum EffectTarget {
     /// The first neighbor (ascending site id) matching the selector.
     /// v0 semantics; a random-match option is planned (design doc §3.3).
     FirstMatch(NeighborSelect),
+    /// Every neighbor matching the selector — the "update both Al
+    /// neighbors of this bridging oxygen" pattern. Matching zero sites is
+    /// legal (unlike `FirstMatch`, which is an error).
+    AllMatches(NeighborSelect),
 }
 
 /// One state assignment.
@@ -105,7 +109,7 @@ impl Reaction {
             .flat_map(|b| &b.effects)
             .filter_map(|e| match &e.target {
                 EffectTarget::Center => None,
-                EffectTarget::FirstMatch(s) => Some(s.distance),
+                EffectTarget::FirstMatch(s) | EffectTarget::AllMatches(s) => Some(s.distance),
             })
             .max();
         g.max(m).max(e).unwrap_or(0)
@@ -162,6 +166,37 @@ pub fn count_matches(
         .iter()
         .filter(|&&s| site_matches(lat, kinds, s, sel))
         .count() as u32
+}
+
+/// All matching neighbors for an `AllMatches` effect target.
+pub fn all_matches(
+    lat: &Lattice,
+    kinds: &[KindId],
+    center: SiteId,
+    sel: &NeighborSelect,
+    scratch: &mut Vec<SiteId>,
+    out: &mut Vec<SiteId>,
+) {
+    out.clear();
+    if sel.distance == 1 && sel.label.is_some() {
+        let label = sel.label.unwrap();
+        let nbrs = lat.neighbors(center);
+        let labels = lat.neighbor_labels(center);
+        out.extend(
+            nbrs.iter()
+                .zip(labels)
+                .filter(|&(&n, &l)| l == label && site_matches(lat, kinds, n as SiteId, sel))
+                .map(|(&n, _)| n as SiteId),
+        );
+        return;
+    }
+    sites_at_distance(lat, center, sel.distance, scratch);
+    out.extend(
+        scratch
+            .iter()
+            .copied()
+            .filter(|&s| site_matches(lat, kinds, s, sel)),
+    );
 }
 
 /// First matching neighbor for an effect target, if any.

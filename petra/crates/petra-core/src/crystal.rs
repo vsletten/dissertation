@@ -12,36 +12,70 @@ pub struct KindId(pub u16);
 /// for selecting a specific bonded partner.
 pub const NO_LABEL: u16 = u16::MAX;
 
-/// Triclinic cell parameters. Angles in degrees.
+/// Cell geometry, stored as the fractional → Cartesian matrix (columns are
+/// the cell vectors). Construct from conventional parameters
+/// ([`Cell::from_params`]) or directly from a matrix ([`Cell::from_matrix`])
+/// — the latter admits nonstandard conventions like the legacy kaolinite
+/// shear cell, which conventional (a b c α β γ) cannot express verbatim.
 #[derive(Debug, Clone, Copy)]
 pub struct Cell {
-    pub a: f64,
-    pub b: f64,
-    pub c: f64,
-    pub alpha: f64,
-    pub beta: f64,
-    pub gamma: f64,
+    m: [[f64; 3]; 3],
 }
 
 impl Cell {
-    /// Fractional → Cartesian matrix (columns are the cell vectors), standard
-    /// crystallographic construction with **a** along x and **b** in the xy
-    /// plane.
-    pub fn matrix(&self) -> [[f64; 3]; 3] {
-        let (al, be, ga) = (
-            self.alpha.to_radians(),
-            self.beta.to_radians(),
-            self.gamma.to_radians(),
-        );
+    /// Standard crystallographic construction with **a** along x and **b**
+    /// in the xy plane. Angles in degrees.
+    pub fn from_params(a: f64, b: f64, c: f64, alpha: f64, beta: f64, gamma: f64) -> Self {
+        let (al, be, ga) = (alpha.to_radians(), beta.to_radians(), gamma.to_radians());
         let (ca, cb, cg, sg) = (al.cos(), be.cos(), ga.cos(), ga.sin());
-        let cx = self.c * cb;
-        let cy = self.c * (ca - cb * cg) / sg;
-        let cz = (self.c * self.c - cx * cx - cy * cy).max(0.0).sqrt();
-        [
-            [self.a, self.b * cg, cx],
-            [0.0, self.b * sg, cy],
-            [0.0, 0.0, cz],
-        ]
+        let cx = c * cb;
+        let cy = c * (ca - cb * cg) / sg;
+        let cz = (c * c - cx * cx - cy * cy).max(0.0).sqrt();
+        Cell {
+            m: [[a, b * cg, cx], [0.0, b * sg, cy], [0.0, 0.0, cz]],
+        }
+    }
+
+    pub fn from_matrix(m: [[f64; 3]; 3]) -> Self {
+        Cell { m }
+    }
+
+    pub fn matrix(&self) -> [[f64; 3]; 3] {
+        self.m
+    }
+
+    /// Cartesian → fractional, via the matrix inverse. Errors on a singular
+    /// (degenerate) cell.
+    pub fn to_fractional(&self, cart: [f64; 3]) -> Result<[f64; 3], String> {
+        let m = &self.m;
+        let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+            - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+        if det.abs() < 1e-12 {
+            return Err("cell matrix is singular".into());
+        }
+        let inv = [
+            [
+                (m[1][1] * m[2][2] - m[1][2] * m[2][1]) / det,
+                (m[0][2] * m[2][1] - m[0][1] * m[2][2]) / det,
+                (m[0][1] * m[1][2] - m[0][2] * m[1][1]) / det,
+            ],
+            [
+                (m[1][2] * m[2][0] - m[1][0] * m[2][2]) / det,
+                (m[0][0] * m[2][2] - m[0][2] * m[2][0]) / det,
+                (m[0][2] * m[1][0] - m[0][0] * m[1][2]) / det,
+            ],
+            [
+                (m[1][0] * m[2][1] - m[1][1] * m[2][0]) / det,
+                (m[0][1] * m[2][0] - m[0][0] * m[2][1]) / det,
+                (m[0][0] * m[1][1] - m[0][1] * m[1][0]) / det,
+            ],
+        ];
+        Ok([
+            inv[0][0] * cart[0] + inv[0][1] * cart[1] + inv[0][2] * cart[2],
+            inv[1][0] * cart[0] + inv[1][1] * cart[1] + inv[1][2] * cart[2],
+            inv[2][0] * cart[0] + inv[2][1] * cart[1] + inv[2][2] * cart[2],
+        ])
     }
 
     /// Fractional coordinates (with integer cell offset) → Cartesian.
@@ -119,14 +153,7 @@ mod tests {
 
     #[test]
     fn orthorhombic_matrix_is_diagonal() {
-        let cell = Cell {
-            a: 3.0,
-            b: 4.0,
-            c: 5.0,
-            alpha: 90.0,
-            beta: 90.0,
-            gamma: 90.0,
-        };
+        let cell = Cell::from_params(3.0, 4.0, 5.0, 90.0, 90.0, 90.0);
         let m = cell.matrix();
         assert!((m[0][0] - 3.0).abs() < 1e-12);
         assert!((m[1][1] - 4.0).abs() < 1e-12);
@@ -141,14 +168,7 @@ mod tests {
     #[test]
     fn reciprocity_detects_missing_mirror() {
         let good = UnitCell {
-            cell: Cell {
-                a: 1.0,
-                b: 1.0,
-                c: 1.0,
-                alpha: 90.0,
-                beta: 90.0,
-                gamma: 90.0,
-            },
+            cell: Cell::from_params(1.0, 1.0, 1.0, 90.0, 90.0, 90.0),
             sites: vec![TemplateSite {
                 kind: KindId(0),
                 frac: [0.0; 3],

@@ -39,25 +39,41 @@ pub struct Meta {
     pub units: Option<String>,
 }
 
+/// Cell geometry: either conventional parameters (`a`..`gamma`, angles in
+/// degrees) or an explicit fractional→Cartesian `matrix` (columns are the
+/// cell vectors) for nonstandard conventions. Exactly one form.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CellSpec {
-    pub a: f64,
-    pub b: f64,
-    pub c: f64,
-    pub alpha: f64,
-    pub beta: f64,
-    pub gamma: f64,
+    #[serde(default)]
+    pub a: Option<f64>,
+    #[serde(default)]
+    pub b: Option<f64>,
+    #[serde(default)]
+    pub c: Option<f64>,
+    #[serde(default)]
+    pub alpha: Option<f64>,
+    #[serde(default)]
+    pub beta: Option<f64>,
+    #[serde(default)]
+    pub gamma: Option<f64>,
+    #[serde(default)]
+    pub matrix: Option<[[f64; 3]; 3]>,
     pub sites: Vec<SiteSpec>,
     #[serde(default)]
     pub bonds: Vec<BondSpec>,
 }
 
+/// A site position: fractional (`frac`) or Cartesian (`cart`, converted
+/// through the cell matrix at compile time). Exactly one.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SiteSpec {
     pub kind: String,
-    pub frac: [f64; 3],
+    #[serde(default)]
+    pub frac: Option<[f64; 3]>,
+    #[serde(default)]
+    pub cart: Option<[f64; 3]>,
 }
 
 /// One declared bond; the compiler expands it onto both endpoints.
@@ -167,7 +183,9 @@ pub struct SelectorSpec {
     /// Bond label filter (distance-1 selectors only).
     #[serde(default)]
     pub label: Option<String>,
-    /// State names, `"Kind.state"` qualified names, or `"@alias"` refs.
+    /// State names, `"Kind.state"` qualified names, `"@alias"` refs, or the
+    /// wildcard `"*"` (every state in scope — with `kind` set this makes
+    /// the selector a degree/coordination counter).
     pub state: Vec<String>,
     /// Guard bounds: default min=1, max=unbounded.
     #[serde(default)]
@@ -251,13 +269,14 @@ pub struct WhenSpec {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EffectSpec {
-    /// `"center"` or `"neighbor"`.
+    /// `"center"`, `"neighbor"` (first match; matching nothing at apply
+    /// time is an error), or `"neighbors"` (all matches; zero is legal).
     pub target: String,
-    /// Required when `target = "neighbor"`; must name a `kind` so `set`
-    /// resolves unambiguously (v0 restriction).
+    /// Required for neighbor targets; must name a `kind` so `set` resolves
+    /// unambiguously (v0 restriction).
     #[serde(default)]
     pub select: Option<SelectorSpec>,
-    /// New state name for the target site.
+    /// New state name for the target site(s).
     pub set: String,
 }
 

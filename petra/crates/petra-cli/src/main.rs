@@ -25,6 +25,7 @@ struct Args {
     out: String,
     paranoid: bool,
     ensemble: u64,
+    xyz: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -35,8 +36,10 @@ fn parse_args() -> Result<Args, String> {
     let mut out = ".".to_string();
     let mut paranoid = false;
     let mut ensemble = 1u64;
+    let mut xyz = false;
     while let Some(a) = args.next() {
         match a.as_str() {
+            "--xyz" => xyz = true,
             "--ensemble" => {
                 ensemble = args
                     .next()
@@ -71,13 +74,14 @@ fn parse_args() -> Result<Args, String> {
     }
     Ok(Args {
         deck: deck.ok_or(
-            "usage: petra <deck.toml> [--steps N] [--seed S] [--out DIR] [--paranoid] [--ensemble N]",
+            "usage: petra <deck.toml> [--steps N] [--seed S] [--out DIR] [--paranoid] [--ensemble N] [--xyz]",
         )?,
         steps,
         seed,
         out,
         paranoid,
         ensemble,
+        xyz,
     })
 }
 
@@ -166,7 +170,53 @@ fn run() -> Result<(), String> {
         println!("  {name}: {count}");
     }
     println!("wrote {csv_path}");
+    if args.xyz {
+        let path = format!("{}/final.xyz", args.out);
+        write_xyz(&engine, &deck, &path)?;
+        println!("wrote {path}");
+    }
     Ok(())
+}
+
+/// Snapshot the occupied sites as plain XYZ: element = occupant species,
+/// position from the cell matrix, state name in the comment column.
+fn write_xyz(
+    engine: &petra_core::Engine,
+    deck: &petra_deck::CompiledDeck,
+    path: &str,
+) -> Result<(), String> {
+    let lat = &engine.lattice;
+    let mut lines = Vec::new();
+    for s in 0..lat.len() {
+        let state = lat.states[s];
+        let Some(species) = &deck.state_occupants[state.0 as usize] else {
+            continue; // vacant
+        };
+        let (cell_coord, t) = lat.coords(s);
+        let pos = deck.unit_cell.cell.to_cartesian(
+            deck.unit_cell.sites[t].frac,
+            [
+                cell_coord[0] as i32,
+                cell_coord[1] as i32,
+                cell_coord[2] as i32,
+            ],
+        );
+        lines.push(format!(
+            "{species} {:.6} {:.6} {:.6} # {}",
+            pos[0], pos[1], pos[2], deck.state_names[state.0 as usize]
+        ));
+    }
+    let mut text = String::new();
+    text.push_str(&format!("{}\n", lines.len()));
+    text.push_str(&format!(
+        "petra deck '{}' step {} time {:.6e}\n",
+        deck.name, engine.step_count, engine.time
+    ));
+    for l in &lines {
+        text.push_str(l);
+        text.push('\n');
+    }
+    std::fs::write(path, text).map_err(|e| e.to_string())
 }
 
 fn run_ensemble(args: &Args, deck: &petra_deck::CompiledDeck) -> Result<(), String> {

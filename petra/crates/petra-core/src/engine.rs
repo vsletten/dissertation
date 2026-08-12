@@ -8,7 +8,7 @@ use rand_pcg::Pcg64Mcg;
 use crate::crystal::KindId;
 use crate::lattice::{Lattice, SiteId};
 use crate::reaction::{
-    first_match, guards_pass, resolve_rate, sites_at_distance, EffectTarget, Reaction,
+    all_matches, first_match, guards_pass, resolve_rate, sites_at_distance, EffectTarget, Reaction,
 };
 
 /// Fenwick (binary-indexed) tree over per-site total rates: O(log N) point
@@ -314,19 +314,28 @@ impl Engine {
         // an effect must not see a sibling effect's result.
         let mut writes: Vec<(SiteId, crate::state::StateId)> =
             Vec::with_capacity(branch.effects.len());
+        let mut matched = Vec::new();
         for eff in &branch.effects {
-            let target = match &eff.target {
-                EffectTarget::Center => site,
-                EffectTarget::FirstMatch(sel) => first_match(
-                    &self.lattice,
-                    &self.kinds,
-                    site,
-                    sel,
-                    &mut self.scratch,
-                )
-                .ok_or(Stop::EffectTargetMissing { site, reaction: ri })?,
-            };
-            writes.push((target, eff.set));
+            match &eff.target {
+                EffectTarget::Center => writes.push((site, eff.set)),
+                EffectTarget::FirstMatch(sel) => {
+                    let target =
+                        first_match(&self.lattice, &self.kinds, site, sel, &mut self.scratch)
+                            .ok_or(Stop::EffectTargetMissing { site, reaction: ri })?;
+                    writes.push((target, eff.set));
+                }
+                EffectTarget::AllMatches(sel) => {
+                    all_matches(
+                        &self.lattice,
+                        &self.kinds,
+                        site,
+                        sel,
+                        &mut self.scratch,
+                        &mut matched,
+                    );
+                    writes.extend(matched.iter().map(|&t| (t, eff.set)));
+                }
+            }
         }
         for (target, new_state) in writes {
             if self.lattice.states[target] != new_state {
