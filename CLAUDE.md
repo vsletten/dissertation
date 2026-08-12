@@ -10,8 +10,9 @@ This is a dissertation project studying kaolin mineral surface reactions through
 2. **legacy/viewer/** - the original React/TypeScript visualizer for simulation output. Superseded by graph-viz.
 3. **kmc-rs/** - the living Rust port (imported subtree, full history). Milestone-gated parity with the C++: dynamics bitwise-identical over 20,000 steps, full-artifact golden gate green. Also a Rust teaching codebase - see kmc-rs/docs/RUST_TOUR.md.
 4. **graph-viz/** - the visualizer overhaul (imported subtree): PGIF-native instanced property-graph viewer.
+5. **petra/** - greenfield generalization of the model: a chemistry-free lattice KMC engine where the mineral (structure, site states, TST reactions) is declared in a TOML input deck instead of code. Design doc: petra/docs/DESIGN.md. Status: P0 (design + tested skeleton).
 
-Active development happens in kmc-rs/ and graph-viz/. Treat legacy/ as read-only reference; changes there need explicit approval.
+Active development happens in kmc-rs/, graph-viz/, and petra/. Treat legacy/ as read-only reference; changes there need explicit approval.
 
 ## Build, Test, and Development Commands
 

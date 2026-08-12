@@ -1,0 +1,11 @@
+[package]
+name = "petra-core"
+description = "Chemistry-free lattice KMC runtime: site graph, interned states, TST rates, guarded rewrites, rejection-free engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rand = { workspace = true }
+rand_pcg = { workspace = true }
+thiserror = { workspace = true }

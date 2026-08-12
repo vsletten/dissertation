@@ -1,0 +1,102 @@
+# Kossel-crystal dissolution/growth — the Petra tutorial deck.
+#
+# One species, one site kind, a simple-cubic lattice, and two elementary
+# reactions. Detachment carries a bond-counting barrier (each occupied
+# neighbor adds `dea` — the BEP-style modifier of design doc §4), so kinks
+# detach fastest and bulk sites are effectively inert; attachment requires
+# at least one occupied neighbor (no homogeneous nucleation) and is driven
+# by the solution chemical potential in [thermo]. With mu < 0 the crystal
+# dissolves from its two open c-faces inward.
+
+[deck]
+name = "kossel"
+comment = "simple-cubic dissolution/growth demo"
+
+[cell]
+a = 3.0
+b = 3.0
+c = 3.0
+alpha = 90.0
+beta = 90.0
+gamma = 90.0
+
+[[cell.sites]]
+kind = "M_site"
+frac = [0.0, 0.0, 0.0]
+
+# Declare +a, +b, +c; the compiler adds the mirrored halves, giving
+# 6-coordination.
+[[cell.bonds]]
+i = 0
+j = 0
+dcell = [1, 0, 0]
+
+[[cell.bonds]]
+i = 0
+j = 0
+dcell = [0, 1, 0]
+
+[[cell.bonds]]
+i = 0
+j = 0
+dcell = [0, 0, 1]
+
+[[species]]
+name = "M"
+
+[[kinds]]
+name = "M_site"
+initial = "occupied"
+
+[[kinds.states]]
+name = "occupied"
+occupant = "M"
+
+[[kinds.states]]
+name = "empty"
+occupant = "vacant"
+
+[lattice]
+dims = [8, 8, 8]
+boundary = ["periodic", "periodic", "open"]
+
+[thermo]
+temperature = 298.15
+
+[thermo.mu]
+M = -2.0     # kcal/mol, undersaturated -> net dissolution
+
+[thermo.activity]
+M = 1.0
+
+# --- detach: occupied -> empty, barrier = 2 kcal/mol per occupied bond ---
+[[reactions]]
+name = "detach"
+center = { kind = "M_site", state = ["occupied"] }
+rate = { arrhenius = { prefactor = 1.0e13, ea = 0.0 } }
+produces = ["M"]
+
+[[reactions.modifiers]]
+select = { distance = 1, state = ["occupied"] }
+per_match = { dea = 2.0 }
+
+[[reactions.effects]]
+target = "center"
+set = "empty"
+
+# --- attach: empty -> occupied next to the crystal, mu-driven ---
+[[reactions]]
+name = "attach"
+center = { kind = "M_site", state = ["empty"] }
+guards = [{ distance = 1, min = 1, state = ["occupied"] }]
+rate = { arrhenius = { prefactor = 1.0e13, ea = 6.0 } }
+consumes = ["M"]
+
+[[reactions.effects]]
+target = "center"
+set = "occupied"
+
+[simulation]
+steps = 20000
+seed = 42
+report_every = 2000
