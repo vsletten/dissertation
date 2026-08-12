@@ -30,6 +30,13 @@ pub struct Meta {
     pub name: String,
     #[serde(default)]
     pub comment: Option<String>,
+    /// Energy unit for every energy-valued field in this deck (activation
+    /// energies, ΔEa modifiers, chemical potentials, ΔH‡, and ΔS‡ per K):
+    /// `"kcal/mol"` (default), `"kJ/mol"`, or `"eV"`. Temperatures are
+    /// always Kelvin; prefactors always 1/s. Converted once at compile
+    /// time — the runtime stays in kcal/mol internally.
+    #[serde(default)]
+    pub units: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -198,7 +205,7 @@ pub struct EyringSpec {
     pub ds: f64,
 }
 
-/// Exactly one of `per_match` / `when` must be present.
+/// Exactly one of `per_match` / `by_count` / `when` must be present.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModifierSpec {
@@ -206,14 +213,26 @@ pub struct ModifierSpec {
     #[serde(default)]
     pub per_match: Option<PerMatchSpec>,
     #[serde(default)]
+    pub by_count: Option<ByCountSpec>,
+    #[serde(default)]
     pub when: Option<WhenSpec>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PerMatchSpec {
-    /// ΔEa added per matching neighbor, kcal/mol.
+    /// ΔEa added per matching neighbor (linear convenience form of
+    /// `by_count`), in deck units.
     pub dea: f64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ByCountSpec {
+    /// Tabulated ΔEa by match count: `dea[n]` applies when `n` neighbors
+    /// match; the last entry extends to all higher counts. The general
+    /// nonlinear form — barriers are rarely linear in coordination.
+    pub dea: Vec<f64>,
 }
 
 #[derive(Debug, Deserialize)]

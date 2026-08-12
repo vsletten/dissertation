@@ -197,9 +197,13 @@ lists readable where the legacy code had literal lists like
 
 ## 4. Rate physics
 
-All rates are computed at load/update time in f64, in **kcal/mol and Kelvin**
-(the dissertation's convention; `R = 1.987×10⁻³ kcal·mol⁻¹·K⁻¹`), with the
-constant factored so switching unit systems is a deck-level choice later.
+All rates are computed at load/update time in f64. The runtime is canonical
+**kcal/mol and Kelvin** (the dissertation's convention;
+`R = 1.987×10⁻³ kcal·mol⁻¹·K⁻¹`); each deck declares its own energy unit —
+`units = "kcal/mol" | "kJ/mol" | "eV"` in `[deck]` — and every energy-valued
+field (Ea, ΔEa modifiers, Δμ, ΔH‡, ΔS‡ per K) is converted once at compile
+time. Temperatures are always Kelvin, prefactors always s⁻¹. (Decided
+2026-08-12: selectable from day 1.)
 
 **Base rate expressions** (per reaction, one of):
 
@@ -219,16 +223,23 @@ from `[thermo]` — the generalization of the legacy adsorption law
 **Environment modifiers.** After the base rate, an ordered list of modifiers
 adjusts the barrier per local environment:
 
-- `per_match { dea }` with a neighbor selector — each matching neighbor adds
-  `dea` to the activation energy (bond-counting / BEP-style; the Kossel
-  example, and the natural reading of most of the legacy variant tables);
+- `by_count { dea = [e₀, e₁, e₂, …] }` with a neighbor selector — a
+  **tabulated** ΔEa indexed by match count, last entry extending to all
+  higher counts. This is the general form: barriers are rarely linear in
+  coordination (Victor, 2026-08-12: "I would bet that it is usually
+  nonlinear"), so a measured or computed per-coordination table goes in
+  verbatim rather than being forced through a slope;
+- `per_match { dea }` — the linear convenience case (`by_count` with a
+  constant increment): bond-counting / BEP-style, used by the Kossel
+  example;
 - `when { guard } → { dea | factor }` — a discrete override when a guard
-  holds (for genuinely non-additive cases, e.g. the legacy Check400 variants
-  that key on the *pair* partner's exact state via the `pair` bond label).
+  holds (for cases keyed on something other than a count, e.g. the legacy
+  Check400 variants that key on the *pair* partner's exact state via the
+  `pair` bond label).
 
-This two-primitive language was chosen by test: it can express every variant
-family in `envrn.cpp` (which are all either counts of neighbors in a state
-set, membership tests on a specific labeled neighbor, or small combinations),
+This language was chosen by test: it can express every variant family in
+`envrn.cpp` (which are all either counts of neighbors in a state set,
+membership tests on a specific labeled neighbor, or small combinations),
 while staying analyzable — the compiler can enumerate a reaction's complete
 variant table for review, which is exactly the table `data.rxn` used to hold
 as opaque numbers.
@@ -289,7 +300,9 @@ The legacy BFS removal of detached clusters becomes an optional post-event
 policy: `detach_clusters = { anchor = <site selector>, action = "remove" }`,
 run only when an event actually severed a bond (cheap incremental check
 first, BFS only on suspicion). Off by default — detachment is a modeling
-*choice* (those clusters are colloids, arguably), and Petra makes it visible.
+*choice* (those clusters are colloids, arguably), and Petra makes it
+visible. (Confirmed 2026-08-12: default doesn't matter as long as it's a
+one-line deck toggle — which it is.)
 
 ## 6. Defects and substitutions (the design-ahead)
 
@@ -375,15 +388,27 @@ float width — deliberately). The replacement ladder:
 | P5 | Defect initialization rules; first substitution study deck | Fe-substituted kaolinite deck runs |
 | P6 | Performance: profiling, superbasin detection report, big-lattice runs | 10⁶-site lattice at interactive step rates |
 
-## 10. Open questions for Victor
+## 10. Decisions (resolved 2026-08-12)
 
-1. **Units**: kcal/mol locked in, or want kJ/mol / eV selectable per deck
-   from day one? (Cheap now, annoying later.)
-2. **Kaolinite deck authorship**: P4 needs the *intended* physics (the
-   non-flat `data.rxn` of kmc-rs spec B4). Same blocker as kmc-rs M8 — your
-   numbers, not archaeology.
-3. **Modifier semantics**: additive ΔEa per matching neighbor is the chosen
-   default. Any legacy variant family you remember being genuinely
-   non-additive beyond the pair-partner cases would stress-test §4's claim.
-4. **Cluster removal default**: legacy removes detached clusters always;
-   Petra defaults it off (§5.5). Right default?
+The v0 open questions, answered by Victor:
+
+1. **Units: selectable per deck from day 1.** Implemented — `[deck] units`
+   accepts `kcal/mol` (default), `kJ/mol`, `eV`; conversion happens once at
+   compile time, runtime stays canonical kcal/mol (§4).
+2. **Kaolinite deck numbers: the old model's numbers are all there is.**
+   Context, since the original phrasing confused: the legacy `data.rxn`
+   carries an environment-variant table per reaction (15–40 variants), but
+   every variant within a reaction holds *identical* numbers — e.g. all 15
+   Si-O-Si hydrolysis variants read `(1, 2.6)` — so the environment
+   machinery never actually differentiates rates in the shipped inputs
+   ("flat tables", kmc-rs spec B4). There are no other numbers. Resolution:
+   the P4 kaolinite deck uses the legacy values as-is — which is *better*
+   for the cross-check anyway, since both codes then run identical physics;
+   flat tables also collapse cleanly to plain base rates in deck form.
+   Differentiated per-environment barriers become a science question on top
+   of a validated deck (`by_count` tables are the natural slot for them).
+3. **Modifiers: nonlinear in general.** ΔEa is usually *not* additive per
+   matching neighbor. Implemented — `by_count` tabulated ΔEa is the general
+   primitive; `per_match` remains as the linear convenience (§4).
+4. **Cluster removal: default is a don't-care; changeability is the
+   requirement.** Stays off by default as a one-line deck toggle (§5.5).

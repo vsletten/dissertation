@@ -25,6 +25,7 @@ fn err<T>(msg: impl Into<String>) -> Result<T, CompileError> {
 
 /// Everything the engine and the reporting layer need, with the name
 /// tables kept for output (the runtime itself sees only dense ids).
+#[derive(Debug)]
 pub struct CompiledDeck {
     pub name: String,
     pub unit_cell: UnitCell,
@@ -132,7 +133,22 @@ impl Names {
     }
 }
 
+/// kcal/mol per deck energy unit (design doc §4: the runtime is canonical
+/// kcal/mol; decks choose their unit and are converted once, here).
+fn energy_factor(units: Option<&str>) -> Result<f64, CompileError> {
+    match units.unwrap_or("kcal/mol") {
+        "kcal/mol" => Ok(1.0),
+        "kJ/mol" => Ok(1.0 / 4.184),
+        "eV" => Ok(23.060_548),
+        other => err(format!(
+            "unknown units '{other}' (expected kcal/mol, kJ/mol, or eV)"
+        )),
+    }
+}
+
 pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
+    let eunit = energy_factor(deck.deck.units.as_deref())?;
+
     // --- species ---
     let mut species = BTreeMap::new();
     for s in &deck.species {
@@ -301,7 +317,7 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
             });
         }
 
-        let rate = compile_rate(&r.rate, &ctx)?;
+        let rate = compile_rate(&r.rate, eunit, &ctx)?;
 
         // Fold solution coupling into ln_thermo (design doc §4):
         // each consumed species contributes ln(activity) + Δμ/RT.
@@ -314,7 +330,8 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
             if activity <= 0.0 {
                 return err(format!("{ctx}: activity of '{sp}' must be positive"));
             }
-            ln_thermo += activity.ln() + deck.thermo.mu.get(sp).copied().unwrap_or(0.0) / rt;
+            ln_thermo +=
+                activity.ln() + deck.thermo.mu.get(sp).copied().unwrap_or(0.0) * eunit / rt;
         }
         for sp in &r.produces {
             if !species.contains_key(sp) {
@@ -325,15 +342,27 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         let mut modifiers = Vec::new();
         for m in &r.modifiers {
             let select = compile_selector(&names, &m.select, &ctx)?;
-            let kind = match (&m.per_match, &m.when) {
-                (Some(p), None) => ModifierKind::PerMatch { dea: p.dea },
-                (None, Some(w)) => ModifierKind::When {
+            let kind = match (&m.per_match, &m.by_count, &m.when) {
+                (Some(p), None, None) => ModifierKind::PerMatch { dea: p.dea * eunit },
+                (None, Some(b), None) => {
+                    if b.dea.is_empty() {
+                        return err(format!("{ctx}: by_count.dea must be non-empty"));
+                    }
+                    ModifierKind::ByCount {
+                        dea: b.dea.iter().map(|d| d * eunit).collect(),
+                    }
+                }
+                (None, None, Some(w)) => ModifierKind::When {
                     min: w.min.unwrap_or(1),
                     max: w.max.unwrap_or(u32::MAX),
-                    dea: w.dea.unwrap_or(0.0),
+                    dea: w.dea.unwrap_or(0.0) * eunit,
                     factor: w.factor.unwrap_or(1.0),
                 },
-                _ => return err(format!("{ctx}: modifier needs exactly one of per_match/when")),
+                _ => {
+                    return err(format!(
+                        "{ctx}: modifier needs exactly one of per_match/by_count/when"
+                    ))
+                }
             };
             modifiers.push(Modifier { select, kind });
         }
@@ -427,14 +456,17 @@ fn compile_selector(
     })
 }
 
-fn compile_rate(r: &RateSpec, ctx: &str) -> Result<RateExpr, CompileError> {
+fn compile_rate(r: &RateSpec, eunit: f64, ctx: &str) -> Result<RateExpr, CompileError> {
     match (r.constant, &r.arrhenius, &r.eyring) {
         (Some(k), None, None) => Ok(RateExpr::Constant { k }),
         (None, Some(a), None) => Ok(RateExpr::Arrhenius {
             prefactor: a.prefactor,
-            ea: a.ea,
+            ea: a.ea * eunit,
         }),
-        (None, None, Some(e)) => Ok(RateExpr::Eyring { dh: e.dh, ds: e.ds }),
+        (None, None, Some(e)) => Ok(RateExpr::Eyring {
+            dh: e.dh * eunit,
+            ds: e.ds * eunit,
+        }),
         _ => err(format!(
             "{ctx}: rate needs exactly one of constant/arrhenius/eyring"
         )),

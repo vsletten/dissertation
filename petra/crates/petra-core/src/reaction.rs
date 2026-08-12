@@ -30,8 +30,15 @@ pub struct Guard {
 #[derive(Debug, Clone)]
 pub enum ModifierKind {
     /// Each matching neighbor adds `dea` (kcal/mol) to the activation
-    /// energy — bond-counting / BEP-style.
+    /// energy — bond-counting / BEP-style. The *linear* convenience case
+    /// of [`ModifierKind::ByCount`].
     PerMatch { dea: f64 },
+    /// Tabulated ΔEa by match count: `dea[n]` is added when `n` neighbors
+    /// match, with the last entry extending to all higher counts. The
+    /// general nonlinear form — real barriers are rarely linear in
+    /// coordination, so a measured/computed table goes here verbatim.
+    /// Non-empty by construction (deck validation).
+    ByCount { dea: Vec<f64> },
     /// If the match count lies in `[min, max]`, add `dea` and multiply the
     /// rate by `factor` — discrete overrides for non-additive cases.
     When {
@@ -206,15 +213,18 @@ pub fn resolve_rate(
     let mut factor = 1.0;
     for m in &rxn.modifiers {
         let n = count_matches(lat, kinds, center, &m.select, scratch);
-        match m.kind {
+        match &m.kind {
             ModifierKind::PerMatch { dea } => extra_ea += dea * n as f64,
+            ModifierKind::ByCount { dea } => {
+                extra_ea += dea[(n as usize).min(dea.len() - 1)];
+            }
             ModifierKind::When {
                 min,
                 max,
                 dea,
                 factor: f,
             } => {
-                if n >= min && n <= max {
+                if n >= *min && n <= *max {
                     extra_ea += dea;
                     factor *= f;
                 }
