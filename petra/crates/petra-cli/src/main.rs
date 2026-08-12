@@ -1,11 +1,17 @@
 //! petra — run a deck.
 //!
 //! Usage: petra <deck.toml> [--steps N] [--seed S] [--out DIR] [--paranoid]
+//!                          [--ensemble N]
 //!
 //! Writes `populations.csv` (step, time, one column per state) to the
 //! output directory and prints a run summary. `--paranoid` re-derives every
 //! site's events from scratch each report interval and asserts agreement
 //! with the incrementally maintained tables (design doc §5.2).
+//!
+//! `--ensemble N` runs N independent trajectories with seeds S, S+1, …,
+//! S+N-1, writes per-seed final states to `ensemble.csv`, and prints
+//! mean ± std per state — the ensemble-first validation workflow of design
+//! doc §8 (the thing the legacy seed swallow made impossible).
 
 use std::io::Write as _;
 use std::process::ExitCode;
@@ -18,6 +24,7 @@ struct Args {
     seed: Option<u64>,
     out: String,
     paranoid: bool,
+    ensemble: u64,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -27,8 +34,19 @@ fn parse_args() -> Result<Args, String> {
     let mut seed = None;
     let mut out = ".".to_string();
     let mut paranoid = false;
+    let mut ensemble = 1u64;
     while let Some(a) = args.next() {
         match a.as_str() {
+            "--ensemble" => {
+                ensemble = args
+                    .next()
+                    .ok_or("--ensemble needs a value")?
+                    .parse()
+                    .map_err(|e| format!("--ensemble: {e}"))?;
+                if ensemble == 0 {
+                    return Err("--ensemble must be at least 1".into());
+                }
+            }
             "--steps" => {
                 steps = Some(
                     args.next()
@@ -52,11 +70,14 @@ fn parse_args() -> Result<Args, String> {
         }
     }
     Ok(Args {
-        deck: deck.ok_or("usage: petra <deck.toml> [--steps N] [--seed S] [--out DIR] [--paranoid]")?,
+        deck: deck.ok_or(
+            "usage: petra <deck.toml> [--steps N] [--seed S] [--out DIR] [--paranoid] [--ensemble N]",
+        )?,
         steps,
         seed,
         out,
         paranoid,
+        ensemble,
     })
 }
 
@@ -73,6 +94,9 @@ fn main() -> ExitCode {
 fn run() -> Result<(), String> {
     let args = parse_args()?;
     let deck = petra_deck::load(&args.deck).map_err(|e| e.to_string())?;
+    if args.ensemble > 1 {
+        return run_ensemble(&args, &deck);
+    }
     let mut engine = deck.build_engine(args.seed);
     let steps = args.steps.unwrap_or(deck.steps);
     let report_every = if deck.report_every == 0 {
@@ -140,6 +164,63 @@ fn run() -> Result<(), String> {
     let counts = engine.state_counts(deck.n_states);
     for (name, count) in deck.state_names.iter().zip(&counts) {
         println!("  {name}: {count}");
+    }
+    println!("wrote {csv_path}");
+    Ok(())
+}
+
+fn run_ensemble(args: &Args, deck: &petra_deck::CompiledDeck) -> Result<(), String> {
+    let steps = args.steps.unwrap_or(deck.steps);
+    let base_seed = args.seed.unwrap_or(deck.seed);
+
+    std::fs::create_dir_all(&args.out).map_err(|e| e.to_string())?;
+    let csv_path = format!("{}/ensemble.csv", args.out);
+    let mut csv = std::fs::File::create(&csv_path).map_err(|e| e.to_string())?;
+    writeln!(csv, "seed,steps,time,{}", deck.state_names.join(","))
+        .map_err(|e| e.to_string())?;
+
+    println!(
+        "deck '{}': ensemble of {} runs, seeds {}..={}, {} steps each",
+        deck.name,
+        args.ensemble,
+        base_seed,
+        base_seed + args.ensemble - 1,
+        steps
+    );
+
+    // Per-state running sums for mean/std over ensemble members.
+    let mut sum = vec![0.0f64; deck.n_states];
+    let mut sumsq = vec![0.0f64; deck.n_states];
+    for k in 0..args.ensemble {
+        let seed = base_seed + k;
+        let mut engine = deck.build_engine(Some(seed));
+        for _ in 0..steps {
+            if engine.step().is_err() {
+                break;
+            }
+        }
+        let counts = engine.state_counts(deck.n_states);
+        let row: Vec<String> = counts.iter().map(|c| c.to_string()).collect();
+        writeln!(
+            csv,
+            "{seed},{},{:.6e},{}",
+            engine.step_count,
+            engine.time,
+            row.join(",")
+        )
+        .map_err(|e| e.to_string())?;
+        for (i, &c) in counts.iter().enumerate() {
+            sum[i] += c as f64;
+            sumsq[i] += (c as f64) * (c as f64);
+        }
+    }
+
+    let n = args.ensemble as f64;
+    println!("final populations, mean ± std over {} members:", args.ensemble);
+    for (i, name) in deck.state_names.iter().enumerate() {
+        let mean = sum[i] / n;
+        let var = (sumsq[i] / n - mean * mean).max(0.0);
+        println!("  {name}: {mean:.2} ± {:.2}", var.sqrt());
     }
     println!("wrote {csv_path}");
     Ok(())

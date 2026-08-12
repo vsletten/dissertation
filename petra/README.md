@@ -10,8 +10,11 @@ of them.
 
 **Start with [`docs/DESIGN.md`](docs/DESIGN.md)** — the architecture,
 the deck format, the rate physics, the engine algorithms, and the roadmap
-(P0–P6). This tree is the P0 milestone: the design plus a compiling,
-tested skeleton that proves the shape end to end.
+(P0–P6). Landed so far: P0 (design + tested skeleton), per-deck energy
+units (kcal/mol, kJ/mol, eV), tabulated nonlinear ΔEa modifiers
+(`by_count`), the P2 analytic gates (two-state equilibrium, Langmuir
+isotherm, waiting-time statistics), and the `--ensemble` seed-sweep
+runner.
 
 ## Layout
 
