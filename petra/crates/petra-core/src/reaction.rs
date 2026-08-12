@@ -15,6 +15,9 @@ pub struct NeighborSelect {
     pub distance: u8,
     pub kind: Option<KindId>,
     pub label: Option<u16>,
+    /// Restrict to frozen (`Some(true)`) or unfrozen (`Some(false)`) sites —
+    /// the "occupied AND not part of the frozen boundary" tests.
+    pub frozen: Option<bool>,
     pub states: StateSet,
 }
 
@@ -68,11 +71,63 @@ pub enum EffectTarget {
     AllMatches(NeighborSelect),
 }
 
-/// One state assignment.
+/// What an effect does to its target site's state.
+#[derive(Debug, Clone)]
+pub enum EffectOp {
+    /// Set to a fixed state.
+    Set(StateId),
+    /// Move n steps along the target's kind state ladder (states in deck
+    /// declaration order — ids within a kind are contiguous by
+    /// construction). The kaolinite "protonation counter" pattern:
+    /// `state++`/`state--` on a cation. Out-of-ladder is an apply error.
+    Shift(i32),
+    /// Per-state transition table (the adsorption/desorption oxygen-shell
+    /// rewrites). A target whose state has no entry either errors
+    /// (`missing_is_error` — legacy adsorb) or is left unchanged (legacy
+    /// desorb).
+    Map {
+        entries: Vec<(StateId, StateId)>,
+        missing_is_error: bool,
+    },
+}
+
+/// One state rewrite.
 #[derive(Debug, Clone)]
 pub struct Effect {
     pub target: EffectTarget,
-    pub set: StateId,
+    pub op: EffectOp,
+}
+
+impl EffectOp {
+    /// Resolve this op against a target's current state. `kind_range` is
+    /// the contiguous `StateId` range (start, count) of the target's kind,
+    /// for `Shift`. Returns `Ok(None)` for "leave unchanged" (a `Map` miss
+    /// with `missing_is_error = false`), `Err` for a genuine violation.
+    pub fn resolve(
+        &self,
+        current: StateId,
+        kind_range: (u16, u16),
+    ) -> Result<Option<StateId>, &'static str> {
+        match self {
+            EffectOp::Set(s) => Ok(Some(*s)),
+            EffectOp::Shift(n) => {
+                let (start, count) = kind_range;
+                let idx = current.0 as i32 - start as i32 + n;
+                if idx < 0 || idx >= count as i32 {
+                    return Err("shift leaves the kind's state ladder");
+                }
+                Ok(Some(StateId(start + idx as u16)))
+            }
+            EffectOp::Map {
+                entries,
+                missing_is_error,
+            } => match entries.iter().find(|(from, _)| *from == current) {
+                Some((_, to)) => Ok(Some(*to)),
+                None if *missing_is_error => Err("state has no map entry"),
+                None => Ok(None),
+            },
+        }
+    }
 }
 
 /// A weighted alternative outcome (generalizes the legacy R4/R9 proton
@@ -228,6 +283,11 @@ pub fn first_match(
 fn site_matches(lat: &Lattice, kinds: &[KindId], s: SiteId, sel: &NeighborSelect) -> bool {
     if let Some(k) = sel.kind {
         if kinds[s] != k {
+            return false;
+        }
+    }
+    if let Some(f) = sel.frozen {
+        if lat.frozen[s] != f {
             return false;
         }
     }

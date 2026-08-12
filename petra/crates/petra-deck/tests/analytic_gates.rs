@@ -153,7 +153,7 @@ fn time_averaged_state0_fraction(
     steps: u64,
     burn_in: u64,
 ) -> f64 {
-    let mut engine = deck.build_engine(Some(seed));
+    let mut engine = deck.build_engine(Some(seed)).expect("engine builds");
     let n = engine.lattice.len() as f64;
     let mut last_time = 0.0;
     let mut weighted = 0.0;
@@ -213,7 +213,7 @@ fn mean_waiting_time_tracks_total_rate() {
     // dt·R_total must be 1 (unit-mean exponential draws).
     let parsed: petra_deck::DeckFile = toml::from_str(TWO_STATE).expect("valid deck");
     let deck = petra_deck::compile(&parsed).expect("compiles");
-    let mut engine = deck.build_engine(Some(13));
+    let mut engine = deck.build_engine(Some(13)).expect("engine builds");
 
     let mut last_time = 0.0;
     let mut sum = 0.0;

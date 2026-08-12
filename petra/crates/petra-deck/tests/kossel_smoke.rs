@@ -30,7 +30,7 @@ fn kossel_deck_compiles_with_expected_shape() {
 #[test]
 fn kossel_run_dissolves_under_undersaturation() {
     let deck = petra_deck::load(deck_path()).expect("deck should load");
-    let mut engine = deck.build_engine(Some(7));
+    let mut engine = deck.build_engine(Some(7)).expect("engine builds");
     let n_sites = engine.lattice.len() as u64;
     assert_eq!(n_sites, 8 * 8 * 8);
 
@@ -79,7 +79,7 @@ fn same_seed_reproduces_same_seed_diverges_different() {
     let deck = petra_deck::load(deck_path()).expect("deck should load");
 
     let run = |seed: u64| {
-        let mut e = deck.build_engine(Some(seed));
+        let mut e = deck.build_engine(Some(seed)).expect("engine builds");
         for _ in 0..500 {
             if e.step().is_err() {
                 break;

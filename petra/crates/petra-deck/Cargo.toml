@@ -10,3 +10,9 @@ petra-core = { path = "../petra-core" }
 serde = { workspace = true }
 toml = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+# The golden structural gate builds the kaolinite lattice with the
+# parity-tested kmc-rs builder and compares Petra's build site-by-site.
+kaolinite = { path = "../../../kmc-rs/crates/kaolinite" }
+kmc-io = { path = "../../../kmc-rs/crates/kmc-io" }

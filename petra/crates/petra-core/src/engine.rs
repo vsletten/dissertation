@@ -124,6 +124,12 @@ pub enum Stop {
     ZeroRate,
     #[error("reaction {reaction} at site {site}: effect selector matched no neighbor")]
     EffectTargetMissing { site: SiteId, reaction: u16 },
+    #[error("reaction {reaction} at site {site}: {reason}")]
+    EffectFailed {
+        site: SiteId,
+        reaction: u16,
+        reason: &'static str,
+    },
 }
 
 /// Steps between full tree rebuilds (float-drift hygiene).
@@ -136,6 +142,8 @@ pub struct Engine {
     kinds: Vec<KindId>,
     /// Reaction ids grouped by center kind.
     by_kind: Vec<Vec<u16>>,
+    /// Contiguous StateId range (start, count) per kind, for Shift effects.
+    kind_state_ranges: Vec<(u16, u16)>,
     temperature: f64,
     /// Cached candidate events per site: (reaction id, resolved rate).
     site_events: Vec<Vec<(u16, f64)>>,
@@ -156,6 +164,7 @@ impl Engine {
         lattice: Lattice,
         kinds_per_template: &[KindId],
         n_kinds: usize,
+        kind_state_ranges: Vec<(u16, u16)>,
         reactions: Vec<Reaction>,
         temperature: f64,
         seed: u64,
@@ -180,6 +189,7 @@ impl Engine {
             reactions,
             kinds,
             by_kind,
+            kind_state_ranges,
             temperature,
             site_events: vec![Vec::new(); n],
             tree: RateTree::new(n),
@@ -312,17 +322,17 @@ impl Engine {
         let mut changed = Vec::with_capacity(branch.effects.len());
         // Resolve all targets against the *pre-effect* state, then write —
         // an effect must not see a sibling effect's result.
-        let mut writes: Vec<(SiteId, crate::state::StateId)> =
+        let mut targets: Vec<(SiteId, &crate::reaction::EffectOp)> =
             Vec::with_capacity(branch.effects.len());
         let mut matched = Vec::new();
         for eff in &branch.effects {
             match &eff.target {
-                EffectTarget::Center => writes.push((site, eff.set)),
+                EffectTarget::Center => targets.push((site, &eff.op)),
                 EffectTarget::FirstMatch(sel) => {
                     let target =
                         first_match(&self.lattice, &self.kinds, site, sel, &mut self.scratch)
                             .ok_or(Stop::EffectTargetMissing { site, reaction: ri })?;
-                    writes.push((target, eff.set));
+                    targets.push((target, &eff.op));
                 }
                 EffectTarget::AllMatches(sel) => {
                     all_matches(
@@ -333,7 +343,33 @@ impl Engine {
                         &mut self.scratch,
                         &mut matched,
                     );
-                    writes.extend(matched.iter().map(|&t| (t, eff.set)));
+                    targets.extend(matched.iter().map(|&t| (t, &eff.op)));
+                }
+            }
+        }
+        // Resolve every op against the pre-effect states, then write.
+        let mut writes: Vec<(SiteId, crate::state::StateId)> = Vec::with_capacity(targets.len());
+        for (target, op) in targets {
+            if self.lattice.frozen[target] {
+                // A frozen site is immutable during dynamics (the legacy
+                // EDGE analog would abort here); decks exclude frozen
+                // sites from effect selectors explicitly.
+                return Err(Stop::EffectFailed {
+                    site,
+                    reaction: ri,
+                    reason: "effect writes a frozen site",
+                });
+            }
+            let range = self.kind_state_ranges[self.kinds[target].0 as usize];
+            match op.resolve(self.lattice.states[target], range) {
+                Ok(Some(new_state)) => writes.push((target, new_state)),
+                Ok(None) => {} // map miss with skip policy: leave unchanged
+                Err(reason) => {
+                    return Err(Stop::EffectFailed {
+                        site,
+                        reaction: ri,
+                        reason,
+                    })
                 }
             }
         }

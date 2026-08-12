@@ -380,13 +380,22 @@ float width — deliberately). The replacement ladder:
 
 | # | Lands | Exit test |
 | --- | --- | --- |
-| P0 | This doc + workspace skeleton: core types, Fenwick engine, deck schema, Kossel example compiles & runs | `cargo test` green; smoke test runs 10⁴ steps |
-| P1 | Full guard/modifier semantics incl. distance-2, labeled bonds, branches; influence-radius compiler | variant-table dump matches hand analysis; paranoid mode green |
-| P2 | Analytic gates; detailed-balance linter; ensemble runner (seed sweep + aggregation) | gates 2–3 above green in CI |
-| P3 | Outputs: extended-XYZ, event log, PGIF export to graph-viz | a Kossel run renders in graph-viz |
-| P4 | The kaolinite deck + cross-check vs kmc-rs corrected mode | agreement bands documented |
+| P0 | ✅ This doc + workspace skeleton: core types, Fenwick engine, deck schema, Kossel example compiles & runs | `cargo test` green; smoke test runs 10⁴ steps |
+| P1 | Mostly landed with P4: distance-2 guards, labeled bonds, branches, frozen filters, set/shift/map effect ops. Remaining: variant-table dump, auto-reverse generation | variant-table dump matches hand analysis |
+| P2 | ✅ Analytic gates (two-state, Langmuir, waiting times); ensemble runner. Remaining: detailed-balance linter | gates green in CI |
+| P3 | Partial: plain-XYZ snapshots (`--xyz`). Remaining: extended-XYZ, event log, PGIF export to graph-viz | a Kossel run renders in graph-viz |
+| P4 | ✅ The kaolinite deck (`examples/kaolinite.toml`) with the legacy `data.rxn` numbers, **corrected physics** (bounded surface test, R13 restored, Δμ un-swapped; as-implemented termination maps). Structural golden gate: Petra's built lattice matches the kmc-rs (bitwise-parity-tested) builder **site-by-site** — states, EDGE⟺frozen, degrees — plus a 5k-step dynamics gate with paranoid differential checks. The build machinery this required is general: deck-declared init passes (region clears, per-neighbor termination maps, hydroxyl counting), the pr1/pr2 state split replacing the hidden `lostal` field, and labeled-bond addressing | `kaolinite_golden.rs` green |
 | P5 | Defect initialization rules; first substitution study deck | Fe-substituted kaolinite deck runs |
 | P6 | Performance: profiling, superbasin detection report, big-lattice runs | 10⁶-site lattice at interactive step rates |
+
+**P4 cross-check caveat, stated honestly:** trajectory-level agreement bands
+against kmc-rs are *not possible yet* — kmc-rs today implements only legacy
+mode, whose forward-hydrolysis surface test carries the out-of-bounds
+phantom (reform R1) that Petra deliberately does not reproduce (~4× the
+forward-hydrolysis event availability). The site-by-site structural gate is
+the strongest cross-check available until kmc-rs's corrected mode lands;
+at that point ensemble observables (population trajectories, dissolution
+rate vs Δμ) become comparable.
 
 ## 10. Decisions (resolved 2026-08-12)
 

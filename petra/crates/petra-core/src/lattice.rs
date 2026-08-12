@@ -18,9 +18,12 @@ pub enum Boundary {
     Periodic,
     /// Bonds crossing the face are dropped (free surface on both faces).
     Open,
-    /// Like `Open`, but sites in the layer of cells at coordinate 0 along
-    /// this axis are frozen: they appear in neighbors' environments but
-    /// never react. Anchors a slab from below.
+    /// Like `Open`, but sites in the two extreme cell layers along this
+    /// axis whose bond template could not fully resolve (they lost bonds to
+    /// the cut) are frozen: they appear in neighbors' environments but
+    /// never react. This is the legacy kaolinite `TerminateLattice` EDGE
+    /// rule — a frozen ragged wall standing in for bulk crystal beyond the
+    /// simulation box.
     Fixed,
 }
 
@@ -112,10 +115,11 @@ impl Lattice {
                     for (t, tsite) in ucell.sites.iter().enumerate() {
                         lat.template_index.push(t as u16);
                         lat.states.push(initial_state(t));
-                        let frozen = (0..3).any(|ax| {
-                            boundary[ax] == Boundary::Fixed && [a, b, c][ax] == 0
+                        let in_fixed_layer = (0..3).any(|ax| {
+                            boundary[ax] == Boundary::Fixed
+                                && ([a, b, c][ax] == 0 || [a, b, c][ax] == dims[ax] - 1)
                         });
-                        lat.frozen.push(frozen);
+                        let mut dropped_bonds = 0usize;
 
                         for bond in &tsite.bonds {
                             let mut target = [0usize; 3];
@@ -143,9 +147,12 @@ impl Lattice {
                                     + bond.to;
                                 lat.adj.push(to as u32);
                                 lat.adj_label.push(bond.label);
+                            } else {
+                                dropped_bonds += 1;
                             }
                         }
                         lat.adj_off.push(lat.adj.len() as u32);
+                        lat.frozen.push(in_fixed_layer && dropped_bonds > 0);
                     }
                 }
             }
@@ -220,16 +227,19 @@ mod tests {
     }
 
     #[test]
-    fn fixed_axis_freezes_bottom_layer_only() {
+    fn fixed_axis_freezes_ragged_extreme_layers() {
         let lat = Lattice::build(
             &sc_cell(),
             [2, 2, 3],
             [Boundary::Periodic, Boundary::Periodic, Boundary::Fixed],
             |_| StateId(0),
         );
+        // Simple-cubic single-site cell: every site in the two extreme
+        // c-layers loses exactly one bond to the cut, so both faces freeze;
+        // the interior layer stays live.
         for s in 0..lat.len() {
             let ([_, _, c], _) = lat.coords(s);
-            assert_eq!(lat.frozen[s], c == 0, "site {s} at c={c}");
+            assert_eq!(lat.frozen[s], c == 0 || c == 2, "site {s} at c={c}");
         }
     }
 }

@@ -101,7 +101,7 @@ fn run() -> Result<(), String> {
     if args.ensemble > 1 {
         return run_ensemble(&args, &deck);
     }
-    let mut engine = deck.build_engine(args.seed);
+    let mut engine = deck.build_engine(args.seed).map_err(|e| e.to_string())?;
     let steps = args.steps.unwrap_or(deck.steps);
     let report_every = if deck.report_every == 0 {
         steps.max(1)
@@ -243,7 +243,7 @@ fn run_ensemble(args: &Args, deck: &petra_deck::CompiledDeck) -> Result<(), Stri
     let mut sumsq = vec![0.0f64; deck.n_states];
     for k in 0..args.ensemble {
         let seed = base_seed + k;
-        let mut engine = deck.build_engine(Some(seed));
+        let mut engine = deck.build_engine(Some(seed)).expect("engine builds");
         for _ in 0..steps {
             if engine.step().is_err() {
                 break;

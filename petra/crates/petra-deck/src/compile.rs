@@ -8,7 +8,8 @@ use petra_core::crystal::{Cell, KindId, TemplateBond, TemplateSite, UnitCell, NO
 use petra_core::lattice::{Boundary, Lattice};
 use petra_core::rate::{RateExpr, R_KCAL};
 use petra_core::reaction::{
-    Branch, Effect, EffectTarget, Guard, Modifier, ModifierKind, NeighborSelect, Reaction,
+    count_matches, Branch, Effect, EffectOp, EffectTarget, Guard, Modifier, ModifierKind,
+    NeighborSelect, Reaction,
 };
 use petra_core::state::{StateId, StateSet};
 use petra_core::Engine;
@@ -37,7 +38,10 @@ pub struct CompiledDeck {
     /// `StateId` — for snapshots/exports that need chemical identity.
     pub state_occupants: Vec<Option<String>>,
     pub n_states: usize,
+    /// Contiguous StateId range (start, count) per kind, for Shift effects.
+    pub kind_state_ranges: Vec<(u16, u16)>,
     pub initial_per_template: Vec<StateId>,
+    pub init_passes: Vec<InitPass>,
     pub reactions: Vec<Reaction>,
     pub temperature: f64,
     pub dims: [usize; 3],
@@ -47,20 +51,92 @@ pub struct CompiledDeck {
     pub report_every: u64,
 }
 
+/// One compiled build-time pass (design doc §3.1 fill rules): sweep all
+/// sites in index order, writes immediately visible — the legacy
+/// TerminateSurface convention.
+#[derive(Debug)]
+pub struct InitPass {
+    pub name: String,
+    pub center_kind: Option<KindId>,
+    pub center_states: StateSet,
+    /// (axis, min, max) inclusive cell-coordinate slab.
+    pub region: Option<(u8, usize, usize)>,
+    pub guards: Vec<Guard>,
+    /// Apply the op once per matching neighbor instead of once.
+    pub foreach: Option<NeighborSelect>,
+    pub op: EffectOp,
+}
+
 impl CompiledDeck {
-    /// Instantiate the lattice and engine (perfect-crystal fill; defect
-    /// fills mutate `engine.lattice.states` before stepping).
-    pub fn build_engine(&self, seed_override: Option<u64>) -> Engine {
+    /// Instantiate the lattice (uniform per-kind fill), run the init
+    /// passes, and build the engine.
+    pub fn build_engine(&self, seed_override: Option<u64>) -> Result<Engine, CompileError> {
         let initial = self.initial_per_template.clone();
-        let lattice = Lattice::build(&self.unit_cell, self.dims, self.boundary, |t| initial[t]);
-        Engine::new(
+        let mut lattice =
+            Lattice::build(&self.unit_cell, self.dims, self.boundary, |t| initial[t]);
+        let kinds: Vec<KindId> = lattice
+            .template_index
+            .iter()
+            .map(|&t| self.kinds_per_template[t as usize])
+            .collect();
+        self.run_init(&mut lattice, &kinds)?;
+        Ok(Engine::new(
             lattice,
             &self.kinds_per_template,
             self.kind_names.len(),
+            self.kind_state_ranges.clone(),
             self.reactions.clone(),
             self.temperature,
             seed_override.unwrap_or(self.seed),
-        )
+        ))
+    }
+
+    fn run_init(&self, lattice: &mut Lattice, kinds: &[KindId]) -> Result<(), CompileError> {
+        let mut scratch = Vec::new();
+        for pass in &self.init_passes {
+            for s in 0..lattice.len() {
+                if let Some((axis, min, max)) = pass.region {
+                    let (cell, _) = lattice.coords(s);
+                    let coord = cell[axis as usize];
+                    if coord < min || coord > max {
+                        continue;
+                    }
+                }
+                if let Some(k) = pass.center_kind {
+                    if kinds[s] != k {
+                        continue;
+                    }
+                }
+                if !pass.center_states.contains(lattice.states[s]) {
+                    continue;
+                }
+                let guards_ok = pass.guards.iter().all(|g| {
+                    let n = count_matches(lattice, kinds, s, &g.select, &mut scratch);
+                    n >= g.min && n <= g.max
+                });
+                if !guards_ok {
+                    continue;
+                }
+                let times = match &pass.foreach {
+                    None => 1,
+                    Some(sel) => count_matches(lattice, kinds, s, sel, &mut scratch),
+                };
+                let range = self.kind_state_ranges[kinds[s].0 as usize];
+                for _ in 0..times {
+                    match pass.op.resolve(lattice.states[s], range) {
+                        Ok(Some(new_state)) => lattice.states[s] = new_state,
+                        Ok(None) => {}
+                        Err(reason) => {
+                            return err(format!(
+                                "init pass '{}' failed at site {s}: {reason}",
+                                pass.name
+                            ))
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -184,9 +260,11 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
     let mut state_occupants = Vec::new();
     let mut kind_names = Vec::new();
     let mut initial_by_kind = Vec::new();
+    let mut kind_state_ranges = Vec::new();
 
     for (ki, k) in deck.kinds.iter().enumerate() {
         let ki = ki as u16;
+        kind_state_ranges.push((state_names.len() as u16, k.states.len() as u16));
         if names.kind_ids.insert(k.name.clone(), ki).is_some() {
             return err(format!("duplicate kind '{}'", k.name));
         }
@@ -440,6 +518,62 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         return err("lattice dims must be nonzero");
     }
 
+    // --- init passes ---
+    let mut init_passes = Vec::new();
+    for p in &deck.init {
+        let ctx = format!("init pass '{}'", p.name);
+        let center_kind = match &p.center.kind {
+            None => None,
+            Some(k) => Some(*names.kind_ids.get(k).ok_or_else(|| {
+                CompileError(format!("{ctx}: unknown center kind '{k}'"))
+            })?),
+        };
+        let center_states = names.state_set(&p.center.state, center_kind, &ctx)?;
+        let region = match &p.region {
+            None => None,
+            Some(r) => {
+                if r.axis > 2 {
+                    return err(format!("{ctx}: region axis must be 0, 1, or 2"));
+                }
+                Some((r.axis, r.min.unwrap_or(0), r.max.unwrap_or(usize::MAX)))
+            }
+        };
+        let mut guards = Vec::new();
+        for g in &p.guards {
+            let select = compile_selector(&names, g, &ctx)?;
+            guards.push(Guard {
+                select,
+                min: g.min.unwrap_or(1),
+                max: g.max.unwrap_or(u32::MAX),
+            });
+        }
+        let foreach = match &p.foreach {
+            None => None,
+            Some(sel) => Some(compile_selector(&names, sel, &ctx)?),
+        };
+        // Init maps default to skip (termination maps leave unlisted
+        // states alone).
+        let op = compile_op(
+            &names,
+            center_kind,
+            &p.set,
+            &p.shift,
+            &p.map,
+            &p.missing,
+            false,
+            &ctx,
+        )?;
+        init_passes.push(InitPass {
+            name: p.name.clone(),
+            center_kind: center_kind.map(KindId),
+            center_states,
+            region,
+            guards,
+            foreach,
+            op,
+        });
+    }
+
     Ok(CompiledDeck {
         name: deck.deck.name.clone(),
         unit_cell,
@@ -448,7 +582,9 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         state_names,
         state_occupants,
         n_states: names.n_states,
+        kind_state_ranges,
         initial_per_template,
+        init_passes,
         reactions,
         temperature,
         dims,
@@ -488,6 +624,7 @@ fn compile_selector(
         distance,
         kind,
         label,
+        frozen: s.frozen,
         states,
     })
 }
@@ -509,6 +646,74 @@ fn compile_rate(r: &RateSpec, eunit: f64, ctx: &str) -> Result<RateExpr, Compile
     }
 }
 
+/// Resolve one state name within a specific kind (plain or "Kind."-prefixed).
+fn state_in_kind(names: &Names, kind: u16, name: &str, ctx: &str) -> Result<StateId, CompileError> {
+    names
+        .kind_states
+        .get(kind as usize)
+        .and_then(|m| {
+            m.get(name).copied().or_else(|| {
+                name.strip_prefix(&format!("{}.", names_kind(names, kind)))
+                    .and_then(|plain| m.get(plain).copied())
+            })
+        })
+        .ok_or_else(|| {
+            CompileError(format!(
+                "{ctx}: unknown state '{name}' for kind '{}'",
+                names_kind(names, kind)
+            ))
+        })
+}
+
+/// Compile the set/shift/map trio into an EffectOp. `kind` scopes state-name
+/// resolution and is required for `set`/`map`.
+fn compile_op(
+    names: &Names,
+    kind: Option<u16>,
+    set: &Option<String>,
+    shift: &Option<i32>,
+    map: &Option<std::collections::BTreeMap<String, String>>,
+    missing: &Option<String>,
+    missing_default_error: bool,
+    ctx: &str,
+) -> Result<EffectOp, CompileError> {
+    let missing_is_error = match missing.as_deref() {
+        None => missing_default_error,
+        Some("error") => true,
+        Some("skip") => false,
+        Some(other) => return err(format!("{ctx}: missing must be 'error' or 'skip', not '{other}'")),
+    };
+    match (set, shift, map) {
+        (Some(name), None, None) => {
+            let k = kind.ok_or_else(|| {
+                CompileError(format!("{ctx}: 'set' needs a kind in scope to resolve '{name}'"))
+            })?;
+            Ok(EffectOp::Set(state_in_kind(names, k, name, ctx)?))
+        }
+        (None, Some(n), None) => Ok(EffectOp::Shift(*n)),
+        (None, None, Some(m)) => {
+            let k = kind.ok_or_else(|| {
+                CompileError(format!("{ctx}: 'map' needs a kind in scope"))
+            })?;
+            let mut entries = Vec::new();
+            for (from, to) in m {
+                entries.push((
+                    state_in_kind(names, k, from, ctx)?,
+                    state_in_kind(names, k, to, ctx)?,
+                ));
+            }
+            if entries.is_empty() {
+                return err(format!("{ctx}: map must be non-empty"));
+            }
+            Ok(EffectOp::Map {
+                entries,
+                missing_is_error,
+            })
+        }
+        _ => err(format!("{ctx}: exactly one of set/shift/map")),
+    }
+}
+
 fn compile_effects(
     names: &Names,
     effects: &[EffectSpec],
@@ -525,46 +730,39 @@ fn compile_effects(
                 if e.select.is_some() {
                     return err(format!("{ctx}: a center effect takes no selector"));
                 }
-                (EffectTarget::Center, center_kind)
+                (EffectTarget::Center, Some(center_kind))
             }
             t @ ("neighbor" | "neighbors") => {
                 let sel = e.select.as_ref().ok_or_else(|| {
                     CompileError(format!("{ctx}: a neighbor effect requires a selector"))
                 })?;
                 let compiled = compile_selector(names, sel, ctx)?;
-                let k = compiled.kind.ok_or_else(|| {
-                    CompileError(format!(
-                        "{ctx}: neighbor-effect selectors must name a kind so 'set' resolves"
-                    ))
-                })?;
+                if compiled.kind.is_none() && (e.set.is_some() || e.map.is_some()) {
+                    return err(format!(
+                        "{ctx}: neighbor-effect selectors must name a kind for set/map to resolve"
+                    ));
+                }
+                let k = compiled.kind.map(|k| k.0);
                 let target = if t == "neighbor" {
                     EffectTarget::FirstMatch(compiled)
                 } else {
                     EffectTarget::AllMatches(compiled)
                 };
-                (target, k.0)
+                (target, k)
             }
             other => return err(format!("{ctx}: unknown effect target '{other}'")),
         };
-        // Resolve `set` within the target's kind.
-        let set = names
-            .kind_states
-            .get(target_kind as usize)
-            .and_then(|m| {
-                m.get(&e.set).copied().or_else(|| {
-                    e.set
-                        .strip_prefix(&format!("{}.", names_kind(names, target_kind)))
-                        .and_then(|plain| m.get(plain).copied())
-                })
-            })
-            .ok_or_else(|| {
-                CompileError(format!(
-                    "{ctx}: effect sets unknown state '{}' for kind '{}'",
-                    e.set,
-                    names_kind(names, target_kind)
-                ))
-            })?;
-        out.push(Effect { target, set });
+        let op = compile_op(
+            names,
+            target_kind,
+            &e.set,
+            &e.shift,
+            &e.map,
+            &e.missing,
+            true,
+            ctx,
+        )?;
+        out.push(Effect { target, op });
     }
     Ok(out)
 }

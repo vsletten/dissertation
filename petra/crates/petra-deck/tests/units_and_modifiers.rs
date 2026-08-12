@@ -102,7 +102,7 @@ fn ev_energies_convert_to_internal_kcal() {
 #[test]
 fn by_count_table_is_nonlinear_in_neighbor_count() {
     let deck = parse(EV_DECK);
-    let engine = deck.build_engine(Some(1));
+    let engine = deck.build_engine(Some(1)).expect("engine builds");
     let lat = &engine.lattice;
     let kinds: Vec<_> = lat
         .template_index

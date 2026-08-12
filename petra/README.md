@@ -13,8 +13,11 @@ the deck format, the rate physics, the engine algorithms, and the roadmap
 (P0–P6). Landed so far: P0 (design + tested skeleton), per-deck energy
 units (kcal/mol, kJ/mol, eV), tabulated nonlinear ΔEa modifiers
 (`by_count`), the P2 analytic gates (two-state equilibrium, Langmuir
-isotherm, waiting-time statistics), and the `--ensemble` seed-sweep
-runner.
+isotherm, waiting-time statistics), the `--ensemble` seed-sweep runner,
+and **P4: the full kaolinite deck** (`examples/kaolinite.toml`) — the
+dissertation model as data, structurally golden-gated site-by-site
+against the kmc-rs builder and running 20k-step dynamics with paranoid
+differential checks green.
 
 ## Layout
 

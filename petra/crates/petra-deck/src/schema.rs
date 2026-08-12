@@ -19,9 +19,66 @@ pub struct DeckFile {
     pub aliases: BTreeMap<String, Vec<String>>,
     pub lattice: LatticeSpec,
     pub thermo: ThermoSpec,
+    /// Ordered build-time passes applied after the uniform per-kind fill
+    /// and before dynamics: surface termination, region clearing, defect
+    /// seeding. Each pass sweeps all sites in index order with writes
+    /// immediately visible (the legacy TerminateSurface convention).
+    #[serde(default)]
+    pub init: Vec<InitPassSpec>,
     #[serde(default)]
     pub reactions: Vec<ReactionSpec>,
     pub simulation: SimSpec,
+}
+
+/// One build-time pass. The operation applies to the *center* site — once,
+/// or once per neighbor matching `foreach` (in adjacency order), so
+/// "step the map per missing cation" and "increment per terminal OH" are
+/// both expressible.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InitPassSpec {
+    pub name: String,
+    /// Which sites this pass rewrites: kind (optional) + state set.
+    pub center: CenterInitSpec,
+    /// Restrict to a cell-coordinate slab: axis 0/1/2 and an inclusive
+    /// range (either bound optional).
+    #[serde(default)]
+    pub region: Option<RegionSpec>,
+    /// Additional guards on the center's neighborhood.
+    #[serde(default)]
+    pub guards: Vec<SelectorSpec>,
+    /// Apply the op once per neighbor matching this selector.
+    #[serde(default)]
+    pub foreach: Option<SelectorSpec>,
+    #[serde(default)]
+    pub set: Option<String>,
+    #[serde(default)]
+    pub shift: Option<i32>,
+    #[serde(default)]
+    pub map: Option<BTreeMap<String, String>>,
+    /// `map` miss policy; init defaults to `"skip"` (the termination maps
+    /// leave unlisted states alone).
+    #[serde(default)]
+    pub missing: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CenterInitSpec {
+    #[serde(default)]
+    pub kind: Option<String>,
+    pub state: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegionSpec {
+    /// 0 = a, 1 = b, 2 = c.
+    pub axis: u8,
+    #[serde(default)]
+    pub min: Option<usize>,
+    #[serde(default)]
+    pub max: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -187,6 +244,10 @@ pub struct SelectorSpec {
     /// wildcard `"*"` (every state in scope — with `kind` set this makes
     /// the selector a degree/coordination counter).
     pub state: Vec<String>,
+    /// Restrict to frozen boundary sites (`true`) or live sites (`false`) —
+    /// e.g. "occupied AND not part of the frozen wall".
+    #[serde(default)]
+    pub frozen: Option<bool>,
     /// Guard bounds: default min=1, max=unbounded.
     #[serde(default)]
     pub min: Option<u32>,
@@ -266,18 +327,31 @@ pub struct WhenSpec {
     pub factor: Option<f64>,
 }
 
+/// One state rewrite. Exactly one operation: `set` (fixed state), `shift`
+/// (±n along the kind's declared state ladder — the protonation-counter
+/// pattern), or `map` (per-state transition table — the adsorption/
+/// desorption oxygen-shell pattern).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EffectSpec {
     /// `"center"`, `"neighbor"` (first match; matching nothing at apply
     /// time is an error), or `"neighbors"` (all matches; zero is legal).
     pub target: String,
-    /// Required for neighbor targets; must name a `kind` so `set` resolves
-    /// unambiguously (v0 restriction).
+    /// Required for neighbor targets; must name a `kind` so state names in
+    /// `set`/`map` resolve unambiguously (v0 restriction).
     #[serde(default)]
     pub select: Option<SelectorSpec>,
-    /// New state name for the target site(s).
-    pub set: String,
+    #[serde(default)]
+    pub set: Option<String>,
+    #[serde(default)]
+    pub shift: Option<i32>,
+    #[serde(default)]
+    pub map: Option<BTreeMap<String, String>>,
+    /// `map` policy for a matched site whose state has no entry:
+    /// `"error"` (default — the legacy adsorb fatal) or `"skip"` (leave
+    /// unchanged — the legacy desorb silence).
+    #[serde(default)]
+    pub missing: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
