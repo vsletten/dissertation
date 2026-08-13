@@ -157,6 +157,10 @@ pub struct Engine {
     pub step_count: u64,
     rng: Pcg64Mcg,
     scratch: Vec<SiteId>,
+    /// (site, old state, new state) for every site the LAST applied event
+    /// actually changed — the trajectory-export/streaming feed. Reused
+    /// across steps; read it before calling [`Engine::step`] again.
+    last_changes: Vec<(SiteId, crate::state::StateId, crate::state::StateId)>,
 }
 
 impl Engine {
@@ -198,6 +202,7 @@ impl Engine {
             step_count: 0,
             rng: Pcg64Mcg::seed_from_u64(seed),
             scratch: Vec::new(),
+            last_changes: Vec::new(),
         };
         for s in 0..n {
             engine.refresh_site(s);
@@ -373,10 +378,13 @@ impl Engine {
                 }
             }
         }
+        self.last_changes.clear();
         for (target, new_state) in writes {
-            if self.lattice.states[target] != new_state {
+            let old = self.lattice.states[target];
+            if old != new_state {
                 self.lattice.states[target] = new_state;
                 changed.push(target);
+                self.last_changes.push((target, old, new_state));
             }
         }
         if changed.is_empty() {
@@ -385,6 +393,13 @@ impl Engine {
             changed.push(site);
         }
         Ok(changed)
+    }
+
+    /// The per-site state changes of the most recently applied event:
+    /// `(site, old, new)`, actual changes only. Valid until the next
+    /// [`Engine::step`].
+    pub fn last_changes(&self) -> &[(SiteId, crate::state::StateId, crate::state::StateId)] {
+        &self.last_changes
     }
 
     /// Population count per state id (scan; used at report cadence only).

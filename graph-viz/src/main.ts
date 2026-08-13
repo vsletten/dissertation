@@ -14,6 +14,7 @@ import { encodeBinary, encodeJson } from './pgif/encode';
 import { loadPgif } from './pgif/decode';
 import { pickNode } from './render/picking';
 import { GraphScene } from './render/scene';
+import { parseTrajectory, prepareGraphForTrajectory, TrajectoryPlayer } from './traj';
 import type { LayoutMessage } from './layout.worker';
 
 declare global {
@@ -24,6 +25,9 @@ declare global {
       graph: () => { nodes: number; edges: number; types: string[] } | null;
       loadDemo: (spec: string) => Promise<void>;
       loadText: (name: string, text: string) => Promise<void>;
+      loadTrajectory: (snapshotName: string, snapshotText: string, eventsText: string) => Promise<void>;
+      trajectory: () => { position: number; length: number; time: number; step: number } | null;
+      seekTrajectory: (position: number) => void;
       pickAtNdc: (x: number, y: number) => Record<string, unknown> | null;
       projectNode: (i: number) => { x: number; y: number } | null;
     };
@@ -49,11 +53,73 @@ const inspectorEl = $('#inspector');
 const hud = $('#hud');
 const nodeLabel = $('#node-label');
 const toast = $('#toast');
+const playback = $('#playback');
+const pbPlay = $<HTMLButtonElement>('#pb-play');
+const pbScrub = $<HTMLInputElement>('#pb-scrub');
+const pbSpeed = $<HTMLInputElement>('#pb-speed');
+const pbStatus = $('#pb-status');
 
 const scene = new GraphScene(viewport);
 let currentName = '';
 let pickedNode: number | null = null;
 const pickedWorld = new Vector3();
+
+// ---------- trajectory playback state ----------
+let player: TrajectoryPlayer | null = null;
+let playing = false;
+/** fractional events carried between frames at low speeds */
+let playAccum = 0;
+const touched = new Set<number>();
+
+/** slider 0..100 → 1..10^4 events/sec, log scale */
+function speedFromSlider(): number {
+  return 10 ** (Number(pbSpeed.value) / 25);
+}
+
+function updatePlaybackUi(): void {
+  if (!player) return;
+  pbScrub.value = String(player.position);
+  pbPlay.textContent = playing ? '⏸' : '▶';
+  const rxn = player.lastReaction;
+  pbStatus.textContent =
+    `${player.position.toLocaleString()} / ${player.length.toLocaleString()} · ` +
+    `step ${player.step.toLocaleString()} · t ${player.time.toExponential(2)}` +
+    (rxn ? ` · ${rxn}` : '') +
+    ` · ${Math.round(speedFromSlider()).toLocaleString()} ev/s`;
+}
+
+function seekTo(position: number): void {
+  if (!player) return;
+  touched.clear();
+  player.seek(position, touched);
+  if (touched.size > 0) scene.updateNodeStates(touched);
+  if (pickedNode !== null && touched.has(pickedNode)) renderInspector();
+  updatePlaybackUi();
+}
+
+function detachTrajectory(): void {
+  player = null;
+  playing = false;
+  playback.classList.add('hidden');
+}
+
+function attachTrajectoryText(eventsText: string): void {
+  const g = scene.getGraph();
+  if (!g) throw new Error('load the matching PGIF snapshot first');
+  const traj = parseTrajectory(eventsText);
+  const typeOfState = prepareGraphForTrajectory(g, traj.header);
+  // typeDict may have grown (types unseen at t=0): rebuild styles/buffers
+  scene.setGraph(g);
+  renderLegend(g);
+  player = new TrajectoryPlayer(traj, g, typeOfState);
+  playing = false;
+  playAccum = 0;
+  pbScrub.max = String(player.length);
+  pbScrub.value = '0';
+  playback.classList.remove('hidden');
+  updatePlaybackUi();
+  showToast(`trajectory: ${traj.events.length.toLocaleString()} events (${traj.header.deck})`);
+}
 
 // ---------- toast ----------
 let toastTimer: number | undefined;
@@ -70,6 +136,7 @@ async function setGraph(name: string, graph: Graph): Promise<void> {
   if (!graph.positions) {
     graph = await layoutGraph(graph);
   }
+  detachTrajectory();
   currentName = name;
   pickedNode = null;
   renderInspector();
@@ -124,6 +191,12 @@ function layoutGraph(graph: Graph): Promise<Graph> {
 async function loadTextContent(name: string, text: string): Promise<void> {
   try {
     const lower = name.toLowerCase();
+    // An event log attaches to the already-loaded snapshot instead of
+    // replacing it.
+    if (lower.endsWith('.jsonl')) {
+      attachTrajectoryText(text);
+      return;
+    }
     let graph: Graph;
     if (lower.endsWith('.msi')) {
       graph = loadMsi(text);
@@ -162,6 +235,24 @@ async function loadDemo(spec: string): Promise<void> {
     const n = parseInt(size, 10);
     if (Number.isFinite(n) && n > 0 && n <= 500_000) {
       await setGraph(`social ${n.toLocaleString()}`, generateSocial(n));
+    }
+  } else if (kind === 'petra' && size === 'kaolinite') {
+    // Bundled petra trajectory: snapshot + event log from public/.
+    try {
+      const [snap, events] = await Promise.all([
+        fetch('petra-kaolinite.pgif.json').then(r => {
+          if (!r.ok) throw new Error(`snapshot fetch: ${r.status}`);
+          return r.text();
+        }),
+        fetch('petra-kaolinite.events.jsonl').then(r => {
+          if (!r.ok) throw new Error(`events fetch: ${r.status}`);
+          return r.text();
+        }),
+      ]);
+      await setGraph('petra kaolinite', loadPgif(snap));
+      attachTrajectoryText(events);
+    } catch (err) {
+      showToast(`demo failed: ${err instanceof Error ? err.message : String(err)}`, true);
     }
   }
 }
@@ -268,8 +359,21 @@ function updateLabelPosition(): void {
   nodeLabel.style.top = `${((1 - v.y) / 2) * window.innerHeight}px`;
 }
 
-// ---------- HUD ----------
+// ---------- HUD + playback drive ----------
 scene.onFrame = stats => {
+  // advance the trajectory at the chosen events/sec, frame-rate independent
+  if (player && playing) {
+    playAccum += speedFromSlider() * Math.min(stats.frameMs, 100) / 1000;
+    const whole = Math.floor(playAccum);
+    if (whole > 0) {
+      playAccum -= whole;
+      seekTo(player.position + whole);
+      if (player.position >= player.length) {
+        playing = false;
+        updatePlaybackUi();
+      }
+    }
+  }
   const cls = stats.fps >= 50 ? 'good' : stats.fps >= 25 ? 'ok' : 'bad';
   hud.innerHTML = '';
   const fps = document.createElement('div');
@@ -360,6 +464,32 @@ $('#export-bin').addEventListener('click', () => {
 });
 $('#reframe').addEventListener('click', () => scene.frameCamera());
 
+// ---------- playback controls ----------
+pbPlay.addEventListener('click', () => {
+  if (!player) return;
+  if (!playing && player.position >= player.length) seekTo(0); // replay from start
+  playing = !playing;
+  updatePlaybackUi();
+});
+pbScrub.addEventListener('input', () => {
+  playing = false;
+  seekTo(Number(pbScrub.value));
+});
+pbSpeed.addEventListener('input', () => updatePlaybackUi());
+document.addEventListener('keydown', e => {
+  if (!player || e.target instanceof HTMLInputElement) return;
+  if (e.key === ' ') {
+    e.preventDefault();
+    pbPlay.click();
+  } else if (e.key === 'ArrowRight') {
+    playing = false;
+    seekTo(player.position + (e.shiftKey ? 100 : 1));
+  } else if (e.key === 'ArrowLeft') {
+    playing = false;
+    seekTo(player.position - (e.shiftKey ? 100 : 1));
+  }
+});
+
 // ---------- automation hooks (verification + headless benchmarking) ----------
 window.__graphviz = {
   ready: false,
@@ -370,6 +500,15 @@ window.__graphviz = {
   },
   loadDemo,
   loadText: loadTextContent,
+  loadTrajectory: async (snapshotName, snapshotText, eventsText) => {
+    await setGraph(snapshotName, loadPgif(snapshotText));
+    attachTrajectoryText(eventsText);
+  },
+  trajectory: () =>
+    player
+      ? { position: player.position, length: player.length, time: player.time, step: player.step }
+      : null,
+  seekTrajectory: (position: number) => seekTo(position),
   pickAtNdc: (x, y) => {
     const g = scene.getGraph();
     if (!g) return null;

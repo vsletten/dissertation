@@ -191,3 +191,36 @@ button:hover { border-color: var(--accent); background: rgba(87, 174, 242, 0.15)
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
 }
 #toast.error { border-color: var(--danger); }
+
+/* ---------- trajectory playback bar ---------- */
+#playback {
+  position: fixed;
+  left: 50%;
+  bottom: 64px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 520px;
+  max-width: 84vw;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  backdrop-filter: blur(14px);
+  padding: 10px 16px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+}
+#playback button {
+  width: 34px;
+  height: 30px;
+  font-size: 14px;
+  line-height: 1;
+}
+#pb-scrub { flex: 1; min-width: 220px; }
+#pb-speed { width: 90px; }
+#pb-status {
+  white-space: nowrap;
+  color: var(--text-dim, #9aa4b5);
+  font-variant-numeric: tabular-nums;
+}

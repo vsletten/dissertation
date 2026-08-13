@@ -39,6 +39,11 @@ a knowledge graph or social network renders as readily as a crystal.
   legend toggles per-type visibility.
 - **Inspect**: click a node for every column value (typed-array ray pick,
   no raycaster); the picked node gets a projected label.
+- **Trajectories**: drop a petra `events.jsonl` onto a loaded PGIF snapshot
+  (or pick the `kaolinite dissolution` demo, `?demo=petra:kaolinite`) and a
+  playback bar appears — play/pause (space), scrub both directions (←/→),
+  log-scale speed dial. KMC state deltas are applied to the instance
+  buffers in place; the format is docs/PGIF.md §6a.
 - **Export**: any loaded graph saves back out as PGIF JSON or binary.
 
 ## Why it looks like this

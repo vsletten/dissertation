@@ -12,3 +12,4 @@ path = "src/main.rs"
 [dependencies]
 petra-core = { path = "../petra-core" }
 petra-deck = { path = "../petra-deck" }
+petra-io = { path = "../petra-io" }

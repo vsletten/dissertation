@@ -26,6 +26,9 @@ struct Args {
     paranoid: bool,
     ensemble: u64,
     xyz: bool,
+    /// Write trajectory artifacts (snapshot.pgif.json + events.jsonl) for
+    /// graph-viz playback.
+    viz: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -37,9 +40,11 @@ fn parse_args() -> Result<Args, String> {
     let mut paranoid = false;
     let mut ensemble = 1u64;
     let mut xyz = false;
+    let mut viz = false;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--xyz" => xyz = true,
+            "--viz" => viz = true,
             "--ensemble" => {
                 ensemble = args
                     .next()
@@ -82,6 +87,7 @@ fn parse_args() -> Result<Args, String> {
         paranoid,
         ensemble,
         xyz,
+        viz,
     })
 }
 
@@ -114,6 +120,28 @@ fn run() -> Result<(), String> {
     let mut csv = std::fs::File::create(&csv_path).map_err(|e| e.to_string())?;
     writeln!(csv, "step,time,{}", deck.state_names.join(",")).map_err(|e| e.to_string())?;
 
+    // Trajectory artifacts: initial snapshot now, events as they fire.
+    let mut event_log = if args.viz {
+        let snap_path = format!("{}/snapshot.pgif.json", args.out);
+        std::fs::write(&snap_path, petra_io::snapshot_json(&deck, &engine))
+            .map_err(|e| e.to_string())?;
+        println!("wrote {snap_path}");
+        let file = std::fs::File::create(format!("{}/events.jsonl", args.out))
+            .map_err(|e| e.to_string())?;
+        let writer = std::io::BufWriter::new(file);
+        Some(
+            petra_io::EventLogWriter::new(
+                writer,
+                &deck,
+                args.seed.unwrap_or(deck.seed),
+                engine.lattice.len(),
+            )
+            .map_err(|e| e.to_string())?,
+        )
+    } else {
+        None
+    };
+
     let report = |engine: &petra_core::Engine, csv: &mut std::fs::File| -> Result<(), String> {
         let counts = engine.state_counts(deck.n_states);
         let row: Vec<String> = counts.iter().map(|c| c.to_string()).collect();
@@ -140,7 +168,11 @@ fn run() -> Result<(), String> {
     let mut stopped: Option<Stop> = None;
     for i in 1..=steps {
         match engine.step() {
-            Ok(_) => {}
+            Ok(fired) => {
+                if let Some(log) = &mut event_log {
+                    log.record(&fired, &engine).map_err(|e| e.to_string())?;
+                }
+            }
             Err(stop) => {
                 stopped = Some(stop);
                 break;
@@ -170,6 +202,13 @@ fn run() -> Result<(), String> {
         println!("  {name}: {count}");
     }
     println!("wrote {csv_path}");
+    if let Some(log) = event_log {
+        let events = log.events_written();
+        let mut writer = log.into_inner();
+        use std::io::Write as _;
+        writer.flush().map_err(|e| e.to_string())?;
+        println!("wrote {}/events.jsonl ({events} events)", args.out);
+    }
     if args.xyz {
         let path = format!("{}/final.xyz", args.out);
         write_xyz(&engine, &deck, &path)?;

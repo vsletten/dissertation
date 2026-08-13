@@ -17,7 +17,10 @@ isotherm, waiting-time statistics), the `--ensemble` seed-sweep runner,
 and **P4: the full kaolinite deck** (`examples/kaolinite.toml`) — the
 dissertation model as data, structurally golden-gated site-by-site
 against the kmc-rs builder and running 20k-step dynamics with paranoid
-differential checks green.
+differential checks green. **P3 trajectory export** is in too: run any
+deck with `--viz` and drop the resulting `events.jsonl` on graph-viz (or
+use its bundled `kaolinite dissolution` demo) to watch the run with
+play/scrub/speed controls.
 
 ## Layout
 
