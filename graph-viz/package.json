@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "msi2pgif": "tsx scripts/msi2pgif.ts"
+    "msi2pgif": "tsx scripts/msi2pgif.ts",
+    "build:wasm": "wasm-pack build ../petra/crates/petra-wasm --target web --release --out-dir $(pwd)/public/petra-wasm --no-typescript && rm -f public/petra-wasm/.gitignore"
   },
   "dependencies": {
     "three": "^0.171.0"
@@ -21,6 +22,7 @@
     "tsx": "^4.19.0",
     "typescript": "^5.5.3",
     "vite": "^5.4.6",
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "wasm-pack": "^0.15.0"
   }
 }

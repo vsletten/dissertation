@@ -224,3 +224,20 @@ button:hover { border-color: var(--accent); background: rgba(87, 174, 242, 0.15)
   color: var(--text-dim, #9aa4b5);
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------- live sim card ---------- */
+#live-deck {
+  width: 100%;
+  resize: vertical;
+  background: rgba(10, 14, 22, 0.7);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+#live-seed { width: 90px; }
+#live-card .row { align-items: center; gap: 8px; }

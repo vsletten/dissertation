@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/petra-core", "crates/petra-deck", "crates/petra-io", "crates/petra-cli"]
+members = ["crates/petra-core", "crates/petra-deck", "crates/petra-io", "crates/petra-wasm", "crates/petra-cli"]
 
 [workspace.package]
 version = "0.0.1"

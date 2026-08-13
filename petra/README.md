@@ -20,7 +20,10 @@ against the kmc-rs builder and running 20k-step dynamics with paranoid
 differential checks green. **P3 trajectory export** is in too: run any
 deck with `--viz` and drop the resulting `events.jsonl` on graph-viz (or
 use its bundled `kaolinite dissolution` demo) to watch the run with
-play/scrub/speed controls.
+play/scrub/speed controls. **Stage 2 is live too**: `petra-wasm` compiles
+the engine to WebAssembly, and graph-viz's `kaolinite LIVE` demo runs the
+simulation *in the browser* — edit the deck TOML in the panel, re-seed,
+re-run; events generate on demand as you play or scrub.
 
 ## Layout
 

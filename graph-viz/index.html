@@ -37,9 +37,20 @@
               <option value="social:50000">social 50k</option>
             </optgroup>
             <optgroup label="KMC trajectory (petra)">
-              <option value="petra:kaolinite">kaolinite dissolution</option>
+              <option value="petra:kaolinite">kaolinite dissolution (recorded)</option>
+              <option value="petra:live-kaolinite">kaolinite LIVE (wasm sim)</option>
             </optgroup>
           </select>
+        </div>
+      </section>
+
+      <section class="card hidden" id="live-card">
+        <h2>Live sim <span class="hint">petra · wasm · in-browser</span></h2>
+        <textarea id="live-deck" rows="10" spellcheck="false" placeholder="petra deck TOML — edit and re-run"></textarea>
+        <div class="row">
+          <label for="live-seed">seed</label>
+          <input id="live-seed" type="number" value="42" />
+          <button id="live-run" title="compile the deck and simulate live">▶ run</button>
         </div>
       </section>
 
