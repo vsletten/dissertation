@@ -43,6 +43,10 @@ export interface TypeStyle {
 
 export function stylesFor(typeDict: string[]): TypeStyle[] {
   return typeDict.map(name => {
+    // `vacant` is the trajectory convention for an unoccupied lattice site:
+    // present in the buffers (occupancy flips during playback) but rendered
+    // at radius 0 — invisible, unpickable, and its bonds are hidden too.
+    if (name === 'vacant') return { name, color: '#3a4152', radius: 0 };
     const s = ELEMENT_STYLES[name] ?? hashedStyle(name);
     return { name, color: s.color, radius: s.radius };
   });

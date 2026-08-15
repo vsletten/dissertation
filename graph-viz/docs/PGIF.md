@@ -41,9 +41,11 @@ Conventions the viewer understands (all optional):
 2. **Binary container is bespoke** magic + header + blob (§3). No MessagePack,
    no Arrow — dependency-free on both sides, replaceable later.
 3. **`meta.directed: bool`, default false.** Undirected edges are emitted once.
-4. **Trajectories are out of v0.** The natural v1 extension for KMC movies is
-   static topology + per-frame `state` columns; design it when a producer
-   actually needs it.
+4. **Trajectories are out of v0** — and now specified as a **sidecar**, not a
+   container change (§7): a producer (petra) needed them, and the design that
+   won is static topology + per-event state *deltas*, not per-frame columns —
+   deltas are ~100× smaller for KMC (a few sites change per event) and give
+   backward scrubbing for free.
 5. **`meta` stays free-form** (`producer`, `kind` recommended). Fields get
    promoted to the spec only when two producers share them.
 
@@ -87,6 +89,37 @@ the byte-decoding layer.
 - Every edge endpoint `< nodes.count` (indices, see §2.1).
 - `str` columns may not be buffer refs (they stay in the header).
 - Unknown `meta` keys and unknown columns are preserved, never errors.
+
+## 6a. Trajectory sidecar (petra_traj v1)
+
+A PGIF snapshot plus a JSONL event log make a replayable KMC trajectory.
+Reference producer: `petra/crates/petra-io`; reference consumer:
+`src/traj.ts`. The snapshot must contain **every** lattice site (vacant
+included — occupancy flips during playback; the `vacant` display type
+renders at radius 0) and a categorical `state` node column whose dict is
+indexed by the dense state ids the log uses.
+
+**Log format** — line 1 is a header object, every further line one event:
+
+```
+{"petra_traj":1, "deck":str, "seed":int, "n_sites":int,
+ "states":[str],       // state names, index = state id (must match the
+                       // snapshot's `state` dict)
+ "state_types":[str],  // display type per state id (element name | "vacant")
+ "reactions":[str]}    // reaction names, index = event rxn id
+[step, time, rxn, [[site, old, new], ...]]   // actual state changes only
+```
+
+`old` is mandatory: it is what makes backward scrubbing a pure replay
+(apply deltas inverted, in reverse order) instead of a re-simulation.
+The consumer applies deltas to the `state` column and derives node display
+type via `state_types`; types unseen at t=0 are appended to the type dict
+at attach time.
+
+**Edge conventions:** topology is static across a trajectory. Bonds that
+wrap a periodic boundary carry `seam: true` in a bool edge column; the
+viewer allocates them instance slots but never draws them (a wrap bond is
+topology, not geometry).
 
 ## 6. Producer notes (for the Rust KMC port — milestone M9)
 

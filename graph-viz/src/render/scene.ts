@@ -53,6 +53,13 @@ export class GraphScene {
   private hiddenTypes = new Set<number>();
   /** instance slot → node index (visibility filtering compacts the buffer) */
   private slotToNode = new Uint32Array(0);
+  /** edge index → edge instance slot (-1 when hidden by type filtering) */
+  private edgeSlotOf = new Int32Array(0);
+  /** CSR incidence: edges touching each node (for in-place updates) */
+  private incOff = new Uint32Array(0);
+  private incEdge = new Uint32Array(0);
+  /** `seam` edge column (periodic wrap bonds — never drawn), if present */
+  private seam: Uint8Array | null = null;
   private visibleNodes = 0;
   private visibleEdges = 0;
   private bounds: Bounds | null = null;
@@ -105,8 +112,28 @@ export class GraphScene {
     this.bounds = computeBounds(graph.positions, graph.count);
     // radius that reads well at this graph's density
     this.radiusScale = Math.max(0.05, Math.min(2.5, medianEdgeLength(graph) * 0.16));
+    const seamCol = graph.edgeColumns['seam'];
+    this.seam = seamCol && seamCol.type === 'bool' ? (seamCol.data as Uint8Array) : null;
+    this.buildIncidence(graph);
     this.rebuild();
     this.frameCamera();
+  }
+
+  /** CSR edge lists per node — the in-place update path's lookup. */
+  private buildIncidence(g: Graph): void {
+    const deg = new Uint32Array(g.count);
+    for (let e = 0; e < g.edgeCount; e++) {
+      deg[g.edgeSrc[e]]++;
+      deg[g.edgeDst[e]]++;
+    }
+    this.incOff = new Uint32Array(g.count + 1);
+    for (let i = 0; i < g.count; i++) this.incOff[i + 1] = this.incOff[i] + deg[i];
+    this.incEdge = new Uint32Array(this.incOff[g.count]);
+    const cursor = Uint32Array.from(this.incOff.subarray(0, g.count));
+    for (let e = 0; e < g.edgeCount; e++) {
+      this.incEdge[cursor[g.edgeSrc[e]]++] = e;
+      this.incEdge[cursor[g.edgeDst[e]]++] = e;
+    }
   }
 
   getStyles(): TypeStyle[] {
@@ -192,40 +219,108 @@ export class GraphScene {
     this.nodeMesh = nodes;
     this.group.add(nodes);
 
-    // visible edges: both endpoints visible
+    // visible edges: both endpoints' TYPES visible. Slots are allocated for
+    // all of these; seam edges and edges with a radius-0 (vacant) endpoint
+    // keep their slot but get a zero matrix, so trajectory playback can
+    // flip them in place without recompacting.
     let evis = 0;
+    this.edgeSlotOf = new Int32Array(g.edgeCount).fill(-1);
     for (let e = 0; e < g.edgeCount; e++) {
-      if (!this.hiddenTypes.has(g.typeIndex[g.edgeSrc[e]]) && !this.hiddenTypes.has(g.typeIndex[g.edgeDst[e]])) evis++;
+      if (!this.hiddenTypes.has(g.typeIndex[g.edgeSrc[e]]) && !this.hiddenTypes.has(g.typeIndex[g.edgeDst[e]])) {
+        this.edgeSlotOf[e] = evis++;
+      }
     }
-    this.visibleEdges = evis;
     if (evis > 0) {
       const bondRadius = this.radiusScale * 0.18;
       const edgeGeo = new CylinderGeometry(bondRadius, bondRadius, 1, bondDetail, 1, true);
       const edgeMat = new MeshStandardMaterial({ color: '#7d8ba1', roughness: 0.6, metalness: 0.05 });
       const edges = new InstancedMesh(edgeGeo, edgeMat, evis);
-      const up = new Vector3(0, 1, 0);
-      const q = new Quaternion();
-      const a = new Vector3(), b = new Vector3(), mid = new Vector3(), axis = new Vector3();
-      let eslot = 0;
+      this.edgeMesh = edges;
+      let drawn = 0;
       for (let e = 0; e < g.edgeCount; e++) {
-        const si = g.edgeSrc[e], di = g.edgeDst[e];
-        if (this.hiddenTypes.has(g.typeIndex[si]) || this.hiddenTypes.has(g.typeIndex[di])) continue;
-        a.set(g.positions[si * 3], g.positions[si * 3 + 1], g.positions[si * 3 + 2]);
-        b.set(g.positions[di * 3], g.positions[di * 3 + 1], g.positions[di * 3 + 2]);
-        mid.addVectors(a, b).multiplyScalar(0.5);
-        axis.subVectors(b, a);
-        const len = Math.max(axis.length(), 1e-6);
-        q.setFromUnitVectors(up, axis.normalize());
-        m.makeRotationFromQuaternion(q);
-        m.scale(new Vector3(1, len, 1));
-        m.setPosition(mid);
-        edges.setMatrixAt(eslot, m);
-        eslot++;
+        if (this.edgeSlotOf[e] >= 0 && this.applyEdgeMatrix(e)) drawn++;
       }
       edges.instanceMatrix.needsUpdate = true;
-      this.edgeMesh = edges;
+      this.visibleEdges = drawn;
       this.group.add(edges);
+    } else {
+      this.visibleEdges = 0;
     }
+  }
+
+  private static readonly edgeUp = new Vector3(0, 1, 0);
+  private edgeTmp = {
+    m: new Matrix4(),
+    q: new Quaternion(),
+    a: new Vector3(),
+    b: new Vector3(),
+    mid: new Vector3(),
+    axis: new Vector3(),
+    scale: new Vector3(),
+  };
+
+  /**
+   * Write edge `e`'s instance matrix into its slot: oriented cylinder, or a
+   * zero matrix when the edge is a seam or an endpoint is invisible
+   * (radius 0). Returns whether the edge is drawn.
+   */
+  private applyEdgeMatrix(e: number): boolean {
+    const g = this.graph;
+    const slot = this.edgeSlotOf[e];
+    if (!g || !g.positions || !this.edgeMesh || slot < 0) return false;
+    const { m, q, a, b, mid, axis, scale } = this.edgeTmp;
+    const si = g.edgeSrc[e], di = g.edgeDst[e];
+    const hidden =
+      (this.seam && this.seam[e]) ||
+      this.styles[g.typeIndex[si]].radius <= 0 ||
+      this.styles[g.typeIndex[di]].radius <= 0;
+    if (hidden) {
+      m.makeScale(0, 0, 0);
+      this.edgeMesh.setMatrixAt(slot, m);
+      return false;
+    }
+    a.set(g.positions[si * 3], g.positions[si * 3 + 1], g.positions[si * 3 + 2]);
+    b.set(g.positions[di * 3], g.positions[di * 3 + 1], g.positions[di * 3 + 2]);
+    mid.addVectors(a, b).multiplyScalar(0.5);
+    axis.subVectors(b, a);
+    const len = Math.max(axis.length(), 1e-6);
+    q.setFromUnitVectors(GraphScene.edgeUp, axis.normalize());
+    m.makeRotationFromQuaternion(q);
+    m.scale(scale.set(1, len, 1));
+    m.setPosition(mid);
+    this.edgeMesh.setMatrixAt(slot, m);
+    return true;
+  }
+
+  /**
+   * In-place refresh of specific nodes after their type/state changed
+   * (trajectory playback). Fast path requires no type filtering (slots are
+   * then identity); with hidden types it falls back to a full rebuild.
+   */
+  updateNodeStates(touched: Iterable<number>): void {
+    const g = this.graph;
+    if (!g || !g.positions || !this.nodeMesh) return;
+    if (this.hiddenTypes.size > 0) {
+      this.rebuild();
+      return;
+    }
+    const m = this.edgeTmp.m;
+    const color = new Color();
+    for (const i of touched) {
+      const t = g.typeIndex[i];
+      const style = this.styles[t];
+      const r = (style?.radius ?? 0.8) * this.radiusScale;
+      m.makeScale(r, r, r);
+      m.setPosition(g.positions[i * 3], g.positions[i * 3 + 1], g.positions[i * 3 + 2]);
+      this.nodeMesh.setMatrixAt(i, m);
+      this.nodeMesh.setColorAt(i, color.set(style?.color ?? '#ffffff'));
+      for (let k = this.incOff[i]; k < this.incOff[i + 1]; k++) {
+        this.applyEdgeMatrix(this.incEdge[k]);
+      }
+    }
+    this.nodeMesh.instanceMatrix.needsUpdate = true;
+    if (this.nodeMesh.instanceColor) this.nodeMesh.instanceColor.needsUpdate = true;
+    if (this.edgeMesh) this.edgeMesh.instanceMatrix.needsUpdate = true;
   }
 
   private disposeMeshes(): void {

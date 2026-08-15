@@ -1,0 +1,15 @@
+{
+  "name": "petra-wasm",
+  "type": "module",
+  "description": "WebAssembly bindings: run Petra decks live in the browser (graph-viz live mode)",
+  "version": "0.0.1",
+  "license": "MIT",
+  "files": [
+    "petra_wasm_bg.wasm",
+    "petra_wasm.js"
+  ],
+  "main": "petra_wasm.js",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

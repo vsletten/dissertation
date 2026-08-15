@@ -1,0 +1,15 @@
+[package]
+name = "petra-cli"
+description = "Petra command line: load a deck, run KMC, write observables"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "petra"
+path = "src/main.rs"
+
+[dependencies]
+petra-core = { path = "../petra-core" }
+petra-deck = { path = "../petra-deck" }
+petra-io = { path = "../petra-io" }

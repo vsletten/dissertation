@@ -18,9 +18,9 @@
         <h2>Load</h2>
         <div id="dropzone" tabindex="0">
           <span class="dz-title">Drop a graph here</span>
-          <span class="dz-sub">.pgif.json · .pgif.bin · legacy .msi</span>
+          <span class="dz-sub">.pgif.json · .pgif.bin · legacy .msi · events .jsonl</span>
         </div>
-        <input id="file-input" type="file" accept=".json,.pgif,.bin,.msi,application/json" hidden />
+        <input id="file-input" type="file" accept=".json,.pgif,.bin,.msi,.jsonl,application/json" hidden />
         <div class="row" id="demo-row">
           <label for="demo-select">Demo</label>
           <select id="demo-select">
@@ -36,7 +36,21 @@
               <option value="social:10000">social 10k</option>
               <option value="social:50000">social 50k</option>
             </optgroup>
+            <optgroup label="KMC trajectory (petra)">
+              <option value="petra:kaolinite">kaolinite dissolution (recorded)</option>
+              <option value="petra:live-kaolinite">kaolinite LIVE (wasm sim)</option>
+            </optgroup>
           </select>
+        </div>
+      </section>
+
+      <section class="card hidden" id="live-card">
+        <h2>Live sim <span class="hint">petra · wasm · in-browser</span></h2>
+        <textarea id="live-deck" rows="10" spellcheck="false" placeholder="petra deck TOML — edit and re-run"></textarea>
+        <div class="row">
+          <label for="live-seed">seed</label>
+          <input id="live-seed" type="number" value="42" />
+          <button id="live-run" title="compile the deck and simulate live">▶ run</button>
         </div>
       </section>
 
@@ -64,6 +78,13 @@
     <div id="hud"></div>
     <div id="node-label" class="hidden"></div>
     <div id="toast" class="hidden"></div>
+
+    <div id="playback" class="hidden">
+      <button id="pb-play" title="play/pause (space)">▶</button>
+      <input id="pb-scrub" type="range" min="0" max="0" value="0" step="1" title="scrub (←/→ steps, shift for 100)" />
+      <input id="pb-speed" type="range" min="0" max="100" value="50" title="playback speed (events/sec, log)" />
+      <span id="pb-status"></span>
+    </div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

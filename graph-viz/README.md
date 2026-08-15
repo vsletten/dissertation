@@ -39,6 +39,18 @@ a knowledge graph or social network renders as readily as a crystal.
   legend toggles per-type visibility.
 - **Inspect**: click a node for every column value (typed-array ray pick,
   no raycaster); the picked node gets a projected label.
+- **Trajectories**: drop a petra `events.jsonl` onto a loaded PGIF snapshot
+  (or pick the `kaolinite dissolution` demo, `?demo=petra:kaolinite`) and a
+  playback bar appears — play/pause (space), scrub both directions (←/→),
+  log-scale speed dial. KMC state deltas are applied to the instance
+  buffers in place; the format is docs/PGIF.md §6a.
+- **Live simulation**: petra compiled to WASM runs in the page — pick the
+  `kaolinite LIVE (wasm sim)` demo (`?demo=petra:live-kaolinite`), or paste
+  any petra deck TOML into the Live sim panel, set a seed, run. The sim
+  generates trajectory events on demand as you play/scrub (backward
+  scrubbing replays recorded history), determinism identical to the
+  native CLI. Rebuild the wasm package with `npm run build:wasm`
+  (needs rustup + wasm-pack).
 - **Export**: any loaded graph saves back out as PGIF JSON or binary.
 
 ## Why it looks like this

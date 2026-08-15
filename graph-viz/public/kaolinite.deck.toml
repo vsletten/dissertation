@@ -1,0 +1,1154 @@
+# Kaolinite — the dissertation model as a Petra deck (P4).
+#
+# Translation of the mckaol kinetic Monte Carlo model (legacy/cpp-model,
+# ported and parity-tested in kmc-rs) into declarative form: the 26-site
+# unit cell, the 100-599 state vocabulary as named states, and the live
+# reaction set (16 hydrolysis mechanisms + Al/Si adsorption/desorption)
+# with the rate numbers from the legacy data.rxn.
+#
+# This deck encodes CORRECTED physics, not bug-for-bug parity:
+#   - the forward-hydrolysis surface test is the intended 2nd-neighbor
+#     rule, not the legacy nbr[6] out-of-bounds phantom (kmc-rs reform R1);
+#   - R13 (405 -> 404 reverse) is restored (legacy data.rxn types the
+#     product as "40100", killing the reaction and detailed balance);
+#   - Al adsorption uses delta-mu(Al) (the legacy code routes it through
+#     delta-mu(Si); inert here because both are -1.0);
+#   - surface termination uses the as-implemented legacy map (the
+#     dead-ternary wart, reform R3) because the intended map is uncertain.
+# Legacy behaviors that are deliberately NOT carried: cluster removal
+# (never runs in the live legacy code), diffusion and cross-cation
+# reactions (permanently disabled there), and the fatal aborts when an
+# environment check touches the frozen boundary (Petra excludes frozen
+# sites from selectors instead).
+#
+# The hidden per-site `lostal` field ("which Al holds the proton" on a 410
+# oxygen) is encoded as two states (pr1/pr2) addressed via the a1/a2 bond
+# labels on each Si-O-Al2 oxygen's two Al bonds.
+#
+# State-name key (legacy code -> deck name):
+#   Al:  100 empty | 101-107 l0-l6         (ligand count 0-6)
+#   Si:  200 empty | 201-205 oh0-oh4       (OH count 0-4)
+#   Oss (300 Si-O-Si):   300 empty | 301 br | 302 hy | 303 si1
+#   Osa (400 Si-O-Al2):  400 empty | 401 br | 402 sih | 403 full
+#        | 404 albr | 405 alhy | 406 sial | 407 sialh | 408 si1
+#        | 409 al1 | 410 pr1/pr2 (proton on the a1/a2 Al)
+#   Oaa (500 Al-OH-Al):  500 empty | 501 br | 502 hy | 503 al1
+
+[deck]
+name = "kaolinite"
+comment = "dissertation kaolinite model, corrected physics, legacy rate numbers"
+
+[[species]]
+name = "Al"
+charge = 3.0
+
+[[species]]
+name = "Si"
+charge = 4.0
+
+[[species]]
+name = "O"
+charge = -2.0
+
+# --- site kinds and their state vocabularies ------------------------------
+# State declaration order is the shift ladder: Al/Si states are ordered by
+# protonation count so `shift = 1` is the legacy `state++`.
+
+[[kinds]]
+name = "Al"
+initial = "l0"
+
+[[kinds.states]]
+name = "empty"
+occupant = "vacant"
+
+[[kinds.states]]
+name = "l0"
+occupant = "Al"
+
+[[kinds.states]]
+name = "l1"
+occupant = "Al"
+
+[[kinds.states]]
+name = "l2"
+occupant = "Al"
+
+[[kinds.states]]
+name = "l3"
+occupant = "Al"
+
+[[kinds.states]]
+name = "l4"
+occupant = "Al"
+
+[[kinds.states]]
+name = "l5"
+occupant = "Al"
+
+[[kinds.states]]
+name = "l6"
+occupant = "Al"
+
+[[kinds]]
+name = "Si"
+initial = "oh0"
+
+[[kinds.states]]
+name = "empty"
+occupant = "vacant"
+
+[[kinds.states]]
+name = "oh0"
+occupant = "Si"
+
+[[kinds.states]]
+name = "oh1"
+occupant = "Si"
+
+[[kinds.states]]
+name = "oh2"
+occupant = "Si"
+
+[[kinds.states]]
+name = "oh3"
+occupant = "Si"
+
+[[kinds.states]]
+name = "oh4"
+occupant = "Si"
+
+[[kinds]]
+name = "Oss"
+initial = "br"
+
+[[kinds.states]]
+name = "empty"
+occupant = "vacant"
+
+[[kinds.states]]
+name = "br"
+occupant = "O"
+
+[[kinds.states]]
+name = "hy"
+occupant = "O"
+
+[[kinds.states]]
+name = "si1"
+occupant = "O"
+
+[[kinds]]
+name = "Osa"
+initial = "br"
+
+[[kinds.states]]
+name = "empty"
+occupant = "vacant"
+
+[[kinds.states]]
+name = "br"
+occupant = "O"
+
+[[kinds.states]]
+name = "sih"
+occupant = "O"
+
+[[kinds.states]]
+name = "full"
+occupant = "O"
+
+[[kinds.states]]
+name = "albr"
+occupant = "O"
+
+[[kinds.states]]
+name = "alhy"
+occupant = "O"
+
+[[kinds.states]]
+name = "sial"
+occupant = "O"
+
+[[kinds.states]]
+name = "sialh"
+occupant = "O"
+
+[[kinds.states]]
+name = "si1"
+occupant = "O"
+
+[[kinds.states]]
+name = "al1"
+occupant = "O"
+
+[[kinds.states]]
+name = "pr1"
+occupant = "O"
+
+[[kinds.states]]
+name = "pr2"
+occupant = "O"
+
+[[kinds]]
+name = "Oaa"
+initial = "br"
+
+[[kinds.states]]
+name = "empty"
+occupant = "vacant"
+
+[[kinds.states]]
+name = "br"
+occupant = "O"
+
+[[kinds.states]]
+name = "hy"
+occupant = "O"
+
+[[kinds.states]]
+name = "al1"
+occupant = "O"
+
+[aliases]
+# The hydrolyzed set of the surface-reachability test (envrn.cpp:
+# {303, 404, 405, 406, 408, 409}; deliberately NOT 302/402/403/407/410).
+hydrolyzed = ["Oss.si1", "Osa.albr", "Osa.alhy", "Osa.sial", "Osa.si1", "Osa.al1"]
+al_occ = ["Al.l0", "Al.l1", "Al.l2", "Al.l3", "Al.l4", "Al.l5", "Al.l6"]
+si_occ = ["Si.oh0", "Si.oh1", "Si.oh2", "Si.oh3", "Si.oh4"]
+cat_empty = ["Al.empty", "Si.empty"]
+o_occ = [
+  "Oss.br", "Oss.hy", "Oss.si1",
+  "Osa.br", "Osa.sih", "Osa.full", "Osa.albr", "Osa.alhy", "Osa.sial",
+  "Osa.sialh", "Osa.si1", "Osa.al1", "Osa.pr1", "Osa.pr2",
+  "Oaa.br", "Oaa.hy", "Oaa.al1",
+]
+[cell]
+matrix = [[4.9725, -0.0262374, -1.3362], [0.0, 8.92893, -0.30084], [0.0, 0.0, 7.384]]
+
+# pos 0 (legacy 100 Al)
+[[cell.sites]]
+kind = "Al"
+frac = [0.34186848, 0.50367380, 0.38535753]
+
+# pos 1 (legacy 100 Al)
+[[cell.sites]]
+kind = "Al"
+frac = [0.36021585, 0.82743483, 0.34971696]
+
+# pos 2 (legacy 100 Al)
+[[cell.sites]]
+kind = "Al"
+frac = [0.84597723, 0.99386203, 0.27084236]
+
+# pos 3 (legacy 100 Al)
+[[cell.sites]]
+kind = "Al"
+frac = [0.81893686, 0.32832226, 0.29304713]
+
+# pos 4 (legacy 200 Si)
+[[cell.sites]]
+kind = "Si"
+frac = [0.05987510, 0.34862001, 0.03055864]
+
+# pos 5 (legacy 200 Si)
+[[cell.sites]]
+kind = "Si"
+frac = [0.08015547, 0.64938798, 0.04449296]
+
+# pos 6 (legacy 200 Si)
+[[cell.sites]]
+kind = "Si"
+frac = [0.52439048, 0.83892801, -0.05653751]
+
+# pos 7 (legacy 200 Si)
+[[cell.sites]]
+kind = "Si"
+frac = [0.54177455, 0.17925012, -0.04190127]
+
+# pos 8 (legacy 400)
+[[cell.sites]]
+kind = "Osa"
+frac = [0.10623002, 0.34148323, 0.27315683]
+
+# pos 9 (legacy 400)
+[[cell.sites]]
+kind = "Osa"
+frac = [0.14292785, 0.66019053, 0.23628115]
+
+# pos 10 (legacy 300)
+[[cell.sites]]
+kind = "Oss"
+frac = [0.07918965, 0.48748283, -0.06176598]
+
+# pos 11 (legacy 300)
+[[cell.sites]]
+kind = "Oss"
+frac = [0.25012389, 0.21911470, -0.07583694]
+
+# pos 12 (legacy 300)
+[[cell.sites]]
+kind = "Oss"
+frac = [0.22598119, 0.76687739, -0.10864166]
+
+# pos 13 (legacy 400)
+[[cell.sites]]
+kind = "Osa"
+frac = [0.60454635, 0.84068310, 0.14635970]
+
+# pos 14 (legacy 400)
+[[cell.sites]]
+kind = "Osa"
+frac = [0.66152475, 0.15489932, 0.17663597]
+
+# pos 15 (legacy 300)
+[[cell.sites]]
+kind = "Oss"
+frac = [0.52921863, 0.00138893, -0.12329496]
+
+# pos 16 (legacy 300)
+[[cell.sites]]
+kind = "Oss"
+frac = [0.74457634, 0.72232510, -0.13907232]
+
+# pos 17 (legacy 300)
+[[cell.sites]]
+kind = "Oss"
+frac = [0.73974819, 0.25960162, -0.16730092]
+
+# pos 18 (legacy 500)
+[[cell.sites]]
+kind = "Oaa"
+frac = [0.11299021, 0.96610849, 0.25142335]
+
+# pos 19 (legacy 500)
+[[cell.sites]]
+kind = "Oaa"
+frac = [0.02317746, 0.17183239, 0.57264762]
+
+# pos 20 (legacy 500)
+[[cell.sites]]
+kind = "Oaa"
+frac = [0.12361331, 0.46435992, 0.54288732]
+
+# pos 21 (legacy 500)
+[[cell.sites]]
+kind = "Oaa"
+frac = [0.10236711, 0.84221097, 0.54546587]
+
+# pos 22 (legacy 500)
+[[cell.sites]]
+kind = "Oaa"
+frac = [0.58619704, 0.46595160, 0.17507990]
+
+# pos 23 (legacy 500)
+[[cell.sites]]
+kind = "Oaa"
+frac = [0.50604118, 0.65808733, 0.46927681]
+
+# pos 24 (legacy 500)
+[[cell.sites]]
+kind = "Oaa"
+frac = [0.57267783, 0.97170621, 0.42999458]
+
+# pos 25 (legacy 500)
+[[cell.sites]]
+kind = "Oaa"
+frac = [0.56205434, 0.36708207, 0.46463705]
+
+[[cell.bonds]]
+i = 8
+j = 0
+dcell = [0, 0, 0]
+label = "a1"
+
+[[cell.bonds]]
+i = 8
+j = 3
+dcell = [-1, 0, 0]
+label = "a2"
+
+[[cell.bonds]]
+i = 8
+j = 4
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 9
+j = 0
+dcell = [0, 0, 0]
+label = "a1"
+
+[[cell.bonds]]
+i = 9
+j = 1
+dcell = [0, 0, 0]
+label = "a2"
+
+[[cell.bonds]]
+i = 9
+j = 5
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 10
+j = 4
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 10
+j = 5
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 11
+j = 4
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 11
+j = 7
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 12
+j = 5
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 12
+j = 6
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 13
+j = 1
+dcell = [0, 0, 0]
+label = "a1"
+
+[[cell.bonds]]
+i = 13
+j = 2
+dcell = [0, 0, 0]
+label = "a2"
+
+[[cell.bonds]]
+i = 13
+j = 6
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 14
+j = 2
+dcell = [0, -1, 0]
+label = "a1"
+
+[[cell.bonds]]
+i = 14
+j = 3
+dcell = [0, 0, 0]
+label = "a2"
+
+[[cell.bonds]]
+i = 14
+j = 7
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 15
+j = 6
+dcell = [0, -1, 0]
+
+[[cell.bonds]]
+i = 15
+j = 7
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 16
+j = 5
+dcell = [1, 0, 0]
+
+[[cell.bonds]]
+i = 16
+j = 6
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 17
+j = 4
+dcell = [1, 0, 0]
+
+[[cell.bonds]]
+i = 17
+j = 7
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 18
+j = 1
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 18
+j = 2
+dcell = [-1, 0, 0]
+
+[[cell.bonds]]
+i = 19
+j = 3
+dcell = [-1, 0, 0]
+
+[[cell.bonds]]
+i = 19
+j = 2
+dcell = [-1, -1, 0]
+
+[[cell.bonds]]
+i = 20
+j = 0
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 20
+j = 3
+dcell = [-1, 0, 0]
+
+[[cell.bonds]]
+i = 21
+j = 1
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 21
+j = 2
+dcell = [-1, 0, 0]
+
+[[cell.bonds]]
+i = 22
+j = 0
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 22
+j = 3
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 23
+j = 0
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 23
+j = 1
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 24
+j = 1
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 24
+j = 2
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 25
+j = 0
+dcell = [0, 0, 0]
+
+[[cell.bonds]]
+i = 25
+j = 3
+dcell = [0, 0, 0]
+# --- lattice --------------------------------------------------------------
+# Golden dimensions: 20 x 3 unit cells, single sheet in c (the legacy model
+# never tiles c). SurfacePlane = 0: b is the open surface-normal axis;
+# "fixed" freezes ragged sites in the two extreme b-rows — the legacy
+# TerminateLattice EDGE rule.
+
+[lattice]
+dims = [20, 3, 1]
+boundary = ["periodic", "fixed", "periodic"]
+
+[thermo]
+temperature = 8000.0    # the legacy relative-rate knob, not a physical claim
+
+[thermo.mu]
+Al = -1.0
+Si = -1.0
+
+[thermo.activity]
+Al = 1.0
+Si = 1.0
+
+# --- build-time passes ----------------------------------------------------
+# Reproduces the legacy build: PopulateSolid (fill 2 of 3 b-rows —
+# (int)(3 * 0.7f) = 2 — plus the Si-chain guard), TerminateSurface passes
+# 1-3 (as-implemented maps, dead-ternary wart included), and the
+# TerminateLattice 301-revert near the frozen boundary.
+
+# Fill depth: uniform fill made everything bulk; clear b >= 2.
+[[init]]
+name = "clear-above-fill-al"
+center = { kind = "Al", state = ["*"] }
+region = { axis = 1, min = 2 }
+set = "empty"
+
+[[init]]
+name = "clear-above-fill-si"
+center = { kind = "Si", state = ["*"] }
+region = { axis = 1, min = 2 }
+set = "empty"
+
+[[init]]
+name = "clear-above-fill-oss"
+center = { kind = "Oss", state = ["*"] }
+region = { axis = 1, min = 2 }
+set = "empty"
+
+[[init]]
+name = "clear-above-fill-osa"
+center = { kind = "Osa", state = ["*"] }
+region = { axis = 1, min = 2 }
+set = "empty"
+
+[[init]]
+name = "clear-above-fill-oaa"
+center = { kind = "Oaa", state = ["*"] }
+region = { axis = 1, min = 2 }
+set = "empty"
+
+# PopulateSolid's chain guard: a Si-O-Si bridge only exists if both Si
+# sites structurally exist (bonds not cut by the open boundary) and each
+# Si's Si-O-Al2 oxygen exists.
+[[init]]
+name = "orphan-oss-missing-si"
+center = { kind = "Oss", state = ["br"] }
+guards = [{ distance = 1, kind = "Si", state = ["*"], min = 0, max = 1 }]
+set = "empty"
+
+[[init]]
+name = "orphan-oss-missing-osa"
+center = { kind = "Oss", state = ["br"] }
+guards = [{ distance = 2, kind = "Osa", state = ["*"], min = 0, max = 1 }]
+set = "empty"
+
+# TerminateSurface pass 1: demote oxygens once per missing (empty) cation
+# neighbor. As-implemented legacy map (reform R3 wart preserved: 401 always
+# -> 406, 406 always -> 409, regardless of which cation is missing).
+[[init]]
+name = "ts1-osa"
+center = { kind = "Osa", state = ["br", "sih", "full", "albr", "alhy", "sial", "sialh", "si1", "al1", "pr1", "pr2"] }
+foreach = { distance = 1, state = ["@cat_empty"] }
+map = { br = "sial", albr = "al1", sial = "al1", al1 = "empty", si1 = "empty" }
+
+[[init]]
+name = "ts1-oss"
+center = { kind = "Oss", state = ["br", "hy", "si1"] }
+foreach = { distance = 1, state = ["@cat_empty"] }
+map = { br = "si1", si1 = "empty" }
+
+[[init]]
+name = "ts1-oaa"
+center = { kind = "Oaa", state = ["br", "hy", "al1"] }
+foreach = { distance = 1, state = ["@cat_empty"] }
+map = { br = "al1", al1 = "empty" }
+
+# TerminateSurface pass 2: hydroxylate oxygens next to minimally
+# coordinated (occupancy-1) cations. Here the legacy Si/Al ternaries are
+# live, so the maps differ by cation kind.
+[[init]]
+name = "ts2-si-oss"
+center = { kind = "Oss", state = ["empty", "hy", "si1"] }
+foreach = { distance = 1, kind = "Si", state = ["Si.oh0"] }
+map = { empty = "si1" }
+
+[[init]]
+name = "ts2-si-osa"
+center = { kind = "Osa", state = ["empty", "sih", "full", "albr", "alhy", "sial", "sialh", "si1", "al1", "pr1", "pr2"] }
+foreach = { distance = 1, kind = "Si", state = ["Si.oh0"] }
+map = { empty = "si1", si1 = "sial", al1 = "sial", albr = "br", sial = "br" }
+
+[[init]]
+name = "ts2-al-osa"
+center = { kind = "Osa", state = ["empty", "sih", "full", "albr", "alhy", "sial", "sialh", "si1", "al1", "pr1", "pr2"] }
+foreach = { distance = 1, kind = "Al", state = ["Al.l0"] }
+map = { empty = "al1", si1 = "sial", al1 = "albr", albr = "br", sial = "br" }
+
+[[init]]
+name = "ts2-al-oaa"
+center = { kind = "Oaa", state = ["empty", "hy", "al1"] }
+foreach = { distance = 1, kind = "Al", state = ["Al.l0"] }
+map = { empty = "al1", al1 = "br" }
+
+# TerminateSurface pass 3: count terminal hydroxyls into cation states.
+[[init]]
+name = "ts3-al"
+center = { kind = "Al", state = ["@al_occ"] }
+foreach = { distance = 1, state = ["Oaa.al1", "Osa.al1"] }
+shift = 1
+
+[[init]]
+name = "ts3-si"
+center = { kind = "Si", state = ["@si_occ"] }
+foreach = { distance = 1, state = ["Oss.si1", "Osa.si1"] }
+shift = 1
+
+# TerminateLattice pass 2: revert Si-O-Si bridges whose chain touches the
+# frozen boundary.
+[[init]]
+name = "tl-revert-frozen-si"
+center = { kind = "Oss", state = ["br"] }
+guards = [{ distance = 1, frozen = true, state = ["*"], min = 1 }]
+set = "empty"
+
+[[init]]
+name = "tl-revert-frozen-osa"
+center = { kind = "Oss", state = ["br"] }
+guards = [{ distance = 2, kind = "Osa", frozen = true, state = ["*"], min = 1 }]
+set = "empty"
+
+# --- reactions ------------------------------------------------------------
+# Rates: T = 8000 K, RT ~ 15.896 kcal/mol. Legacy convention: forward
+# hydrolysis k+ as-is; reverse = k+ * exp(dE/RT), written here as an
+# Arrhenius with NEGATIVE ea = -dE so it stays temperature-consistent.
+# Forward reactions carry the corrected surface-reachability guard:
+# >= 1 second-neighbor in the hydrolyzed set (frozen sites excluded).
+# R10/R12 carry no guard: their centers (406/404) are themselves in the
+# hydrolyzed set, so the legacy test (which scans neighbors-of-neighbors,
+# center included) is trivially true there.
+
+[[reactions]]
+name = "R0-sio-si-hydrolysis"
+center = { kind = "Oss", state = ["br"] }
+guards = [{ distance = 2, state = ["@hydrolyzed"], frozen = false, min = 1 }]
+rate = { arrhenius = { prefactor = 1.0, ea = 0.0 } }
+
+[[reactions.effects]]
+target = "center"
+set = "hy"
+
+[[reactions.effects]]
+target = "neighbors"
+select = { kind = "Si", state = ["@si_occ"], frozen = false }
+shift = 1
+
+[[reactions]]
+name = "R1-sio-si-condensation"
+center = { kind = "Oss", state = ["hy"] }
+rate = { arrhenius = { prefactor = 1.0, ea = -2.6 } }
+
+[[reactions.effects]]
+target = "center"
+set = "br"
+
+[[reactions.effects]]
+target = "neighbors"
+select = { kind = "Si", state = ["@si_occ"], frozen = false }
+shift = -1
+
+[[reactions]]
+name = "R2-sioal2-si-hydrolysis"
+center = { kind = "Osa", state = ["br"] }
+guards = [{ distance = 2, state = ["@hydrolyzed"], frozen = false, min = 1 }]
+rate = { arrhenius = { prefactor = 1.0, ea = 0.0 } }
+
+[[reactions.effects]]
+target = "center"
+set = "sih"
+
+[[reactions.effects]]
+target = "neighbor"
+select = { kind = "Si", state = ["@si_occ"], frozen = false }
+shift = 1
+
+[[reactions]]
+name = "R3-sioal2-si-condensation"
+center = { kind = "Osa", state = ["sih"] }
+rate = { arrhenius = { prefactor = 1.0, ea = -2.6 } }
+
+[[reactions.effects]]
+target = "center"
+set = "br"
+
+[[reactions.effects]]
+target = "neighbor"
+select = { kind = "Si", state = ["@si_occ"], frozen = false }
+shift = -1
+
+# R4: Al-side hydrolysis of the intact triple bridge; a fair coin picks
+# which Al takes the proton (the legacy ran2 < 0.5 draw), recorded in the
+# pr1/pr2 state split.
+[[reactions]]
+name = "R4-sioal2-al-hydrolysis"
+center = { kind = "Osa", state = ["br"] }
+guards = [{ distance = 2, state = ["@hydrolyzed"], frozen = false, min = 1 }]
+rate = { arrhenius = { prefactor = 100.0, ea = 0.0 } }
+
+[[reactions.branches]]
+weight = 0.5
+effects = [
+  { target = "center", set = "pr1" },
+  { target = "neighbor", select = { kind = "Al", label = "a1", state = ["@al_occ"], frozen = false }, shift = 1 },
+]
+
+[[reactions.branches]]
+weight = 0.5
+effects = [
+  { target = "center", set = "pr2" },
+  { target = "neighbor", select = { kind = "Al", label = "a2", state = ["@al_occ"], frozen = false }, shift = 1 },
+]
+
+[[reactions]]
+name = "R5a-sioal2-al-condensation"
+center = { kind = "Osa", state = ["pr1"] }
+rate = { arrhenius = { prefactor = 100.0, ea = -4.8 } }
+
+[[reactions.effects]]
+target = "center"
+set = "br"
+
+[[reactions.effects]]
+target = "neighbor"
+select = { kind = "Al", label = "a1", state = ["@al_occ"], frozen = false }
+shift = -1
+
+[[reactions]]
+name = "R5b-sioal2-al-condensation"
+center = { kind = "Osa", state = ["pr2"] }
+rate = { arrhenius = { prefactor = 100.0, ea = -4.8 } }
+
+[[reactions.effects]]
+target = "center"
+set = "br"
+
+[[reactions.effects]]
+target = "neighbor"
+select = { kind = "Al", label = "a2", state = ["@al_occ"], frozen = false }
+shift = -1
+
+[[reactions]]
+name = "R6-second-stage-hydrolysis"
+center = { kind = "Osa", state = ["sih"] }
+guards = [{ distance = 2, state = ["@hydrolyzed"], frozen = false, min = 1 }]
+rate = { arrhenius = { prefactor = 100.0, ea = 0.0 } }
+
+[[reactions.effects]]
+target = "center"
+set = "full"
+
+[[reactions.effects]]
+target = "neighbors"
+select = { kind = "Al", state = ["@al_occ"], frozen = false }
+shift = 1
+
+[[reactions]]
+name = "R7-second-stage-condensation"
+center = { kind = "Osa", state = ["full"] }
+rate = { arrhenius = { prefactor = 100.0, ea = -4.8 } }
+
+[[reactions.effects]]
+target = "center"
+set = "sih"
+
+[[reactions.effects]]
+target = "neighbors"
+select = { kind = "Al", state = ["@al_occ"], frozen = false }
+shift = -1
+
+# R8: the bridged side lets go; the proton-holding Al (recorded pr1/pr2)
+# keeps its ligand, the OTHER Al gains one.
+[[reactions]]
+name = "R8a-sioha-hydrolysis"
+center = { kind = "Osa", state = ["pr1"] }
+guards = [{ distance = 2, state = ["@hydrolyzed"], frozen = false, min = 1 }]
+rate = { arrhenius = { prefactor = 1.0, ea = 0.0 } }
+
+[[reactions.effects]]
+target = "center"
+set = "full"
+
+[[reactions.effects]]
+target = "neighbor"
+select = { kind = "Si", state = ["@si_occ"], frozen = false }
+shift = 1
+
+[[reactions.effects]]
+target = "neighbor"
+select = { kind = "Al", label = "a2", state = ["@al_occ"], frozen = false }
+shift = 1
+
+[[reactions]]
+name = "R8b-sioha-hydrolysis"
+center = { kind = "Osa", state = ["pr2"] }
+guards = [{ distance = 2, state = ["@hydrolyzed"], frozen = false, min = 1 }]
+rate = { arrhenius = { prefactor = 1.0, ea = 0.0 } }
+
+[[reactions.effects]]
+target = "center"
+set = "full"
+
+[[reactions.effects]]
+target = "neighbor"
+select = { kind = "Si", state = ["@si_occ"], frozen = false }
+shift = 1
+
+[[reactions.effects]]
+target = "neighbor"
+select = { kind = "Al", label = "a1", state = ["@al_occ"], frozen = false }
+shift = 1
+
+# R9: reverse of R8 — a coin picks which Al LOSES a ligand; the other one
+# becomes the recorded proton holder.
+[[reactions]]
+name = "R9-sioha-condensation"
+center = { kind = "Osa", state = ["full"] }
+rate = { arrhenius = { prefactor = 1.0, ea = -2.6 } }
+
+[[reactions.branches]]
+weight = 0.5
+effects = [
+  { target = "center", set = "pr2" },
+  { target = "neighbor", select = { kind = "Si", state = ["@si_occ"], frozen = false }, shift = -1 },
+  { target = "neighbor", select = { kind = "Al", label = "a1", state = ["@al_occ"], frozen = false }, shift = -1 },
+]
+
+[[reactions.branches]]
+weight = 0.5
+effects = [
+  { target = "center", set = "pr1" },
+  { target = "neighbor", select = { kind = "Si", state = ["@si_occ"], frozen = false }, shift = -1 },
+  { target = "neighbor", select = { kind = "Al", label = "a2", state = ["@al_occ"], frozen = false }, shift = -1 },
+]
+
+# R10/R11: Si-OH-Al with one Al vacant; "the occupied Al" is selected by
+# state, exactly the legacy (al1.state == 100) ? al2 : al1 test.
+[[reactions]]
+name = "R10-sial-hydrolysis"
+center = { kind = "Osa", state = ["sial"] }
+rate = { arrhenius = { prefactor = 1.0, ea = 0.0 } }
+
+[[reactions.effects]]
+target = "center"
+set = "sialh"
+
+[[reactions.effects]]
+target = "neighbor"
+select = { kind = "Si", state = ["@si_occ"], frozen = false }
+shift = 1
+
+[[reactions.effects]]
+target = "neighbor"
+select = { kind = "Al", state = ["@al_occ"], frozen = false }
+shift = 1
+
+[[reactions]]
+name = "R11-sial-condensation"
+center = { kind = "Osa", state = ["sialh"] }
+rate = { arrhenius = { prefactor = 1.0, ea = -2.6 } }
+
+[[reactions.effects]]
+target = "center"
+set = "sial"
+
+[[reactions.effects]]
+target = "neighbor"
+select = { kind = "Si", state = ["@si_occ"], frozen = false }
+shift = -1
+
+[[reactions.effects]]
+target = "neighbor"
+select = { kind = "Al", state = ["@al_occ"], frozen = false }
+shift = -1
+
+[[reactions]]
+name = "R12-albr-hydrolysis"
+center = { kind = "Osa", state = ["albr"] }
+rate = { arrhenius = { prefactor = 100.0, ea = 0.0 } }
+
+[[reactions.effects]]
+target = "center"
+set = "alhy"
+
+[[reactions.effects]]
+target = "neighbors"
+select = { kind = "Al", state = ["@al_occ"], frozen = false }
+shift = 1
+
+# R13 is DEAD in the legacy inputs (data.rxn types the product as "40100"),
+# breaking detailed balance for the 404/405 channel. Restored here.
+[[reactions]]
+name = "R13-albr-condensation"
+center = { kind = "Osa", state = ["alhy"] }
+rate = { arrhenius = { prefactor = 100.0, ea = -4.8 } }
+
+[[reactions.effects]]
+target = "center"
+set = "albr"
+
+[[reactions.effects]]
+target = "neighbors"
+select = { kind = "Al", state = ["@al_occ"], frozen = false }
+shift = -1
+
+[[reactions]]
+name = "R14-alohal-hydrolysis"
+center = { kind = "Oaa", state = ["br"] }
+guards = [{ distance = 2, state = ["@hydrolyzed"], frozen = false, min = 1 }]
+rate = { arrhenius = { prefactor = 100.0, ea = 0.0 } }
+
+[[reactions.effects]]
+target = "center"
+set = "hy"
+
+[[reactions.effects]]
+target = "neighbors"
+select = { kind = "Al", state = ["@al_occ"], frozen = false }
+shift = 1
+
+[[reactions]]
+name = "R15-alohal-condensation"
+center = { kind = "Oaa", state = ["hy"] }
+rate = { arrhenius = { prefactor = 100.0, ea = -4.8 } }
+
+[[reactions.effects]]
+target = "center"
+set = "br"
+
+[[reactions.effects]]
+target = "neighbors"
+select = { kind = "Al", state = ["@al_occ"], frozen = false }
+shift = -1
+
+# --- adsorption / desorption ---------------------------------------------
+# The adsorbing cation arrives fully solvated (l6/oh4) and rewrites every
+# oxygen neighbor through a fixed case map; desorption is the inverse with
+# silent skips (the legacy default: break). The legacy adsorption rate is
+# a * exp(dE/RT) * exp(dmu/RT) with dE = -14.5 (Al) / -6.4 (Si), i.e.
+# Arrhenius ea = +14.5 / +6.4 plus the consumes-species solution factor.
+
+[[reactions]]
+name = "adsorb-al"
+center = { kind = "Al", state = ["empty"] }
+guards = [{ distance = 1, state = ["@o_occ"], frozen = false, min = 1 }]
+consumes = ["Al"]
+rate = { arrhenius = { prefactor = 100.0, ea = 14.5 } }
+
+[[reactions.effects]]
+target = "center"
+set = "l6"
+
+[[reactions.effects]]
+target = "neighbors"
+select = { kind = "Oaa", state = ["Oaa.empty", "Oaa.al1"], frozen = false }
+map = { empty = "al1", al1 = "hy" }
+
+[[reactions.effects]]
+target = "neighbors"
+select = { kind = "Osa", state = ["Osa.empty", "Osa.al1", "Osa.si1", "Osa.sialh"], frozen = false }
+map = { empty = "al1", al1 = "alhy", si1 = "sialh", sialh = "full" }
+
+# The 406 -> 410 arm carries the lostal write: the adsorbing Al holds the
+# proton, addressed by which labeled bond connects it to the oxygen.
+[[reactions.effects]]
+target = "neighbors"
+select = { kind = "Osa", label = "a1", state = ["Osa.sial"], frozen = false }
+set = "pr1"
+
+[[reactions.effects]]
+target = "neighbors"
+select = { kind = "Osa", label = "a2", state = ["Osa.sial"], frozen = false }
+set = "pr2"
+
+[[reactions]]
+name = "adsorb-si"
+center = { kind = "Si", state = ["empty"] }
+guards = [{ distance = 1, state = ["@o_occ"], frozen = false, min = 1 }]
+consumes = ["Si"]
+rate = { arrhenius = { prefactor = 100.0, ea = 6.4 } }
+
+[[reactions.effects]]
+target = "center"
+set = "oh4"
+
+[[reactions.effects]]
+target = "neighbors"
+select = { kind = "Oss", state = ["Oss.empty", "Oss.si1"], frozen = false }
+map = { empty = "si1", si1 = "hy" }
+
+[[reactions.effects]]
+target = "neighbors"
+select = { kind = "Osa", state = ["Osa.empty", "Osa.al1", "Osa.albr", "Osa.alhy"], frozen = false }
+map = { empty = "si1", al1 = "sialh", albr = "sih", alhy = "full" }
+
+# Desorption: only the fully solvated cation (l6 / oh4) can leave. The
+# only genuinely environment-dependent rates in the legacy deck live here:
+# the Check100/Check200 buckets give dE = 12*floor((x+y)/2) for Al and
+# 6*(x+y) for Si (x,y as in envrn.cpp), expressed as by_count/when
+# modifiers on the activation energy.
+
+[[reactions]]
+name = "desorb-al"
+center = { kind = "Al", state = ["l6"] }
+produces = ["Al"]
+rate = { arrhenius = { prefactor = 1998.0, ea = 0.0 } }
+
+[[reactions.modifiers]]
+select = { distance = 1, state = ["Oaa.hy", "Osa.full", "Osa.alhy", "Osa.sialh", "Osa.al1", "Osa.pr1", "Osa.pr2"], frozen = false }
+by_count = { dea = [0.0, 0.0, 12.0, 12.0, 24.0, 24.0, 36.0] }
+
+[[reactions.effects]]
+target = "center"
+set = "empty"
+
+[[reactions.effects]]
+target = "neighbors"
+select = { kind = "Oaa", state = ["*"], frozen = false }
+map = { hy = "al1", al1 = "empty" }
+missing = "skip"
+
+[[reactions.effects]]
+target = "neighbors"
+select = { kind = "Osa", state = ["*"], frozen = false }
+map = { full = "sialh", alhy = "al1", sialh = "si1", al1 = "empty", pr1 = "sial", pr2 = "sial" }
+missing = "skip"
+
+[[reactions]]
+name = "desorb-si"
+center = { kind = "Si", state = ["oh4"] }
+produces = ["Si"]
+rate = { arrhenius = { prefactor = 1998.0, ea = 6.0 } }
+
+[[reactions.modifiers]]
+select = { distance = 1, state = ["Oss.hy"], frozen = false }
+by_count = { dea = [0.0, 6.0, 12.0, 18.0, 24.0] }
+
+# The legacy Check200 x-term: any Si-OH (408) neighbor zeroes the base
+# +6 bucket offset.
+[[reactions.modifiers]]
+select = { distance = 1, state = ["Osa.si1"], frozen = false }
+when = { min = 1, dea = -6.0 }
+
+[[reactions.effects]]
+target = "center"
+set = "empty"
+
+[[reactions.effects]]
+target = "neighbors"
+select = { kind = "Oss", state = ["*"], frozen = false }
+map = { si1 = "empty", hy = "si1" }
+missing = "skip"
+
+[[reactions.effects]]
+target = "neighbors"
+select = { kind = "Osa", state = ["*"], frozen = false }
+map = { sih = "albr", full = "alhy", sialh = "al1", si1 = "empty" }
+missing = "skip"
+
+[simulation]
+steps = 20000
+seed = 42
+report_every = 2000

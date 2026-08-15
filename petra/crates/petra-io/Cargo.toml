@@ -1,0 +1,15 @@
+[package]
+name = "petra-io"
+description = "Trajectory export: PGIF snapshots and JSONL event logs for graph-viz playback"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+petra-core = { path = "../petra-core" }
+petra-deck = { path = "../petra-deck" }
+serde = { workspace = true }
+serde_json = "1"
+
+[dev-dependencies]
+toml = { workspace = true }
