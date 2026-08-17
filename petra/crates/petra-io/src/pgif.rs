@@ -59,6 +59,8 @@ pub fn snapshot_json(deck: &CompiledDeck, engine: &Engine) -> String {
         .map(|&t| deck.kinds_per_template[t as usize].0 as i64)
         .collect();
     let frozen: Vec<bool> = lat.frozen.clone();
+    let has_strain = lat.strain.iter().any(|&u| u != 0.0);
+    let strain: Vec<f64> = lat.strain.iter().map(|&u| round6(u)).collect();
 
     // Edges once per pair (adjacency stores both directions), with a
     // best-effort `seam` flag for bonds that wrap a periodic boundary
@@ -101,20 +103,34 @@ pub fn snapshot_json(deck: &CompiledDeck, engine: &Engine) -> String {
         }),
     );
 
+    let mut columns = serde_json::Map::new();
+    columns.insert("x".into(), json!({ "type": "f32", "data": xs }));
+    columns.insert("y".into(), json!({ "type": "f32", "data": ys }));
+    columns.insert("z".into(), json!({ "type": "f32", "data": zs }));
+    columns.insert(
+        "type".into(),
+        json!({ "type": "categorical", "dict": type_dict, "data": types }),
+    );
+    columns.insert(
+        "state".into(),
+        json!({ "type": "categorical", "dict": deck.state_names, "data": states }),
+    );
+    columns.insert(
+        "kind".into(),
+        json!({ "type": "categorical", "dict": deck.kind_names, "data": kinds }),
+    );
+    columns.insert("frozen".into(), json!({ "type": "bool", "data": frozen }));
+    if has_strain {
+        // Stored elastic strain energy per site, kcal/mol (docs/STRAIN.md).
+        columns.insert("strain".into(), json!({ "type": "f32", "data": strain }));
+    }
+
     let doc = json!({
         "pgif": 1,
         "meta": Value::Object(meta),
         "nodes": {
             "count": n,
-            "columns": {
-                "x": { "type": "f32", "data": xs },
-                "y": { "type": "f32", "data": ys },
-                "z": { "type": "f32", "data": zs },
-                "type": { "type": "categorical", "dict": type_dict, "data": types },
-                "state": { "type": "categorical", "dict": deck.state_names, "data": states },
-                "kind": { "type": "categorical", "dict": deck.kind_names, "data": kinds },
-                "frozen": { "type": "bool", "data": frozen },
-            },
+            "columns": Value::Object(columns),
         },
         "edges": {
             "count": src.len(),

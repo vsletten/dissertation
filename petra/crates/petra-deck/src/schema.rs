@@ -18,6 +18,11 @@ pub struct DeckFile {
     #[serde(default)]
     pub aliases: BTreeMap<String, Vec<String>>,
     pub lattice: LatticeSpec,
+    /// Crystallographic line defects: each contributes an analytic elastic
+    /// strain-energy field u(r) = A/max(r, r_core)² over the lattice
+    /// (docs/STRAIN.md §5). Fields superpose.
+    #[serde(default)]
+    pub defects: Vec<DefectSpec>,
     pub thermo: ThermoSpec,
     /// Ordered build-time passes applied after the uniform per-kind fill
     /// and before dynamics: surface termination, region clearing, defect
@@ -184,6 +189,39 @@ pub struct LatticeSpec {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct DefectSpec {
+    /// `"screw"` or `"edge"` (isotropic θ-averaged edge form).
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Dislocation line direction: 0 = a, 1 = b, 2 = c.
+    pub line_axis: u8,
+    /// A point the line passes through, in CELL coordinates (the component
+    /// along `line_axis` is irrelevant).
+    pub at: [f64; 3],
+    /// |Burgers vector|, Å. Required unless `strain_prefactor` is given.
+    #[serde(default)]
+    pub burgers: Option<f64>,
+    /// Shear modulus μ, GPa. Required unless `strain_prefactor` is given.
+    #[serde(default)]
+    pub shear_modulus: Option<f64>,
+    /// Poisson's ratio ν (edge only; default 0.25).
+    #[serde(default)]
+    pub poisson: Option<f64>,
+    /// Continuum cutoff / hollow-core clamp, Å: r is clamped to this.
+    /// Default = burgers.
+    #[serde(default)]
+    pub core_radius: Option<f64>,
+    /// Optional hard cap on u per site, in deck energy units.
+    #[serde(default)]
+    pub cap: Option<f64>,
+    /// Directly set A in u = A/r² (deck-energy·Å²), overriding the
+    /// physical inputs — for illustrative decks and tests.
+    #[serde(default)]
+    pub strain_prefactor: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ThermoSpec {
     /// Kelvin.
     pub temperature: f64,
@@ -211,6 +249,11 @@ pub struct ReactionSpec {
     /// from explicit reverse reactions until the P1 auto-reverse lands).
     #[serde(default)]
     pub produces: Vec<String>,
+    /// Strain coupling: `strain = { scale = s }` adds `s · u_center` to the
+    /// activation energy (docs/STRAIN.md §2.2; dissolution-forward = −β,
+    /// reverse = +(1−β)).
+    #[serde(default)]
+    pub strain: Option<StrainSpec>,
     #[serde(default)]
     pub modifiers: Vec<ModifierSpec>,
     /// Deterministic outcome (exactly one of `effects` / `branches`).
@@ -253,6 +296,13 @@ pub struct SelectorSpec {
     pub min: Option<u32>,
     #[serde(default)]
     pub max: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StrainSpec {
+    /// Dimensionless multiplier on the center's strain energy.
+    pub scale: f64,
 }
 
 /// Exactly one variant must be present.
