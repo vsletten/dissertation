@@ -114,7 +114,8 @@ classic treatment is β = 1 (all of it in the dissolution rate,
 reaction declares `strain_scale`, the multiplier on u_i added to its Ea —
 so a forward/reverse pair writes `strain_scale = -β` and `+(1−β)`
 respectively, and the detailed-balance linter (P2 roadmap) can eventually
-check that pairs sum to −1.
+check that each pair's scales **differ by exactly −1** (forward minus
+reverse = −β − (1−β) = −1, i.e. ΔG shifts by u_i regardless of β).
 
 **Convention**: `u_i ≥ 0` is stored elastic energy (kcal/mol, in the deck's
 energy units) at site i; `Ea_eff = Ea + strain_scale · u_i`.

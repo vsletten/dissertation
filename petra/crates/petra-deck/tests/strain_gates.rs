@@ -111,6 +111,31 @@ fn strain_field_matches_hand_formula_with_clamp_and_min_image() {
 }
 
 #[test]
+fn strain_cap_bounds_the_field() {
+    // Large prefactor, small cap: without the cap the clamped-core value
+    // would be 1e6/4; with it, no site may exceed 0.5.
+    let mut deck: petra_deck::DeckFile = toml::from_str(FIELD_DECK).expect("deck parses");
+    deck.defects[0].strain_prefactor = Some(1.0e6);
+    deck.defects[0].cap = Some(0.5);
+    let deck = petra_deck::compile(&deck).expect("deck compiles");
+    let engine = deck.build_engine(Some(1)).expect("engine builds");
+    let max_u = engine.lattice.strain.iter().cloned().fold(0.0f64, f64::max);
+    assert!(
+        max_u <= 0.5 + 1e-12 && max_u > 0.0,
+        "cap not enforced: max u = {max_u}"
+    );
+}
+
+#[test]
+fn no_defects_means_zero_strain_everywhere() {
+    let mut deck: petra_deck::DeckFile = toml::from_str(FIELD_DECK).expect("deck parses");
+    deck.defects.clear();
+    let deck = petra_deck::compile(&deck).expect("deck compiles");
+    let engine = deck.build_engine(Some(1)).expect("engine builds");
+    assert!(engine.lattice.strain.iter().all(|&u| u == 0.0));
+}
+
+#[test]
 fn strain_rate_coupling_is_exact() {
     let deck = compile(FIELD_DECK);
     let engine = deck.build_engine(Some(1)).expect("engine builds");
