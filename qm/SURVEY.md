@@ -457,13 +457,17 @@ platform layer:
    opt+freq (GPU4PySCF) → geomeTRIC/Sella TS + IRC verification → ωB97M-V +
    SMD single points → quasi-RRHO ΔG‡ → Eyring k(T) with tunneling
    correction; ORCA DLPNO-CCSD(T) spot checks.
-3. **The bridge**: emit the site-resolved rate table in exactly the format
-   `kmc-rs` consumes (the modern `data.rxn`), with provenance for every
-   number.
+3. **The bridge**: emit the site-resolved rate table as TST parameters for
+   a **Petra deck** — the general lattice-KMC framework that now runs the
+   dissertation model as pure data (`petra/examples/kaolinite.toml`) — with
+   provenance for every number. (Legacy `data.rxn` output for `kmc-rs`
+   parity runs is a trivial extra writer.)
 
 That's a modest Python package — the QM analog of what `kmc-rs` is to the
 C++ model — standing on PySCF + ASE + geomeTRIC/Sella, with every heavy
-component free and (except ORCA) open source.
+component free and (except ORCA) open source. Together with Petra it
+completes the "any mineral" story: a new mineral costs a deck plus a
+computed barrier table, not a new program.
 
 ## 9. Pilot plan
 
@@ -484,8 +488,10 @@ the stack.
 barriers for the KMC's five site families; benchmark one or two against
 CP2K metadynamics or a fine-tuned MLIP as an independent check.
 
-**Phase 3 — close the loop**: regenerate `data.rxn` from computed k(T) and
-run `kmc-rs` against the dissertation's original parameterization.
+**Phase 3 — close the loop**: regenerate the kaolinite deck's TST
+parameters from computed k(T) and run Petra with the QM-derived deck against
+the dissertation's original parameterization (`data.rxn`/`kmc-rs` remain the
+legacy cross-check).
 
 ---
 
