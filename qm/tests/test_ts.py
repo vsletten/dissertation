@@ -164,6 +164,32 @@ class TestScanExtension:
         ]
         assert not has_interior_maximum(plateau)
 
+    def test_first_crest_beats_compression_wall(self):
+        # The observed proton-transfer profile: crest, bond formation
+        # dip, then a monotonic compression wall that out-climbs the
+        # crest at the endpoint. The guess must be the first crest.
+        from quarry.ts import first_interior_maximum, scan_ts_guess
+
+        profile = [
+            (2.26, 0.001),
+            (1.96, 0.007),  # the real crest
+            (1.81, -0.001),  # proton snapped over
+            (1.21, 0.010),
+            (1.06, 0.015),  # compression wall, global max at endpoint
+        ]
+        scan = [self._fake_point(r, e) for r, e in profile]
+        assert first_interior_maximum(scan) == 1
+        assert scan_ts_guess(scan).name == "p-r1.96"
+
+    def test_scan_ts_guess_requires_interior_crest(self):
+        from quarry.ts import scan_ts_guess
+
+        rising = [
+            self._fake_point(r, e) for r, e in [(2.8, 0.0), (2.4, 1.0), (2.0, 2.0)]
+        ]
+        with pytest.raises(ValueError, match="no interior"):
+            scan_ts_guess(rising)
+
     def test_scan_extends_until_peak(self, monkeypatch):
         import quarry.ts as ts_mod
 

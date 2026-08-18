@@ -192,8 +192,33 @@ def scan_maximum(scan: list[tuple[float, float, Cluster]]) -> Cluster:
     return max(scan, key=lambda p: p[1])[2]
 
 
+# Peaks must clear both neighbors by this much (Hartree) to count —
+# well above converged-optimization noise, well below any real barrier.
+_PEAK_TOL_HARTREE = 5e-5
+
+
+def first_interior_maximum(
+    scan: list[tuple[float, float, Cluster]], *, tol: float = _PEAK_TOL_HARTREE
+) -> int | None:
+    """Index of the first interior local energy maximum, else None.
+
+    The *first* crest along the driven coordinate is the saddle guess
+    for this elementary step. The global maximum is the wrong criterion:
+    once the driven bond has actually formed, pushing further just
+    compresses it and the energy rises without bound, so the global max
+    lands on the compression endpoint (observed live: proton-transfer
+    crest at r(Obr-H)=1.96 A, then bond formation, then a monotonic
+    compression wall that out-climbed the crest).
+    """
+    energies = [e for _, e, _ in scan]
+    for i in range(1, len(energies) - 1):
+        if energies[i] > energies[i - 1] + tol and energies[i] > energies[i + 1] + tol:
+            return i
+    return None
+
+
 def has_interior_maximum(scan: list[tuple[float, float, Cluster]]) -> bool:
-    """True when the scan's energy maximum is not an endpoint.
+    """True when the scan contains a genuine interior crest.
 
     A maximum at the tight end means the ridge has not been crossed and
     the "TS guess" is just the last constrained point — a saddle search
@@ -203,11 +228,15 @@ def has_interior_maximum(scan: list[tuple[float, float, Cluster]]) -> bool:
     """
     if len(scan) < 3:
         return False
-    energies = [e for _, e, _ in scan]
-    e_max = max(energies)
-    # Strictly above both endpoints — a plateau shared with an endpoint
-    # does not count as a crossed ridge.
-    return energies[0] < e_max and energies[-1] < e_max
+    return first_interior_maximum(scan) is not None
+
+
+def scan_ts_guess(scan: list[tuple[float, float, Cluster]]) -> Cluster:
+    """The structure at the first interior crest — the Sella guess."""
+    idx = first_interior_maximum(scan)
+    if idx is None:
+        raise ValueError("scan has no interior energy maximum")
+    return scan[idx][2]
 
 
 class ScanNoMaximumError(RuntimeError):

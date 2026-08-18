@@ -60,8 +60,8 @@ from quarry.ts import (  # noqa: E402
     ScanNoMaximumError,
     find_ts,
     quick_irc,
-    scan_maximum,
     scan_to_maximum,
+    scan_ts_guess,
 )
 
 REACTIONS = {
@@ -200,7 +200,7 @@ def main() -> int:
                 distances_a=[2.8, 2.6, 2.4, 2.2, 2.1, 2.0, 1.9],
                 progress=lambda r, e: log(f"  r={r:.2f} A  E={e:.6f} Ha"),
             )
-            ts_guess = scan_maximum(scan)
+            ts_guess = scan_ts_guess(scan)
         except ScanNoMaximumError as exc:
             log("  approach coordinate alone does not cross the ridge;")
             log("  stage 2b: pin r(Si-Ow)=1.90 A, drive H(water) -> O(bridge)")
@@ -226,7 +226,7 @@ def main() -> int:
                 min_distance_a=0.95,
                 progress=lambda r, e: log(f"  r(Obr-H)={r:.2f} A  E={e:.6f} Ha"),
             )
-            ts_guess = scan_maximum(pscan)
+            ts_guess = scan_ts_guess(pscan)
         save_xyz(ts_guess, ts_guess_path)
 
     # Stage 3 — saddle search.
