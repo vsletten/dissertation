@@ -1,0 +1,110 @@
+# Kossel crystal with a screw dislocation — the etch-pit demo
+# (docs/STRAIN.md). Same physics as kossel.toml (bond-counting detachment,
+# mu-driven attachment, undersaturated solution) plus one screw dislocation
+# threading the open c-surfaces. Its elastic strain field u(r) = A/r^2
+# lowers the detachment barrier by u (beta = 1, the Blum-Lasaga convention:
+# detach has strain.scale = -1, attach is untouched), so dissolution
+# accelerates toward the core and a pit drills down the line — watch it in
+# graph-viz (petra examples/kossel-etchpit.toml --viz, or paste this deck
+# into the live panel).
+
+[deck]
+name = "kossel-etchpit"
+comment = "screw dislocation etch pit in a Kossel crystal"
+
+[cell]
+a = 3.0
+b = 3.0
+c = 3.0
+alpha = 90.0
+beta = 90.0
+gamma = 90.0
+
+[[cell.sites]]
+kind = "M_site"
+frac = [0.0, 0.0, 0.0]
+
+[[cell.bonds]]
+i = 0
+j = 0
+dcell = [1, 0, 0]
+
+[[cell.bonds]]
+i = 0
+j = 0
+dcell = [0, 1, 0]
+
+[[cell.bonds]]
+i = 0
+j = 0
+dcell = [0, 0, 1]
+
+[[species]]
+name = "M"
+
+[[kinds]]
+name = "M_site"
+initial = "occupied"
+
+[[kinds.states]]
+name = "occupied"
+occupant = "M"
+
+[[kinds.states]]
+name = "empty"
+occupant = "vacant"
+
+[lattice]
+dims = [14, 14, 6]
+boundary = ["periodic", "periodic", "open"]
+
+# One screw dislocation along c through the middle of the slab.
+# A = mu b^2 Omega / (8 pi^2) ~ 53 kcal·Å²/mol with these inputs, so
+# u ~ 3.3 kcal/mol at the 4 Å core clamp, ~0.24 kcal/mol at 15 Å.
+[[defects]]
+type = "screw"
+line_axis = 2
+at = [7.0, 7.0, 0.0]
+burgers = 6.0
+shear_modulus = 30.0
+core_radius = 4.0
+
+[thermo]
+temperature = 298.15
+
+[thermo.mu]
+M = -2.0
+
+[thermo.activity]
+M = 1.0
+
+[[reactions]]
+name = "detach"
+center = { kind = "M_site", state = ["occupied"] }
+rate = { arrhenius = { prefactor = 1.0e13, ea = 0.0 } }
+strain = { scale = -1.0 }
+produces = ["M"]
+
+[[reactions.modifiers]]
+select = { distance = 1, state = ["occupied"] }
+per_match = { dea = 2.0 }
+
+[[reactions.effects]]
+target = "center"
+set = "empty"
+
+[[reactions]]
+name = "attach"
+center = { kind = "M_site", state = ["empty"] }
+guards = [{ distance = 1, min = 1, state = ["occupied"] }]
+rate = { arrhenius = { prefactor = 1.0e13, ea = 6.0 } }
+consumes = ["M"]
+
+[[reactions.effects]]
+target = "center"
+set = "occupied"
+
+[simulation]
+steps = 8000
+seed = 42
+report_every = 1000

@@ -45,6 +45,10 @@ pub struct Lattice {
     pub adj_label: Vec<u16>,
     /// Dynamic per-site state, initialized by the caller.
     pub states: Vec<StateId>,
+    /// Stored elastic strain energy per site (kcal/mol), ≥ 0; zeros unless
+    /// the deck declares defects (docs/STRAIN.md §2). Static in v1 — a
+    /// future relaxation provider mutates it and dirties the sites.
+    pub strain: Vec<f64>,
 }
 
 impl Lattice {
@@ -106,6 +110,7 @@ impl Lattice {
             adj: Vec::new(),
             adj_label: Vec::new(),
             states: Vec::with_capacity(n),
+            strain: vec![0.0; n],
         };
 
         lat.adj_off.push(0);

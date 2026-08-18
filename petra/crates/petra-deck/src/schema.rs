@@ -18,6 +18,11 @@ pub struct DeckFile {
     #[serde(default)]
     pub aliases: BTreeMap<String, Vec<String>>,
     pub lattice: LatticeSpec,
+    /// Crystallographic line defects: each contributes an analytic elastic
+    /// strain-energy field u(r) = A/max(r, r_core)² over the lattice
+    /// (docs/STRAIN.md §5). Fields superpose.
+    #[serde(default)]
+    pub defects: Vec<DefectSpec>,
     pub thermo: ThermoSpec,
     /// Ordered build-time passes applied after the uniform per-kind fill
     /// and before dynamics: surface termination, region clearing, defect
@@ -33,7 +38,9 @@ pub struct DeckFile {
 /// One build-time pass. The operation applies to the *center* site — once,
 /// or once per neighbor matching `foreach` (in adjacency order), so
 /// "step the map per missing cation" and "increment per terminal OH" are
-/// both expressible.
+/// both expressible. `probability` and `sites` are the substitution/defect
+/// fill rules of design doc §6: "Fe replaces Al on Al_oct at 0.02" is a
+/// pass with `probability = 0.02` and `set = <an Fe-occupant state>`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InitPassSpec {
@@ -44,6 +51,18 @@ pub struct InitPassSpec {
     /// range (either bound optional).
     #[serde(default)]
     pub region: Option<RegionSpec>,
+    /// Apply the op at each qualifying site with this probability, in
+    /// [0, 1]. Draws are deterministic given (deck, run seed): one shared
+    /// init RNG stream, consumed in pass order then site-index order, one
+    /// draw per site that passes every other filter. With `foreach`, the
+    /// draw gates the whole site (all repetitions), not each repetition.
+    #[serde(default)]
+    pub probability: Option<f64>,
+    /// Restrict to an explicit site list; each entry is `[a, b, c, t]` —
+    /// cell coordinates plus template-site index (the order sites appear
+    /// under `[[cell.sites]]`). Composes with every other filter.
+    #[serde(default)]
+    pub sites: Option<Vec<[usize; 4]>>,
     /// Additional guards on the center's neighborhood.
     #[serde(default)]
     pub guards: Vec<SelectorSpec>,
@@ -184,6 +203,39 @@ pub struct LatticeSpec {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct DefectSpec {
+    /// `"screw"` or `"edge"` (isotropic θ-averaged edge form).
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Dislocation line direction: 0 = a, 1 = b, 2 = c.
+    pub line_axis: u8,
+    /// A point the line passes through, in CELL coordinates (the component
+    /// along `line_axis` is irrelevant).
+    pub at: [f64; 3],
+    /// |Burgers vector|, Å. Required unless `strain_prefactor` is given.
+    #[serde(default)]
+    pub burgers: Option<f64>,
+    /// Shear modulus μ, GPa. Required unless `strain_prefactor` is given.
+    #[serde(default)]
+    pub shear_modulus: Option<f64>,
+    /// Poisson's ratio ν (edge only; default 0.25).
+    #[serde(default)]
+    pub poisson: Option<f64>,
+    /// Continuum cutoff / hollow-core clamp, Å: r is clamped to this.
+    /// Default = burgers.
+    #[serde(default)]
+    pub core_radius: Option<f64>,
+    /// Optional hard cap on u per site, in deck energy units.
+    #[serde(default)]
+    pub cap: Option<f64>,
+    /// Directly set A in u = A/r² (deck-energy·Å²), overriding the
+    /// physical inputs — for illustrative decks and tests.
+    #[serde(default)]
+    pub strain_prefactor: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ThermoSpec {
     /// Kelvin.
     pub temperature: f64,
@@ -211,6 +263,11 @@ pub struct ReactionSpec {
     /// from explicit reverse reactions until the P1 auto-reverse lands).
     #[serde(default)]
     pub produces: Vec<String>,
+    /// Strain coupling: `strain = { scale = s }` adds `s · u_center` to the
+    /// activation energy (docs/STRAIN.md §2.2; dissolution-forward = −β,
+    /// reverse = +(1−β)).
+    #[serde(default)]
+    pub strain: Option<StrainSpec>,
     #[serde(default)]
     pub modifiers: Vec<ModifierSpec>,
     /// Deterministic outcome (exactly one of `effects` / `branches`).
@@ -253,6 +310,13 @@ pub struct SelectorSpec {
     pub min: Option<u32>,
     #[serde(default)]
     pub max: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StrainSpec {
+    /// Dimensionless multiplier on the center's strain energy.
+    pub scale: f64,
 }
 
 /// Exactly one variant must be present.

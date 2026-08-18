@@ -13,6 +13,8 @@ use petra_core::reaction::{
 };
 use petra_core::state::{StateId, StateSet};
 use petra_core::Engine;
+use rand::{Rng as _, SeedableRng};
+use rand_pcg::Pcg64Mcg;
 
 use crate::schema::{DeckFile, EffectSpec, RateSpec, SelectorSpec};
 
@@ -42,6 +44,7 @@ pub struct CompiledDeck {
     pub kind_state_ranges: Vec<(u16, u16)>,
     pub initial_per_template: Vec<StateId>,
     pub init_passes: Vec<InitPass>,
+    pub defects: Vec<CompiledDefect>,
     pub reactions: Vec<Reaction>,
     pub temperature: f64,
     pub dims: [usize; 3],
@@ -61,16 +64,36 @@ pub struct InitPass {
     pub center_states: StateSet,
     /// (axis, min, max) inclusive cell-coordinate slab.
     pub region: Option<(u8, usize, usize)>,
+    /// Apply at each qualifying site with this probability (schema doc for
+    /// the draw-order contract); `None` = always.
+    pub probability: Option<f64>,
+    /// Explicit `[a, b, c, t]` site list restriction; `None` = all sites.
+    pub sites: Option<Vec<[usize; 4]>>,
     pub guards: Vec<Guard>,
     /// Apply the op once per matching neighbor instead of once.
     pub foreach: Option<NeighborSelect>,
     pub op: EffectOp,
 }
 
+/// One compiled line defect: u(r) = prefactor / max(r, core_radius)²,
+/// capped, superposed over all defects (docs/STRAIN.md §5). All values in
+/// internal units (kcal/mol, Å).
+#[derive(Debug, Clone)]
+pub struct CompiledDefect {
+    pub line_axis: u8,
+    /// A point on the line, cell coordinates.
+    pub at: [f64; 3],
+    /// A in kcal·Å²/mol.
+    pub prefactor: f64,
+    pub core_radius: f64,
+    pub cap: Option<f64>,
+}
+
 impl CompiledDeck {
     /// Instantiate the lattice (uniform per-kind fill), run the init
-    /// passes, and build the engine.
+    /// passes, compute defect strain fields, and build the engine.
     pub fn build_engine(&self, seed_override: Option<u64>) -> Result<Engine, CompileError> {
+        let seed = seed_override.unwrap_or(self.seed);
         let initial = self.initial_per_template.clone();
         let mut lattice =
             Lattice::build(&self.unit_cell, self.dims, self.boundary, |t| initial[t]);
@@ -79,7 +102,8 @@ impl CompiledDeck {
             .iter()
             .map(|&t| self.kinds_per_template[t as usize])
             .collect();
-        self.run_init(&mut lattice, &kinds)?;
+        self.run_init(&mut lattice, &kinds, seed)?;
+        self.compute_strain(&mut lattice)?;
         Ok(Engine::new(
             lattice,
             &self.kinds_per_template,
@@ -87,14 +111,97 @@ impl CompiledDeck {
             self.kind_state_ranges.clone(),
             self.reactions.clone(),
             self.temperature,
-            seed_override.unwrap_or(self.seed),
+            seed,
         ))
     }
 
-    fn run_init(&self, lattice: &mut Lattice, kinds: &[KindId]) -> Result<(), CompileError> {
-        let mut scratch = Vec::new();
-        for pass in &self.init_passes {
+    /// Superpose every defect's analytic field into `lattice.strain`
+    /// (docs/STRAIN.md §5). Perpendicular distance to the line uses
+    /// minimum-image displacement on periodic axes.
+    fn compute_strain(&self, lattice: &mut Lattice) -> Result<(), CompileError> {
+        if self.defects.is_empty() {
+            return Ok(());
+        }
+        let m = self.unit_cell.cell.matrix();
+        let mul = |f: [f64; 3]| -> [f64; 3] {
+            [
+                m[0][0] * f[0] + m[0][1] * f[1] + m[0][2] * f[2],
+                m[1][0] * f[0] + m[1][1] * f[1] + m[1][2] * f[2],
+                m[2][0] * f[0] + m[2][1] * f[1] + m[2][2] * f[2],
+            ]
+        };
+        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+        for d in &self.defects {
+            let ax = d.line_axis as usize;
+            let mut dir = [m[0][ax], m[1][ax], m[2][ax]];
+            let len = dot(dir, dir).sqrt();
+            for c in &mut dir {
+                *c /= len;
+            }
+            let q = mul(d.at);
             for s in 0..lattice.len() {
+                let (cell, t) = lattice.coords(s);
+                let p = self.unit_cell.cell.to_cartesian(
+                    self.unit_cell.sites[t].frac,
+                    [cell[0] as i32, cell[1] as i32, cell[2] as i32],
+                );
+                let v = [p[0] - q[0], p[1] - q[1], p[2] - q[2]];
+                let mut f = self
+                    .unit_cell
+                    .cell
+                    .to_fractional(v)
+                    .map_err(CompileError)?;
+                for (axis, fc) in f.iter_mut().enumerate() {
+                    if self.boundary[axis] == Boundary::Periodic {
+                        let period = self.dims[axis] as f64;
+                        *fc -= period * (*fc / period).round();
+                    }
+                }
+                let w = mul(f);
+                let along = dot(w, dir);
+                let r2 = (dot(w, w) - along * along).max(0.0);
+                let r = r2.sqrt().max(d.core_radius);
+                let mut u = d.prefactor / (r * r);
+                if let Some(cap) = d.cap {
+                    u = u.min(cap);
+                }
+                lattice.strain[s] += u;
+            }
+        }
+        Ok(())
+    }
+
+    fn run_init(
+        &self,
+        lattice: &mut Lattice,
+        kinds: &[KindId],
+        seed: u64,
+    ) -> Result<(), CompileError> {
+        let mut scratch = Vec::new();
+        // One RNG stream for every probabilistic pass, decorrelated from the
+        // dynamics stream by a fixed salt; draw order is the documented
+        // contract (schema.rs): pass order, then site-index order, one draw
+        // per site that passed every other filter.
+        const INIT_STREAM_SALT: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut rng = Pcg64Mcg::seed_from_u64(seed ^ INIT_STREAM_SALT);
+        for pass in &self.init_passes {
+            // An explicit site list, sorted+deduped, IS the iteration order —
+            // site-index order, so the RNG draw contract is unchanged.
+            let site_list: Option<Vec<usize>> = pass.sites.as_ref().map(|list| {
+                let mut v: Vec<usize> = list
+                    .iter()
+                    .map(|&[a, b, c, t]| lattice.index([a, b, c], t))
+                    .collect();
+                v.sort_unstable();
+                v.dedup();
+                v
+            });
+            let sweep: Box<dyn Iterator<Item = usize>> = match &site_list {
+                Some(list) => Box::new(list.iter().copied()),
+                None => Box::new(0..lattice.len()),
+            };
+            for s in sweep {
                 if let Some((axis, min, max)) = pass.region {
                     let (cell, _) = lattice.coords(s);
                     let coord = cell[axis as usize];
@@ -116,6 +223,11 @@ impl CompiledDeck {
                 });
                 if !guards_ok {
                     continue;
+                }
+                if let Some(p) = pass.probability {
+                    if rng.gen::<f64>() >= p {
+                        continue;
+                    }
                 }
                 let times = match &pass.foreach {
                     None => 1,
@@ -508,8 +620,63 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
             guards,
             rate,
             ln_thermo,
+            strain_scale: r.strain.as_ref().map(|s| s.scale).unwrap_or(0.0),
             modifiers,
             branches,
+        });
+    }
+
+    // --- defects (docs/STRAIN.md §5) ---
+    // kcal/mol per GPa·Å³: 1 GPa·Å³ = 1e-21 J → × N_A / 4184.
+    const KCAL_PER_GPA_A3: f64 = 0.143_932_6;
+    let mm = unit_cell.cell.matrix();
+    let cell_volume = (mm[0][0]
+        * (mm[1][1] * mm[2][2] - mm[1][2] * mm[2][1])
+        - mm[0][1] * (mm[1][0] * mm[2][2] - mm[1][2] * mm[2][0])
+        + mm[0][2] * (mm[1][0] * mm[2][1] - mm[1][1] * mm[2][0]))
+        .abs();
+    let omega = cell_volume / unit_cell.sites.len().max(1) as f64;
+    let mut defects = Vec::new();
+    for (di, d) in deck.defects.iter().enumerate() {
+        let ctx = format!("defect {di}");
+        if d.line_axis > 2 {
+            return err(format!("{ctx}: line_axis must be 0, 1, or 2"));
+        }
+        let edge = match d.kind.as_str() {
+            "screw" => false,
+            "edge" => true,
+            other => return err(format!("{ctx}: type must be screw or edge, not '{other}'")),
+        };
+        let prefactor = match (d.strain_prefactor, d.burgers, d.shear_modulus) {
+            (Some(a), _, _) => a * eunit,
+            (None, Some(b), Some(mu)) => {
+                let nu = d.poisson.unwrap_or(0.25);
+                if edge && nu >= 1.0 {
+                    return err(format!("{ctx}: poisson must be < 1"));
+                }
+                let mut a = KCAL_PER_GPA_A3 * mu * b * b * omega
+                    / (8.0 * std::f64::consts::PI * std::f64::consts::PI);
+                if edge {
+                    a /= 1.0 - nu;
+                }
+                a
+            }
+            _ => {
+                return err(format!(
+                    "{ctx}: give burgers + shear_modulus, or strain_prefactor"
+                ))
+            }
+        };
+        let core_radius = match d.core_radius.or(d.burgers) {
+            Some(r) if r > 0.0 => r,
+            _ => return err(format!("{ctx}: core_radius (or burgers) must be positive")),
+        };
+        defects.push(CompiledDefect {
+            line_axis: d.line_axis,
+            at: d.at,
+            prefactor,
+            core_radius,
+            cap: d.cap.map(|c| c * eunit),
         });
     }
 
@@ -538,6 +705,32 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
                 Some((r.axis, r.min.unwrap_or(0), r.max.unwrap_or(usize::MAX)))
             }
         };
+        if let Some(prob) = p.probability {
+            if !(0.0..=1.0).contains(&prob) {
+                return err(format!(
+                    "{ctx}: probability must be in [0, 1], got {prob}"
+                ));
+            }
+        }
+        if let Some(sites) = &p.sites {
+            if sites.is_empty() {
+                return err(format!("{ctx}: sites list must be non-empty"));
+            }
+            for &[a, b, c, t] in sites {
+                if a >= dims[0] || b >= dims[1] || c >= dims[2] {
+                    return err(format!(
+                        "{ctx}: site [{a}, {b}, {c}, {t}] outside lattice dims {dims:?}"
+                    ));
+                }
+                if t >= unit_cell.sites.len() {
+                    return err(format!(
+                        "{ctx}: site [{a}, {b}, {c}, {t}] names template site {t}, \
+                         but the cell has only {}",
+                        unit_cell.sites.len()
+                    ));
+                }
+            }
+        }
         let mut guards = Vec::new();
         for g in &p.guards {
             let select = compile_selector(&names, g, &ctx)?;
@@ -568,6 +761,8 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
             center_kind: center_kind.map(KindId),
             center_states,
             region,
+            probability: p.probability,
+            sites: p.sites.clone(),
             guards,
             foreach,
             op,
@@ -585,6 +780,7 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         kind_state_ranges,
         initial_per_template,
         init_passes,
+        defects,
         reactions,
         temperature,
         dims,
