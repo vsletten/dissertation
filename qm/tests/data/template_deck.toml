@@ -1,0 +1,71 @@
+# Round-trip template: the petra kossel tutorial deck with the reactions
+# stripped and replaced by the quarry emission marker. tests/test_emit.py
+# splices emitted [[reactions]] here and compiles the result with the
+# in-repo petra CLI. Energies are kJ/mol — quarry's emission convention.
+
+[deck]
+name = "quarry-roundtrip"
+comment = "emit.py round-trip fixture"
+units = "kJ/mol"
+
+[cell]
+a = 3.0
+b = 3.0
+c = 3.0
+alpha = 90.0
+beta = 90.0
+gamma = 90.0
+
+[[cell.sites]]
+kind = "M_site"
+frac = [0.0, 0.0, 0.0]
+
+[[cell.bonds]]
+i = 0
+j = 0
+dcell = [1, 0, 0]
+
+[[cell.bonds]]
+i = 0
+j = 0
+dcell = [0, 1, 0]
+
+[[cell.bonds]]
+i = 0
+j = 0
+dcell = [0, 0, 1]
+
+[[species]]
+name = "M"
+
+[[kinds]]
+name = "M_site"
+initial = "occupied"
+
+[[kinds.states]]
+name = "occupied"
+occupant = "M"
+
+[[kinds.states]]
+name = "empty"
+occupant = "vacant"
+
+[lattice]
+dims = [4, 4, 4]
+boundary = ["periodic", "periodic", "open"]
+
+[thermo]
+temperature = 298.15
+
+[thermo.mu]
+M = -8.4     # kJ/mol
+
+[thermo.activity]
+M = 1.0
+
+[simulation]
+steps = 100
+seed = 42
+report_every = 100
+
+# {QUARRY_REACTIONS}

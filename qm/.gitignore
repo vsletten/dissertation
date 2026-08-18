@@ -1,0 +1,13 @@
+# uv-managed environment and caches
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# big QM artifacts never enter git (SURVEY.md house rule); the SQLite
+# store keeps derived numbers, structures stay as light XYZ in-store
+*.chk
+*.cube
+*.sqlite
+*.h5
