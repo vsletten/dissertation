@@ -1,0 +1,22 @@
+# Gotchas
+
+### Petra decks require a [simulation] section to compile (2026-08-17)
+`petra-cli` rejects a deck missing `[simulation]` (steps/seed/report_every)
+with "missing field `simulation`" even when you only want `--steps 0`
+validation. Any deck template used for emit round-trips (qm/tests/data/
+template_deck.toml) must carry one.
+
+### pyscf thermo silently applies the rotational symmetry number (2026-08-17)
+`pyscf.hessian.thermo.thermo` detects the molecular point group and divides
+the rotational partition function by sigma (2 for water). Comparing an
+independent thermochemistry implementation with sigma=1 shows an entropy
+discrepancy of exactly R·ln(sigma) — 5.76 J/(mol K) for water. Pass the
+matching `symmetry_number` when cross-checking (qm/tests/test_pipeline.py).
+
+### petra's gas constant differs from CODATA by 0.17% (2026-08-17)
+petra-core rate.rs uses the dissertation's truncated R = 1.987e-3
+kcal/(mol K); CODATA is 1.9872e-3. At a 10 kcal/mol barrier and 298 K the
+rate differs by ~0.17%. Negligible against DFT barrier error, but it means
+the QM→KMC bridge should always transmit barriers/ΔH‡/ΔS‡ and let the
+engine exponentiate — never pre-computed rate constants
+(documented in qm/tests/test_rates.py::test_petra_gate_value).
