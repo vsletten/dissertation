@@ -68,6 +68,8 @@ class TestBasics:
             assert len(c.symbols) == 9 + 3 * n
         with pytest.raises(ValueError):
             silicic_acid_hydrate(25)
+        with pytest.raises(ValueError):
+            silicic_acid_hydrate(-1)
 
     def test_hydrate_shells_never_collide(self):
         # Both shells populated at the maximum: waters must not overlap

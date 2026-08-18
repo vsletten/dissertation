@@ -38,7 +38,10 @@ class DftSettings:
     solvent: str | None = None
     dispersion: str | None = None  # e.g. "d3bj", "d4" (needs pyscf[dispersion])
     grid_level: int | None = None
-    density_fit: bool = False  # RI-JK; the production default (SURVEY §2.2, §3.2)
+    # RI-JK. Off here so cheap tests and comparisons are explicit;
+    # production call sites and the smoke benchmark turn it on
+    # (SURVEY §2.2, §3.2).
+    density_fit: bool = False
     use_gpu: bool = False
 
 

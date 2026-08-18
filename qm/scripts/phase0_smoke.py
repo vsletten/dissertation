@@ -90,17 +90,19 @@ class Timing:
     e_tot: float | None = None
 
 
-def warm_up_gpu() -> None:
+def warm_up_gpu(settings: DftSettings) -> None:
     """Compile CUDA kernels / init cuBLAS on a throwaway job.
 
     Without this the first timed GPU SCF absorbs tens of seconds of
     one-time setup and the table reads as a slowdown (measured 2026-08-18
     on the 4090: 54 s "energy" for a 15-atom job that reruns far faster).
+    Runs on a bare water molecule but with the caller's method settings
+    so the same code paths (DF, functional, basis) get initialized.
     """
-    mf = _make_scf(
-        build_mol(water(), DftSettings(xc="b3lyp", basis="def2-svp", use_gpu=True)),
-        DftSettings(xc="b3lyp", basis="def2-svp", use_gpu=True),
-    )
+    from dataclasses import replace
+
+    warm = replace(settings, use_gpu=True)
+    mf = _make_scf(build_mol(water(), warm), warm)
     mf.kernel()
     mf.nuc_grad_method().kernel()
 
@@ -185,7 +187,7 @@ def main() -> int:
         from dataclasses import replace
 
         print("warming up GPU (untimed kernel compile/init)...")
-        warm_up_gpu()
+        warm_up_gpu(settings)
         rows.append(
             time_engine(cluster, replace(settings, use_gpu=True), hessian=hessian)
         )
