@@ -1,0 +1,48 @@
+[project]
+name = "quarry"
+version = "0.1.0"
+description = "Orchestration layer: mineral crystallography + reaction taxonomy -> site-resolved activation energies and rate constants for KMC (petra / kmc-rs)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.26",
+    "pyscf>=2.6",
+    "geometric>=1.0",
+    "sella>=2.3",
+    "ase>=3.23",
+    "goodvibes>=3.2",
+]
+
+[project.optional-dependencies]
+# GPU extra is intentionally not installed in CI/test environments; it only
+# means something on the RTX 4090 workstation (see SURVEY.md §3).
+gpu = [
+    "gpu4pyscf-cuda12x",
+    "nvidia-cuest-cu12",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["quarry"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "petra: round-trip tests that compile emitted decks with the in-repo petra CLI (needs cargo)",
+    "slow: anything beyond tiny-molecule/small-basis; excluded from the default fast gate",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
