@@ -297,6 +297,14 @@ pub struct SelectorSpec {
     /// Bond label filter (distance-1 selectors only).
     #[serde(default)]
     pub label: Option<String>,
+    /// Bonds with this label are invisible to the selector: skipped at
+    /// distance 1, never traversed on either hop at distance 2 (distances
+    /// are measured on the filtered graph). Keeps chemistry from
+    /// propagating through non-reactive contacts — e.g. a surface-
+    /// reachability guard that must not cross anhydrous interlayer
+    /// hydrogen bonds. Mutually exclusive with `label`.
+    #[serde(default)]
+    pub exclude_label: Option<String>,
     /// State names, `"Kind.state"` qualified names, `"@alias"` refs, or the
     /// wildcard `"*"` (every state in scope — with `kind` set this makes
     /// the selector a degree/coordination counter).

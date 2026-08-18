@@ -39,6 +39,8 @@ pub struct CompiledDeck {
     /// Occupant species name per state (`None` = vacant), indexed by
     /// `StateId` — for snapshots/exports that need chemical identity.
     pub state_occupants: Vec<Option<String>>,
+    /// Bond label names, indexed by the interned label id.
+    pub label_names: Vec<String>,
     pub n_states: usize,
     /// Contiguous StateId range (start, count) per kind, for Shift effects.
     pub kind_state_ranges: Vec<(u16, u16)>,
@@ -769,6 +771,11 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         });
     }
 
+    let mut label_names = vec![String::new(); names.labels.len()];
+    for (name, &id) in &names.labels {
+        label_names[id as usize] = name.clone();
+    }
+
     Ok(CompiledDeck {
         name: deck.deck.name.clone(),
         unit_cell,
@@ -776,6 +783,7 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         kind_names,
         state_names,
         state_occupants,
+        label_names,
         n_states: names.n_states,
         kind_state_ranges,
         initial_per_template,
@@ -815,11 +823,25 @@ fn compile_selector(
             CompileError(format!("{ctx}: selector names unknown bond label '{l}'"))
         })?),
     };
+    let exclude_label = match &s.exclude_label {
+        None => None,
+        Some(l) => Some(*names.labels.get(l).ok_or_else(|| {
+            CompileError(format!(
+                "{ctx}: selector excludes unknown bond label '{l}'"
+            ))
+        })?),
+    };
+    if label.is_some() && exclude_label.is_some() {
+        return err(format!(
+            "{ctx}: a selector cannot both require and exclude a bond label"
+        ));
+    }
     let states = names.state_set(&s.state, kind.map(|k| k.0), ctx)?;
     Ok(NeighborSelect {
         distance,
         kind,
         label,
+        exclude_label,
         frozen: s.frozen,
         states,
     })

@@ -19,11 +19,12 @@ pub enum Boundary {
     /// Bonds crossing the face are dropped (free surface on both faces).
     Open,
     /// Like `Open`, but sites in the two extreme cell layers along this
-    /// axis whose bond template could not fully resolve (they lost bonds to
-    /// the cut) are frozen: they appear in neighbors' environments but
-    /// never react. This is the legacy kaolinite `TerminateLattice` EDGE
-    /// rule — a frozen ragged wall standing in for bulk crystal beyond the
-    /// simulation box.
+    /// axis whose bond template could not fully resolve *at a fixed face*
+    /// (they lost bonds to this cut — bonds lost to an `Open` face on
+    /// another axis don't count) are frozen: they appear in neighbors'
+    /// environments but never react. This is the legacy kaolinite
+    /// `TerminateLattice` EDGE rule — a frozen ragged wall standing in for
+    /// bulk crystal beyond the simulation box.
     Fixed,
 }
 
@@ -124,11 +125,12 @@ impl Lattice {
                             boundary[ax] == Boundary::Fixed
                                 && ([a, b, c][ax] == 0 || [a, b, c][ax] == dims[ax] - 1)
                         });
-                        let mut dropped_bonds = 0usize;
+                        let mut dropped_fixed_bonds = 0usize;
 
                         for bond in &tsite.bonds {
                             let mut target = [0usize; 3];
                             let mut in_range = true;
+                            let mut crosses_fixed = false;
                             for ax in 0..3 {
                                 let raw = [a, b, c][ax] as i64 + bond.dcell[ax] as i64;
                                 let d = dims[ax] as i64;
@@ -139,9 +141,12 @@ impl Lattice {
                                     Boundary::Open | Boundary::Fixed => {
                                         if raw < 0 || raw >= d {
                                             in_range = false;
-                                            break;
+                                            if boundary[ax] == Boundary::Fixed {
+                                                crosses_fixed = true;
+                                            }
+                                        } else {
+                                            target[ax] = raw as usize;
                                         }
-                                        target[ax] = raw as usize;
                                     }
                                 }
                             }
@@ -152,12 +157,17 @@ impl Lattice {
                                     + bond.to;
                                 lat.adj.push(to as u32);
                                 lat.adj_label.push(bond.label);
-                            } else {
-                                dropped_bonds += 1;
+                            } else if crosses_fixed {
+                                // Only bonds severed at a FIXED face count
+                                // toward freezing: the frozen wall stands in
+                                // for bulk crystal beyond that cut. A bond
+                                // lost to an Open face elsewhere is a free
+                                // surface, not a reason to anchor the site.
+                                dropped_fixed_bonds += 1;
                             }
                         }
                         lat.adj_off.push(lat.adj.len() as u32);
-                        lat.frozen.push(in_fixed_layer && dropped_bonds > 0);
+                        lat.frozen.push(in_fixed_layer && dropped_fixed_bonds > 0);
                     }
                 }
             }
@@ -228,6 +238,51 @@ mod tests {
             let ([_, _, c], _) = lat.coords(s);
             let expect = if c == 0 || c == 3 { 5 } else { 6 };
             assert_eq!(lat.neighbors(s).len(), expect, "site {s} at c={c}");
+        }
+    }
+
+    #[test]
+    fn only_fixed_face_cuts_freeze_not_open_ones() {
+        // Two-site cell: site 0 bonds ±c (and to site 1); site 1 bonds only
+        // ±a. With a Open and c Fixed, site 1 in the extreme c-layers loses
+        // a-bonds at the open faces but no fixed-face bond — it must NOT
+        // freeze. Site 0 there loses its c-bond at the fixed face — frozen.
+        let cell = UnitCell {
+            cell: Cell::from_params(3.0, 3.0, 3.0, 90.0, 90.0, 90.0),
+            sites: vec![
+                TemplateSite {
+                    kind: KindId(0),
+                    frac: [0.0; 3],
+                    bonds: vec![
+                        TemplateBond { to: 0, dcell: [0, 0, 1], label: NO_LABEL },
+                        TemplateBond { to: 0, dcell: [0, 0, -1], label: NO_LABEL },
+                        TemplateBond { to: 1, dcell: [0, 0, 0], label: NO_LABEL },
+                    ],
+                },
+                TemplateSite {
+                    kind: KindId(0),
+                    frac: [0.5, 0.0, 0.0],
+                    bonds: vec![
+                        TemplateBond { to: 1, dcell: [1, 0, 0], label: NO_LABEL },
+                        TemplateBond { to: 1, dcell: [-1, 0, 0], label: NO_LABEL },
+                        TemplateBond { to: 0, dcell: [0, 0, 0], label: NO_LABEL },
+                    ],
+                },
+            ],
+        };
+        let lat = Lattice::build(
+            &cell,
+            [3, 1, 3],
+            [Boundary::Open, Boundary::Periodic, Boundary::Fixed],
+            |_| StateId(0),
+        );
+        for s in 0..lat.len() {
+            let ([a, _, c], t) = lat.coords(s);
+            let expect = t == 0 && (c == 0 || c == 2);
+            assert_eq!(
+                lat.frozen[s], expect,
+                "site {s} (a={a}, c={c}, t={t})"
+            );
         }
     }
 

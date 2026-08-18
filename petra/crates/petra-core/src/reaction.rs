@@ -15,6 +15,14 @@ pub struct NeighborSelect {
     pub distance: u8,
     pub kind: Option<KindId>,
     pub label: Option<u16>,
+    /// Bonds carrying this label are invisible to the selector: at
+    /// distance 1 their neighbors are skipped, at distance 2 the walk may
+    /// not traverse them on either hop. Distances are measured on the
+    /// filtered graph. The "surface reachability does not cross the
+    /// anhydrous interlayer" tool: a hydrogen-bond label excluded here
+    /// keeps chemistry from propagating through a contact that carries no
+    /// reactive medium.
+    pub exclude_label: Option<u16>,
     /// Restrict to frozen (`Some(true)`) or unfrozen (`Some(false)`) sites —
     /// the "occupied AND not part of the frozen boundary" tests.
     pub frozen: Option<bool>,
@@ -177,17 +185,31 @@ impl Reaction {
 }
 
 /// Collect the unique sites at exact graph distance 1 or 2 from `center`
-/// (distance 2 excludes the center and all distance-1 sites). Coordination
-/// numbers are small, so linear membership checks beat hashing here.
-pub fn sites_at_distance(lat: &Lattice, center: SiteId, distance: u8, out: &mut Vec<SiteId>) {
+/// (distance 2 excludes the center and all distance-1 sites). Bonds whose
+/// label equals `exclude` are not traversed on any hop — distances are
+/// measured on the filtered graph. Coordination numbers are small, so
+/// linear membership checks beat hashing here.
+pub fn sites_at_distance(
+    lat: &Lattice,
+    center: SiteId,
+    distance: u8,
+    exclude: Option<u16>,
+    out: &mut Vec<SiteId>,
+) {
     out.clear();
+    let hops = |s: SiteId| {
+        lat.neighbors(s)
+            .iter()
+            .zip(lat.neighbor_labels(s))
+            .filter(move |&(_, &l)| Some(l) != exclude)
+            .map(|(&n, _)| n as SiteId)
+    };
     match distance {
-        1 => out.extend(lat.neighbors(center).iter().map(|&n| n as SiteId)),
+        1 => out.extend(hops(center)),
         2 => {
-            let first: Vec<SiteId> = lat.neighbors(center).iter().map(|&n| n as SiteId).collect();
+            let first: Vec<SiteId> = hops(center).collect();
             for &n in &first {
-                for &nn in lat.neighbors(n) {
-                    let nn = nn as SiteId;
+                for nn in hops(n) {
                     if nn != center && !first.contains(&nn) && !out.contains(&nn) {
                         out.push(nn);
                     }
@@ -221,7 +243,7 @@ pub fn count_matches(
             })
             .count() as u32;
     }
-    sites_at_distance(lat, center, sel.distance, scratch);
+    sites_at_distance(lat, center, sel.distance, sel.exclude_label, scratch);
     scratch
         .iter()
         .filter(|&&s| site_matches(lat, kinds, s, sel))
@@ -250,7 +272,7 @@ pub fn all_matches(
         );
         return;
     }
-    sites_at_distance(lat, center, sel.distance, scratch);
+    sites_at_distance(lat, center, sel.distance, sel.exclude_label, scratch);
     out.extend(
         scratch
             .iter()
@@ -277,7 +299,7 @@ pub fn first_match(
             .find(|&(&n, &l)| l == label && site_matches(lat, kinds, n as SiteId, sel))
             .map(|(&n, _)| n as SiteId);
     }
-    sites_at_distance(lat, center, sel.distance, scratch);
+    sites_at_distance(lat, center, sel.distance, sel.exclude_label, scratch);
     scratch
         .iter()
         .copied()
@@ -347,4 +369,72 @@ pub fn guards_pass(
         let n = count_matches(lat, kinds, center, &g.select, scratch);
         n >= g.min && n <= g.max
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crystal::{Cell, TemplateBond, TemplateSite, UnitCell, NO_LABEL};
+    use crate::lattice::Boundary;
+
+    /// Two-site cell: site 0 chains along a (unlabeled) and reaches site 1
+    /// through a bond labeled 0; site 1 has no other bonds.
+    fn labeled_lattice() -> Lattice {
+        let cell = UnitCell {
+            cell: Cell::from_params(3.0, 3.0, 3.0, 90.0, 90.0, 90.0),
+            sites: vec![
+                TemplateSite {
+                    kind: KindId(0),
+                    frac: [0.0; 3],
+                    bonds: vec![
+                        TemplateBond { to: 0, dcell: [1, 0, 0], label: NO_LABEL },
+                        TemplateBond { to: 0, dcell: [-1, 0, 0], label: NO_LABEL },
+                        TemplateBond { to: 1, dcell: [0, 0, 0], label: 0 },
+                    ],
+                },
+                TemplateSite {
+                    kind: KindId(1),
+                    frac: [0.5, 0.0, 0.0],
+                    bonds: vec![TemplateBond { to: 0, dcell: [0, 0, 0], label: 0 }],
+                },
+            ],
+        };
+        Lattice::build(
+            &cell,
+            [5, 1, 1],
+            [Boundary::Periodic; 3],
+            |_| StateId(0),
+        )
+    }
+
+    #[test]
+    fn exclude_label_filters_both_hops() {
+        let lat = labeled_lattice();
+        let mut out = Vec::new();
+        // Site index = 2*a + t. Center: site 0 of cell 2 (index 4).
+        let center = 4;
+
+        sites_at_distance(&lat, center, 1, None, &mut out);
+        let mut d1: Vec<_> = out.clone();
+        d1.sort_unstable();
+        assert_eq!(d1, vec![2, 5, 6], "unfiltered d1: chain ±a plus labeled");
+
+        sites_at_distance(&lat, center, 1, Some(0), &mut out);
+        let mut d1x: Vec<_> = out.clone();
+        d1x.sort_unstable();
+        assert_eq!(d1x, vec![2, 6], "excluded label drops the site-1 arm");
+
+        // Unfiltered d2 reaches the chain two cells out (0, 8) and the
+        // labeled site-1 arms of the adjacent cells (3, 7).
+        sites_at_distance(&lat, center, 2, None, &mut out);
+        let mut d2: Vec<_> = out.clone();
+        d2.sort_unstable();
+        assert_eq!(d2, vec![0, 3, 7, 8]);
+
+        // With label 0 excluded, no walk may enter or leave a site-1 arm.
+        sites_at_distance(&lat, center, 2, Some(0), &mut out);
+        let mut d2x: Vec<_> = out.clone();
+        d2x.sort_unstable();
+        assert_eq!(d2x, vec![0, 8], "filtered d2 is chain-only");
+    }
 }
