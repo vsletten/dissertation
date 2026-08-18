@@ -272,11 +272,11 @@ async function loadDemo(spec: string): Promise<void> {
     if (Number.isFinite(n) && n > 0 && n <= 500_000) {
       await setGraph(`social ${n.toLocaleString()}`, generateSocial(n));
     }
-  } else if (kind === 'petra' && size === 'live-kaolinite') {
+  } else if (kind === 'petra' && size.startsWith('live-')) {
     // Live in-browser simulation: fetch the bundled deck into the editor
-    // and run it.
+    // and run it. petra:live-<name> → <name>.deck.toml in public/.
     try {
-      const deckToml = await fetch('kaolinite.deck.toml').then(r => {
+      const deckToml = await fetch(`${size.slice('live-'.length)}.deck.toml`).then(r => {
         if (!r.ok) throw new Error(`deck fetch: ${r.status}`);
         return r.text();
       });

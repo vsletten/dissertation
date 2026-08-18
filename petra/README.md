@@ -23,7 +23,12 @@ use its bundled `kaolinite dissolution` demo) to watch the run with
 play/scrub/speed controls. **Stage 2 is live too**: `petra-wasm` compiles
 the engine to WebAssembly, and graph-viz's `kaolinite LIVE` demo runs the
 simulation *in the browser* — edit the deck TOML in the panel, re-seed,
-re-run; events generate on demand as you play or scrub.
+re-run; events generate on demand as you play or scrub. **Defects and
+strain energy** are in too: declare `[[defects]]` (screw/edge dislocations)
+in a deck and their analytic elastic fields modify reaction barriers —
+the `kossel-etchpit` example drills an etch pit down a screw core, gated
+by ensemble tests and watchable live. The design space (topology
+rewiring, self-consistent relaxation) is worked out in docs/STRAIN.md.
 
 ## Layout
 

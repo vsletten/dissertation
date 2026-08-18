@@ -149,6 +149,11 @@ pub struct Reaction {
     /// ln of the solution-coupling factor (activities, chemical potentials),
     /// folded once at compile time: k *= exp(ln_thermo).
     pub ln_thermo: f64,
+    /// Multiplier on the center site's stored strain energy, added to the
+    /// activation energy: `Ea_eff = Ea + strain_scale · u_center`
+    /// (docs/STRAIN.md §2.2 — dissolution-forward reactions use −β,
+    /// their reverses +(1−β)). Zero = strain-insensitive.
+    pub strain_scale: f64,
     pub modifiers: Vec<Modifier>,
     pub branches: Vec<Branch>,
 }
@@ -304,7 +309,7 @@ pub fn resolve_rate(
     scratch: &mut Vec<SiteId>,
 ) -> f64 {
     let rt = R_KCAL * temperature;
-    let mut extra_ea = 0.0;
+    let mut extra_ea = rxn.strain_scale * lat.strain[center];
     let mut factor = 1.0;
     for m in &rxn.modifiers {
         let n = count_matches(lat, kinds, center, &m.select, scratch);

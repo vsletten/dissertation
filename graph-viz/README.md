@@ -50,7 +50,10 @@ a knowledge graph or social network renders as readily as a crystal.
   generates trajectory events on demand as you play/scrub (backward
   scrubbing replays recorded history), determinism identical to the
   native CLI. Rebuild the wasm package with `npm run build:wasm`
-  (needs rustup + wasm-pack).
+  (needs rustup + wasm-pack). The `etch pit LIVE` demo runs a Kossel
+  crystal with a screw dislocation (petra/docs/STRAIN.md) — dissolution
+  concentrates around the strained core; sites carry a `strain` column in
+  the inspector.
 - **Export**: any loaded graph saves back out as PGIF JSON or binary.
 
 ## Why it looks like this
