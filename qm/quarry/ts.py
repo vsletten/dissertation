@@ -160,6 +160,8 @@ def constrained_scan(
     """
     from pyscf.geomopt.geometric_solver import optimize as geometric_optimize
 
+    from quarry.pipeline import constraints_file
+
     results: list[tuple[float, float, Cluster]] = []
     current = cluster
     for r in distances_a:
@@ -168,7 +170,8 @@ def constrained_scan(
             frozen = ",".join(str(k + 1) for k in sorted(current.frozen_indices))
             constraint += f"$freeze\nxyz {frozen}\n"
         mf = _make_scf(build_mol(current, settings), settings)
-        mol_opt = geometric_optimize(mf, maxsteps=max_steps, constraints=constraint)
+        with constraints_file(constraint) as path:
+            mol_opt = geometric_optimize(mf, maxsteps=max_steps, constraints=path)
         coords = mol_opt.atom_coords() * BOHR_TO_ANGSTROM
         current = replace(current, coords=coords, name=f"{cluster.name}-r{r:.2f}")
         mf2 = _make_scf(build_mol(current, settings), settings)

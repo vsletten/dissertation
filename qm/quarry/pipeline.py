@@ -13,6 +13,9 @@ default test gate exercises each rung on H2O/Si(OH)4.
 
 from __future__ import annotations
 
+import os
+import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -101,6 +104,20 @@ def gradient(cluster: Cluster, settings: DftSettings) -> np.ndarray:
     return np.asarray(mf.nuc_grad_method().kernel())
 
 
+@contextmanager
+def constraints_file(text: str):
+    """geomeTRIC takes constraints as a *file path*, not inline text
+    (passing text raises FileNotFoundError on the constraint string —
+    found live in the phase-1 scan). Yields a temp-file path."""
+    fd, path = tempfile.mkstemp(suffix=".constraints", text=True)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+        yield path
+    finally:
+        os.unlink(path)
+
+
 def optimize(
     cluster: Cluster, settings: DftSettings, *, max_steps: int = 100
 ) -> Cluster:
@@ -108,13 +125,14 @@ def optimize(
     from pyscf.geomopt.geometric_solver import optimize as geometric_optimize
 
     mf = _make_scf(build_mol(cluster, settings), settings)
-    params = {}
     if cluster.frozen_indices:
         # geomeTRIC constraint block: freeze xyz of the peripheral atoms
         # (the lattice-resistance contract, SURVEY.md §6.2).
         atoms = ",".join(str(i + 1) for i in sorted(cluster.frozen_indices))
-        params["constraints"] = f"$freeze\nxyz {atoms}\n"
-    mol_opt = geometric_optimize(mf, maxsteps=max_steps, **params)
+        with constraints_file(f"$freeze\nxyz {atoms}\n") as path:
+            mol_opt = geometric_optimize(mf, maxsteps=max_steps, constraints=path)
+    else:
+        mol_opt = geometric_optimize(mf, maxsteps=max_steps)
     return replace(
         cluster,
         symbols=[mol_opt.atom_symbol(i) for i in range(mol_opt.natm)],

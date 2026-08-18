@@ -112,6 +112,34 @@ class TestSaddleSearch:
         assert abs(ch_back - ch_fwd) > 0.3
 
 
+class TestConstraints:
+    """These run real geomeTRIC constraint plumbing — the inline-text
+    regression (FileNotFoundError on the constraint string) died here."""
+
+    def test_constrained_scan_holds_distance_and_raises_energy(self):
+        from quarry.ts import constrained_scan, scan_maximum
+
+        w = optimize(water(), CHEAP)
+        scan = constrained_scan(w, CHEAP, atom_i=0, atom_j=1, distances_a=[1.10, 1.30])
+        for r_target, _e, cl in scan:
+            r_actual = np.linalg.norm(cl.coords[0] - cl.coords[1])
+            assert r_actual == pytest.approx(r_target, abs=0.01)
+        # Stretching an O-H bond off equilibrium must cost energy.
+        assert scan[1][1] > scan[0][1]
+        assert scan_maximum(scan).name.endswith("r1.30")
+
+    def test_optimize_respects_frozen_atoms(self):
+        from dataclasses import replace
+
+        w = replace(water(), frozen_indices=[0, 1])
+        opt = optimize(w, CHEAP)
+        # Frozen atoms stay put to numerical drift (~1e-5 A observed).
+        assert np.allclose(opt.coords[0], w.coords[0], atol=1e-4)
+        assert np.allclose(opt.coords[1], w.coords[1], atol=1e-4)
+        # The free H must have moved off the deliberately-bad guess.
+        assert not np.allclose(opt.coords[2], w.coords[2], atol=1e-3)
+
+
 class TestVerifyTs:
     def test_minimum_rejected_as_ts(self):
         w = optimize(water(), CHEAP)
