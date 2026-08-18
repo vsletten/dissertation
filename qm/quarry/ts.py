@@ -239,6 +239,64 @@ def scan_ts_guess(scan: list[tuple[float, float, Cluster]]) -> Cluster:
     return scan[idx][2]
 
 
+def neb_ts_guess(
+    reactant: Cluster,
+    product: Cluster,
+    settings: DftSettings,
+    *,
+    n_images: int = 7,
+    fmax_ev_a: float = 0.10,
+    max_steps: int = 150,
+) -> Cluster:
+    """Climbing-image NEB between two basins; returns the peak image.
+
+    The remedy for saddle searches that escape the reaction channel
+    (observed live: Sella walked a crest guess from r(Si-Ow)=1.90 back
+    out to 3.22 A): the band is pinned to both basins so it cannot
+    escape, and the climbing image rides the path to the col, where the
+    lowest curvature direction *is* the reaction mode. The peak image
+    is then a Sella start it can refine rather than flee.
+
+    ``fmax_ev_a`` is deliberately loose — this produces a guess, and
+    Sella does the tight convergence.
+    """
+    from ase import Atoms
+
+    try:
+        from ase.mep import NEB
+    except ImportError:  # older ASE layout
+        from ase.neb import NEB
+    from ase.optimize import FIRE
+
+    if reactant.charge != product.charge or reactant.spin != product.spin:
+        raise ValueError("reactant/product electronic states differ")
+    images = [Atoms(symbols=reactant.symbols, positions=reactant.coords)]
+    for _ in range(n_images - 2):
+        images.append(images[0].copy())
+    images.append(Atoms(symbols=product.symbols, positions=product.coords))
+    for image in images:
+        image.calc = make_ase_calculator(settings, reactant.charge, reactant.spin)
+        if reactant.frozen_indices:
+            from ase.constraints import FixAtoms
+
+            image.set_constraint(FixAtoms(indices=reactant.frozen_indices))
+    neb = NEB(images, climb=True)
+    neb.interpolate(method="idpp")
+    FIRE(neb).run(fmax=fmax_ev_a, steps=max_steps)
+    energies = [float(image.get_potential_energy()) for image in images]
+    peak = int(np.argmax(energies))
+    if peak in (0, len(images) - 1):
+        raise RuntimeError(
+            "NEB peak landed on an endpoint — the two basins do not "
+            "bracket a barrier at this method/geometry"
+        )
+    return replace(
+        reactant,
+        coords=images[peak].positions.copy(),
+        name=f"{reactant.name}-neb-peak",
+    )
+
+
 class ScanNoMaximumError(RuntimeError):
     """A scan hit its distance floor with the energy still rising.
 

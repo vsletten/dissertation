@@ -111,6 +111,18 @@ class TestSaddleSearch:
         ch_fwd = np.linalg.norm(fwd.coords[2] - fwd.coords[0])
         assert abs(ch_back - ch_fwd) > 0.3
 
+    def test_neb_peak_approximates_the_saddle(self, ts):
+        from quarry.ts import neb_ts_guess
+
+        back, fwd = quick_irc(ts, CHEAP)
+        guess = neb_ts_guess(back, fwd, CHEAP, n_images=5, max_steps=80)
+        e_guess = energy(guess, CHEAP)
+        e_ts = energy(ts, CHEAP)
+        # The climbing image should land near the true saddle energy,
+        # from above or below within the loose NEB convergence.
+        assert abs(e_guess - e_ts) < 0.02  # Hartree (~50 kJ/mol slack)
+        assert e_guess > energy(back, CHEAP)
+
 
 class TestConstraints:
     """These run real geomeTRIC constraint plumbing — the inline-text

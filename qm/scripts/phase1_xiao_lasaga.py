@@ -59,6 +59,8 @@ from quarry.store import Store  # noqa: E402
 from quarry.ts import (  # noqa: E402
     ScanNoMaximumError,
     find_ts,
+    first_interior_maximum,
+    neb_ts_guess,
     quick_irc,
     scan_to_maximum,
     scan_ts_guess,
@@ -226,7 +228,25 @@ def main() -> int:
                 min_distance_a=0.95,
                 progress=lambda r, e: log(f"  r(Obr-H)={r:.2f} A  E={e:.6f} Ha"),
             )
-            ts_guess = scan_ts_guess(pscan)
+            # A raw crest guess lets Sella escape the channel (measured:
+            # r(Si-Ow) 1.90 -> 3.22). Instead: relax the post-crest
+            # structure into the product basin, then CI-NEB from complex
+            # to product — the climbing image rides to the col.
+            crest_idx = first_interior_maximum(pscan)
+            if crest_idx is None:
+                log("  !! proton scan produced no crest either — aborting")
+                return 1
+            seed_idx = min(crest_idx + 1, len(pscan) - 1)
+            log("  stage 2c: relaxing post-crest structure into the product basin")
+            product = checkpointed(
+                run_dir / "product.xyz",
+                pscan[seed_idx][2],
+                lambda: optimize(pscan[seed_idx][2], settings),
+            )
+            r_prod = np.linalg.norm(product.coords[SI_INDEX] - product.coords[ow_index])
+            log(f"  product r(Si-Ow)={r_prod:.2f} A")
+            log("  stage 2d: CI-NEB complex -> product (7 images)")
+            ts_guess = neb_ts_guess(complex_opt, product, settings)
         save_xyz(ts_guess, ts_guess_path)
 
     # Stage 3 — saddle search.
