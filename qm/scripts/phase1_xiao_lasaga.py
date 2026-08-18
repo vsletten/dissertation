@@ -56,7 +56,7 @@ from quarry.pipeline import (  # noqa: E402
 )
 from quarry.rates import rate_from_thermo, thermo_from_frequencies  # noqa: E402
 from quarry.store import Store  # noqa: E402
-from quarry.ts import constrained_scan, find_ts, quick_irc, scan_maximum  # noqa: E402
+from quarry.ts import find_ts, quick_irc, scan_maximum, scan_to_maximum  # noqa: E402
 
 REACTIONS = {
     "si-neutral": (disilicate, water),
@@ -165,22 +165,22 @@ def main() -> int:
         lambda: optimize(attacker, settings),
     )
 
-    # Stage 2 — relaxed scan pulling the attacker O onto Si.
-    log("stage 2: relaxed scan r(Si-Ow) 2.8 -> 1.9 A")
+    # Stage 2 — relaxed scan pulling the attacker O onto Si, extended
+    # until the energy maximum is interior (ridge actually crossed).
+    log("stage 2: relaxed scan r(Si-Ow), auto-extending to interior maximum")
     ts_guess_path = run_dir / "ts_guess.xyz"
     if ts_guess_path.exists():
         ts_guess = load_xyz(ts_guess_path, complex_opt)
         log("  resume: ts_guess.xyz exists")
     else:
-        scan = constrained_scan(
+        scan = scan_to_maximum(
             complex_opt,
             settings,
             atom_i=SI_INDEX,
             atom_j=ow_index,
             distances_a=[2.8, 2.6, 2.4, 2.2, 2.1, 2.0, 1.9],
+            progress=lambda r, e: log(f"  r={r:.2f} A  E={e:.6f} Ha"),
         )
-        for r, e, _ in scan:
-            log(f"  r={r:.2f} A  E={e:.6f} Ha")
         ts_guess = scan_maximum(scan)
         save_xyz(ts_guess, ts_guess_path)
 
@@ -191,6 +191,23 @@ def main() -> int:
         ts_guess,
         lambda: find_ts(ts_guess, settings, trajectory=str(run_dir / "sella.traj")),
     )
+
+    # Guard: a saddle that drifted back out of the approach channel is a
+    # trivial complex-rearrangement saddle, not the hydrolysis TS
+    # (observed live: 208i water wag at r(Si-Ow)=3.25 from a bad guess).
+    r_guess = float(
+        np.linalg.norm(ts_guess.coords[SI_INDEX] - ts_guess.coords[ow_index])
+    )
+    r_ts = float(np.linalg.norm(ts.coords[SI_INDEX] - ts.coords[ow_index]))
+    log(f"  r(Si-Ow): guess {r_guess:.2f} A -> saddle {r_ts:.2f} A")
+    if r_ts > r_guess + 0.5:
+        log(
+            "  !! saddle escaped the approach channel (r(Si-Ow) grew by "
+            f"{r_ts - r_guess:.2f} A) — this is not the hydrolysis TS. "
+            "Delete ts.xyz/ts_guess.xyz and rerun with a tighter scan, or "
+            "drive a combined coordinate. Aborting before thermochemistry."
+        )
+        return 1
 
     # Stage 4 — verify + quick IRC.
     log("stage 4: frequencies + quick-IRC")

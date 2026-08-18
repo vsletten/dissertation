@@ -140,6 +140,62 @@ class TestConstraints:
         assert not np.allclose(opt.coords[2], w.coords[2], atol=1e-3)
 
 
+class TestScanExtension:
+    @staticmethod
+    def _fake_point(r, e):
+        cl = Cluster(f"p-r{r:.2f}", ["H"], np.zeros((1, 3)))
+        return (r, e, cl)
+
+    def test_interior_maximum_detection(self):
+        from quarry.ts import has_interior_maximum
+
+        rising = [
+            self._fake_point(r, e) for r, e in [(2.8, 0.0), (2.4, 1.0), (2.0, 2.0)]
+        ]
+        peaked = [
+            self._fake_point(r, e) for r, e in [(2.8, 0.0), (2.4, 2.0), (2.0, 1.0)]
+        ]
+        assert not has_interior_maximum(rising)
+        assert has_interior_maximum(peaked)
+        assert not has_interior_maximum(peaked[:2])  # too short to say
+
+    def test_scan_extends_until_peak(self, monkeypatch):
+        import quarry.ts as ts_mod
+
+        # Energy profile: rises to a peak at r=1.92 then falls.
+        profile = {2.0: 1.0, 1.92: 2.0, 1.84: 1.5}
+
+        def fake_scan(cluster, settings, *, atom_i, atom_j, distances_a, max_steps=150):
+            return [self._fake_point(r, profile[round(r, 2)]) for r in distances_a]
+
+        monkeypatch.setattr(ts_mod, "constrained_scan", fake_scan)
+        scan = ts_mod.scan_to_maximum(
+            Cluster("x", ["H"], np.zeros((1, 3))),
+            CHEAP,
+            atom_i=0,
+            atom_j=0,
+            distances_a=[2.0, 1.92],
+        )
+        assert [round(r, 2) for r, _, _ in scan] == [2.0, 1.92, 1.84]
+        assert ts_mod.scan_maximum(scan).name == "p-r1.92"
+
+    def test_scan_raises_at_floor_without_peak(self, monkeypatch):
+        import quarry.ts as ts_mod
+
+        def fake_scan(cluster, settings, *, atom_i, atom_j, distances_a, max_steps=150):
+            return [self._fake_point(r, 3.0 - r) for r in distances_a]
+
+        monkeypatch.setattr(ts_mod, "constrained_scan", fake_scan)
+        with pytest.raises(RuntimeError, match="interior"):
+            ts_mod.scan_to_maximum(
+                Cluster("x", ["H"], np.zeros((1, 3))),
+                CHEAP,
+                atom_i=0,
+                atom_j=0,
+                distances_a=[1.8, 1.75],
+            )
+
+
 class TestVerifyTs:
     def test_minimum_rejected_as_ts(self):
         w = optimize(water(), CHEAP)

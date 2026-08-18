@@ -185,3 +185,71 @@ def scan_maximum(scan: list[tuple[float, float, Cluster]]) -> Cluster:
     if not scan:
         raise ValueError("empty scan")
     return max(scan, key=lambda p: p[1])[2]
+
+
+def has_interior_maximum(scan: list[tuple[float, float, Cluster]]) -> bool:
+    """True when the scan's energy maximum is not an endpoint.
+
+    A maximum at the tight end means the ridge has not been crossed and
+    the "TS guess" is just the last constrained point — a saddle search
+    from it slides back into the reactant basin (observed live: Sella
+    relaxed a monotonic scan's endpoint into a 208i cm^-1 water-wag
+    saddle with a 2.5 kJ/mol "barrier"). Extend the scan instead.
+    """
+    if len(scan) < 3:
+        return False
+    energies = [e for _, e, _ in scan]
+    return 0 < energies.index(max(energies)) < len(energies) - 1
+
+
+def scan_to_maximum(
+    cluster: Cluster,
+    settings: DftSettings,
+    *,
+    atom_i: int,
+    atom_j: int,
+    distances_a: list[float],
+    extend_step_a: float = 0.08,
+    min_distance_a: float = 1.60,
+    max_steps: int = 150,
+    progress=None,
+) -> list[tuple[float, float, Cluster]]:
+    """Relaxed scan that keeps tightening r(i,j) until the maximum is
+    interior (or ``min_distance_a`` is hit — then a RuntimeError, since a
+    guess from an uncrossed ridge is worse than no guess).
+
+    ``progress`` is an optional callable taking (r, energy) per point.
+    """
+    scan = constrained_scan(
+        cluster,
+        settings,
+        atom_i=atom_i,
+        atom_j=atom_j,
+        distances_a=distances_a,
+        max_steps=max_steps,
+    )
+    if progress:
+        for r, e, _ in scan:
+            progress(r, e)
+    while not has_interior_maximum(scan):
+        next_r = round(scan[-1][0] - extend_step_a, 3)
+        if next_r < min_distance_a:
+            raise RuntimeError(
+                f"scan reached r={scan[-1][0]:.2f} A without an interior "
+                "energy maximum — the driven coordinate alone does not "
+                "cross the ridge; a different or combined reaction "
+                "coordinate is needed"
+            )
+        ext = constrained_scan(
+            scan[-1][2],
+            settings,
+            atom_i=atom_i,
+            atom_j=atom_j,
+            distances_a=[next_r],
+            max_steps=max_steps,
+        )
+        if progress:
+            for r, e, _ in ext:
+                progress(r, e)
+        scan.extend(ext)
+    return scan
