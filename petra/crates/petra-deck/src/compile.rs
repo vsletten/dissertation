@@ -186,6 +186,8 @@ impl CompiledDeck {
         const INIT_STREAM_SALT: u64 = 0x9E37_79B9_7F4A_7C15;
         let mut rng = Pcg64Mcg::seed_from_u64(seed ^ INIT_STREAM_SALT);
         for pass in &self.init_passes {
+            // An explicit site list, sorted+deduped, IS the iteration order —
+            // site-index order, so the RNG draw contract is unchanged.
             let site_list: Option<Vec<usize>> = pass.sites.as_ref().map(|list| {
                 let mut v: Vec<usize> = list
                     .iter()
@@ -195,16 +197,15 @@ impl CompiledDeck {
                 v.dedup();
                 v
             });
-            for s in 0..lattice.len() {
+            let sweep: Box<dyn Iterator<Item = usize>> = match &site_list {
+                Some(list) => Box::new(list.iter().copied()),
+                None => Box::new(0..lattice.len()),
+            };
+            for s in sweep {
                 if let Some((axis, min, max)) = pass.region {
                     let (cell, _) = lattice.coords(s);
                     let coord = cell[axis as usize];
                     if coord < min || coord > max {
-                        continue;
-                    }
-                }
-                if let Some(list) = &site_list {
-                    if list.binary_search(&s).is_err() {
                         continue;
                     }
                 }
