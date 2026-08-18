@@ -158,6 +158,11 @@ class TestScanExtension:
         assert not has_interior_maximum(rising)
         assert has_interior_maximum(peaked)
         assert not has_interior_maximum(peaked[:2])  # too short to say
+        # A plateau shared with an endpoint is not a crossed ridge.
+        plateau = [
+            self._fake_point(r, e) for r, e in [(2.8, 0.0), (2.4, 2.0), (2.0, 2.0)]
+        ]
+        assert not has_interior_maximum(plateau)
 
     def test_scan_extends_until_peak(self, monkeypatch):
         import quarry.ts as ts_mod

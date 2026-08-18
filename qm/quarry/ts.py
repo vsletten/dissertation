@@ -199,7 +199,10 @@ def has_interior_maximum(scan: list[tuple[float, float, Cluster]]) -> bool:
     if len(scan) < 3:
         return False
     energies = [e for _, e, _ in scan]
-    return 0 < energies.index(max(energies)) < len(energies) - 1
+    e_max = max(energies)
+    # Strictly above both endpoints — a plateau shared with an endpoint
+    # does not count as a crossed ridge.
+    return energies[0] < e_max and energies[-1] < e_max
 
 
 def scan_to_maximum(
