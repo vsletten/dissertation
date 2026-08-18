@@ -51,6 +51,15 @@ class TestElectronicStructure:
         assert mol.charge == 1
         assert mol.spin == 0
 
+    def test_density_fit_energy_close_to_exact(self):
+        from dataclasses import replace
+
+        e_exact = energy(water(), CHEAP)
+        e_df = energy(water(), replace(CHEAP, density_fit=True))
+        # RI error is well under 0.1 mHa/atom for sane aux bases.
+        assert e_df == pytest.approx(e_exact, abs=1e-3)
+        assert e_df != e_exact  # DF path actually taken
+
 
 class TestOptimization:
     def test_energy_decreases(self, opt_water):

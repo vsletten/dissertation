@@ -63,11 +63,19 @@ class TestBasics:
             assert _min_interatomic(c) > 0.85, c.name  # > shortest real bond
 
     def test_hydrate_series(self):
-        for n in (0, 1, 3, 6):
+        for n in (0, 1, 3, 6, 12, 24):
             c = silicic_acid_hydrate(n)
             assert len(c.symbols) == 9 + 3 * n
         with pytest.raises(ValueError):
-            silicic_acid_hydrate(7)
+            silicic_acid_hydrate(25)
+        with pytest.raises(ValueError):
+            silicic_acid_hydrate(-1)
+
+    def test_hydrate_shells_never_collide(self):
+        # Both shells populated at the maximum: waters must not overlap
+        # each other or the core.
+        c = silicic_acid_hydrate(24)
+        assert _min_interatomic(c) > 0.85
 
 
 class TestClusterContract:
