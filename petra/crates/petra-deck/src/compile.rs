@@ -13,6 +13,8 @@ use petra_core::reaction::{
 };
 use petra_core::state::{StateId, StateSet};
 use petra_core::Engine;
+use rand::{Rng as _, SeedableRng};
+use rand_pcg::Pcg64Mcg;
 
 use crate::schema::{DeckFile, EffectSpec, RateSpec, SelectorSpec};
 
@@ -62,6 +64,11 @@ pub struct InitPass {
     pub center_states: StateSet,
     /// (axis, min, max) inclusive cell-coordinate slab.
     pub region: Option<(u8, usize, usize)>,
+    /// Apply at each qualifying site with this probability (schema doc for
+    /// the draw-order contract); `None` = always.
+    pub probability: Option<f64>,
+    /// Explicit `[a, b, c, t]` site list restriction; `None` = all sites.
+    pub sites: Option<Vec<[usize; 4]>>,
     pub guards: Vec<Guard>,
     /// Apply the op once per matching neighbor instead of once.
     pub foreach: Option<NeighborSelect>,
@@ -86,6 +93,7 @@ impl CompiledDeck {
     /// Instantiate the lattice (uniform per-kind fill), run the init
     /// passes, compute defect strain fields, and build the engine.
     pub fn build_engine(&self, seed_override: Option<u64>) -> Result<Engine, CompileError> {
+        let seed = seed_override.unwrap_or(self.seed);
         let initial = self.initial_per_template.clone();
         let mut lattice =
             Lattice::build(&self.unit_cell, self.dims, self.boundary, |t| initial[t]);
@@ -94,7 +102,7 @@ impl CompiledDeck {
             .iter()
             .map(|&t| self.kinds_per_template[t as usize])
             .collect();
-        self.run_init(&mut lattice, &kinds)?;
+        self.run_init(&mut lattice, &kinds, seed)?;
         self.compute_strain(&mut lattice)?;
         Ok(Engine::new(
             lattice,
@@ -103,7 +111,7 @@ impl CompiledDeck {
             self.kind_state_ranges.clone(),
             self.reactions.clone(),
             self.temperature,
-            seed_override.unwrap_or(self.seed),
+            seed,
         ))
     }
 
@@ -164,14 +172,39 @@ impl CompiledDeck {
         Ok(())
     }
 
-    fn run_init(&self, lattice: &mut Lattice, kinds: &[KindId]) -> Result<(), CompileError> {
+    fn run_init(
+        &self,
+        lattice: &mut Lattice,
+        kinds: &[KindId],
+        seed: u64,
+    ) -> Result<(), CompileError> {
         let mut scratch = Vec::new();
+        // One RNG stream for every probabilistic pass, decorrelated from the
+        // dynamics stream by a fixed salt; draw order is the documented
+        // contract (schema.rs): pass order, then site-index order, one draw
+        // per site that passed every other filter.
+        const INIT_STREAM_SALT: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut rng = Pcg64Mcg::seed_from_u64(seed ^ INIT_STREAM_SALT);
         for pass in &self.init_passes {
+            let site_list: Option<Vec<usize>> = pass.sites.as_ref().map(|list| {
+                let mut v: Vec<usize> = list
+                    .iter()
+                    .map(|&[a, b, c, t]| lattice.index([a, b, c], t))
+                    .collect();
+                v.sort_unstable();
+                v.dedup();
+                v
+            });
             for s in 0..lattice.len() {
                 if let Some((axis, min, max)) = pass.region {
                     let (cell, _) = lattice.coords(s);
                     let coord = cell[axis as usize];
                     if coord < min || coord > max {
+                        continue;
+                    }
+                }
+                if let Some(list) = &site_list {
+                    if list.binary_search(&s).is_err() {
                         continue;
                     }
                 }
@@ -189,6 +222,11 @@ impl CompiledDeck {
                 });
                 if !guards_ok {
                     continue;
+                }
+                if let Some(p) = pass.probability {
+                    if rng.gen::<f64>() >= p {
+                        continue;
+                    }
                 }
                 let times = match &pass.foreach {
                     None => 1,
@@ -666,6 +704,32 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
                 Some((r.axis, r.min.unwrap_or(0), r.max.unwrap_or(usize::MAX)))
             }
         };
+        if let Some(prob) = p.probability {
+            if !(0.0..=1.0).contains(&prob) {
+                return err(format!(
+                    "{ctx}: probability must be in [0, 1], got {prob}"
+                ));
+            }
+        }
+        if let Some(sites) = &p.sites {
+            if sites.is_empty() {
+                return err(format!("{ctx}: sites list must be non-empty"));
+            }
+            for &[a, b, c, t] in sites {
+                if a >= dims[0] || b >= dims[1] || c >= dims[2] {
+                    return err(format!(
+                        "{ctx}: site [{a}, {b}, {c}, {t}] outside lattice dims {dims:?}"
+                    ));
+                }
+                if t >= unit_cell.sites.len() {
+                    return err(format!(
+                        "{ctx}: site [{a}, {b}, {c}, {t}] names template site {t}, \
+                         but the cell has only {}",
+                        unit_cell.sites.len()
+                    ));
+                }
+            }
+        }
         let mut guards = Vec::new();
         for g in &p.guards {
             let select = compile_selector(&names, g, &ctx)?;
@@ -696,6 +760,8 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
             center_kind: center_kind.map(KindId),
             center_states,
             region,
+            probability: p.probability,
+            sites: p.sites.clone(),
             guards,
             foreach,
             op,

@@ -38,7 +38,9 @@ pub struct DeckFile {
 /// One build-time pass. The operation applies to the *center* site — once,
 /// or once per neighbor matching `foreach` (in adjacency order), so
 /// "step the map per missing cation" and "increment per terminal OH" are
-/// both expressible.
+/// both expressible. `probability` and `sites` are the substitution/defect
+/// fill rules of design doc §6: "Fe replaces Al on Al_oct at 0.02" is a
+/// pass with `probability = 0.02` and `set = <an Fe-occupant state>`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InitPassSpec {
@@ -49,6 +51,18 @@ pub struct InitPassSpec {
     /// range (either bound optional).
     #[serde(default)]
     pub region: Option<RegionSpec>,
+    /// Apply the op at each qualifying site with this probability, in
+    /// [0, 1]. Draws are deterministic given (deck, run seed): one shared
+    /// init RNG stream, consumed in pass order then site-index order, one
+    /// draw per site that passes every other filter. With `foreach`, the
+    /// draw gates the whole site (all repetitions), not each repetition.
+    #[serde(default)]
+    pub probability: Option<f64>,
+    /// Restrict to an explicit site list; each entry is `[a, b, c, t]` —
+    /// cell coordinates plus template-site index (the order sites appear
+    /// under `[[cell.sites]]`). Composes with every other filter.
+    #[serde(default)]
+    pub sites: Option<Vec<[usize; 4]>>,
     /// Additional guards on the center's neighborhood.
     #[serde(default)]
     pub guards: Vec<SelectorSpec>,
