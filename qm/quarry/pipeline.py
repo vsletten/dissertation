@@ -69,6 +69,9 @@ def _make_scf(mol: Any, settings: DftSettings) -> Any:
         mf.xc = settings.xc
         if settings.grid_level is not None:
             mf.grids.level = settings.grid_level
+    # Hand-built cluster guesses and stretched scan geometries need more
+    # than the default 50 cycles; DIIS usually gets there given room.
+    mf.max_cycle = 150
     if settings.dispersion is not None:
         mf.disp = settings.dispersion
     if settings.density_fit:
@@ -129,6 +132,10 @@ class FrequencyResult:
     molar_mass_kg: float
     rotational_temperatures_k: tuple[float, ...] | None
     linear: bool
+    # Cartesian displacement of the largest imaginary mode, shape (n, 3);
+    # None when there is no imaginary mode. This is the reaction mode a
+    # TS hands to quick-IRC and to the tunneling correction.
+    imaginary_mode: np.ndarray | None = None
 
     @property
     def n_imaginary(self) -> int:
@@ -144,11 +151,22 @@ def frequencies(cluster: Cluster, settings: DftSettings) -> FrequencyResult:
     if not mf.converged:
         raise RuntimeError(f"SCF did not converge for {cluster.name}")
     hess = mf.Hessian().kernel()
+    hess = np.asarray(hess.get() if hasattr(hess, "get") else hess)
     freq_info = pyscf_thermo.harmonic_analysis(mf.mol, hess)
     nu = np.asarray(freq_info["freq_wavenumber"])
-    imag = np.abs(np.imag(nu)) if np.iscomplexobj(nu) else np.zeros(0)
-    imag = imag[imag > 0] if imag.size else np.zeros(0)
-    real = np.real(nu[np.isreal(nu)]) if np.iscomplexobj(nu) else nu
+    modes = np.asarray(freq_info["norm_mode"])  # (nmodes, natm, 3)
+    imag_mode = None
+    if np.iscomplexobj(nu):
+        is_imag = np.abs(np.imag(nu)) > 0
+        imag = np.abs(np.imag(nu[is_imag]))
+        real = np.real(nu[~is_imag])
+        if imag.size:
+            # Mode of the largest-magnitude imaginary frequency.
+            idx = np.flatnonzero(is_imag)[np.argmax(imag)]
+            imag_mode = np.real(modes[idx])
+    else:
+        imag = np.zeros(0)
+        real = nu
     real = real[real > 0]
 
     mol = mf.mol
@@ -161,6 +179,7 @@ def frequencies(cluster: Cluster, settings: DftSettings) -> FrequencyResult:
         molar_mass_kg=mass_kg,
         rotational_temperatures_k=rot[0],
         linear=rot[1],
+        imaginary_mode=imag_mode,
     )
 
 
