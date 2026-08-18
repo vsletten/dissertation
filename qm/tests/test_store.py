@@ -62,6 +62,23 @@ class TestJobsAndResults:
         with pytest.raises(ValueError):
             store.set_job_status(jid, "finished")
 
+    def test_exception_rolls_back_uncommitted_work(self, tmp_path):
+        path = tmp_path / "rollback.sqlite"
+        with pytest.raises(RuntimeError), Store(path) as s:
+            sid = s.add_structure("water", "H2O", XYZ)
+            jid = s.add_job(sid, "sp", "hf/sto-3g", "pyscf")
+            # Bypass add_result's own commit to leave work pending.
+            s.conn.execute(
+                "INSERT INTO results (job_id, key, value, units, created_at)"
+                " VALUES (?, 'energy', -74.96, 'hartree', 'now')",
+                (jid,),
+            )
+            raise RuntimeError("boom")
+        with Store(path) as s:
+            with pytest.raises(KeyError):
+                s.get_result(1, "energy")  # rolled back
+            s.get_structure(1)  # committed by add_structure, survives
+
     def test_provenance_stamp(self, store):
         sid = store.add_structure("water", "H2O", XYZ)
         jid = store.add_job(sid, "sp", "wb97m-v/def2-tzvpd", "pyscf")

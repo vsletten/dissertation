@@ -304,6 +304,8 @@ def arrhenius_fit(
     k = np.asarray(ks, dtype=float)
     if t.size < 2:
         raise ValueError("need at least two (T, k) points")
+    if not (np.all(np.isfinite(k)) and np.all(k > 0.0)):
+        raise ValueError("rate constants must be finite and positive")
     x = 1.0 / (R_KJ * t)
     slope, intercept = np.polyfit(x, np.log(k), 1)
     return float(np.exp(intercept)), float(-slope)

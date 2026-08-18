@@ -79,8 +79,11 @@ class Store:
     def __enter__(self) -> Store:
         return self
 
-    def __exit__(self, *exc: object) -> None:
-        self.conn.commit()
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        if exc_type is None:
+            self.conn.commit()
+        else:
+            self.conn.rollback()
         self.close()
 
     # -- structures --------------------------------------------------------

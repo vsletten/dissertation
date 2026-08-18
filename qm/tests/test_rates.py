@@ -171,6 +171,31 @@ class TestRateFromThermo:
         with pytest.raises(ValueError):
             rate_from_thermo(reactant, ts)
 
+    def test_eckart_multiplies_with_zpe_corrected_barrier(self):
+        # dv_forward must come from electronic+ZPE, not from ΔG.
+        reactant = Thermo(0.0, 10.0, 0.0, 0.0, T298)
+        ts = Thermo(70.0, 5.0, 0.0, 0.0, T298)
+        r = rate_from_thermo(
+            reactant, ts, imag_nu_cm=1200.0, tunneling="eckart", dv_reverse_kj=90.0
+        )
+        dv_forward = (70.0 + 5.0) - (0.0 + 10.0)
+        assert r.kappa == pytest.approx(
+            eckart_kappa(1200.0, dv_forward, 90.0, T298), rel=1e-12
+        )
+        assert r.k == pytest.approx(r.kappa * eyring_k(r.dg_kj, T298), rel=1e-12)
+
+    def test_eckart_missing_arguments_rejected(self):
+        reactant, ts = self._pair(75.0)
+        with pytest.raises(ValueError, match="eckart"):
+            rate_from_thermo(reactant, ts, tunneling="eckart", dv_reverse_kj=90.0)
+        with pytest.raises(ValueError, match="eckart"):
+            rate_from_thermo(reactant, ts, tunneling="eckart", imag_nu_cm=1200.0)
+
+    def test_unknown_tunneling_scheme_rejected(self):
+        reactant, ts = self._pair(75.0)
+        with pytest.raises(ValueError, match="unknown tunneling"):
+            rate_from_thermo(reactant, ts, tunneling="magic")
+
 
 class TestArrheniusFit:
     def test_recovers_exact_parameters(self):
@@ -180,3 +205,13 @@ class TestArrheniusFit:
         a_fit, ea_fit = arrhenius_fit(temps, ks)
         assert a_fit == pytest.approx(a, rel=1e-9)
         assert ea_fit == pytest.approx(ea, rel=1e-9)
+
+    def test_too_few_points_rejected(self):
+        with pytest.raises(ValueError, match="at least two"):
+            arrhenius_fit([300.0], [1e12])
+
+    def test_nonpositive_or_nonfinite_rates_rejected(self):
+        with pytest.raises(ValueError, match="finite and positive"):
+            arrhenius_fit([300.0, 320.0], [1e12, 0.0])
+        with pytest.raises(ValueError, match="finite and positive"):
+            arrhenius_fit([300.0, 320.0], [1e12, float("nan")])
