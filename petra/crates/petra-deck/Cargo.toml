@@ -7,6 +7,8 @@ license.workspace = true
 
 [dependencies]
 petra-core = { path = "../petra-core" }
+rand = { workspace = true }
+rand_pcg = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true }
 thiserror = { workspace = true }

@@ -313,10 +313,14 @@ Requested for "down the road"; the commitments that make it cheap later:
    every occupant-agnostic rule still applies, and occupant-specific rules
    (an Fe–O–Si bridge hydrolyzing faster) are just additional reactions with
    a narrower selector.
-2. **Initial-condition rules**: `[lattice]` fill supports, beyond "perfect
-   crystal": random substitution by fraction (`Fe3+ replaces Al on Al_oct at
-   0.02`), explicit site lists, and seeded vacancy populations. Deterministic
-   under the run seed.
+2. **Initial-condition rules** (implemented): any `[[init]]` pass takes
+   `probability = p` (random substitution by fraction — `Fe3+ replaces Al
+   on Al_oct at 0.02` is `probability = 0.02` + `set` to an Fe-occupant
+   state) and/or `sites = [[a, b, c, t], …]` (explicit site lists; seeded
+   vacancy populations are the same with a vacant-state `set`). Both
+   compose with the existing region/state/guard filters. Deterministic
+   under the run seed: one init RNG stream, salted apart from the dynamics
+   stream, drawn in pass order then site-index order.
 3. **Vacancies are ordinary states** (`occupant = vacant`), so vacancy
    diffusion is a rewrite rule pair, not a mechanism.
 4. **Charge is declared** on species now (inert bookkeeping), so a future
@@ -385,7 +389,7 @@ float width — deliberately). The replacement ladder:
 | P2 | ✅ Analytic gates (two-state, Langmuir, waiting times); ensemble runner. Remaining: detailed-balance linter | gates green in CI |
 | P3 | ✅ `--viz` writes a PGIF snapshot + JSONL event log (`petra-io`); graph-viz grew a trajectory playback mode (play/scrub both directions, speed dial, in-place instance updates) with the format spec'd in graph-viz/docs/PGIF.md §6a; kaolinite trajectory bundled as a viewer demo, verified end-to-end in a real browser. Plain-XYZ via `--xyz`. Stage 2: `petra-wasm` (wasm-bindgen) runs the engine in-browser; graph-viz live mode generates trajectory events on demand (play/scrub = simulate), deck editable in the page. Remaining: binary event log for very long runs | kaolinite run plays in graph-viz ✅ |
 | P4 | ✅ The kaolinite deck (`examples/kaolinite.toml`) with the legacy `data.rxn` numbers, **corrected physics** (bounded surface test, R13 restored, Δμ un-swapped; as-implemented termination maps). Structural golden gate: Petra's built lattice matches the kmc-rs (bitwise-parity-tested) builder **site-by-site** — states, EDGE⟺frozen, degrees — plus a 5k-step dynamics gate with paranoid differential checks. The build machinery this required is general: deck-declared init passes (region clears, per-neighbor termination maps, hydroxyl counting), the pr1/pr2 state split replacing the hidden `lostal` field, and labeled-bond addressing | `kaolinite_golden.rs` green |
-| P5 | Partial: **defect strain fields landed** — `[[defects]]` analytic screw/edge elastic fields, per-reaction `strain` coupling with detailed-balance conventions, etch-pit gates and demo; full treatment (topological screw rewiring, self-consistent relaxation) designed in **docs/STRAIN.md**. Remaining: substitution initialization rules, Fe-substituted kaolinite deck | etch-pit gate green ✅ |
+| P5 | Partial: **defect strain fields landed** — `[[defects]]` analytic screw/edge elastic fields, per-reaction `strain` coupling with detailed-balance conventions, etch-pit gates and demo; full treatment (topological screw rewiring, self-consistent relaxation) designed in **docs/STRAIN.md**. **Substitution init rules landed** — `[[init]]` `probability`/`sites`, seeded + deterministic, gated in `init_substitution.rs` (§6). Remaining: Fe-substituted kaolinite deck | etch-pit gate green ✅ |
 | P6 | Performance: profiling, superbasin detection report, big-lattice runs | 10⁶-site lattice at interactive step rates |
 
 **P4 cross-check caveat, stated honestly:** trajectory-level agreement bands

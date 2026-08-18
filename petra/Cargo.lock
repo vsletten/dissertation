@@ -152,6 +152,8 @@ dependencies = [
  "kaolinite",
  "kmc-io",
  "petra-core",
+ "rand",
+ "rand_pcg",
  "serde",
  "thiserror",
  "toml",
