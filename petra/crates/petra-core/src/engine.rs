@@ -279,7 +279,10 @@ impl Engine {
         let mut ring = Vec::new();
         for &c in &changed {
             for d in 1..=self.max_read {
-                sites_at_distance(&self.lattice, c, d, &mut ring);
+                // No label exclusion here: the dirty ring is the union of
+                // every selector's possible reach, so it walks the
+                // unfiltered graph (a superset is always safe).
+                sites_at_distance(&self.lattice, c, d, None, &mut ring);
                 for &s in &ring {
                     if !dirty.contains(&s) {
                         dirty.push(s);

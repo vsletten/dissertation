@@ -161,12 +161,15 @@ enforce at compile: **b** must be an integer number of cells along the line
 axis (partial Burgers vectors ⇒ stacking fault, below), and the line axis
 must be periodic or the line must terminate on open faces.
 
-Caveat for the current kaolinite deck: it is a single (001) sheet (the
+Caveat for the golden kaolinite deck: it is a single (001) sheet (the
 legacy model never tiled c), so a screw threading the basal surface has no
-lattice to wind through — screw topology becomes interesting exactly when a
-deck tiles the third dimension. The engine supports 3D tiling already; the
-kaolinite deck's 2D-ness is inherited from the legacy model, not a Petra
-limit.
+lattice to wind through. That gap is now closed by
+`examples/kaolinite-multilayer.toml` — four layers tiled along c, held by
+labeled interlayer hydrogen bonds (anhydrous-gap semantics via
+`exclude_label`; energetics as `per_match` barriers on the desorption
+reactions, placeholder energy tracked as qm/CALCULATIONS.md CALC-001) —
+which is exactly the substrate the rewiring pass needs for a kaolinite
+BCF spiral demo.
 
 ### 3.2 Edge dislocations, stacking faults, twins — harder, in order
 
