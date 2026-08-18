@@ -11,3 +11,7 @@ __pycache__/
 *.cube
 *.sqlite
 *.h5
+
+# campaign outputs (checkpoints, trajectories, results)
+runs/
+*.traj

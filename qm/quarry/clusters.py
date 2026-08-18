@@ -269,6 +269,48 @@ def aluminosilicate_dimer() -> Cluster:
     return c
 
 
+def merge(a: Cluster, b: Cluster, name: str | None = None) -> Cluster:
+    """One cluster from two (frozen sets carried over, charges added)."""
+    return Cluster(
+        name=name or f"{a.name}+{b.name}",
+        symbols=[*a.symbols, *b.symbols],
+        coords=np.vstack([a.coords, b.coords]),
+        charge=a.charge + b.charge,
+        spin=a.spin + b.spin,
+        frozen_indices=[
+            *a.frozen_indices,
+            *(i + len(a.symbols) for i in b.frozen_indices),
+        ],
+        site_family=a.site_family,
+    )
+
+
+def hydrolysis_complex(
+    dimer: Cluster, attacker: Cluster, *, approach_a: float = 3.2
+) -> Cluster:
+    """Attacker positioned for backside attack on the dimer's Si.
+
+    Convention from ``_bridged_dimer``: atom 0 is the bridging O, atom 1
+    the Si under attack. The attacker's O (its atom 0) is placed at
+    ``approach_a`` from Si, on the far side from the bridging O — the
+    SN2-like approach of the silicate hydrolysis literature (SURVEY.md
+    §6.2, §7.1: pentacoordinate Si TS). The geometry is a starting
+    guess; the pipeline optimizes it.
+    """
+    bridge, si = dimer.coords[0], dimer.coords[1]
+    direction = _unit(si - bridge)
+    target = si + approach_a * direction
+    shifted = attacker.coords - attacker.coords[0] + target
+    moved = Cluster(
+        name=attacker.name,
+        symbols=list(attacker.symbols),
+        coords=shifted,
+        charge=attacker.charge,
+        spin=attacker.spin,
+    )
+    return merge(dimer, moved, name=f"{dimer.name}+{attacker.name}")
+
+
 BENCHMARKS = {
     "water": water,
     "hydronium": hydronium,
