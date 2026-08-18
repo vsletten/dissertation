@@ -208,7 +208,7 @@ def main() -> int:
     cx_freq = frequencies(complex_opt, settings)
     t = args.temperature
 
-    def thermo(freq, cluster):
+    def thermo(freq):
         return thermo_from_frequencies(
             freq.electronic_hartree * HARTREE_TO_KJ,
             freq.frequencies_cm,
@@ -222,8 +222,8 @@ def main() -> int:
             linear=freq.linear,
         )
 
-    th_cx = thermo(cx_freq, complex_opt)
-    th_ts = thermo(ts_freq, ts)
+    th_cx = thermo(cx_freq)
+    th_ts = thermo(ts_freq)
     rate = rate_from_thermo(
         th_cx,
         th_ts,
@@ -282,6 +282,7 @@ def main() -> int:
             attacker_opt.formula,
             attacker_opt.to_xyz(),
             charge=attacker_opt.charge,
+            spin=attacker_opt.spin,
         )
 
     log("")

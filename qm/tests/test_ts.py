@@ -62,6 +62,26 @@ class TestAseAdapter:
         assert f.shape == (3, 3)
         assert np.all(np.isfinite(f))
 
+    def test_forces_match_finite_difference(self):
+        # Physics gate on signs/units/coordinate handling: F_x(H1) must
+        # equal -dE/dx to finite-difference accuracy.
+        from ase import Atoms
+
+        w = water()
+        atoms = Atoms(symbols=w.symbols, positions=w.coords)
+        atoms.calc = make_ase_calculator(CHEAP, w.charge, w.spin)
+        f_analytic = atoms.get_forces()[1, 0]  # H1, x-component, eV/A
+
+        h = 1e-3  # Angstrom
+        e = []
+        for sign in (+1.0, -1.0):
+            shifted = Atoms(symbols=w.symbols, positions=w.coords)
+            shifted.positions[1, 0] += sign * h
+            shifted.calc = make_ase_calculator(CHEAP, w.charge, w.spin)
+            e.append(shifted.get_potential_energy())
+        f_numeric = -(e[0] - e[1]) / (2.0 * h)
+        assert f_analytic == pytest.approx(f_numeric, abs=1e-3)
+
 
 @pytest.mark.slow
 class TestSaddleSearch:

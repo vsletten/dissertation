@@ -95,6 +95,10 @@ def find_ts(
     # for molecular clusters; order=1 requests a first-order saddle.
     dyn = Sella(atoms, order=1, internal=True, trajectory=trajectory)
     converged = dyn.run(fmax=fmax_ev_a, steps=max_steps)
+    if converged is None:
+        # Older ASE returned None from run(); fall back to the force test
+        # (forces are cached from the last step, no recompute).
+        converged = float(np.abs(atoms.get_forces()).max()) < fmax_ev_a
     if not converged:
         raise RuntimeError(
             f"Sella did not converge a saddle for {cluster.name} "
