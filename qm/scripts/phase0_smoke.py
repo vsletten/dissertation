@@ -3,9 +3,9 @@
 
 Run on the workstation (SURVEY.md §9 Phase 0):
 
-    uv run python scripts/phase0_smoke.py            # full table
-    uv run python scripts/phase0_smoke.py --quick    # seconds-long sanity
-    uv run python scripts/phase0_smoke.py --waters 2 # bigger cluster
+    uv run python scripts/phase0_smoke.py             # full table (DF on)
+    uv run python scripts/phase0_smoke.py --quick     # seconds-long sanity
+    uv run python scripts/phase0_smoke.py --waters 24 # ~100-atom regime
 
 Prints a paste-back-able report: environment, library versions, GPU
 detection (gpu4pyscf + cuEST), then B3LYP/def2-TZVP energy, gradient,
@@ -65,6 +65,19 @@ def detect_gpu() -> tuple[bool, list[str]]:
         notes.append("nvidia-cuest present (INT8 FP64-emulation path available)")
     except ImportError:
         notes.append("nvidia-cuest not installed (FP64-native path only)")
+    try:
+        from gpu4pyscf.lib import cutensor as g4p_cutensor
+
+        engine = getattr(g4p_cutensor, "contract_engine", None)
+        if engine is None or "cutensor" in str(engine).lower():
+            notes.append("cuTENSOR contraction engine active")
+        else:
+            notes.append(
+                f"contraction engine = {engine} — install cuTENSOR "
+                "(`uv sync --extra gpu`) for faster contractions"
+            )
+    except ImportError:
+        pass
     return len(notes) > 0 and n > 0, notes
 
 
@@ -75,6 +88,21 @@ class Timing:
     gradient_s: float | None = None
     hessian_s: float | None = None
     e_tot: float | None = None
+
+
+def warm_up_gpu() -> None:
+    """Compile CUDA kernels / init cuBLAS on a throwaway job.
+
+    Without this the first timed GPU SCF absorbs tens of seconds of
+    one-time setup and the table reads as a slowdown (measured 2026-08-18
+    on the 4090: 54 s "energy" for a 15-atom job that reruns far faster).
+    """
+    mf = _make_scf(
+        build_mol(water(), DftSettings(xc="b3lyp", basis="def2-svp", use_gpu=True)),
+        DftSettings(xc="b3lyp", basis="def2-svp", use_gpu=True),
+    )
+    mf.kernel()
+    mf.nuc_grad_method().kernel()
 
 
 def time_engine(cluster, settings: DftSettings, *, hessian: bool) -> Timing:
@@ -106,10 +134,17 @@ def main() -> int:
     ap.add_argument(
         "--waters",
         type=int,
-        default=2,
-        help="n in Si(OH)4·nH2O for the timing run (default 2)",
+        default=6,
+        help="n in Si(OH)4·nH2O for the timing run (default 6; up to 24 "
+        "to approach the 100+-atom regime where the GPU pays off)",
     )
     ap.add_argument("--skip-hessian", action="store_true")
+    ap.add_argument(
+        "--no-df",
+        action="store_true",
+        help="disable density fitting (production runs use RI, so the "
+        "default table measures the DF path)",
+    )
     args = ap.parse_args()
 
     print("=" * 72)
@@ -134,17 +169,23 @@ def main() -> int:
         print(f"\nquick mode: {cluster.name} at HF/STO-3G")
     else:
         cluster = silicic_acid_hydrate(args.waters)
-        settings = DftSettings(xc="b3lyp", basis="def2-tzvp")
+        settings = DftSettings(
+            xc="b3lyp", basis="def2-tzvp", density_fit=not args.no_df
+        )
         hessian = not args.skip_hessian
+        df = "on" if settings.density_fit else "off"
         print(
             f"\ntarget: {cluster.name} ({len(cluster.symbols)} atoms), "
-            f"B3LYP/def2-TZVP, analytic Hessian={'yes' if hessian else 'no'}"
+            f"B3LYP/def2-TZVP, density fitting={df}, "
+            f"analytic Hessian={'yes' if hessian else 'no'}"
         )
 
     rows = [time_engine(cluster, settings, hessian=hessian)]
     if gpu_ok:
         from dataclasses import replace
 
+        print("warming up GPU (untimed kernel compile/init)...")
+        warm_up_gpu()
         rows.append(
             time_engine(cluster, replace(settings, use_gpu=True), hessian=hessian)
         )

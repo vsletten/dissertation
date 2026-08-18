@@ -127,6 +127,16 @@ wheels = [
 ]
 
 [[package]]
+name = "cutensor-cu12"
+version = "2.7.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/87/4f/7744b62f5d0c3ec0e4f1442ecd119343462d6f3a0d025508ace4f319d32a/cutensor_cu12-2.7.0-py3-none-manylinux2014_aarch64.whl", hash = "sha256:4518081e13a22c6fe1d7941ee7b0358f4ad71a1484e2a92563f0d1336476f939", size = 332968151 },
+    { url = "https://files.pythonhosted.org/packages/30/0b/c9a0d71cc847c7b90d21ae1062737dbc16104fc2c2219b51ec64752017c4/cutensor_cu12-2.7.0-py3-none-manylinux2014_x86_64.whl", hash = "sha256:ddedf0d94555c457c6c282dd7369c10fd10db22029f3731f1ed9420600188e6d", size = 332959918 },
+    { url = "https://files.pythonhosted.org/packages/30/bc/18bd0789acfb9d746b4542c9a794efe5debb21bf7114fb39f16662805c46/cutensor_cu12-2.7.0-py3-none-win_amd64.whl", hash = "sha256:6b5df750a43218a395b0ddc2607623c07f610a10ff2e5a071273d93e568010f0", size = 316268223 },
+]
+
+[[package]]
 name = "cycler"
 version = "0.12.1"
 source = { registry = "https://pypi.org/simple" }
@@ -845,6 +855,7 @@ dev = [
     { name = "ruff" },
 ]
 gpu = [
+    { name = "cutensor-cu12" },
     { name = "gpu4pyscf-cuda12x" },
     { name = "nvidia-cuest-cu12" },
 ]
@@ -852,6 +863,7 @@ gpu = [
 [package.metadata]
 requires-dist = [
     { name = "ase", specifier = ">=3.23" },
+    { name = "cutensor-cu12", marker = "extra == 'gpu'" },
     { name = "geometric", specifier = ">=1.0" },
     { name = "goodvibes", specifier = ">=3.2" },
     { name = "gpu4pyscf-cuda12x", marker = "extra == 'gpu'" },

@@ -20,6 +20,9 @@ dependencies = [
 gpu = [
     "gpu4pyscf-cuda12x",
     "nvidia-cuest-cu12",
+    # Without cuTENSOR, gpu4pyscf falls back to cupy for tensor
+    # contractions (it warns at import) and leaves speed on the table.
+    "cutensor-cu12",
 ]
 dev = [
     "pytest>=8.0",

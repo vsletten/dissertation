@@ -39,9 +39,18 @@ On the workstation (RTX 4090), add the GPU extra and run the smoke test:
 
 ```bash
 uv sync --extra dev --extra gpu
-uv run python scripts/phase0_smoke.py          # full timing table
-uv run python scripts/phase0_smoke.py --quick  # seconds-long sanity check
+uv run python scripts/phase0_smoke.py            # full timing table (DF on)
+uv run python scripts/phase0_smoke.py --quick    # seconds-long sanity check
+uv run python scripts/phase0_smoke.py --waters 24  # ~100-atom-regime probe
 ```
+
+First measured table (2026-08-18, 15 atoms, **no** density fitting, cold
+GPU): CPU/GPU energies bitwise-matched; Hessian 1.6× GPU, SCF/gradient
+*slower* on GPU. That is the survey's predicted small-molecule worst case
+plus untimed-warmup and missing-cuTENSOR artifacts — the defaults now warm
+up the GPU, enable density fitting (the production path), and pull in
+cuTENSOR, and bigger `--waters` probes the regime where the survey's
+2–5×/5–10× claims live (details in `.claude/learnings/performance.md`).
 
 ### Not managed by uv (install separately, never commit)
 

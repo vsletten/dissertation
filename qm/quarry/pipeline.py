@@ -38,6 +38,7 @@ class DftSettings:
     solvent: str | None = None
     dispersion: str | None = None  # e.g. "d3bj", "d4" (needs pyscf[dispersion])
     grid_level: int | None = None
+    density_fit: bool = False  # RI-JK; the production default (SURVEY §2.2, §3.2)
     use_gpu: bool = False
 
 
@@ -67,6 +68,8 @@ def _make_scf(mol: Any, settings: DftSettings) -> Any:
             mf.grids.level = settings.grid_level
     if settings.dispersion is not None:
         mf.disp = settings.dispersion
+    if settings.density_fit:
+        mf = mf.density_fit()
     if settings.solvent is not None:
         mf = mf.SMD() if settings.solvent.lower() == "smd" else mf.PCM()
     if settings.use_gpu:

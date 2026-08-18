@@ -171,31 +171,57 @@ def silicic_acid() -> Cluster:
     )
 
 
+def _shell_directions(n: int) -> list[np.ndarray]:
+    """n roughly-uniform unit vectors (golden-spiral points on a sphere)."""
+    golden = math.pi * (3.0 - math.sqrt(5.0))
+    dirs = []
+    for k in range(n):
+        z = 1.0 - 2.0 * (k + 0.5) / n
+        r = math.sqrt(max(0.0, 1.0 - z * z))
+        phi = golden * k
+        dirs.append(np.array([r * math.cos(phi), r * math.sin(phi), z]))
+    return dirs
+
+
+MAX_HYDRATE_WATERS = 24
+
+
+def _water_at(direction: np.ndarray, radius: float) -> list[np.ndarray]:
+    """[O, H, H] for a water at ``radius`` along ``direction``, H2 pointing
+    outward (dipole bisector along the shell normal) so shell waters never
+    reach back toward the core."""
+    d = _unit(direction)
+    ref = np.array([1.0, 0.0, 0.0])
+    if abs(np.dot(ref, d)) > 0.9:
+        ref = np.array([0.0, 1.0, 0.0])
+    e1 = _unit(np.cross(d, ref))
+    half = math.radians(104.5 / 2.0)
+    o = radius * d
+    h1 = o + R_O_H * (math.cos(half) * d + math.sin(half) * e1)
+    h2 = o + R_O_H * (math.cos(half) * d - math.sin(half) * e1)
+    return [o, h1, h2]
+
+
 def silicic_acid_hydrate(n_water: int) -> Cluster:
     """Si(OH)4 · n H2O — the Phase 0 smoke-test series (SURVEY.md §9).
 
-    Waters are placed on a loose shell around the cluster; only the
-    topology matters (the smoke test measures E+grad+Hessian cost, and
-    real work pre-optimizes).
+    Waters are placed on a loose golden-spiral shell around the cluster;
+    only the topology matters (the smoke test measures E+grad+Hessian
+    cost, and real work pre-optimizes). Larger n exists purely to push
+    the benchmark toward the 100+-atom regime where the GPU pays off.
     """
-    if not 0 <= n_water <= 6:
-        raise ValueError("n_water must be in 0..6")
+    if not 0 <= n_water <= MAX_HYDRATE_WATERS:
+        raise ValueError(f"n_water must be in 0..{MAX_HYDRATE_WATERS}")
     base = silicic_acid()
     symbols = list(base.symbols)
     coords = list(base.coords)
-    w = water()
-    shell_dirs = [
-        (1, 0, 0),
-        (-1, 0, 0),
-        (0, 1, 0),
-        (0, -1, 0),
-        (0, 0, 1),
-        (0, 0, -1),
-    ]
-    for k in range(n_water):
-        offset = 3.4 * _unit(np.array(shell_dirs[k], dtype=float))
-        symbols += w.symbols
-        coords += list(w.coords + offset)
+    # Second shell sits further out so waters never collide.
+    for d in _shell_directions(min(n_water, 12)):
+        symbols += ["O", "H", "H"]
+        coords += _water_at(d, 3.4)
+    for d in _shell_directions(max(0, n_water - 12)):
+        symbols += ["O", "H", "H"]
+        coords += _water_at(d, 6.2)
     return Cluster(
         name=f"silicic-acid-{n_water}w",
         symbols=symbols,
