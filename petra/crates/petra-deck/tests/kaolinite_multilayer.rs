@@ -179,6 +179,26 @@ fn hydrolysis_reachability_does_not_cross_the_interlayer() {
         0,
         "the anhydrous interlayer transmits no reachability"
     );
+
+    // Positive control — the truthful one. (Stripping exclude_label from
+    // the d2 guard is NOT a control: exact-distance-2 semantics keeps the
+    // distance-1 acceptor out of that guard with or without exclusion.)
+    // At distance 1 the hbond edge is real and carries the hydrolyzed
+    // acceptor; only the exclusion hides it.
+    let mut probe = guard.clone();
+    probe.distance = 1;
+    probe.exclude_label = None;
+    assert_eq!(
+        count_matches(&engine.lattice, &kinds, donor, &probe, &mut scratch),
+        1,
+        "the hbond edge exists and its acceptor is hydrolyzed"
+    );
+    probe.exclude_label = guard.exclude_label;
+    assert_eq!(
+        count_matches(&engine.lattice, &kinds, donor, &probe, &mut scratch),
+        0,
+        "the exclusion hides the same edge"
+    );
 }
 
 #[test]
