@@ -248,8 +248,8 @@ class TestComplexBuilders:
         assert m.frozen_indices == [1, len(a.symbols)]
         assert len(m.symbols) == len(a.symbols) + len(b.symbols)
 
-    def test_neutral_attack_complex(self):
-        c = hydrolysis_complex(disilicate(), water())
+    def test_backside_attack_complex(self):
+        c = hydrolysis_complex(disilicate(), water(), mode="backside")
         assert c.charge == 0
         assert len(c.symbols) == 15 + 3
         # Attacker O sits ~approach distance from the Si under attack,
@@ -257,6 +257,25 @@ class TestComplexBuilders:
         si, o_attack = c.coords[1], c.coords[15]
         assert np.linalg.norm(o_attack - si) == pytest.approx(3.2, abs=0.05)
         assert np.linalg.norm(o_attack - c.coords[0]) > np.linalg.norm(si - c.coords[0])
+
+    def test_flank_attack_complex_geometry(self):
+        c = hydrolysis_complex(disilicate(), water())  # flank is default
+        obr, si, ow = c.coords[0], c.coords[1], c.coords[15]
+        assert np.linalg.norm(ow - si) == pytest.approx(3.2, abs=0.05)
+        # Ow-Si-Obr angle near the 4-center arrangement (80 deg built in).
+        v1, v2 = ow - si, obr - si
+        cos = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+        assert 60.0 < np.degrees(np.arccos(cos)) < 100.0
+        # The aimed water H must actually be able to reach the bridging O
+        # (backside had it at 3.9 A — the measured failure).
+        h_to_obr = min(
+            np.linalg.norm(c.coords[16] - obr), np.linalg.norm(c.coords[17] - obr)
+        )
+        assert h_to_obr < 2.6
+
+    def test_unknown_mode_rejected(self):
+        with pytest.raises(ValueError, match="unknown attack mode"):
+            hydrolysis_complex(disilicate(), water(), mode="sideways")
 
     def test_acid_attack_complex_charge(self):
         c = hydrolysis_complex(aluminosilicate_dimer(), hydronium())

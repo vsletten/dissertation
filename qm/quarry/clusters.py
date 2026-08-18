@@ -285,26 +285,68 @@ def merge(a: Cluster, b: Cluster, name: str | None = None) -> Cluster:
     )
 
 
-def hydrolysis_complex(
-    dimer: Cluster, attacker: Cluster, *, approach_a: float = 3.2
-) -> Cluster:
-    """Attacker positioned for backside attack on the dimer's Si.
+def _rotation_between(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Rotation matrix taking unit direction of ``a`` onto that of ``b``."""
+    a, b = _unit(a), _unit(b)
+    v = np.cross(a, b)
+    c = float(np.dot(a, b))
+    s = np.linalg.norm(v)
+    if s < 1e-12:
+        if c > 0.0:
+            return np.eye(3)
+        # Antiparallel: rotate pi about any axis perpendicular to a.
+        p = _unit(np.cross(a, [1.0, 0.0, 0.0] if abs(a[0]) < 0.9 else [0.0, 1.0, 0.0]))
+        return 2.0 * np.outer(p, p) - np.eye(3)
+    vx = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+    return np.eye(3) + vx + vx @ vx * ((1.0 - c) / s**2)
 
-    Convention from ``_bridged_dimer``: atom 0 is the bridging O, atom 1
-    the Si under attack. The attacker's O (its atom 0) is placed at
-    ``approach_a`` from Si, on the far side from the bridging O — the
-    SN2-like approach of the silicate hydrolysis literature (SURVEY.md
-    §6.2, §7.1: pentacoordinate Si TS). The geometry is a starting
-    guess; the pipeline optimizes it.
+
+def hydrolysis_complex(
+    dimer: Cluster,
+    attacker: Cluster,
+    *,
+    approach_a: float = 3.2,
+    mode: str = "flank",
+) -> Cluster:
+    """Attacker positioned to attack the dimer's Si (atom 1; atom 0 is
+    the bridging O). The geometry is a starting guess; the pipeline
+    optimizes it.
+
+    ``mode="flank"`` (default): the 4-center X&L geometry — attacker O
+    ~80 deg off the Si->Obr axis (same side as the bridge) with its
+    first H aimed at the bridging O, so the concerted proton transfer
+    is geometrically available. ``mode="backside"``: SN2-like approach
+    opposite the bridge (proton transfer NOT reachable from here —
+    measured live: nearest water H sat 3.9 A from the bridging O and
+    driving it across never produced an interior maximum).
     """
     bridge, si = dimer.coords[0], dimer.coords[1]
-    direction = _unit(si - bridge)
-    target = si + approach_a * direction
-    shifted = attacker.coords - attacker.coords[0] + target
+    to_bridge = _unit(bridge - si)
+    if mode == "backside":
+        target = si + approach_a * -to_bridge
+        rotated = attacker.coords - attacker.coords[0]
+    elif mode == "flank":
+        ref = np.array([1.0, 0.0, 0.0])
+        if abs(np.dot(ref, to_bridge)) > 0.9:
+            ref = np.array([0.0, 1.0, 0.0])
+        perp = _unit(np.cross(np.cross(to_bridge, ref), to_bridge))
+        theta = math.radians(80.0)
+        target = si + approach_a * (
+            math.cos(theta) * to_bridge + math.sin(theta) * perp
+        )
+        shifted = attacker.coords - attacker.coords[0]
+        if len(attacker.symbols) > 1:
+            # Aim the first O-H bond at the bridging O.
+            rot = _rotation_between(shifted[1], bridge - target)
+            rotated = shifted @ rot.T
+        else:
+            rotated = shifted
+    else:
+        raise ValueError(f"unknown attack mode '{mode}'")
     moved = Cluster(
         name=attacker.name,
         symbols=list(attacker.symbols),
-        coords=shifted,
+        coords=rotated + target,
         charge=attacker.charge,
         spin=attacker.spin,
     )

@@ -122,6 +122,13 @@ def main() -> int:
         default=16,
         help="OMP thread cap for CPU stages (default 16 — leave the box usable)",
     )
+    ap.add_argument(
+        "--approach",
+        choices=["flank", "backside"],
+        default="flank",
+        help="attack geometry: flank = X&L 4-center (proton can reach the "
+        "bridging O), backside = SN2-like (no concerted transfer)",
+    )
     ap.add_argument("--temperature", type=float, default=298.15)
     args = ap.parse_args()
 
@@ -134,7 +141,7 @@ def main() -> int:
         Path(__file__).resolve().parent.parent
         / "runs"
         / "phase1"
-        / (f"{args.reaction}-{args.xc}-{args.basis}")
+        / (f"{args.reaction}-{args.xc}-{args.basis}-{args.approach}")
     )
     run_dir.mkdir(parents=True, exist_ok=True)
     log(f"run dir: {run_dir}")
@@ -142,7 +149,7 @@ def main() -> int:
 
     dimer_factory, attacker_factory = REACTIONS[args.reaction]
     dimer, attacker = dimer_factory(), attacker_factory()
-    complex_guess = hydrolysis_complex(dimer, attacker)
+    complex_guess = hydrolysis_complex(dimer, attacker, mode=args.approach)
     ow_index = len(dimer.symbols)  # attacker O
 
     # Stage 0 — cheap, robust pre-optimization of the hand-built guess.
