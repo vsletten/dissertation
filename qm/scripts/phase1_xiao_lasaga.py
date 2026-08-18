@@ -138,12 +138,23 @@ def main() -> int:
     complex_guess = hydrolysis_complex(dimer, attacker)
     ow_index = len(dimer.symbols)  # attacker O
 
+    # Stage 0 — cheap, robust pre-optimization of the hand-built guess.
+    # HF/STO-3G converges where a hybrid at a strained guess may not;
+    # the production method then starts from a relaxed structure.
+    log("stage 0: HF/STO-3G pre-optimization of the complex guess")
+    preopt_settings = DftSettings(xc="hf", basis="sto-3g")
+    complex_pre = checkpointed(
+        run_dir / "complex_preopt.xyz",
+        complex_guess,
+        lambda: optimize(complex_guess, preopt_settings),
+    )
+
     # Stage 1 — optimize reactant complex and separated fragments.
     log("stage 1: optimizing reactant complex + fragments")
     complex_opt = checkpointed(
         run_dir / "complex.xyz",
-        complex_guess,
-        lambda: optimize(complex_guess, settings),
+        complex_pre,
+        lambda: optimize(complex_pre, settings),
     )
     dimer_opt = checkpointed(
         run_dir / "dimer.xyz", dimer, lambda: optimize(dimer, settings)

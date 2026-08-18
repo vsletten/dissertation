@@ -69,6 +69,9 @@ def _make_scf(mol: Any, settings: DftSettings) -> Any:
         mf.xc = settings.xc
         if settings.grid_level is not None:
             mf.grids.level = settings.grid_level
+    # Hand-built cluster guesses and stretched scan geometries need more
+    # than the default 50 cycles; DIIS usually gets there given room.
+    mf.max_cycle = 150
     if settings.dispersion is not None:
         mf.disp = settings.dispersion
     if settings.density_fit:
