@@ -150,13 +150,16 @@ def constrained_scan(
     atom_i: int,
     atom_j: int,
     distances_a: list[float],
+    fixed_distances: list[tuple[int, int, float]] = (),
     max_steps: int = 150,
 ) -> list[tuple[float, float, Cluster]]:
     """Relaxed scan of one interatomic distance (TS-guess generator).
 
     Optimizes the cluster with r(i,j) frozen at each value; returns
     (distance, energy_hartree, relaxed_cluster) tuples in scan order.
-    The maximum-energy point is the natural Sella starting guess.
+    ``fixed_distances`` holds additional (i, j, r) pairs constrained at
+    every point — e.g. pinning the nucleophile in place while a proton
+    is driven. The maximum-energy point is the natural Sella guess.
     """
     from pyscf.geomopt.geometric_solver import optimize as geometric_optimize
 
@@ -166,6 +169,8 @@ def constrained_scan(
     current = cluster
     for r in distances_a:
         constraint = f"$set\ndistance {atom_i + 1} {atom_j + 1} {r:.4f}\n"
+        for fi, fj, fr in fixed_distances:
+            constraint += f"distance {fi + 1} {fj + 1} {fr:.4f}\n"
         if current.frozen_indices:
             frozen = ",".join(str(k + 1) for k in sorted(current.frozen_indices))
             constraint += f"$freeze\nxyz {frozen}\n"
@@ -205,6 +210,18 @@ def has_interior_maximum(scan: list[tuple[float, float, Cluster]]) -> bool:
     return energies[0] < e_max and energies[-1] < e_max
 
 
+class ScanNoMaximumError(RuntimeError):
+    """A scan hit its distance floor with the energy still rising.
+
+    Carries the completed scan so callers can pivot to a second driven
+    coordinate from the best structure already computed.
+    """
+
+    def __init__(self, message: str, scan: list[tuple[float, float, Cluster]]):
+        super().__init__(message)
+        self.scan = scan
+
+
 def scan_to_maximum(
     cluster: Cluster,
     settings: DftSettings,
@@ -212,14 +229,16 @@ def scan_to_maximum(
     atom_i: int,
     atom_j: int,
     distances_a: list[float],
+    fixed_distances: list[tuple[int, int, float]] = (),
     extend_step_a: float = 0.08,
     min_distance_a: float = 1.60,
     max_steps: int = 150,
     progress=None,
 ) -> list[tuple[float, float, Cluster]]:
     """Relaxed scan that keeps tightening r(i,j) until the maximum is
-    interior (or ``min_distance_a`` is hit — then a RuntimeError, since a
-    guess from an uncrossed ridge is worse than no guess).
+    interior (or ``min_distance_a`` is hit — then ``ScanNoMaximumError``
+    carrying the scan, since a guess from an uncrossed ridge is worse
+    than no guess).
 
     ``progress`` is an optional callable taking (r, energy) per point.
     """
@@ -229,6 +248,7 @@ def scan_to_maximum(
         atom_i=atom_i,
         atom_j=atom_j,
         distances_a=distances_a,
+        fixed_distances=fixed_distances,
         max_steps=max_steps,
     )
     if progress:
@@ -237,11 +257,12 @@ def scan_to_maximum(
     while not has_interior_maximum(scan):
         next_r = round(scan[-1][0] - extend_step_a, 3)
         if next_r < min_distance_a:
-            raise RuntimeError(
+            raise ScanNoMaximumError(
                 f"scan reached r={scan[-1][0]:.2f} A without an interior "
                 "energy maximum — the driven coordinate alone does not "
                 "cross the ridge; a different or combined reaction "
-                "coordinate is needed"
+                "coordinate is needed",
+                scan,
             )
         ext = constrained_scan(
             scan[-1][2],
@@ -249,6 +270,7 @@ def scan_to_maximum(
             atom_i=atom_i,
             atom_j=atom_j,
             distances_a=[next_r],
+            fixed_distances=fixed_distances,
             max_steps=max_steps,
         )
         if progress:

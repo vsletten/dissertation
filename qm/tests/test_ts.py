@@ -170,7 +170,7 @@ class TestScanExtension:
         # Energy profile: rises to a peak at r=1.92 then falls.
         profile = {2.0: 1.0, 1.92: 2.0, 1.84: 1.5}
 
-        def fake_scan(cluster, settings, *, atom_i, atom_j, distances_a, max_steps=150):
+        def fake_scan(cluster, settings, *, atom_i, atom_j, distances_a, **kwargs):
             return [self._fake_point(r, profile[round(r, 2)]) for r in distances_a]
 
         monkeypatch.setattr(ts_mod, "constrained_scan", fake_scan)
@@ -187,11 +187,11 @@ class TestScanExtension:
     def test_scan_raises_at_floor_without_peak(self, monkeypatch):
         import quarry.ts as ts_mod
 
-        def fake_scan(cluster, settings, *, atom_i, atom_j, distances_a, max_steps=150):
+        def fake_scan(cluster, settings, *, atom_i, atom_j, distances_a, **kwargs):
             return [self._fake_point(r, 3.0 - r) for r in distances_a]
 
         monkeypatch.setattr(ts_mod, "constrained_scan", fake_scan)
-        with pytest.raises(RuntimeError, match="interior"):
+        with pytest.raises(ts_mod.ScanNoMaximumError, match="interior") as exc_info:
             ts_mod.scan_to_maximum(
                 Cluster("x", ["H"], np.zeros((1, 3))),
                 CHEAP,
@@ -199,6 +199,30 @@ class TestScanExtension:
                 atom_j=0,
                 distances_a=[1.8, 1.75],
             )
+        # The exception carries the scan so callers can pivot to a
+        # second coordinate from the best structure already computed.
+        assert len(exc_info.value.scan) >= 2
+        assert exc_info.value.scan[0][0] == 1.8
+
+    def test_fixed_distances_held_during_scan(self):
+        from quarry.ts import constrained_scan
+
+        w = optimize(water(), CHEAP)
+        scan = constrained_scan(
+            w,
+            CHEAP,
+            atom_i=0,
+            atom_j=1,
+            distances_a=[1.15],
+            fixed_distances=[(0, 2, 1.05)],
+        )
+        _, _, cl = scan[0]
+        assert np.linalg.norm(cl.coords[0] - cl.coords[1]) == pytest.approx(
+            1.15, abs=0.01
+        )
+        assert np.linalg.norm(cl.coords[0] - cl.coords[2]) == pytest.approx(
+            1.05, abs=0.01
+        )
 
 
 class TestVerifyTs:

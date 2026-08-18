@@ -56,7 +56,13 @@ from quarry.pipeline import (  # noqa: E402
 )
 from quarry.rates import rate_from_thermo, thermo_from_frequencies  # noqa: E402
 from quarry.store import Store  # noqa: E402
-from quarry.ts import find_ts, quick_irc, scan_maximum, scan_to_maximum  # noqa: E402
+from quarry.ts import (  # noqa: E402
+    ScanNoMaximumError,
+    find_ts,
+    quick_irc,
+    scan_maximum,
+    scan_to_maximum,
+)
 
 REACTIONS = {
     "si-neutral": (disilicate, water),
@@ -66,6 +72,7 @@ REACTIONS = {
 }
 # Indices from the builders: 0 = bridging O, 1 = Si under attack;
 # the attacker's O is the first atom appended after the dimer.
+BR_INDEX = 0
 SI_INDEX = 1
 KCAL = 4.184
 
@@ -167,21 +174,52 @@ def main() -> int:
 
     # Stage 2 — relaxed scan pulling the attacker O onto Si, extended
     # until the energy maximum is interior (ridge actually crossed).
+    # The neutral 4-center mechanism needs a second driven coordinate:
+    # if approach alone never peaks (observed live: monotonic to 1.66 A,
+    # +115 kJ/mol), pin r(Si-Ow) and drive the water proton onto the
+    # bridging O — the concerted proton transfer of the X&L TS.
     log("stage 2: relaxed scan r(Si-Ow), auto-extending to interior maximum")
     ts_guess_path = run_dir / "ts_guess.xyz"
     if ts_guess_path.exists():
         ts_guess = load_xyz(ts_guess_path, complex_opt)
         log("  resume: ts_guess.xyz exists")
     else:
-        scan = scan_to_maximum(
-            complex_opt,
-            settings,
-            atom_i=SI_INDEX,
-            atom_j=ow_index,
-            distances_a=[2.8, 2.6, 2.4, 2.2, 2.1, 2.0, 1.9],
-            progress=lambda r, e: log(f"  r={r:.2f} A  E={e:.6f} Ha"),
-        )
-        ts_guess = scan_maximum(scan)
+        try:
+            scan = scan_to_maximum(
+                complex_opt,
+                settings,
+                atom_i=SI_INDEX,
+                atom_j=ow_index,
+                distances_a=[2.8, 2.6, 2.4, 2.2, 2.1, 2.0, 1.9],
+                progress=lambda r, e: log(f"  r={r:.2f} A  E={e:.6f} Ha"),
+            )
+            ts_guess = scan_maximum(scan)
+        except ScanNoMaximumError as exc:
+            log("  approach coordinate alone does not cross the ridge;")
+            log("  stage 2b: pin r(Si-Ow)=1.90 A, drive H(water) -> O(bridge)")
+            base = min(exc.scan, key=lambda p: abs(p[0] - 1.90))[2]
+            # The water H closest to the bridging O is the one to shuttle.
+            h_candidates = [ow_index + 1, ow_index + 2]
+            h_idx = min(
+                h_candidates,
+                key=lambda i: np.linalg.norm(base.coords[i] - base.coords[BR_INDEX]),
+            )
+            r0 = float(np.linalg.norm(base.coords[h_idx] - base.coords[BR_INDEX]))
+            log(f"  driving H{h_idx} from r(Obr-H)={r0:.2f} A inward")
+            first = max(1.05, round(r0 - 0.15, 2))
+            distances = [round(x, 2) for x in np.arange(first, 1.04, -0.15)]
+            pscan = scan_to_maximum(
+                base,
+                settings,
+                atom_i=BR_INDEX,
+                atom_j=h_idx,
+                distances_a=distances or [first],
+                fixed_distances=[(SI_INDEX, ow_index, 1.90)],
+                extend_step_a=0.06,
+                min_distance_a=0.95,
+                progress=lambda r, e: log(f"  r(Obr-H)={r:.2f} A  E={e:.6f} Ha"),
+            )
+            ts_guess = scan_maximum(pscan)
         save_xyz(ts_guess, ts_guess_path)
 
     # Stage 3 — saddle search.
