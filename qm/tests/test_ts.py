@@ -222,6 +222,46 @@ class TestScanExtension:
         assert [round(r, 2) for r, _, _ in scan] == [2.0, 1.92, 1.84]
         assert ts_mod.scan_maximum(scan).name == "p-r1.92"
 
+    def test_spike_is_retried_from_both_neighbors_before_crest_detection(
+        self, monkeypatch
+    ):
+        import quarry.ts as ts_mod
+
+        # The r=2.20 point mimics the live al-neutral optimizer hop: it is
+        # >40 kJ/mol above the interpolation of its neighbors and would be
+        # mistaken for the first crest without a bidirectional repair.
+        profile = {
+            2.60: 0.000,
+            2.40: 0.010,
+            2.20: 0.060,
+            2.10: 0.023,
+            2.00: 0.015,
+        }
+        retry_energies = {"p-r2.40": 0.020, "p-r2.10": 0.014}
+        retry_seeds = []
+
+        def fake_scan(cluster, settings, *, atom_i, atom_j, distances_a, **kwargs):
+            if len(distances_a) > 1:
+                return [self._fake_point(r, profile[round(r, 2)]) for r in distances_a]
+            r = distances_a[0]
+            retry_seeds.append(cluster.name)
+            return [self._fake_point(r, retry_energies[cluster.name])]
+
+        monkeypatch.setattr(ts_mod, "constrained_scan", fake_scan)
+        scan = ts_mod.scan_to_maximum(
+            Cluster("x", ["H"], np.zeros((1, 3))),
+            CHEAP,
+            atom_i=0,
+            atom_j=0,
+            distances_a=[2.60, 2.40, 2.20, 2.10, 2.00],
+        )
+
+        assert retry_seeds == ["p-r2.40", "p-r2.10"]
+        assert scan[2][1] == pytest.approx(0.014)
+        assert scan[2][2].name == "p-r2.20"
+        assert ts_mod.first_interior_maximum(scan) == 3
+        assert ts_mod.scan_ts_guess(scan).name == "p-r2.10"
+
     def test_scan_raises_at_floor_without_peak(self, monkeypatch):
         import quarry.ts as ts_mod
 
