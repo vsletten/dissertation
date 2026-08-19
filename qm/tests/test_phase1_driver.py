@@ -86,3 +86,40 @@ def test_proton_neb_fallback_reconstructs_resumed_approach_seed(monkeypatch, tmp
         np.linalg.norm(neb_inputs[0][1].coords[1] - neb_inputs[0][1].coords[2]) == 1.70
     )
     assert (tmp_path / "product.xyz").exists()
+
+
+def test_rolled_back_product_extends_cleavage_without_repeating_proton_scan(
+    monkeypatch, tmp_path
+):
+    direct_crest = geometry("direct-crest", 2.2)
+    complex_opt = geometry("complex", 3.2)
+    phase1.save_xyz(
+        geometry("rolled-back", 1.70, si_obr=2.07), tmp_path / "product.xyz"
+    )
+    break_targets = []
+
+    def fake_break_scan(cluster, settings, *, distances_a, **kwargs):
+        break_targets.extend(distances_a)
+        broken = geometry("fully-broken", 1.70, si_obr=3.60)
+        return [(r, -2.0, broken) for r in distances_a]
+
+    monkeypatch.setattr(phase1, "constrained_scan", fake_break_scan)
+    monkeypatch.setattr(
+        phase1,
+        "scan_to_maximum",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("proton scan must not repeat")
+        ),
+    )
+    monkeypatch.setattr(phase1, "optimize", lambda cluster, settings: cluster)
+    monkeypatch.setattr(
+        phase1,
+        "neb_ts_guess",
+        lambda reactant, product, settings: geometry("neb-guess", 2.0),
+    )
+
+    result = phase1.proton_neb_guess(direct_crest, complex_opt, CHEAP, tmp_path, 2)
+
+    assert result.name == "neb-guess"
+    assert break_targets == [2.3, 2.6, 3.0, 3.4, 3.6]
+    assert (tmp_path / "product.rejected-rollback.xyz").exists()

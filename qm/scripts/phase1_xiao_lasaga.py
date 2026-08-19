@@ -132,70 +132,111 @@ def proton_neb_guess(
     """Build the concerted proton-transfer/product/CI-NEB TS guess.
 
     ``approach_seed`` may be the r=1.90 A point from a completed scan or a
-    resumed direct-crest checkpoint.  In the latter case, reconstruct only
-    the missing 1.90 A approach point instead of rerunning the whole scan.
+    resumed direct-crest checkpoint. Existing product checkpoints are
+    validated before reuse; a rolled-back product is extended farther along
+    Si-Obr cleavage rather than repeating the expensive proton scan.
     """
-    seed_r = float(
-        np.linalg.norm(approach_seed.coords[SI_INDEX] - approach_seed.coords[ow_index])
-    )
-    if abs(seed_r - 1.90) > 0.02:
-        log(f"  pinning resumed approach seed: r(Si-Ow) {seed_r:.2f} -> 1.90 A")
-        approach_seed = constrained_scan(
+    product_path = run_dir / "product.xyz"
+    product_seed: Cluster | None = None
+    h_candidates = [ow_index + 1, ow_index + 2]
+
+    if product_path.exists():
+        product = load_xyz(product_path, approach_seed)
+        r_prod_ow = float(
+            np.linalg.norm(product.coords[SI_INDEX] - product.coords[ow_index])
+        )
+        r_prod_br = float(
+            np.linalg.norm(product.coords[SI_INDEX] - product.coords[BR_INDEX])
+        )
+        log(
+            "  resume: product.xyz exists; "
+            f"r(Si-Ow)={r_prod_ow:.2f} A, r(Si-Obr)={r_prod_br:.2f} A"
+        )
+        if r_prod_ow <= 1.9 and r_prod_br >= 2.2:
+            log("  stage 2d: CI-NEB complex -> product (7 images)")
+            return neb_ts_guess(complex_opt, product, settings)
+        log("  saved product is not hydrolyzed; extending Si-Obr cleavage")
+        rejected = run_dir / "product.rejected-rollback.xyz"
+        product_path.replace(rejected)
+        product_seed = product
+
+    if product_seed is None:
+        seed_r = float(
+            np.linalg.norm(
+                approach_seed.coords[SI_INDEX] - approach_seed.coords[ow_index]
+            )
+        )
+        if abs(seed_r - 1.90) > 0.02:
+            log(f"  pinning resumed approach seed: r(Si-Ow) {seed_r:.2f} -> 1.90 A")
+            approach_seed = constrained_scan(
+                approach_seed,
+                settings,
+                atom_i=SI_INDEX,
+                atom_j=ow_index,
+                distances_a=[1.90],
+            )[0][2]
+
+        log("  stage 2b: pin r(Si-Ow)=1.90 A, drive H(water) -> O(bridge)")
+        h_idx = min(
+            h_candidates,
+            key=lambda i: np.linalg.norm(
+                approach_seed.coords[i] - approach_seed.coords[BR_INDEX]
+            ),
+        )
+        r0 = float(
+            np.linalg.norm(approach_seed.coords[h_idx] - approach_seed.coords[BR_INDEX])
+        )
+        log(f"  driving H{h_idx} from r(Obr-H)={r0:.2f} A inward")
+        first = max(1.05, round(r0 - 0.15, 2))
+        distances = [round(float(x), 2) for x in np.arange(first, 1.04, -0.15)]
+        pscan = scan_to_maximum(
             approach_seed,
             settings,
-            atom_i=SI_INDEX,
-            atom_j=ow_index,
-            distances_a=[1.90],
-        )[0][2]
+            atom_i=BR_INDEX,
+            atom_j=h_idx,
+            distances_a=distances or [first],
+            fixed_distances=[(SI_INDEX, ow_index, 1.90)],
+            extend_step_a=0.06,
+            min_distance_a=0.95,
+            progress=lambda r, e: log(f"  r(Obr-H)={r:.2f} A  E={e:.6f} Ha"),
+        )
+        crest_idx = first_interior_maximum(pscan)
+        if crest_idx is None:
+            raise RuntimeError("proton scan produced no interior crest")
+        product_seed = pscan[min(crest_idx + 1, len(pscan) - 1)][2]
 
-    log("  stage 2b: pin r(Si-Ow)=1.90 A, drive H(water) -> O(bridge)")
-    h_candidates = [ow_index + 1, ow_index + 2]
     h_idx = min(
         h_candidates,
         key=lambda i: np.linalg.norm(
-            approach_seed.coords[i] - approach_seed.coords[BR_INDEX]
+            product_seed.coords[i] - product_seed.coords[BR_INDEX]
         ),
     )
-    r0 = float(
-        np.linalg.norm(approach_seed.coords[h_idx] - approach_seed.coords[BR_INDEX])
+    current_br = float(
+        np.linalg.norm(product_seed.coords[SI_INDEX] - product_seed.coords[BR_INDEX])
     )
-    log(f"  driving H{h_idx} from r(Obr-H)={r0:.2f} A inward")
-    first = max(1.05, round(r0 - 0.15, 2))
-    distances = [round(float(x), 2) for x in np.arange(first, 1.04, -0.15)]
-    pscan = scan_to_maximum(
-        approach_seed,
+    break_targets = [
+        r for r in [1.85, 2.05, 2.30, 2.60, 3.00, 3.40, 3.60] if r > current_br + 0.05
+    ]
+    if not break_targets:
+        break_targets = [round(current_br + 0.30, 2)]
+
+    log("  stage 2c: breaking Si-Obr with the new bonds held")
+    broken = constrained_scan(
+        product_seed,
         settings,
-        atom_i=BR_INDEX,
-        atom_j=h_idx,
-        distances_a=distances or [first],
-        fixed_distances=[(SI_INDEX, ow_index, 1.90)],
-        extend_step_a=0.06,
-        min_distance_a=0.95,
-        progress=lambda r, e: log(f"  r(Obr-H)={r:.2f} A  E={e:.6f} Ha"),
+        atom_i=SI_INDEX,
+        atom_j=BR_INDEX,
+        distances_a=break_targets,
+        fixed_distances=[
+            (SI_INDEX, ow_index, 1.70),
+            (BR_INDEX, h_idx, 0.98),
+        ],
     )
-    crest_idx = first_interior_maximum(pscan)
-    if crest_idx is None:
-        raise RuntimeError("proton scan produced no interior crest")
-    seed_idx = min(crest_idx + 1, len(pscan) - 1)
+    for r, e, _ in broken:
+        log(f"  r(Si-Obr)={r:.2f} A  E={e:.6f} Ha")
+    product = optimize(broken[-1][2], settings)
+    save_xyz(product, product_path)
 
-    def build_product():
-        log("  stage 2c: breaking Si-Obr with the new bonds held")
-        broken = constrained_scan(
-            pscan[seed_idx][2],
-            settings,
-            atom_i=SI_INDEX,
-            atom_j=BR_INDEX,
-            distances_a=[1.85, 2.05, 2.30, 2.60],
-            fixed_distances=[
-                (SI_INDEX, ow_index, 1.70),
-                (BR_INDEX, h_idx, 0.98),
-            ],
-        )
-        for r, e, _ in broken:
-            log(f"  r(Si-Obr)={r:.2f} A  E={e:.6f} Ha")
-        return optimize(broken[-1][2], settings)
-
-    product = checkpointed(run_dir / "product.xyz", pscan[seed_idx][2], build_product)
     r_prod_ow = float(
         np.linalg.norm(product.coords[SI_INDEX] - product.coords[ow_index])
     )
