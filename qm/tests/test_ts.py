@@ -111,6 +111,18 @@ class TestSaddleSearch:
         ch_fwd = np.linalg.norm(fwd.coords[2] - fwd.coords[0])
         assert abs(ch_back - ch_fwd) > 0.3
 
+    def test_neb_peak_approximates_the_saddle(self, ts):
+        from quarry.ts import neb_ts_guess
+
+        back, fwd = quick_irc(ts, CHEAP)
+        guess = neb_ts_guess(back, fwd, CHEAP, n_images=5, max_steps=80)
+        e_guess = energy(guess, CHEAP)
+        e_ts = energy(ts, CHEAP)
+        # The climbing image should land near the true saddle energy,
+        # from above or below within the loose NEB convergence.
+        assert abs(e_guess - e_ts) < 0.02  # Hartree (~50 kJ/mol slack)
+        assert e_guess > energy(back, CHEAP)
+
 
 class TestConstraints:
     """These run real geomeTRIC constraint plumbing — the inline-text
@@ -140,6 +152,117 @@ class TestConstraints:
         assert not np.allclose(opt.coords[2], w.coords[2], atol=1e-3)
 
 
+class TestScanExtension:
+    @staticmethod
+    def _fake_point(r, e):
+        cl = Cluster(f"p-r{r:.2f}", ["H"], np.zeros((1, 3)))
+        return (r, e, cl)
+
+    def test_interior_maximum_detection(self):
+        from quarry.ts import has_interior_maximum
+
+        rising = [
+            self._fake_point(r, e) for r, e in [(2.8, 0.0), (2.4, 1.0), (2.0, 2.0)]
+        ]
+        peaked = [
+            self._fake_point(r, e) for r, e in [(2.8, 0.0), (2.4, 2.0), (2.0, 1.0)]
+        ]
+        assert not has_interior_maximum(rising)
+        assert has_interior_maximum(peaked)
+        assert not has_interior_maximum(peaked[:2])  # too short to say
+        # A plateau shared with an endpoint is not a crossed ridge.
+        plateau = [
+            self._fake_point(r, e) for r, e in [(2.8, 0.0), (2.4, 2.0), (2.0, 2.0)]
+        ]
+        assert not has_interior_maximum(plateau)
+
+    def test_first_crest_beats_compression_wall(self):
+        # The observed proton-transfer profile: crest, bond formation
+        # dip, then a monotonic compression wall that out-climbs the
+        # crest at the endpoint. The guess must be the first crest.
+        from quarry.ts import first_interior_maximum, scan_ts_guess
+
+        profile = [
+            (2.26, 0.001),
+            (1.96, 0.007),  # the real crest
+            (1.81, -0.001),  # proton snapped over
+            (1.21, 0.010),
+            (1.06, 0.015),  # compression wall, global max at endpoint
+        ]
+        scan = [self._fake_point(r, e) for r, e in profile]
+        assert first_interior_maximum(scan) == 1
+        assert scan_ts_guess(scan).name == "p-r1.96"
+
+    def test_scan_ts_guess_requires_interior_crest(self):
+        from quarry.ts import scan_ts_guess
+
+        rising = [
+            self._fake_point(r, e) for r, e in [(2.8, 0.0), (2.4, 1.0), (2.0, 2.0)]
+        ]
+        with pytest.raises(ValueError, match="no interior"):
+            scan_ts_guess(rising)
+
+    def test_scan_extends_until_peak(self, monkeypatch):
+        import quarry.ts as ts_mod
+
+        # Energy profile: rises to a peak at r=1.92 then falls.
+        profile = {2.0: 1.0, 1.92: 2.0, 1.84: 1.5}
+
+        def fake_scan(cluster, settings, *, atom_i, atom_j, distances_a, **kwargs):
+            return [self._fake_point(r, profile[round(r, 2)]) for r in distances_a]
+
+        monkeypatch.setattr(ts_mod, "constrained_scan", fake_scan)
+        scan = ts_mod.scan_to_maximum(
+            Cluster("x", ["H"], np.zeros((1, 3))),
+            CHEAP,
+            atom_i=0,
+            atom_j=0,
+            distances_a=[2.0, 1.92],
+        )
+        assert [round(r, 2) for r, _, _ in scan] == [2.0, 1.92, 1.84]
+        assert ts_mod.scan_maximum(scan).name == "p-r1.92"
+
+    def test_scan_raises_at_floor_without_peak(self, monkeypatch):
+        import quarry.ts as ts_mod
+
+        def fake_scan(cluster, settings, *, atom_i, atom_j, distances_a, **kwargs):
+            return [self._fake_point(r, 3.0 - r) for r in distances_a]
+
+        monkeypatch.setattr(ts_mod, "constrained_scan", fake_scan)
+        with pytest.raises(ts_mod.ScanNoMaximumError, match="interior") as exc_info:
+            ts_mod.scan_to_maximum(
+                Cluster("x", ["H"], np.zeros((1, 3))),
+                CHEAP,
+                atom_i=0,
+                atom_j=0,
+                distances_a=[1.8, 1.75],
+            )
+        # The exception carries the scan so callers can pivot to a
+        # second coordinate from the best structure already computed.
+        assert len(exc_info.value.scan) >= 2
+        assert exc_info.value.scan[0][0] == 1.8
+
+    def test_fixed_distances_held_during_scan(self):
+        from quarry.ts import constrained_scan
+
+        w = optimize(water(), CHEAP)
+        scan = constrained_scan(
+            w,
+            CHEAP,
+            atom_i=0,
+            atom_j=1,
+            distances_a=[1.15],
+            fixed_distances=[(0, 2, 1.05)],
+        )
+        _, _, cl = scan[0]
+        assert np.linalg.norm(cl.coords[0] - cl.coords[1]) == pytest.approx(
+            1.15, abs=0.01
+        )
+        assert np.linalg.norm(cl.coords[0] - cl.coords[2]) == pytest.approx(
+            1.05, abs=0.01
+        )
+
+
 class TestVerifyTs:
     def test_minimum_rejected_as_ts(self):
         w = optimize(water(), CHEAP)
@@ -163,8 +286,8 @@ class TestComplexBuilders:
         assert m.frozen_indices == [1, len(a.symbols)]
         assert len(m.symbols) == len(a.symbols) + len(b.symbols)
 
-    def test_neutral_attack_complex(self):
-        c = hydrolysis_complex(disilicate(), water())
+    def test_backside_attack_complex(self):
+        c = hydrolysis_complex(disilicate(), water(), mode="backside")
         assert c.charge == 0
         assert len(c.symbols) == 15 + 3
         # Attacker O sits ~approach distance from the Si under attack,
@@ -172,6 +295,25 @@ class TestComplexBuilders:
         si, o_attack = c.coords[1], c.coords[15]
         assert np.linalg.norm(o_attack - si) == pytest.approx(3.2, abs=0.05)
         assert np.linalg.norm(o_attack - c.coords[0]) > np.linalg.norm(si - c.coords[0])
+
+    def test_flank_attack_complex_geometry(self):
+        c = hydrolysis_complex(disilicate(), water())  # flank is default
+        obr, si, ow = c.coords[0], c.coords[1], c.coords[15]
+        assert np.linalg.norm(ow - si) == pytest.approx(3.2, abs=0.05)
+        # Ow-Si-Obr angle near the 4-center arrangement (80 deg built in).
+        v1, v2 = ow - si, obr - si
+        cos = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+        assert 60.0 < np.degrees(np.arccos(cos)) < 100.0
+        # The aimed water H must actually be able to reach the bridging O
+        # (backside had it at 3.9 A — the measured failure).
+        h_to_obr = min(
+            np.linalg.norm(c.coords[16] - obr), np.linalg.norm(c.coords[17] - obr)
+        )
+        assert h_to_obr < 2.6
+
+    def test_unknown_mode_rejected(self):
+        with pytest.raises(ValueError, match="unknown attack mode"):
+            hydrolysis_complex(disilicate(), water(), mode="sideways")
 
     def test_acid_attack_complex_charge(self):
         c = hydrolysis_complex(aluminosilicate_dimer(), hydronium())

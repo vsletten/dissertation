@@ -56,7 +56,15 @@ from quarry.pipeline import (  # noqa: E402
 )
 from quarry.rates import rate_from_thermo, thermo_from_frequencies  # noqa: E402
 from quarry.store import Store  # noqa: E402
-from quarry.ts import constrained_scan, find_ts, quick_irc, scan_maximum  # noqa: E402
+from quarry.ts import (  # noqa: E402
+    ScanNoMaximumError,
+    find_ts,
+    first_interior_maximum,
+    neb_ts_guess,
+    quick_irc,
+    scan_to_maximum,
+    scan_ts_guess,
+)
 
 REACTIONS = {
     "si-neutral": (disilicate, water),
@@ -66,6 +74,7 @@ REACTIONS = {
 }
 # Indices from the builders: 0 = bridging O, 1 = Si under attack;
 # the attacker's O is the first atom appended after the dimer.
+BR_INDEX = 0
 SI_INDEX = 1
 KCAL = 4.184
 
@@ -115,6 +124,13 @@ def main() -> int:
         default=16,
         help="OMP thread cap for CPU stages (default 16 — leave the box usable)",
     )
+    ap.add_argument(
+        "--approach",
+        choices=["flank", "backside"],
+        default="flank",
+        help="attack geometry: flank = X&L 4-center (proton can reach the "
+        "bridging O), backside = SN2-like (no concerted transfer)",
+    )
     ap.add_argument("--temperature", type=float, default=298.15)
     args = ap.parse_args()
 
@@ -127,7 +143,7 @@ def main() -> int:
         Path(__file__).resolve().parent.parent
         / "runs"
         / "phase1"
-        / (f"{args.reaction}-{args.xc}-{args.basis}")
+        / (f"{args.reaction}-{args.xc}-{args.basis}-{args.approach}")
     )
     run_dir.mkdir(parents=True, exist_ok=True)
     log(f"run dir: {run_dir}")
@@ -135,7 +151,7 @@ def main() -> int:
 
     dimer_factory, attacker_factory = REACTIONS[args.reaction]
     dimer, attacker = dimer_factory(), attacker_factory()
-    complex_guess = hydrolysis_complex(dimer, attacker)
+    complex_guess = hydrolysis_complex(dimer, attacker, mode=args.approach)
     ow_index = len(dimer.symbols)  # attacker O
 
     # Stage 0 — cheap, robust pre-optimization of the hand-built guess.
@@ -165,23 +181,105 @@ def main() -> int:
         lambda: optimize(attacker, settings),
     )
 
-    # Stage 2 — relaxed scan pulling the attacker O onto Si.
-    log("stage 2: relaxed scan r(Si-Ow) 2.8 -> 1.9 A")
+    # Stage 2 — relaxed scan pulling the attacker O onto Si, extended
+    # until the energy maximum is interior (ridge actually crossed).
+    # The neutral 4-center mechanism needs a second driven coordinate:
+    # if approach alone never peaks (observed live: monotonic to 1.66 A,
+    # +115 kJ/mol), pin r(Si-Ow) and drive the water proton onto the
+    # bridging O — the concerted proton transfer of the X&L TS.
+    log("stage 2: relaxed scan r(Si-Ow), auto-extending to interior maximum")
     ts_guess_path = run_dir / "ts_guess.xyz"
     if ts_guess_path.exists():
         ts_guess = load_xyz(ts_guess_path, complex_opt)
         log("  resume: ts_guess.xyz exists")
     else:
-        scan = constrained_scan(
-            complex_opt,
-            settings,
-            atom_i=SI_INDEX,
-            atom_j=ow_index,
-            distances_a=[2.8, 2.6, 2.4, 2.2, 2.1, 2.0, 1.9],
-        )
-        for r, e, _ in scan:
-            log(f"  r={r:.2f} A  E={e:.6f} Ha")
-        ts_guess = scan_maximum(scan)
+        try:
+            scan = scan_to_maximum(
+                complex_opt,
+                settings,
+                atom_i=SI_INDEX,
+                atom_j=ow_index,
+                distances_a=[2.8, 2.6, 2.4, 2.2, 2.1, 2.0, 1.9],
+                progress=lambda r, e: log(f"  r={r:.2f} A  E={e:.6f} Ha"),
+            )
+            ts_guess = scan_ts_guess(scan)
+        except ScanNoMaximumError as exc:
+            log("  approach coordinate alone does not cross the ridge;")
+            log("  stage 2b: pin r(Si-Ow)=1.90 A, drive H(water) -> O(bridge)")
+            base = min(exc.scan, key=lambda p: abs(p[0] - 1.90))[2]
+            # The water H closest to the bridging O is the one to shuttle.
+            h_candidates = [ow_index + 1, ow_index + 2]
+            h_idx = min(
+                h_candidates,
+                key=lambda i: np.linalg.norm(base.coords[i] - base.coords[BR_INDEX]),
+            )
+            r0 = float(np.linalg.norm(base.coords[h_idx] - base.coords[BR_INDEX]))
+            log(f"  driving H{h_idx} from r(Obr-H)={r0:.2f} A inward")
+            first = max(1.05, round(r0 - 0.15, 2))
+            distances = [round(x, 2) for x in np.arange(first, 1.04, -0.15)]
+            pscan = scan_to_maximum(
+                base,
+                settings,
+                atom_i=BR_INDEX,
+                atom_j=h_idx,
+                distances_a=distances or [first],
+                fixed_distances=[(SI_INDEX, ow_index, 1.90)],
+                extend_step_a=0.06,
+                min_distance_a=0.95,
+                progress=lambda r, e: log(f"  r(Obr-H)={r:.2f} A  E={e:.6f} Ha"),
+            )
+            # A raw crest guess lets Sella escape the channel (measured:
+            # r(Si-Ow) 1.90 -> 3.22). And a bare free relax of the
+            # post-crest structure rolls BACK to reactants (measured:
+            # product r(Si-Ow)=3.16 — proton returned, water left):
+            # a single proton transfer with the bridge intact is not a
+            # minimum. Hydrolysis completes by Si-Obr cleavage, so build
+            # the product deliberately: hold the new bonds, break the
+            # bridge, then free-optimize into 2 Si(OH)4.
+            crest_idx = first_interior_maximum(pscan)
+            if crest_idx is None:
+                log("  !! proton scan produced no crest either — aborting")
+                return 1
+            seed_idx = min(crest_idx + 1, len(pscan) - 1)
+
+            def build_product():
+                log("  stage 2c: breaking Si-Obr with the new bonds held")
+                from quarry.ts import constrained_scan
+
+                broken = constrained_scan(
+                    pscan[seed_idx][2],
+                    settings,
+                    atom_i=SI_INDEX,
+                    atom_j=BR_INDEX,
+                    distances_a=[1.85, 2.05, 2.30, 2.60],
+                    fixed_distances=[
+                        (SI_INDEX, ow_index, 1.70),
+                        (BR_INDEX, h_idx, 0.98),
+                    ],
+                )
+                for r, e, _ in broken:
+                    log(f"  r(Si-Obr)={r:.2f} A  E={e:.6f} Ha")
+                return optimize(broken[-1][2], settings)
+
+            product = checkpointed(
+                run_dir / "product.xyz", pscan[seed_idx][2], build_product
+            )
+            r_prod_ow = float(
+                np.linalg.norm(product.coords[SI_INDEX] - product.coords[ow_index])
+            )
+            r_prod_br = float(
+                np.linalg.norm(product.coords[SI_INDEX] - product.coords[BR_INDEX])
+            )
+            log(f"  product r(Si-Ow)={r_prod_ow:.2f} A, r(Si-Obr)={r_prod_br:.2f} A")
+            if r_prod_ow > 1.9 or r_prod_br < 2.2:
+                log(
+                    "  !! product rolled back toward reactants "
+                    "(hydrolyzed minimum requires Si-Ow bonded, Si-Obr "
+                    "broken) — aborting; inspect product.xyz"
+                )
+                return 1
+            log("  stage 2d: CI-NEB complex -> product (7 images)")
+            ts_guess = neb_ts_guess(complex_opt, product, settings)
         save_xyz(ts_guess, ts_guess_path)
 
     # Stage 3 — saddle search.
@@ -191,6 +289,35 @@ def main() -> int:
         ts_guess,
         lambda: find_ts(ts_guess, settings, trajectory=str(run_dir / "sella.traj")),
     )
+
+    # Guard: a saddle that drifted back out of the approach channel is a
+    # trivial complex-rearrangement saddle, not the hydrolysis TS
+    # (observed live: 208i water wag at r(Si-Ow)=3.25 from a bad guess).
+    r_guess = float(
+        np.linalg.norm(ts_guess.coords[SI_INDEX] - ts_guess.coords[ow_index])
+    )
+    r_ts = float(np.linalg.norm(ts.coords[SI_INDEX] - ts.coords[ow_index]))
+    log(f"  r(Si-Ow): guess {r_guess:.2f} A -> saddle {r_ts:.2f} A")
+    # The 4-center hydrolysis saddle is in-channel by construction:
+    # forming Si-Ow bond ~1.8-2.2 A. A saddle sitting outside bonding
+    # range is a complex-rearrangement saddle whatever its history
+    # (observed live: 45.7i at r(Si-Ow)=3.15 from a reactant-conformer
+    # NEB after the product basin escaped).
+    if r_ts > 2.6:
+        log(
+            f"  !! saddle at r(Si-Ow)={r_ts:.2f} A is outside the bonding "
+            "channel — not the hydrolysis TS. Aborting before "
+            "thermochemistry; inspect ts.xyz and product.xyz."
+        )
+        return 1
+    if r_ts > r_guess + 0.5:
+        log(
+            "  !! saddle escaped the approach channel (r(Si-Ow) grew by "
+            f"{r_ts - r_guess:.2f} A) — this is not the hydrolysis TS. "
+            "Delete ts.xyz/ts_guess.xyz and rerun with a tighter scan, or "
+            "drive a combined coordinate. Aborting before thermochemistry."
+        )
+        return 1
 
     # Stage 4 — verify + quick IRC.
     log("stage 4: frequencies + quick-IRC")
