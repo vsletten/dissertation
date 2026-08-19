@@ -70,7 +70,11 @@ def test_proton_neb_fallback_reconstructs_resumed_approach_seed(monkeypatch, tmp
 
     def fake_neb(reactant, product, settings, **kwargs):
         neb_inputs.append((reactant, product))
-        assert kwargs == {"fmax_ev_a": 0.5, "pre_relax_fmax_ev_a": 0.8}
+        assert kwargs == {
+            "n_images": 5,
+            "fmax_ev_a": 0.5,
+            "pre_relax_fmax_ev_a": 3.0,
+        }
         return geometry("neb-guess", 2.0)
 
     monkeypatch.setattr(phase1, "constrained_scan", fake_constrained_scan)

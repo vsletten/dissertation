@@ -155,14 +155,15 @@ def proton_neb_guess(
         if r_prod_ow <= 1.9 and r_prod_br >= 2.2:
             log(
                 "  stage 2d: staged CI-NEB complex -> product "
-                "(7 images; 0.8 -> 0.5 eV/A)"
+                "(5 images; 3.0 pre-relax -> 0.5 climb eV/A)"
             )
             return neb_ts_guess(
                 complex_opt,
                 product,
                 settings,
+                n_images=5,
                 fmax_ev_a=0.5,
-                pre_relax_fmax_ev_a=0.8,
+                pre_relax_fmax_ev_a=3.0,
             )
         log("  saved product is not hydrolyzed; extending Si-Obr cleavage")
         rejected = run_dir / "product.rejected-rollback.xyz"
@@ -258,13 +259,17 @@ def proton_neb_guess(
             "product rolled back toward reactants; expected Si-Ow bonded "
             "and Si-Obr broken"
         )
-    log("  stage 2d: staged CI-NEB complex -> product (7 images; 0.8 -> 0.5 eV/A)")
+    log(
+        "  stage 2d: staged CI-NEB complex -> product "
+        "(5 images; 3.0 pre-relax -> 0.5 climb eV/A)"
+    )
     return neb_ts_guess(
         complex_opt,
         product,
         settings,
+        n_images=5,
         fmax_ev_a=0.5,
-        pre_relax_fmax_ev_a=0.8,
+        pre_relax_fmax_ev_a=3.0,
     )
 
 
