@@ -9,7 +9,7 @@ updated through the same PRs that do the work.*
 | Milestone | State | Notes |
 |---|---|---|
 | M0 — scoping + in-flight landed | ✅ done 2026-08-18 | Omnibus + 3 scoping docs merged; Phase-1 si-neutral barrier landed (ΔG‡ 27.0 kcal/mol vs X&L ~29) |
-| M1 — B1 schema RFC reviewed | ready | **The keystone — gates all of Track B, C, D** |
+| M1 — B1 schema RFC reviewed | ready | RFC-001 written (B1 done); awaiting Victor's review ack |
 | M2 — B2 refactor, parity green | blocked (B1) | |
 | M3 — B3 conformance decks green | blocked (B2) | Conway / Ising / SIR with analytic gates |
 | M4 — B4 ensembles + observables | blocked (B2) | design against A5-Phase-0 needs |
@@ -25,11 +25,11 @@ on main). Priority P0 > P1 > P2 within READY.
 
 | Card | Track | Priority | Machine | Status | Depends on |
 |---|---|---|---|---|---|
-| [B1-schema-rfc](cards/B1-schema-rfc.md) | B | P0 | any | ready | — |
+| [B1-schema-rfc](cards/B1-schema-rfc.md) | B | P0 | any | done | — |
 | [D2a-astro-rate-reproduction](cards/D2a-astro-rate-reproduction.md) | D | P1 | workstation | ready | — |
 | [A1b-acid-mechanisms](cards/A1b-acid-mechanisms.md) | A | P1 | workstation | ready | — |
 | [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: ORCA install (Victor) + A1b | A1b |
-| [B2-engine-refactor](cards/B2-engine-refactor.md) | B | P0 | any | blocked: B1 | B1 |
+| [B2-engine-refactor](cards/B2-engine-refactor.md) | B | P0 | any | blocked: Victor review ack of RFC-001 | B1 |
 | [B3-conformance-decks](cards/B3-conformance-decks.md) | B | P1 | any | blocked: B2 | B2 |
 | [B4-ensembles-observables](cards/B4-ensembles-observables.md) | B | P1 | any | blocked: B2 | B2 |
 | [C2-corrosion-deck](cards/C2-corrosion-deck.md) | C | P2 | any | blocked: B3 | B3 |

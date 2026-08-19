@@ -4,6 +4,11 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-19 — hermes cloud worker — B1-schema-rfc done:
+  `petra/docs/RFC-001-DECK-V2.md` written (deck schema v2 + UpdateStrategy
+  trait + v1 compat shim + determinism/RNG contract + B2/B3 test plan;
+  corrosion + ice-mantle showcase fragments). B2 unblocked pending Victor's
+  review ack of the RFC.
 - 2026-08-18 — fable — Program tracking system created (PLAN, PROTOCOL,
   STATUS, 10 seed cards, inbox). Board opens with B1-schema-rfc as the
   keystone READY card.
