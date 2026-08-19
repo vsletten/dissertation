@@ -1,0 +1,40 @@
+schema_version = 0
+name = "Bytownite"
+formula = "(Ca,Na)(Al,Si)4O8"
+mineral_group = "plagioclase feldspar"
+rate_law = "Palandri-Kharaka Eq. 6 (far-from-equilibrium, surface-normalized multi-mechanism Arrhenius law)"
+surface_area_basis = "unspecified"
+caveats = ["Solid-solution formula is compositional; Table 13 parameters were interpolated between constrained plagioclase compositions."]
+
+[source]
+id = "pk2004-table-13-p24"
+citation = "Palandri, J. L., and Kharaka, Y. K. (2004), USGS OFR 2004-1068"
+url = "https://pubs.usgs.gov/of/2004/1068/pdf/OFR_2004_1068.pdf"
+year = 2004
+page = 24
+table = 13
+notes = "Page is the printed report page; table is the compiled parameter table."
+
+[[mechanism]]
+kind = "acid"
+log_k25_mol_m2_s = -5.85
+activation_energy_kj_mol = 29.3
+source_ref = "pk2004-table-13-p24"
+reaction_orders = { H_plus = 1.018 }
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []
+
+[[mechanism]]
+kind = "neutral"
+log_k25_mol_m2_s = -9.82
+activation_energy_kj_mol = 31.5
+source_ref = "pk2004-table-13-p24"
+reaction_orders = {}
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []

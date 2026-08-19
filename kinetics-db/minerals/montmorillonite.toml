@@ -1,0 +1,52 @@
+schema_version = 0
+name = "Montmorillonite"
+formula = "K0.318(Si3.975Al0.025)(Al1.509Fe0.205Mg0.283)(OH)2"
+mineral_group = "clay"
+rate_law = "Palandri-Kharaka Eq. 6 (far-from-equilibrium, surface-normalized multi-mechanism Arrhenius law)"
+surface_area_basis = "unspecified"
+caveats = ["Formula is transcribed from Table 29 footnote d."]
+
+[source]
+id = "pk2004-table-29-p39"
+citation = "Palandri, J. L., and Kharaka, Y. K. (2004), USGS OFR 2004-1068"
+url = "https://pubs.usgs.gov/of/2004/1068/pdf/OFR_2004_1068.pdf"
+year = 2004
+page = 39
+table = 29
+notes = "Page is the printed report page; table is the compiled parameter table."
+
+[[mechanism]]
+kind = "acid"
+log_k25_mol_m2_s = -12.71
+activation_energy_kj_mol = 48.0
+source_ref = "pk2004-table-29-p39"
+reaction_orders = { H_plus = 0.22 }
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []
+
+[[mechanism]]
+kind = "neutral"
+log_k25_mol_m2_s = -14.41
+activation_energy_kj_mol = 48.0
+source_ref = "pk2004-table-29-p39"
+reaction_orders = {}
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []
+
+[[mechanism]]
+kind = "base"
+log_k25_mol_m2_s = -14.41
+activation_energy_kj_mol = 48.0
+source_ref = "pk2004-table-29-p39"
+reaction_orders = { H_plus = -0.13 }
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []
