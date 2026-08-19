@@ -143,6 +143,7 @@ class TestNebConvergence:
         import ase.optimize
 
         neb_calls = []
+        aligned_endpoint_rms = []
         fire_calls = []
         results = iter(stage_results)
 
@@ -151,6 +152,8 @@ class TestNebConvergence:
                 self.images = images
                 self.climb = kwargs["climb"]
                 neb_calls.append(kwargs)
+                delta = images[-1].positions - images[0].positions
+                aligned_endpoint_rms.append(float(np.sqrt(np.mean(delta**2))))
 
             def interpolate(self, *, method):
                 assert method == "idpp"
@@ -180,7 +183,14 @@ class TestNebConvergence:
                 max_steps=5,
             )
 
-        assert neb_calls == [{"climb": False, "method": "improvedtangent"}]
+        assert neb_calls == [
+            {
+                "climb": False,
+                "method": "improvedtangent",
+                "remove_rotation_and_translation": True,
+            }
+        ]
+        assert aligned_endpoint_rms == pytest.approx([0.0], abs=1e-12)
         assert fire_calls[0] == (
             False,
             {"dt": 0.05, "dtmax": 0.2, "maxstep": 0.05},

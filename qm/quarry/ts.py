@@ -339,6 +339,7 @@ def neb_ts_guess(
     returning an arbitrary peak from an exhausted optimizer is forbidden.
     """
     from ase import Atoms
+    from ase.build.rotate import minimize_rotation_and_translation
 
     try:
         from ase.mep import NEB
@@ -352,13 +353,23 @@ def neb_ts_guess(
     for _ in range(n_images - 2):
         images.append(images[0].copy())
     images.append(Atoms(symbols=product.symbols, positions=product.coords))
+    # Independent optimizations can rigidly rotate/translate the product.
+    # Interpolating those raw Cartesian frames sent the transferring proton
+    # several Angstroms into vacuum and made the first DFT SCF fail. Remove
+    # only that physically meaningless global motion before IDPP.
+    minimize_rotation_and_translation(images[0], images[-1])
     for image in images:
         image.calc = make_ase_calculator(settings, reactant.charge, reactant.spin)
         if reactant.frozen_indices:
             from ase.constraints import FixAtoms
 
             image.set_constraint(FixAtoms(indices=reactant.frozen_indices))
-    neb = NEB(images, climb=False, method="improvedtangent")
+    neb = NEB(
+        images,
+        climb=False,
+        method="improvedtangent",
+        remove_rotation_and_translation=True,
+    )
     neb.interpolate(method="idpp")
 
     relaxed = FIRE(
