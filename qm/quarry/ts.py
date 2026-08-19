@@ -333,10 +333,10 @@ def neb_ts_guess(
 
     ``fmax_ev_a`` is deliberately loose — this produces a guess, and
     Sella does the tight convergence.  The band is first relaxed without a
-    climbing image, then the climb is enabled.  Conservative FIRE time and
-    displacement caps prevent the runaway observed for the al-neutral band
-    with ASE's much larger defaults.  Both bounded stages must converge;
-    returning an arbitrary peak from an exhausted optimizer is forbidden.
+    climbing image using conservative FIRE caps, then the climb is enabled
+    under MDMin, ASE's documented NEB optimizer.  Both bounded stages must
+    converge; returning an arbitrary peak from an exhausted optimizer is
+    forbidden.
     """
     from ase import Atoms
     from ase.build.rotate import minimize_rotation_and_translation
@@ -345,7 +345,7 @@ def neb_ts_guess(
         from ase.mep import NEB
     except ImportError:  # older ASE layout
         from ase.neb import NEB
-    from ase.optimize import FIRE
+    from ase.optimize import FIRE, MDMin
 
     if reactant.charge != product.charge or reactant.spin != product.spin:
         raise ValueError("reactant/product electronic states differ")
@@ -385,10 +385,9 @@ def neb_ts_guess(
         )
 
     neb.climb = True
-    climbed = FIRE(
+    climbed = MDMin(
         neb,  # type: ignore[arg-type] -- ASE optimizers accept NEB objects
         dt=fire_dt,
-        dtmax=fire_dtmax,
         maxstep=fire_maxstep,
     ).run(fmax=fmax_ev_a, steps=max_steps)
     if not climbed:

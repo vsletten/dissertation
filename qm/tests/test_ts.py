@@ -144,7 +144,7 @@ class TestNebConvergence:
 
         neb_calls = []
         aligned_endpoint_rms = []
-        fire_calls = []
+        optimizer_calls = []
         results = iter(stage_results)
 
         class FakeNeb:
@@ -158,17 +158,26 @@ class TestNebConvergence:
             def interpolate(self, *, method):
                 assert method == "idpp"
 
-        class FakeFire:
+        class FakeOptimizer:
+            name = "optimizer"
+
             def __init__(self, neb, **kwargs):
                 self.neb = neb
-                fire_calls.append((neb.climb, kwargs))
+                optimizer_calls.append((self.name, neb.climb, kwargs))
 
             def run(self, *, fmax, steps):
-                fire_calls[-1] += (fmax, steps)
+                optimizer_calls[-1] += (fmax, steps)
                 return next(results)
+
+        class FakeFire(FakeOptimizer):
+            name = "FIRE"
+
+        class FakeMdMin(FakeOptimizer):
+            name = "MDMin"
 
         monkeypatch.setattr(ase.mep, "NEB", FakeNeb)
         monkeypatch.setattr(ase.optimize, "FIRE", FakeFire)
+        monkeypatch.setattr(ase.optimize, "MDMin", FakeMdMin)
         reactant, product = self._endpoints()
 
         with pytest.raises(RuntimeError, match=message):
@@ -191,16 +200,18 @@ class TestNebConvergence:
             }
         ]
         assert aligned_endpoint_rms == pytest.approx([0.0], abs=1e-12)
-        assert fire_calls[0] == (
+        assert optimizer_calls[0] == (
+            "FIRE",
             False,
             {"dt": 0.05, "dtmax": 0.2, "maxstep": 0.05},
             0.3,
             4,
         )
         if len(stage_results) == 2:
-            assert fire_calls[1] == (
+            assert optimizer_calls[1] == (
+                "MDMin",
                 True,
-                {"dt": 0.05, "dtmax": 0.2, "maxstep": 0.05},
+                {"dt": 0.05, "maxstep": 0.05},
                 0.1,
                 5,
             )
