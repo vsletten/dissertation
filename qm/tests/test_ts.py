@@ -169,14 +169,10 @@ class TestNebConvergence:
                 optimizer_calls[-1] += (fmax, steps)
                 return next(results)
 
-        class FakeFire(FakeOptimizer):
-            name = "FIRE"
-
         class FakeMdMin(FakeOptimizer):
             name = "MDMin"
 
         monkeypatch.setattr(ase.mep, "NEB", FakeNeb)
-        monkeypatch.setattr(ase.optimize, "FIRE", FakeFire)
         monkeypatch.setattr(ase.optimize, "MDMin", FakeMdMin)
         reactant, product = self._endpoints()
 
@@ -201,9 +197,9 @@ class TestNebConvergence:
         ]
         assert aligned_endpoint_rms == pytest.approx([0.0], abs=1e-12)
         assert optimizer_calls[0] == (
-            "FIRE",
+            "MDMin",
             False,
-            {"dt": 0.05, "dtmax": 0.2, "maxstep": 0.05},
+            {"dt": 0.05, "maxstep": 0.05},
             0.3,
             4,
         )

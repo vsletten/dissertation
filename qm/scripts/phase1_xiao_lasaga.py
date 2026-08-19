@@ -160,15 +160,17 @@ def proton_neb_guess(
             # four-imaginary-mode NEB peak, not the concerted saddle.
             log(
                 "  stage 2d: staged CI-NEB complex -> aligned full product "
-                "(7 images; 0.3 pre-relax -> 0.5 climb eV/A)"
+                "(5 images; MDMin 1.5 pre-relax -> 0.5 climb eV/A)"
             )
             return neb_ts_guess(
                 complex_opt,
                 product,
                 settings,
-                n_images=7,
+                n_images=5,
                 fmax_ev_a=0.5,
-                pre_relax_fmax_ev_a=0.3,
+                max_steps=200,
+                pre_relax_fmax_ev_a=1.5,
+                pre_relax_steps=120,
             )
         log("  saved product is not hydrolyzed; extending Si-Obr cleavage")
         rejected = run_dir / "product.rejected-rollback.xyz"
@@ -266,15 +268,17 @@ def proton_neb_guess(
         )
     log(
         "  stage 2d: staged CI-NEB complex -> aligned full product "
-        "(7 images; 0.3 pre-relax -> 0.5 climb eV/A)"
+        "(5 images; MDMin 1.5 pre-relax -> 0.5 climb eV/A)"
     )
     return neb_ts_guess(
         complex_opt,
         product,
         settings,
-        n_images=7,
+        n_images=5,
         fmax_ev_a=0.5,
-        pre_relax_fmax_ev_a=0.3,
+        max_steps=200,
+        pre_relax_fmax_ev_a=1.5,
+        pre_relax_steps=120,
     )
 
 
@@ -382,9 +386,17 @@ def main() -> int:
                 ts_guess, complex_opt, settings, run_dir, ow_index
             )
             save_xyz(ts_guess, ts_guess_path)
+    elif route == "proton-neb" and (run_dir / "product.xyz").exists():
+        # A failed bounded NEB leaves the route and validated product durable
+        # but no ts_guess.xyz.  Resume that exact stage instead of repeating
+        # the already-completed direct/proton scans.
+        log("  resume: proton-NEB route/product exist; rebuilding only the band")
+        ts_guess = proton_neb_guess(
+            complex_opt, complex_opt, settings, run_dir, ow_index
+        )
+        save_xyz(ts_guess, ts_guess_path)
     else:
-        # A route marker without its geometry can only be a crash between
-        # checkpoint writes. Reconstruct from the direct route safely.
+        # No reusable product exists. Reconstruct from the direct route.
         route = "direct"
         route_path.unlink(missing_ok=True)
         try:

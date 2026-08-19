@@ -71,9 +71,11 @@ def test_proton_neb_fallback_reconstructs_resumed_approach_seed(monkeypatch, tmp
     def fake_neb(reactant, product, settings, **kwargs):
         neb_inputs.append((reactant, product))
         assert kwargs == {
-            "n_images": 7,
+            "n_images": 5,
             "fmax_ev_a": 0.5,
-            "pre_relax_fmax_ev_a": 0.3,
+            "max_steps": 200,
+            "pre_relax_fmax_ev_a": 1.5,
+            "pre_relax_steps": 120,
         }
         return geometry("neb-guess", 2.0)
 
@@ -152,7 +154,9 @@ def test_completed_product_uses_full_aligned_neb_endpoint(monkeypatch, tmp_path)
     product, kwargs = endpoints[0]
     assert np.linalg.norm(product.coords[1] - product.coords[0]) == 3.50
     assert kwargs == {
-        "n_images": 7,
+        "n_images": 5,
         "fmax_ev_a": 0.5,
-        "pre_relax_fmax_ev_a": 0.3,
+        "max_steps": 200,
+        "pre_relax_fmax_ev_a": 1.5,
+        "pre_relax_steps": 120,
     }

@@ -318,9 +318,8 @@ def neb_ts_guess(
     max_steps: int = 150,
     pre_relax_fmax_ev_a: float = 0.30,
     pre_relax_steps: int = 80,
-    fire_dt: float = 0.05,
-    fire_dtmax: float = 0.20,
-    fire_maxstep: float = 0.05,
+    optimizer_dt: float = 0.05,
+    optimizer_maxstep: float = 0.05,
 ) -> Cluster:
     """Climbing-image NEB between two basins; returns the peak image.
 
@@ -333,10 +332,11 @@ def neb_ts_guess(
 
     ``fmax_ev_a`` is deliberately loose — this produces a guess, and
     Sella does the tight convergence.  The band is first relaxed without a
-    climbing image using conservative FIRE caps, then the climb is enabled
-    under MDMin, ASE's documented NEB optimizer.  Both bounded stages must
-    converge; returning an arbitrary peak from an exhausted optimizer is
-    forbidden.
+    climbing image, then the climb is enabled.  Both stages use bounded MDMin,
+    ASE's documented stable NEB optimizer: FIRE oscillated and repeatedly
+    re-inflated the force on the live al-neutral full-product band.  Both
+    bounded stages must converge; returning an arbitrary peak from an
+    exhausted optimizer is forbidden.
     """
     from ase import Atoms
     from ase.build.rotate import minimize_rotation_and_translation
@@ -345,7 +345,7 @@ def neb_ts_guess(
         from ase.mep import NEB
     except ImportError:  # older ASE layout
         from ase.neb import NEB
-    from ase.optimize import FIRE, MDMin
+    from ase.optimize import MDMin
 
     if reactant.charge != product.charge or reactant.spin != product.spin:
         raise ValueError("reactant/product electronic states differ")
@@ -372,11 +372,10 @@ def neb_ts_guess(
     )
     neb.interpolate(method="idpp")
 
-    relaxed = FIRE(
+    relaxed = MDMin(
         neb,  # type: ignore[arg-type] -- ASE optimizers accept NEB objects
-        dt=fire_dt,
-        dtmax=fire_dtmax,
-        maxstep=fire_maxstep,
+        dt=optimizer_dt,
+        maxstep=optimizer_maxstep,
     ).run(fmax=pre_relax_fmax_ev_a, steps=pre_relax_steps)
     if not relaxed:
         raise RuntimeError(
@@ -387,8 +386,8 @@ def neb_ts_guess(
     neb.climb = True
     climbed = MDMin(
         neb,  # type: ignore[arg-type] -- ASE optimizers accept NEB objects
-        dt=fire_dt,
-        maxstep=fire_maxstep,
+        dt=optimizer_dt,
+        maxstep=optimizer_maxstep,
     ).run(fmax=fmax_ev_a, steps=max_steps)
     if not climbed:
         raise RuntimeError(
