@@ -318,9 +318,9 @@ def neb_ts_guess(
     max_steps: int = 150,
     pre_relax_fmax_ev_a: float = 0.30,
     pre_relax_steps: int = 80,
-    fire_dt: float = 0.02,
+    fire_dt: float = 0.05,
     fire_dtmax: float = 0.20,
-    fire_maxstep: float = 0.03,
+    fire_maxstep: float = 0.05,
 ) -> Cluster:
     """Climbing-image NEB between two basins; returns the peak image.
 
