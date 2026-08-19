@@ -129,7 +129,7 @@ React application using Three.js (via @react-three/fiber) to render molecular st
 Parser handles Cerius2 .msi files (see msi-schema.md for format details). The MSI format uses keyword-value pairs with sections like (1 Atom), (1 Bond) for defining molecular structure.
 
 ### Styling
-Element colors defined in utils/elementColors.ts, supports charge-based and element-based coloring schemes
+Element colors are defined in utils/elementColors.ts and support charge-based and element-based coloring schemes.
 
 ## Development Notes
 
