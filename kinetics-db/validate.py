@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parent
 MINERALS = ROOT / "minerals"
 AREA_BASES = {"BET", "geometric", "unspecified"}
 MECHANISM_KINDS = {"acid", "neutral", "base", "other"}
+MIN_INVENTORY_SIZE = 25
 TOP_LEVEL = {
     "schema_version": int,
     "name": str,
@@ -59,13 +60,13 @@ def nonempty_string(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
-def validate_file(path: Path) -> list[str]:
+def validate_file(path: Path) -> tuple[list[str], dict[str, Any] | None]:
     errors: list[str] = []
     try:
         with path.open("rb") as handle:
             record = tomllib.load(handle)
     except (OSError, tomllib.TOMLDecodeError) as exc:
-        return [f"{path.name}: cannot parse: {exc}"]
+        return [f"{path.name}: cannot parse: {exc}"], None
 
     for field, expected in TOP_LEVEL.items():
         if field not in record:
@@ -74,7 +75,7 @@ def validate_file(path: Path) -> list[str]:
             errors.append(f"{path.name}: {field} has wrong type")
 
     if errors:
-        return errors
+        return errors, record
 
     if record["schema_version"] != 0:
         errors.append(f"{path.name}: schema_version must be 0")
@@ -166,24 +167,26 @@ def validate_file(path: Path) -> list[str]:
             errors.append(
                 f"{label}: not_reported uncertainty must use empty placeholders"
             )
-    return errors
+    return errors, record
 
 
 def main() -> int:
     paths = sorted(MINERALS.glob("*.toml"))
     errors: list[str] = []
-    if len(paths) < 25:
+    if len(paths) < MIN_INVENTORY_SIZE:
         errors.append(
-            f"inventory contains {len(paths)} mineral files; at least 25 required"
+            f"inventory contains {len(paths)} mineral files; "
+            f"at least {MIN_INVENTORY_SIZE} required"
         )
     names: dict[str, Path] = {}
+    records: list[dict[str, Any]] = []
     for path in paths:
-        errors.extend(validate_file(path))
-        try:
-            with path.open("rb") as handle:
-                name = tomllib.load(handle).get("name")
-        except (OSError, tomllib.TOMLDecodeError):
+        file_errors, record = validate_file(path)
+        errors.extend(file_errors)
+        if record is None:
             continue
+        records.append(record)
+        name = record.get("name")
         if isinstance(name, str):
             key = name.casefold()
             if key in names:
@@ -199,10 +202,7 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    mechanism_count = 0
-    for path in paths:
-        with path.open("rb") as handle:
-            mechanism_count += len(tomllib.load(handle)["mechanism"])
+    mechanism_count = sum(len(record["mechanism"]) for record in records)
     print(f"OK: {len(paths)} mineral files, {mechanism_count} mechanisms, schema v0")
     return 0
 
