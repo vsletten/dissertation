@@ -1,0 +1,40 @@
+schema_version = 0
+name = "Chlorite (clinochlore 14 A)"
+formula = "Mg5Al(AlSi3O10)(OH)8"
+mineral_group = "miscellaneous phyllosilicate"
+rate_law = "Palandri-Kharaka Eq. 6 (far-from-equilibrium, surface-normalized multi-mechanism Arrhenius law)"
+surface_area_basis = "unspecified"
+caveats = ["Table 30 footnote d identifies the material as clinochlore 14 A."]
+
+[source]
+id = "pk2004-table-30-p40"
+citation = "Palandri, J. L., and Kharaka, Y. K. (2004), USGS OFR 2004-1068"
+url = "https://pubs.usgs.gov/of/2004/1068/pdf/OFR_2004_1068.pdf"
+year = 2004
+page = 40
+table = 30
+notes = "Page is the printed report page; table is the compiled parameter table."
+
+[[mechanism]]
+kind = "acid"
+log_k25_mol_m2_s = -11.11
+activation_energy_kj_mol = 88.0
+source_ref = "pk2004-table-30-p40"
+reaction_orders = { H_plus = 0.5 }
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []
+
+[[mechanism]]
+kind = "neutral"
+log_k25_mol_m2_s = -12.52
+activation_energy_kj_mol = 88.0
+source_ref = "pk2004-table-30-p40"
+reaction_orders = {}
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []

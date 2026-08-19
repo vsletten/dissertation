@@ -1,0 +1,52 @@
+schema_version = 0
+name = "Nepheline"
+formula = "(Na,K)AlSiO4"
+mineral_group = "feldspathoid"
+rate_law = "Palandri-Kharaka Eq. 6 (far-from-equilibrium, surface-normalized multi-mechanism Arrhenius law)"
+surface_area_basis = "unspecified"
+caveats = []
+
+[source]
+id = "pk2004-table-18-p27"
+citation = "Palandri, J. L., and Kharaka, Y. K. (2004), USGS OFR 2004-1068"
+url = "https://pubs.usgs.gov/of/2004/1068/pdf/OFR_2004_1068.pdf"
+year = 2004
+page = 27
+table = 18
+notes = "Page is the printed report page; table is the compiled parameter table."
+
+[[mechanism]]
+kind = "acid"
+log_k25_mol_m2_s = -2.73
+activation_energy_kj_mol = 62.9
+source_ref = "pk2004-table-18-p27"
+reaction_orders = { H_plus = 1.13 }
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []
+
+[[mechanism]]
+kind = "neutral"
+log_k25_mol_m2_s = -8.56
+activation_energy_kj_mol = 65.4
+source_ref = "pk2004-table-18-p27"
+reaction_orders = {}
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []
+
+[[mechanism]]
+kind = "base"
+log_k25_mol_m2_s = -10.76
+activation_energy_kj_mol = 37.8
+source_ref = "pk2004-table-18-p27"
+reaction_orders = { H_plus = -0.2 }
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []

@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Repository Overview
 
@@ -126,10 +126,10 @@ React application using Three.js (via @react-three/fiber) to render molecular st
 5. ModelInfo displays structural metadata
 
 ### File Format Support
-Parser handles Cerius2 .msi files (see msi-schema.md for format details). The MSI format uses keyword-value pairs with sections like (1 Atom), (1 Bond) for defining molecular structure.
+Parser handles Cerius2 .msi files (see `legacy/viewer/msi-schema.md` for format details). The MSI format uses keyword-value pairs with sections like (1 Atom), (1 Bond) for defining molecular structure.
 
 ### Styling
-Element colors defined in utils/elementColors.ts, supports charge-based and element-based coloring schemes
+Element colors are defined in utils/elementColors.ts and support charge-based and element-based coloring schemes.
 
 ## Development Notes
 
@@ -146,7 +146,7 @@ Element colors defined in utils/elementColors.ts, supports charge-based and elem
 - Three.js r174+ with @react-three/fiber for declarative 3D
 - No tests currently configured (npm test will fail)
 
-### Code Style (from viewer/CLAUDE.md)
+### Code Style (from `legacy/viewer/CLAUDE.md`)
 - Imports: Group as (1) React/framework (2) External libraries (3) Internal modules
 - TypeScript: Prefer interfaces over types, explicit return types on functions
 - Naming: camelCase for variables/functions, PascalCase for classes/components
