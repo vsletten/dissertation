@@ -122,6 +122,36 @@ def channel_escape_reason(ts_guess: Cluster, ts: Cluster, ow_index: int) -> str 
     return None
 
 
+def hydrolysis_basin_signature(
+    cluster: Cluster, ow_index: int
+) -> tuple[bool, bool, bool]:
+    """Return (Si-Ow bonded, Si-Obr bonded, proton on Obr) for IRC gating."""
+    h_candidates = [ow_index + 1, ow_index + 2]
+    return (
+        float(np.linalg.norm(cluster.coords[SI_INDEX] - cluster.coords[ow_index]))
+        < 2.3,
+        float(np.linalg.norm(cluster.coords[SI_INDEX] - cluster.coords[BR_INDEX]))
+        < 2.3,
+        min(
+            float(np.linalg.norm(cluster.coords[BR_INDEX] - cluster.coords[h_idx]))
+            for h_idx in h_candidates
+        )
+        < 1.25,
+    )
+
+
+def quick_irc_channel_reason(back: Cluster, fwd: Cluster, ow_index: int) -> str | None:
+    """Explain why quick-IRC did not connect reactant and hydrolyzed basins."""
+    actual = {
+        hydrolysis_basin_signature(back, ow_index),
+        hydrolysis_basin_signature(fwd, ow_index),
+    }
+    expected = {(False, True, False), (True, False, True)}
+    if actual != expected:
+        return f"quick-IRC basin signatures {sorted(actual)} != {sorted(expected)}"
+    return None
+
+
 def proton_neb_guess(
     approach_seed: Cluster,
     complex_opt: Cluster,
@@ -160,15 +190,15 @@ def proton_neb_guess(
             # four-imaginary-mode NEB peak, not the concerted saddle.
             log(
                 "  stage 2d: staged CI-NEB complex -> aligned full product "
-                "(5 images; MDMin 1.5 pre-relax -> 0.5 climb eV/A)"
+                "(5 images; MDMin 1.5 pre-relax -> 0.2 climb eV/A)"
             )
             return neb_ts_guess(
                 complex_opt,
                 product,
                 settings,
                 n_images=5,
-                fmax_ev_a=0.5,
-                max_steps=200,
+                fmax_ev_a=0.2,
+                max_steps=240,
                 pre_relax_fmax_ev_a=1.5,
                 pre_relax_steps=120,
             )
@@ -268,15 +298,15 @@ def proton_neb_guess(
         )
     log(
         "  stage 2d: staged CI-NEB complex -> aligned full product "
-        "(5 images; MDMin 1.5 pre-relax -> 0.5 climb eV/A)"
+        "(5 images; MDMin 1.5 pre-relax -> 0.2 climb eV/A)"
     )
     return neb_ts_guess(
         complex_opt,
         product,
         settings,
         n_images=5,
-        fmax_ev_a=0.5,
-        max_steps=200,
+        fmax_ev_a=0.2,
+        max_steps=240,
         pre_relax_fmax_ev_a=1.5,
         pre_relax_steps=120,
     )
@@ -476,9 +506,13 @@ def main() -> int:
     if ts_freq.n_imaginary != 1:
         log("  !! not a clean first-order saddle — inspect ts.xyz; aborting")
         return 1
-    back, fwd = quick_irc(ts, settings)
+    back, fwd = quick_irc(ts, settings, displacement_a=0.50)
     save_xyz(back, run_dir / "irc_back.xyz")
     save_xyz(fwd, run_dir / "irc_fwd.xyz")
+    irc_failure = quick_irc_channel_reason(back, fwd, ow_index)
+    if irc_failure:
+        log(f"  !! {irc_failure}; aborting before thermochemistry")
+        return 1
 
     # Stage 5 — thermochemistry.
     log("stage 5: thermochemistry")
