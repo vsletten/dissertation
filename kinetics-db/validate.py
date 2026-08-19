@@ -129,11 +129,12 @@ def validate_file(path: Path) -> list[str]:
         for field in ("log_k25_mol_m2_s", "activation_energy_kj_mol"):
             if not finite_number(mechanism[field]):
                 errors.append(f"{label}.{field} must be a finite number")
-        for order, value in mechanism["reaction_orders"].items():
-            if not nonempty_string(order) or not finite_number(value):
-                errors.append(
-                    f"{label}.reaction_orders must map names to finite numbers"
-                )
+        if isinstance(mechanism["reaction_orders"], dict):
+            for order, value in mechanism["reaction_orders"].items():
+                if not nonempty_string(order) or not finite_number(value):
+                    errors.append(
+                        f"{label}.reaction_orders must map name {order!r} to a finite number (got {value!r})"
+                    )
         if mechanism["source_ref"] != source.get("id"):
             errors.append(f"{label}.source_ref does not match source.id")
         if mechanism["uncertainty_status"] not in {"not_reported", "reported"}:
