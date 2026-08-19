@@ -185,14 +185,14 @@ def proton_neb_guess(
                     product = near
             log(
                 "  stage 2d: staged CI-NEB complex -> product "
-                "(5 images; 0.3 pre-relax -> 0.1 climb eV/A)"
+                "(5 images; 0.3 pre-relax -> 0.5 climb eV/A)"
             )
             return neb_ts_guess(
                 complex_opt,
                 product,
                 settings,
                 n_images=5,
-                fmax_ev_a=0.1,
+                fmax_ev_a=0.5,
                 pre_relax_fmax_ev_a=0.3,
             )
         log("  saved product is not hydrolyzed; extending Si-Obr cleavage")
@@ -291,14 +291,14 @@ def proton_neb_guess(
         )
     log(
         "  stage 2d: staged CI-NEB complex -> product "
-        "(5 images; 0.3 pre-relax -> 0.1 climb eV/A)"
+        "(5 images; 0.3 pre-relax -> 0.5 climb eV/A)"
     )
     return neb_ts_guess(
         complex_opt,
         product,
         settings,
         n_images=5,
-        fmax_ev_a=0.1,
+        fmax_ev_a=0.5,
         pre_relax_fmax_ev_a=0.3,
     )
 

@@ -72,7 +72,7 @@ def test_proton_neb_fallback_reconstructs_resumed_approach_seed(monkeypatch, tmp
         neb_inputs.append((reactant, product))
         assert kwargs == {
             "n_images": 5,
-            "fmax_ev_a": 0.1,
+            "fmax_ev_a": 0.5,
             "pre_relax_fmax_ev_a": 0.3,
         }
         return geometry("neb-guess", 2.0)
