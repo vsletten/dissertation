@@ -153,45 +153,20 @@ def proton_neb_guess(
             f"r(Si-Ow)={r_prod_ow:.2f} A, r(Si-Obr)={r_prod_br:.2f} A"
         )
         if r_prod_ow <= 1.9 and r_prod_br >= 2.2:
-            # A fully separated product is a poor linear NEB endpoint for
-            # this concerted substitution: the first image can climb by
-            # dissociating water before proton transfer begins.  Prefer a
-            # validated, just-past-the-ridge checkpoint when one survived
-            # the deliberate product construction.
-            near_path = run_dir / "product.rejected-rollback.xyz"
-            if near_path.exists():
-                near = load_xyz(near_path, approach_seed)
-                r_near_ow = float(
-                    np.linalg.norm(near.coords[SI_INDEX] - near.coords[ow_index])
-                )
-                r_near_br = float(
-                    np.linalg.norm(near.coords[SI_INDEX] - near.coords[BR_INDEX])
-                )
-                r_near_h = min(
-                    float(np.linalg.norm(near.coords[h] - near.coords[BR_INDEX]))
-                    for h in h_candidates
-                )
-                if (
-                    r_near_ow <= 1.9
-                    and 1.9 <= r_near_br < r_prod_br
-                    and r_near_h <= 1.2
-                ):
-                    log(
-                        "  using closer concerted NEB endpoint: "
-                        f"r(Si-Ow)={r_near_ow:.2f} A, "
-                        f"r(Si-Obr)={r_near_br:.2f} A, "
-                        f"r(Obr-H)={r_near_h:.2f} A"
-                    )
-                    product = near
+            # Endpoint alignment in ``neb_ts_guess`` removes the rigid-frame
+            # mismatch that made the full hydrolysis product fail its first
+            # image SCF.  Use the actual product basin here: the older
+            # rolled-back r(Si-Obr)≈2.07 checkpoint yielded a product-like
+            # four-imaginary-mode NEB peak, not the concerted saddle.
             log(
-                "  stage 2d: staged CI-NEB complex -> product "
-                "(5 images; 0.3 pre-relax -> 0.5 climb eV/A)"
+                "  stage 2d: staged CI-NEB complex -> aligned full product "
+                "(7 images; 0.3 pre-relax -> 0.5 climb eV/A)"
             )
             return neb_ts_guess(
                 complex_opt,
                 product,
                 settings,
-                n_images=5,
+                n_images=7,
                 fmax_ev_a=0.5,
                 pre_relax_fmax_ev_a=0.3,
             )
@@ -290,14 +265,14 @@ def proton_neb_guess(
             "and Si-Obr broken"
         )
     log(
-        "  stage 2d: staged CI-NEB complex -> product "
-        "(5 images; 0.3 pre-relax -> 0.5 climb eV/A)"
+        "  stage 2d: staged CI-NEB complex -> aligned full product "
+        "(7 images; 0.3 pre-relax -> 0.5 climb eV/A)"
     )
     return neb_ts_guess(
         complex_opt,
         product,
         settings,
-        n_images=5,
+        n_images=7,
         fmax_ev_a=0.5,
         pre_relax_fmax_ev_a=0.3,
     )

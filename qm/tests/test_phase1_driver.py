@@ -71,7 +71,7 @@ def test_proton_neb_fallback_reconstructs_resumed_approach_seed(monkeypatch, tmp
     def fake_neb(reactant, product, settings, **kwargs):
         neb_inputs.append((reactant, product))
         assert kwargs == {
-            "n_images": 5,
+            "n_images": 7,
             "fmax_ev_a": 0.5,
             "pre_relax_fmax_ev_a": 0.3,
         }
@@ -130,7 +130,7 @@ def test_rolled_back_product_extends_cleavage_without_repeating_proton_scan(
     assert (tmp_path / "product.rejected-rollback.xyz").exists()
 
 
-def test_completed_product_prefers_closer_concerted_neb_endpoint(monkeypatch, tmp_path):
+def test_completed_product_uses_full_aligned_neb_endpoint(monkeypatch, tmp_path):
     approach = geometry("approach", 2.2)
     complex_opt = geometry("complex", 3.2)
     phase1.save_xyz(geometry("full-product", 1.66, 3.50), tmp_path / "product.xyz")
@@ -140,7 +140,7 @@ def test_completed_product_prefers_closer_concerted_neb_endpoint(monkeypatch, tm
     endpoints = []
 
     def fake_neb(reactant, product, settings, **kwargs):
-        endpoints.append(product)
+        endpoints.append((product, kwargs))
         return geometry("neb-guess", 2.0)
 
     monkeypatch.setattr(phase1, "neb_ts_guess", fake_neb)
@@ -149,4 +149,10 @@ def test_completed_product_prefers_closer_concerted_neb_endpoint(monkeypatch, tm
 
     assert result.name == "neb-guess"
     assert len(endpoints) == 1
-    assert np.linalg.norm(endpoints[0].coords[1] - endpoints[0].coords[0]) == 2.07
+    product, kwargs = endpoints[0]
+    assert np.linalg.norm(product.coords[1] - product.coords[0]) == 3.50
+    assert kwargs == {
+        "n_images": 7,
+        "fmax_ev_a": 0.5,
+        "pre_relax_fmax_ev_a": 0.3,
+    }
