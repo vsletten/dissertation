@@ -4,6 +4,10 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-18 — hermes-workstation — A7-kinetics-database done: schema v0,
+  36 P&K silicate records / 74 mechanisms, stdlib validator, and a
+  49-source 2004–present expansion inventory under `kinetics-db/`.
+
 - 2026-08-19 — hermes cloud worker — B1-schema-rfc done:
   `petra/docs/RFC-001-DECK-V2.md` written (deck schema v2 + UpdateStrategy
   trait + v1 compat shim + determinism/RNG contract + B2/B3 test plan;

@@ -1,0 +1,28 @@
+schema_version = 0
+name = "Beta-cristobalite"
+formula = "SiO2"
+mineral_group = "silica polymorph"
+rate_law = "Palandri-Kharaka Eq. 6 (far-from-equilibrium, surface-normalized multi-mechanism Arrhenius law)"
+surface_area_basis = "unspecified"
+caveats = ["Table 6 parameters are reported from Rimstidt and Barnes (1980)."]
+
+[source]
+id = "pk2004-table-6-p15"
+citation = "Palandri, J. L., and Kharaka, Y. K. (2004), USGS OFR 2004-1068"
+url = "https://pubs.usgs.gov/of/2004/1068/pdf/OFR_2004_1068.pdf"
+year = 2004
+page = 15
+table = 6
+notes = "Page is the printed report page; table is the compiled parameter table."
+
+[[mechanism]]
+kind = "neutral"
+log_k25_mol_m2_s = -12.14
+activation_energy_kj_mol = 62.9
+source_ref = "pk2004-table-6-p15"
+reaction_orders = {}
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []

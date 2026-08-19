@@ -1,0 +1,52 @@
+schema_version = 0
+name = "Smectite"
+formula = "K0.04Ca0.5(Al2.8Fe0.53Mg0.7)(Si7.65Al0.35)O20(OH)4"
+mineral_group = "clay"
+rate_law = "Palandri-Kharaka Eq. 6 (far-from-equilibrium, surface-normalized multi-mechanism Arrhenius law)"
+surface_area_basis = "unspecified"
+caveats = ["The report table prints 'smecite'; normalized here to smectite. Formula is transcribed from Table 29 footnote e."]
+
+[source]
+id = "pk2004-table-29-p39"
+citation = "Palandri, J. L., and Kharaka, Y. K. (2004), USGS OFR 2004-1068"
+url = "https://pubs.usgs.gov/of/2004/1068/pdf/OFR_2004_1068.pdf"
+year = 2004
+page = 39
+table = 29
+notes = "Page is the printed report page; table is the compiled parameter table."
+
+[[mechanism]]
+kind = "acid"
+log_k25_mol_m2_s = -10.98
+activation_energy_kj_mol = 23.6
+source_ref = "pk2004-table-29-p39"
+reaction_orders = { H_plus = 0.34 }
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []
+
+[[mechanism]]
+kind = "neutral"
+log_k25_mol_m2_s = -12.78
+activation_energy_kj_mol = 35.0
+source_ref = "pk2004-table-29-p39"
+reaction_orders = {}
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []
+
+[[mechanism]]
+kind = "base"
+log_k25_mol_m2_s = -16.52
+activation_energy_kj_mol = 58.9
+source_ref = "pk2004-table-29-p39"
+reaction_orders = { H_plus = -0.4 }
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []

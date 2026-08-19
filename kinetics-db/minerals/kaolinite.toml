@@ -1,0 +1,52 @@
+schema_version = 0
+name = "Kaolinite"
+formula = "Al2Si2O5(OH)4"
+mineral_group = "clay"
+rate_law = "Palandri-Kharaka Eq. 6 (far-from-equilibrium, surface-normalized multi-mechanism Arrhenius law)"
+surface_area_basis = "unspecified"
+caveats = ["Cross-check against qm/SURVEY.md section 7.3: the survey quotes experimental activation-energy targets of about 29 kJ/mol acidic and 33-51 kJ/mol alkaline. The P&K fitted values here (65.9 acidic; 17.9 base) lie outside both quoted ranges. Preserve the discrepancy: P&K pools/parameterizes multiple datasets and its mechanism-specific fit is not interchangeable with an individual experimental apparent Ea."]
+
+[source]
+id = "pk2004-table-29-p39"
+citation = "Palandri, J. L., and Kharaka, Y. K. (2004), USGS OFR 2004-1068"
+url = "https://pubs.usgs.gov/of/2004/1068/pdf/OFR_2004_1068.pdf"
+year = 2004
+page = 39
+table = 29
+notes = "Page is the printed report page; table is the compiled parameter table."
+
+[[mechanism]]
+kind = "acid"
+log_k25_mol_m2_s = -11.31
+activation_energy_kj_mol = 65.9
+source_ref = "pk2004-table-29-p39"
+reaction_orders = { H_plus = 0.777 }
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []
+
+[[mechanism]]
+kind = "neutral"
+log_k25_mol_m2_s = -13.18
+activation_energy_kj_mol = 22.2
+source_ref = "pk2004-table-29-p39"
+reaction_orders = {}
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []
+
+[[mechanism]]
+kind = "base"
+log_k25_mol_m2_s = -17.05
+activation_energy_kj_mol = 17.9
+source_ref = "pk2004-table-29-p39"
+reaction_orders = { H_plus = -0.472 }
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []

@@ -1,0 +1,40 @@
+schema_version = 0
+name = "Fayalite"
+formula = "Fe2SiO4"
+mineral_group = "olivine"
+rate_law = "Palandri-Kharaka Eq. 6 (far-from-equilibrium, surface-normalized multi-mechanism Arrhenius law)"
+surface_area_basis = "unspecified"
+caveats = ["The neutral value is a report-imposed high-pH cutoff; no reaction order is printed for the acid row in Table 23."]
+
+[source]
+id = "pk2004-table-23-p35"
+citation = "Palandri, J. L., and Kharaka, Y. K. (2004), USGS OFR 2004-1068"
+url = "https://pubs.usgs.gov/of/2004/1068/pdf/OFR_2004_1068.pdf"
+year = 2004
+page = 35
+table = 23
+notes = "Page is the printed report page; table is the compiled parameter table."
+
+[[mechanism]]
+kind = "acid"
+log_k25_mol_m2_s = -4.8
+activation_energy_kj_mol = 94.4
+source_ref = "pk2004-table-23-p35"
+reaction_orders = {}
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []
+
+[[mechanism]]
+kind = "neutral"
+log_k25_mol_m2_s = -12.8
+activation_energy_kj_mol = 94.4
+source_ref = "pk2004-table-23-p35"
+reaction_orders = {}
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []

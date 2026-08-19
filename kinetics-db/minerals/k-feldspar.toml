@@ -1,0 +1,52 @@
+schema_version = 0
+name = "K-feldspar"
+formula = "KAlSi3O8"
+mineral_group = "alkali feldspar"
+rate_law = "Palandri-Kharaka Eq. 6 (far-from-equilibrium, surface-normalized multi-mechanism Arrhenius law)"
+surface_area_basis = "unspecified"
+caveats = ["Record represents the K-feldspar family rather than one ordered polymorph."]
+
+[source]
+id = "pk2004-table-15-p26"
+citation = "Palandri, J. L., and Kharaka, Y. K. (2004), USGS OFR 2004-1068"
+url = "https://pubs.usgs.gov/of/2004/1068/pdf/OFR_2004_1068.pdf"
+year = 2004
+page = 26
+table = 15
+notes = "Page is the printed report page; table is the compiled parameter table."
+
+[[mechanism]]
+kind = "acid"
+log_k25_mol_m2_s = -10.06
+activation_energy_kj_mol = 51.7
+source_ref = "pk2004-table-15-p26"
+reaction_orders = { H_plus = 0.5 }
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []
+
+[[mechanism]]
+kind = "neutral"
+log_k25_mol_m2_s = -12.41
+activation_energy_kj_mol = 38.0
+source_ref = "pk2004-table-15-p26"
+reaction_orders = {}
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []
+
+[[mechanism]]
+kind = "base"
+log_k25_mol_m2_s = -21.2
+activation_energy_kj_mol = 94.1
+source_ref = "pk2004-table-15-p26"
+reaction_orders = { H_plus = -0.823 }
+uncertainty_status = "not_reported"
+uncertainty_log_k25 = []
+uncertainty_activation_energy_kj_mol = []
+uncertainty_reaction_orders = []
+uncertainty_notes = []
