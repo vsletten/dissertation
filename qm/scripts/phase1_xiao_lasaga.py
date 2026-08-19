@@ -229,22 +229,55 @@ def main() -> int:
                 progress=lambda r, e: log(f"  r(Obr-H)={r:.2f} A  E={e:.6f} Ha"),
             )
             # A raw crest guess lets Sella escape the channel (measured:
-            # r(Si-Ow) 1.90 -> 3.22). Instead: relax the post-crest
-            # structure into the product basin, then CI-NEB from complex
-            # to product — the climbing image rides to the col.
+            # r(Si-Ow) 1.90 -> 3.22). And a bare free relax of the
+            # post-crest structure rolls BACK to reactants (measured:
+            # product r(Si-Ow)=3.16 — proton returned, water left):
+            # a single proton transfer with the bridge intact is not a
+            # minimum. Hydrolysis completes by Si-Obr cleavage, so build
+            # the product deliberately: hold the new bonds, break the
+            # bridge, then free-optimize into 2 Si(OH)4.
             crest_idx = first_interior_maximum(pscan)
             if crest_idx is None:
                 log("  !! proton scan produced no crest either — aborting")
                 return 1
             seed_idx = min(crest_idx + 1, len(pscan) - 1)
-            log("  stage 2c: relaxing post-crest structure into the product basin")
+
+            def build_product():
+                log("  stage 2c: breaking Si-Obr with the new bonds held")
+                from quarry.ts import constrained_scan
+
+                broken = constrained_scan(
+                    pscan[seed_idx][2],
+                    settings,
+                    atom_i=SI_INDEX,
+                    atom_j=BR_INDEX,
+                    distances_a=[1.85, 2.05, 2.30, 2.60],
+                    fixed_distances=[
+                        (SI_INDEX, ow_index, 1.70),
+                        (BR_INDEX, h_idx, 0.98),
+                    ],
+                )
+                for r, e, _ in broken:
+                    log(f"  r(Si-Obr)={r:.2f} A  E={e:.6f} Ha")
+                return optimize(broken[-1][2], settings)
+
             product = checkpointed(
-                run_dir / "product.xyz",
-                pscan[seed_idx][2],
-                lambda: optimize(pscan[seed_idx][2], settings),
+                run_dir / "product.xyz", pscan[seed_idx][2], build_product
             )
-            r_prod = np.linalg.norm(product.coords[SI_INDEX] - product.coords[ow_index])
-            log(f"  product r(Si-Ow)={r_prod:.2f} A")
+            r_prod_ow = float(
+                np.linalg.norm(product.coords[SI_INDEX] - product.coords[ow_index])
+            )
+            r_prod_br = float(
+                np.linalg.norm(product.coords[SI_INDEX] - product.coords[BR_INDEX])
+            )
+            log(f"  product r(Si-Ow)={r_prod_ow:.2f} A, r(Si-Obr)={r_prod_br:.2f} A")
+            if r_prod_ow > 1.9 or r_prod_br < 2.2:
+                log(
+                    "  !! product rolled back toward reactants "
+                    "(hydrolyzed minimum requires Si-Ow bonded, Si-Obr "
+                    "broken) — aborting; inspect product.xyz"
+                )
+                return 1
             log("  stage 2d: CI-NEB complex -> product (7 images)")
             ts_guess = neb_ts_guess(complex_opt, product, settings)
         save_xyz(ts_guess, ts_guess_path)
@@ -265,6 +298,18 @@ def main() -> int:
     )
     r_ts = float(np.linalg.norm(ts.coords[SI_INDEX] - ts.coords[ow_index]))
     log(f"  r(Si-Ow): guess {r_guess:.2f} A -> saddle {r_ts:.2f} A")
+    # The 4-center hydrolysis saddle is in-channel by construction:
+    # forming Si-Ow bond ~1.8-2.2 A. A saddle sitting outside bonding
+    # range is a complex-rearrangement saddle whatever its history
+    # (observed live: 45.7i at r(Si-Ow)=3.15 from a reactant-conformer
+    # NEB after the product basin escaped).
+    if r_ts > 2.6:
+        log(
+            f"  !! saddle at r(Si-Ow)={r_ts:.2f} A is outside the bonding "
+            "channel — not the hydrolysis TS. Aborting before "
+            "thermochemistry; inspect ts.xyz and product.xyz."
+        )
+        return 1
     if r_ts > r_guess + 0.5:
         log(
             "  !! saddle escaped the approach channel (r(Si-Ow) grew by "
