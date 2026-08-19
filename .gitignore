@@ -8,4 +8,6 @@ model/*.out
 model/.vscode/
 .DS_Store
 model/.DS_Store
+__pycache__/
+*.py[cod]
 
