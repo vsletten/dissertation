@@ -58,6 +58,7 @@ from quarry.rates import rate_from_thermo, thermo_from_frequencies  # noqa: E402
 from quarry.store import Store  # noqa: E402
 from quarry.ts import (  # noqa: E402
     ScanNoMaximumError,
+    constrained_scan,
     find_ts,
     first_interior_maximum,
     neb_ts_guess,
@@ -106,6 +107,109 @@ def checkpointed(path: Path, template: Cluster, compute) -> Cluster:
     result = compute()
     save_xyz(result, path)
     return result
+
+
+def channel_escape_reason(ts_guess: Cluster, ts: Cluster, ow_index: int) -> str | None:
+    """Explain why a refined saddle left the hydrolysis channel, if it did."""
+    r_guess = float(
+        np.linalg.norm(ts_guess.coords[SI_INDEX] - ts_guess.coords[ow_index])
+    )
+    r_ts = float(np.linalg.norm(ts.coords[SI_INDEX] - ts.coords[ow_index]))
+    if r_ts > 2.6:
+        return f"saddle r(Si-Ow)={r_ts:.2f} A is outside the bonding channel"
+    if r_ts > r_guess + 0.5:
+        return f"saddle escaped the approach channel by {r_ts - r_guess:.2f} A"
+    return None
+
+
+def proton_neb_guess(
+    approach_seed: Cluster,
+    complex_opt: Cluster,
+    settings: DftSettings,
+    run_dir: Path,
+    ow_index: int,
+) -> Cluster:
+    """Build the concerted proton-transfer/product/CI-NEB TS guess.
+
+    ``approach_seed`` may be the r=1.90 A point from a completed scan or a
+    resumed direct-crest checkpoint.  In the latter case, reconstruct only
+    the missing 1.90 A approach point instead of rerunning the whole scan.
+    """
+    seed_r = float(
+        np.linalg.norm(approach_seed.coords[SI_INDEX] - approach_seed.coords[ow_index])
+    )
+    if abs(seed_r - 1.90) > 0.02:
+        log(f"  pinning resumed approach seed: r(Si-Ow) {seed_r:.2f} -> 1.90 A")
+        approach_seed = constrained_scan(
+            approach_seed,
+            settings,
+            atom_i=SI_INDEX,
+            atom_j=ow_index,
+            distances_a=[1.90],
+        )[0][2]
+
+    log("  stage 2b: pin r(Si-Ow)=1.90 A, drive H(water) -> O(bridge)")
+    h_candidates = [ow_index + 1, ow_index + 2]
+    h_idx = min(
+        h_candidates,
+        key=lambda i: np.linalg.norm(
+            approach_seed.coords[i] - approach_seed.coords[BR_INDEX]
+        ),
+    )
+    r0 = float(
+        np.linalg.norm(approach_seed.coords[h_idx] - approach_seed.coords[BR_INDEX])
+    )
+    log(f"  driving H{h_idx} from r(Obr-H)={r0:.2f} A inward")
+    first = max(1.05, round(r0 - 0.15, 2))
+    distances = [round(float(x), 2) for x in np.arange(first, 1.04, -0.15)]
+    pscan = scan_to_maximum(
+        approach_seed,
+        settings,
+        atom_i=BR_INDEX,
+        atom_j=h_idx,
+        distances_a=distances or [first],
+        fixed_distances=[(SI_INDEX, ow_index, 1.90)],
+        extend_step_a=0.06,
+        min_distance_a=0.95,
+        progress=lambda r, e: log(f"  r(Obr-H)={r:.2f} A  E={e:.6f} Ha"),
+    )
+    crest_idx = first_interior_maximum(pscan)
+    if crest_idx is None:
+        raise RuntimeError("proton scan produced no interior crest")
+    seed_idx = min(crest_idx + 1, len(pscan) - 1)
+
+    def build_product():
+        log("  stage 2c: breaking Si-Obr with the new bonds held")
+        broken = constrained_scan(
+            pscan[seed_idx][2],
+            settings,
+            atom_i=SI_INDEX,
+            atom_j=BR_INDEX,
+            distances_a=[1.85, 2.05, 2.30, 2.60],
+            fixed_distances=[
+                (SI_INDEX, ow_index, 1.70),
+                (BR_INDEX, h_idx, 0.98),
+            ],
+        )
+        for r, e, _ in broken:
+            log(f"  r(Si-Obr)={r:.2f} A  E={e:.6f} Ha")
+        return optimize(broken[-1][2], settings)
+
+    product = checkpointed(run_dir / "product.xyz", pscan[seed_idx][2], build_product)
+    r_prod_ow = float(
+        np.linalg.norm(product.coords[SI_INDEX] - product.coords[ow_index])
+    )
+    r_prod_br = float(
+        np.linalg.norm(product.coords[SI_INDEX] - product.coords[BR_INDEX])
+    )
+    log(f"  product r(Si-Ow)={r_prod_ow:.2f} A, r(Si-Obr)={r_prod_br:.2f} A")
+    if r_prod_ow > 1.9 or r_prod_br < 2.2:
+        raise RuntimeError(
+            "product rolled back toward reactants; expected Si-Ow bonded "
+            "and Si-Obr broken"
+        )
+    log("  stage 2d: CI-NEB complex -> product (7 images)")
+    return neb_ts_guess(complex_opt, product, settings)
 
 
 def main() -> int:
@@ -189,10 +293,16 @@ def main() -> int:
     # bridging O — the concerted proton transfer of the X&L TS.
     log("stage 2: relaxed scan r(Si-Ow), auto-extending to interior maximum")
     ts_guess_path = run_dir / "ts_guess.xyz"
+    route_path = run_dir / "ts_guess.route"
+    route = route_path.read_text().strip() if route_path.exists() else "direct"
     if ts_guess_path.exists():
         ts_guess = load_xyz(ts_guess_path, complex_opt)
-        log("  resume: ts_guess.xyz exists")
+        log(f"  resume: ts_guess.xyz exists ({route} route)")
     else:
+        # A route marker without its geometry can only be a crash between
+        # checkpoint writes. Reconstruct from the direct route safely.
+        route = "direct"
+        route_path.unlink(missing_ok=True)
         try:
             scan = scan_to_maximum(
                 complex_opt,
@@ -205,118 +315,62 @@ def main() -> int:
             ts_guess = scan_ts_guess(scan)
         except ScanNoMaximumError as exc:
             log("  approach coordinate alone does not cross the ridge;")
-            log("  stage 2b: pin r(Si-Ow)=1.90 A, drive H(water) -> O(bridge)")
             base = min(exc.scan, key=lambda p: abs(p[0] - 1.90))[2]
-            # The water H closest to the bridging O is the one to shuttle.
-            h_candidates = [ow_index + 1, ow_index + 2]
-            h_idx = min(
-                h_candidates,
-                key=lambda i: np.linalg.norm(base.coords[i] - base.coords[BR_INDEX]),
-            )
-            r0 = float(np.linalg.norm(base.coords[h_idx] - base.coords[BR_INDEX]))
-            log(f"  driving H{h_idx} from r(Obr-H)={r0:.2f} A inward")
-            first = max(1.05, round(r0 - 0.15, 2))
-            distances = [round(x, 2) for x in np.arange(first, 1.04, -0.15)]
-            pscan = scan_to_maximum(
-                base,
-                settings,
-                atom_i=BR_INDEX,
-                atom_j=h_idx,
-                distances_a=distances or [first],
-                fixed_distances=[(SI_INDEX, ow_index, 1.90)],
-                extend_step_a=0.06,
-                min_distance_a=0.95,
-                progress=lambda r, e: log(f"  r(Obr-H)={r:.2f} A  E={e:.6f} Ha"),
-            )
-            # A raw crest guess lets Sella escape the channel (measured:
-            # r(Si-Ow) 1.90 -> 3.22). And a bare free relax of the
-            # post-crest structure rolls BACK to reactants (measured:
-            # product r(Si-Ow)=3.16 — proton returned, water left):
-            # a single proton transfer with the bridge intact is not a
-            # minimum. Hydrolysis completes by Si-Obr cleavage, so build
-            # the product deliberately: hold the new bonds, break the
-            # bridge, then free-optimize into 2 Si(OH)4.
-            crest_idx = first_interior_maximum(pscan)
-            if crest_idx is None:
-                log("  !! proton scan produced no crest either — aborting")
-                return 1
-            seed_idx = min(crest_idx + 1, len(pscan) - 1)
-
-            def build_product():
-                log("  stage 2c: breaking Si-Obr with the new bonds held")
-                from quarry.ts import constrained_scan
-
-                broken = constrained_scan(
-                    pscan[seed_idx][2],
-                    settings,
-                    atom_i=SI_INDEX,
-                    atom_j=BR_INDEX,
-                    distances_a=[1.85, 2.05, 2.30, 2.60],
-                    fixed_distances=[
-                        (SI_INDEX, ow_index, 1.70),
-                        (BR_INDEX, h_idx, 0.98),
-                    ],
-                )
-                for r, e, _ in broken:
-                    log(f"  r(Si-Obr)={r:.2f} A  E={e:.6f} Ha")
-                return optimize(broken[-1][2], settings)
-
-            product = checkpointed(
-                run_dir / "product.xyz", pscan[seed_idx][2], build_product
-            )
-            r_prod_ow = float(
-                np.linalg.norm(product.coords[SI_INDEX] - product.coords[ow_index])
-            )
-            r_prod_br = float(
-                np.linalg.norm(product.coords[SI_INDEX] - product.coords[BR_INDEX])
-            )
-            log(f"  product r(Si-Ow)={r_prod_ow:.2f} A, r(Si-Obr)={r_prod_br:.2f} A")
-            if r_prod_ow > 1.9 or r_prod_br < 2.2:
-                log(
-                    "  !! product rolled back toward reactants "
-                    "(hydrolyzed minimum requires Si-Ow bonded, Si-Obr "
-                    "broken) — aborting; inspect product.xyz"
-                )
-                return 1
-            log("  stage 2d: CI-NEB complex -> product (7 images)")
-            ts_guess = neb_ts_guess(complex_opt, product, settings)
+            ts_guess = proton_neb_guess(base, complex_opt, settings, run_dir, ow_index)
+            route = "proton-neb"
         save_xyz(ts_guess, ts_guess_path)
+        if route == "proton-neb":
+            route_path.write_text(route)
 
-    # Stage 3 — saddle search.
+    # Stage 3 — saddle search. A direct approach crest gets one bounded
+    # fallback through the concerted proton/product/CI-NEB route if Sella
+    # escapes. A proton-NEB saddle that escapes is terminal.
     log("stage 3: Sella saddle search")
+    ts_path = run_dir / "ts.xyz"
+    trajectory_path = run_dir / "sella.traj"
     ts = checkpointed(
-        run_dir / "ts.xyz",
+        ts_path,
         ts_guess,
-        lambda: find_ts(ts_guess, settings, trajectory=str(run_dir / "sella.traj")),
+        lambda: find_ts(ts_guess, settings, trajectory=str(trajectory_path)),
     )
 
-    # Guard: a saddle that drifted back out of the approach channel is a
-    # trivial complex-rearrangement saddle, not the hydrolysis TS
-    # (observed live: 208i water wag at r(Si-Ow)=3.25 from a bad guess).
     r_guess = float(
         np.linalg.norm(ts_guess.coords[SI_INDEX] - ts_guess.coords[ow_index])
     )
     r_ts = float(np.linalg.norm(ts.coords[SI_INDEX] - ts.coords[ow_index]))
     log(f"  r(Si-Ow): guess {r_guess:.2f} A -> saddle {r_ts:.2f} A")
-    # The 4-center hydrolysis saddle is in-channel by construction:
-    # forming Si-Ow bond ~1.8-2.2 A. A saddle sitting outside bonding
-    # range is a complex-rearrangement saddle whatever its history
-    # (observed live: 45.7i at r(Si-Ow)=3.15 from a reactant-conformer
-    # NEB after the product basin escaped).
-    if r_ts > 2.6:
-        log(
-            f"  !! saddle at r(Si-Ow)={r_ts:.2f} A is outside the bonding "
-            "channel — not the hydrolysis TS. Aborting before "
-            "thermochemistry; inspect ts.xyz and product.xyz."
+    escape = channel_escape_reason(ts_guess, ts, ow_index)
+    if escape and route == "direct":
+        log(f"  !! {escape}; pivoting once to proton-drive + product + CI-NEB")
+        neb_guess = proton_neb_guess(ts_guess, complex_opt, settings, run_dir, ow_index)
+
+        # Preserve the rejected direct-search receipt, then replace all
+        # resumable checkpoints with the new route before refining again.
+        rejected_ts = run_dir / "ts.rejected-direct.xyz"
+        if ts_path.exists():
+            ts_path.replace(rejected_ts)
+        rejected_traj = run_dir / "sella.rejected-direct.traj"
+        if trajectory_path.exists():
+            trajectory_path.replace(rejected_traj)
+        ts_guess = neb_guess
+        save_xyz(ts_guess, ts_guess_path)
+        route = "proton-neb"
+        route_path.write_text(route)
+
+        log("stage 3b: Sella saddle search from CI-NEB guess")
+        ts = checkpointed(
+            ts_path,
+            ts_guess,
+            lambda: find_ts(ts_guess, settings, trajectory=str(trajectory_path)),
         )
-        return 1
-    if r_ts > r_guess + 0.5:
-        log(
-            "  !! saddle escaped the approach channel (r(Si-Ow) grew by "
-            f"{r_ts - r_guess:.2f} A) — this is not the hydrolysis TS. "
-            "Delete ts.xyz/ts_guess.xyz and rerun with a tighter scan, or "
-            "drive a combined coordinate. Aborting before thermochemistry."
+        r_guess = float(
+            np.linalg.norm(ts_guess.coords[SI_INDEX] - ts_guess.coords[ow_index])
         )
+        r_ts = float(np.linalg.norm(ts.coords[SI_INDEX] - ts.coords[ow_index]))
+        log(f"  r(Si-Ow): NEB guess {r_guess:.2f} A -> saddle {r_ts:.2f} A")
+        escape = channel_escape_reason(ts_guess, ts, ow_index)
+    if escape:
+        log(f"  !! {escape}; {route} route exhausted — aborting before thermochemistry")
         return 1
 
     # Stage 4 — verify + quick IRC.
