@@ -175,7 +175,7 @@ concrete stiffness profile.
 The bet: pitting is mathematically isomorphic to mineral dissolution —
 localized attack at defects, film-breakdown-vs-repair competition,
 stochastic initiation, pit morphology evolution — and the corrosion
-modeling literature (ad-hoc CA rules, mean-field point-defect models,
+modeling literature (ad hoc CA rules, mean-field point-defect models,
 phase-field) lacks exactly what petra brings: exact stochastic
 dynamics, environment-dependent barriers with provenance, and matched
 ensemble statistics against experimentally-Weibull pit-initiation
@@ -209,7 +209,7 @@ machinery is the whole story, not a correction) and is modeled by
 lattice KMC on ice mantles — the same QM-rates-feed-lattice-KMC
 architecture, in a field where both halves are undersupplied and every
 rate is a citable community contribution. JWST's ice observations are
-creating demand for exactly this kinetics *right now*.
+creating demand for exactly these kinetics *right now*.
 
 - **D1. Scoping** (subagent, in flight): database contribution
   pathways, the honest niche map (where an outsider's GPU rates are
