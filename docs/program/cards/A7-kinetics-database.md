@@ -53,7 +53,7 @@ machine-readable. This card is v0: schema + the core extraction.
 ## Acceptance
 
 - `kinetics-db/SCHEMA.md`, `SOURCES.md`, `validate.py` exist on main;
-  ≥25 mineral TOML files parse clean under the validator; every numeric
+  ≥25 mineral TOML files parse cleanly under the validator; every numeric
   value has provenance; kaolinite record cross-checked against the
   experimental Ea range quoted in qm/SURVEY.md §7.3 (29 kJ/mol acidic /
   33–51 alkaline) with any discrepancy noted in caveats.
