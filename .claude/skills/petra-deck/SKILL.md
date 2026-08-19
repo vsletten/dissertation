@@ -11,11 +11,13 @@ thing), `kossel-etchpit.toml` (defects).
 
 ## Required sections (learned the hard way)
 
-A deck does NOT compile without ALL of: `[deck]`, `[cell]` (+ sites,
-bonds), `[[species]]`, `[[kinds]]` (+ states), `[lattice]`, `[thermo]`,
-and **`[simulation]`** (steps/seed/report_every — required even if you
-only want compile-validation; its absence is the classic
-`missing field 'simulation'` error).
+A deck does NOT compile without `[deck]`, `[cell]` (with sites),
+`[[kinds]]` (with states), `[lattice]`, `[thermo]`, and
+**`[simulation]`** (`steps` and `seed`; `report_every` is optional).
+`[[species]]` is required when a state has a non-`vacant` occupant;
+`[[cell.bonds]]` is optional for models with no connectivity. A missing
+`[simulation]` section is the classic `missing field 'simulation'`
+error, even when you only want compile-validation.
 
 ## Units
 
@@ -59,5 +61,6 @@ change breaks a golden gate, the change is wrong until proven otherwise.
   silently changes `shift = 1` semantics.
 - Engine runtime is canonical kcal/mol internally; deck units convert
   once at compile. Don't "help" by pre-converting.
-- Frozen boundary sites are excluded from selectors (not fatal aborts —
-  deliberate divergence from legacy).
+- Frozen boundary sites remain visible to selectors unless the selector
+  sets `frozen = false`; use the filter deliberately (Petra does not use
+  the legacy fatal-abort behavior).
