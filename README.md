@@ -39,4 +39,9 @@ cd graph-viz && npm install && npm run dev
 cd legacy/cpp-model && make && ./mckaol
 ```
 
+Ongoing multi-agent development is tracked on the program board at
+[`docs/program/PLAN.md`](docs/program/PLAN.md) (protocol:
+[`docs/program/PROTOCOL.md`](docs/program/PROTOCOL.md); rationale:
+[`docs/OMNIBUS.md`](docs/OMNIBUS.md)).
+
 See [`CLAUDE.md`](CLAUDE.md) for the full map and per-component detail.

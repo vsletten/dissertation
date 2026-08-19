@@ -14,6 +14,14 @@ This is a dissertation project studying kaolin mineral surface reactions through
 
 Active development happens in kmc-rs/, graph-viz/, and petra/. Treat legacy/ as read-only reference; changes there need explicit approval.
 
+## The Omnibus program (multi-agent work board)
+
+Ongoing development is organized as a card board under `docs/program/`:
+`PLAN.md` (what's ready), `PROTOCOL.md` (how to claim and deliver work —
+read before contributing), `STATUS.md` (rolling log), `cards/` (work
+items), `inbox/` (agent-to-agent messages). Program rationale:
+`docs/OMNIBUS.md`. Any agent may claim a READY card per the protocol.
+
 ## Build, Test, and Development Commands
 
 ### Legacy model (C++ simulation, reference)
