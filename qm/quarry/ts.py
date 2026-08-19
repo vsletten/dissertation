@@ -18,6 +18,7 @@ import numpy as np
 
 from quarry.clusters import Cluster
 from quarry.pipeline import (
+    HARTREE_TO_KJ,
     DftSettings,
     FrequencyResult,
     _make_scf,
@@ -195,6 +196,74 @@ def scan_maximum(scan: list[tuple[float, float, Cluster]]) -> Cluster:
 # Peaks must clear both neighbors by this much (Hartree) to count —
 # well above converged-optimization noise, well below any real barrier.
 _PEAK_TOL_HARTREE = 5e-5
+# A single constrained optimization can hop into a bad peripheral-hydroxyl
+# conformer while its neighbors remain on the reaction path.  The live
+# al-neutral scan produced a 117 kJ/mol spike followed by an 84 kJ/mol drop.
+# A genuine crest that both neighboring seeds reproduce is retained; only the
+# one-direction path-dependent result is replaced.
+_SCAN_OUTLIER_THRESHOLD_KJ = 40.0
+
+
+def _scan_outlier_indices(
+    scan: list[tuple[float, float, Cluster]],
+    *,
+    threshold_kj: float = _SCAN_OUTLIER_THRESHOLD_KJ,
+) -> list[int]:
+    """Return interior points far above linear neighbor interpolation."""
+    threshold_hartree = threshold_kj / HARTREE_TO_KJ
+    outliers = []
+    for i in range(1, len(scan) - 1):
+        r_left, e_left, _ = scan[i - 1]
+        r, energy, _ = scan[i]
+        r_right, e_right, _ = scan[i + 1]
+        if r_right == r_left:
+            continue
+        fraction = (r - r_left) / (r_right - r_left)
+        interpolated = e_left + fraction * (e_right - e_left)
+        if energy > interpolated + threshold_hartree:
+            outliers.append(i)
+    return outliers
+
+
+def _repair_scan_outliers(
+    scan: list[tuple[float, float, Cluster]],
+    settings: DftSettings,
+    *,
+    atom_i: int,
+    atom_j: int,
+    fixed_distances: list[tuple[int, int, float]],
+    max_steps: int,
+    attempted: set[int],
+    progress=None,
+) -> None:
+    """Reoptimize each new spike from both neighboring scan structures.
+
+    ``attempted`` persists while a scan is extended.  A point reproduced as
+    high energy from both directions may be a real sharp crest, so it is
+    checked once and then left for crest detection rather than retried forever.
+    """
+    while True:
+        indices = [i for i in _scan_outlier_indices(scan) if i not in attempted]
+        if not indices:
+            return
+        for i in indices:
+            attempted.add(i)
+            r = scan[i][0]
+            retries = []
+            for seed in (scan[i - 1][2], scan[i + 1][2]):
+                result = constrained_scan(
+                    seed,
+                    settings,
+                    atom_i=atom_i,
+                    atom_j=atom_j,
+                    distances_a=[r],
+                    fixed_distances=fixed_distances,
+                    max_steps=max_steps,
+                )[0]
+                retries.append(result)
+                if progress:
+                    progress(result[0], result[1])
+            scan[i] = min(retries, key=lambda point: point[1])
 
 
 def first_interior_maximum(
@@ -341,6 +410,17 @@ def scan_to_maximum(
     if progress:
         for r, e, _ in scan:
             progress(r, e)
+    repaired_indices: set[int] = set()
+    _repair_scan_outliers(
+        scan,
+        settings,
+        atom_i=atom_i,
+        atom_j=atom_j,
+        fixed_distances=fixed_distances,
+        max_steps=max_steps,
+        attempted=repaired_indices,
+        progress=progress,
+    )
     while not has_interior_maximum(scan):
         next_r = round(scan[-1][0] - extend_step_a, 3)
         if next_r < min_distance_a:
@@ -364,4 +444,14 @@ def scan_to_maximum(
             for r, e, _ in ext:
                 progress(r, e)
         scan.extend(ext)
+        _repair_scan_outliers(
+            scan,
+            settings,
+            atom_i=atom_i,
+            atom_j=atom_j,
+            fixed_distances=fixed_distances,
+            max_steps=max_steps,
+            attempted=repaired_indices,
+            progress=progress,
+        )
     return scan
