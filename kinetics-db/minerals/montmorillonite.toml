@@ -1,10 +1,10 @@
 schema_version = 0
 name = "Montmorillonite"
-formula = "K0.318(Si3.975Al0.025)(Al1.509Fe0.205Mg0.283)(OH)2"
+formula = "K0.318(Si3.975Al0.025)(Al1.509Fe0.205Mg0.283)O10(OH)2"
 mineral_group = "clay"
 rate_law = "Palandri-Kharaka Eq. 6 (far-from-equilibrium, surface-normalized multi-mechanism Arrhenius law)"
 surface_area_basis = "unspecified"
-caveats = ["Formula is transcribed from Table 29 footnote d."]
+caveats = ["Table 29 footnote d prints K0.318(Si3.975Al0.025)(Al1.509Fe0.205Mg0.283)(OH)2, omitting the tetrahedral-sheet O10 term. This record restores O10 explicitly and preserves the source typo here rather than silently presenting the correction as a verbatim transcription."]
 
 [source]
 id = "pk2004-table-29-p39"
