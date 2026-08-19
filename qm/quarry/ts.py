@@ -316,6 +316,11 @@ def neb_ts_guess(
     n_images: int = 7,
     fmax_ev_a: float = 0.10,
     max_steps: int = 150,
+    pre_relax_fmax_ev_a: float = 0.30,
+    pre_relax_steps: int = 80,
+    fire_dt: float = 0.02,
+    fire_dtmax: float = 0.20,
+    fire_maxstep: float = 0.03,
 ) -> Cluster:
     """Climbing-image NEB between two basins; returns the peak image.
 
@@ -327,7 +332,11 @@ def neb_ts_guess(
     is then a Sella start it can refine rather than flee.
 
     ``fmax_ev_a`` is deliberately loose — this produces a guess, and
-    Sella does the tight convergence.
+    Sella does the tight convergence.  The band is first relaxed without a
+    climbing image, then the climb is enabled.  Conservative FIRE time and
+    displacement caps prevent the runaway observed for the al-neutral band
+    with ASE's much larger defaults.  Both bounded stages must converge;
+    returning an arbitrary peak from an exhausted optimizer is forbidden.
     """
     from ase import Atoms
 
@@ -349,9 +358,33 @@ def neb_ts_guess(
             from ase.constraints import FixAtoms
 
             image.set_constraint(FixAtoms(indices=reactant.frozen_indices))
-    neb = NEB(images, climb=True)
+    neb = NEB(images, climb=False, method="improvedtangent")
     neb.interpolate(method="idpp")
-    FIRE(neb).run(fmax=fmax_ev_a, steps=max_steps)
+
+    relaxed = FIRE(
+        neb,  # type: ignore[arg-type] -- ASE optimizers accept NEB objects
+        dt=fire_dt,
+        dtmax=fire_dtmax,
+        maxstep=fire_maxstep,
+    ).run(fmax=pre_relax_fmax_ev_a, steps=pre_relax_steps)
+    if not relaxed:
+        raise RuntimeError(
+            "NEB pre-relaxation did not converge "
+            f"to {pre_relax_fmax_ev_a:.3f} eV/A within {pre_relax_steps} steps"
+        )
+
+    neb.climb = True
+    climbed = FIRE(
+        neb,  # type: ignore[arg-type] -- ASE optimizers accept NEB objects
+        dt=fire_dt,
+        dtmax=fire_dtmax,
+        maxstep=fire_maxstep,
+    ).run(fmax=fmax_ev_a, steps=max_steps)
+    if not climbed:
+        raise RuntimeError(
+            "climbing-image NEB did not converge "
+            f"to {fmax_ev_a:.3f} eV/A within {max_steps} steps"
+        )
     energies = [float(image.get_potential_energy()) for image in images]
     peak = int(np.argmax(energies))
     if peak in (0, len(images) - 1):
