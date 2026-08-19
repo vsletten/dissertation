@@ -1,0 +1,95 @@
+# Astrochemistry Showcase — Scoping Document
+
+**For:** independent computational scientist (quarry + petra, Ryzen 7950X / RTX 4090)
+**Date:** 2026-08-18
+**Target:** (a) computed rate constants with tunneling for astrochemical kinetics databases; (b) grain-surface chemistry as lattice KMC on interstellar ice mantles.
+
+---
+
+## 1. The field and why now (JWST)
+
+Astrochemistry models the ~300 molecules detected in interstellar space using reaction networks of thousands of gas-phase and grain-surface processes at 10–300 K. At these temperatures classical over-the-barrier chemistry is frozen out: almost everything interesting on grains happens by quantum tunneling of H atoms, and the field's canonical result — Watanabe & Kouchi's 2002 demonstration that CO ice is hydrogenated to H2CO and CH3OH by tunneling at 10 K ([ApJ 571, L173](https://iopscience.iop.org/article/10.1086/341412)) — is a tunneling result.
+
+The "why now" is JWST. The Ice Age Early Release Science program ([McClure et al. 2023](https://arxiv.org/abs/2301.09140)) measured ice inventories toward the most extinguished background stars ever observed (A_V ≈ 60–95): CO at 30–45% of water ice, CO2 at 13–20%, methanol at 4–9%, plus weak features (13CO2, OCN−, OCS, COM functional groups) never before accessible. The JOYS program ([overview 2025](https://arxiv.org/abs/2505.08002)) is doing the same for protostars. For the first time, ice *column densities per species per line of sight* exist at a precision that exceeds the models. The response paper — ["Modelling methanol and hydride formation in the JWST Ice Age era"](https://arxiv.org/abs/2502.10123) (A&A 2025) — ran five state-of-the-art codes (MAGICKAL, MONACO, Nautilus, UCLCHEM, and a microscopic KMC) against the Ice Age data and found: methanol forms >99% via CO hydrogenation; codes diverge sharply below T_dust ≈ 12 K depending on diffusive vs non-diffusive treatments; CO2 forms via CO+OH or CO+O *depending on which code you run*; methane predictions disagree across codes. That is the current state: observation has outrun kinetics. The bottleneck is now microphysical inputs — barriers, tunneling rates, binding/diffusion energies, branching ratios — and the machinery to propagate them. That is exactly what quarry and petra do.
+
+## 2. Database and modeling landscape
+
+**Rate databases (gas phase).**
+- **KIDA** ([kida.astrochem-tools.org](https://kida.astrochem-tools.org/)) — the Bordeaux-curated KInetic Database for Astrochemistry. The [kida.uva.2024 network](https://arxiv.org/abs/2407.15958) has 7,667 gas-phase reactions over 584 species. The paper is blunt: most reactions "have not been studied experimentally or theoretically," and many rates and branching ratios were "determined using common sense or chemical intuition." Uncertainty analyses of comparable networks find only ~20% of rate coefficients measured, ~17% calculated, and ~60% estimated ([Wakelam et al., Space Sci. Rev. 2010](https://ui.adsabs.harvard.edu/abs/2010SSRv..156...13W/abstract); [2026 AGB sensitivity study](https://arxiv.org/abs/2511.13638)). **Submissions from anyone are explicitly welcomed and expert-reviewed before inclusion** ([KIDA paper, ApJS 2012](https://iopscience.iop.org/article/10.1088/0067-0049/199/1/21)); the 2024 release paper thanks external submitters by name. Since 2016 KIDA also stores grain-surface reactions and binding/diffusion energies, and admits that section "is not complete." This is a real, low-friction contribution pathway for an independent.
+- **UMIST/UDfA** ([umistdatabase.uk](https://umistdatabase.uk/)) — [RATE22](https://arxiv.org/abs/2311.03936) (A&A 2024): 8,767 rate coefficients, 737 species, 17 elements; each rate carries an accuracy class and a provenance flag (measured / calculated / estimated). Updated roughly decadally from literature; the pathway here is "publish the rates, they get harvested."
+
+**Gas-grain modeling codes** (rate-equation, the production tools): **Nautilus** (Bordeaux, three-phase, public, KIDA-native), **UCLCHEM** (UCL, public, Python), **MAGICKAL** (Garrod, Virginia — the standard for complex organics since the [non-diffusive chemistry treatment](https://iopscience.iop.org/article/10.3847/1538-4365/ac3131) of Jin & Garrod 2020 / Garrod et al. 2022), **MONACO** (Vasyunin, macroscopic Gillespie Monte Carlo over the network), and newcomer **[PEGASIS](https://arxiv.org/abs/2504.18138)** (2025, Python/Numba, three-phase, ships KIDA-2024 plus 4,837 grain processes). All of these consume *tables of E_bind, E_diff, E_act, and branching ratios* — they are downstream customers of exactly the numbers quarry produces.
+
+**Microscopic/kinetic Monte Carlo lineage** (the petra-shaped corner): Chang, Cuppen & Herbst 2005; [Cuppen & Herbst 2007](https://arxiv.org/abs/0704.2704) (ice morphology + stochastic H2); Garrod's [off-lattice MIMICK](https://iopscience.iop.org/article/10.1088/0004-637X/778/2/158) (2013); Chang & Herbst's unified micro-macro models; and the Nijmegen center of gravity — Cuppen's group ([theochem.ru.nl/~hcuppen](https://www.theochem.ru.nl/~hcuppen/)) with a continuous-time random-walk KMC used across Lamberts, Simons ([CO hydrogenation, 2020](https://arxiv.org/abs/2001.04895)), and the 2025 Ice Age comparison; her group also wrote the definitive [KMC-for-astrochemistry review (Chem. Rev. 2013)](https://pubs.acs.org/doi/10.1021/cr400234a). Active 2020–2026: Cuppen (Nijmegen), Garrod (Virginia), Vasyunin (Ural), Chang (China), Sipilä (MPE), plus a 2025 "[fully ab initio KMC](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC12814774/)" (H2S on ice) from the computational-chemistry side.
+
+**The tooling fact that matters:** none of the microscopic KMC codes in this lineage is open source. Cuppen's CTRW-KMC, Garrod's MIMICK, Chang's codes — all private, single-group, hard-coded chemistry. The public codes (Nautilus, UCLCHEM, PEGASIS) are rate-equation codes that *cannot* capture stochastic small-grain effects or ice microstructure. There is no open, modern, declarative lattice-KMC for grain chemistry. This is the same gap petra was built to fill in mineral dissolution.
+
+## 3. Honest niche assessment: wanted vs crowded
+
+**Wanted (undersupplied, modelers actively flag these):**
+1. **Surface reaction barriers + tunneling rates for H-addition/abstraction families.** Networks still carry "effective barriers" like the canonical 2500 K for H+CO with rectangular-barrier tunneling of assumed 1 Å width — a 1970s approximation feeding 2026 models. Proper computed k(T) with real barrier shapes changes methanol/formaldehyde ratios directly. The 2025 Ice Age comparison paper's code divergences trace to exactly these inputs.
+2. **Binding-energy distributions on amorphous solid water (ASW).** The field is moving from single E_bind values to distributions ([Grassi et al. 2020 framework](https://www.aanda.org/articles/aa/full_html/2025/06/aa55097-25/aa55097-25.html); Ferrero et al. 2020; [ML-potential CO distributions, A&A 2025](https://arxiv.org/abs/2508.14219)). Semi-crowded — Bovolenta/Grassi, the Torino group (Ugliengo/Ceccarelli's ACO-GATE), and ML-potential groups are on it — but coverage is thin beyond ~10 benchmark species, and *distributions consumed as distributions by KMC* barely exist.
+3. **The diffusion problem.** E_diff/E_bind ratios in use span **0.3–0.8** ([review of the controversy](https://www.aanda.org/articles/aa/full_html/2014/09/aa24792-14.html); recent computations suggest 0.3–0.4) — a factor-of-2 in an exponent, the single largest acknowledged uncertainty in grain chemistry. Computed site-to-site hopping barriers on ASW models, per species, would be *welcomed*; almost nobody computes them because it's tedious — i.e., perfect for an agent-driven pipeline.
+4. **Branching ratios** (H2CO+H → CH3O vs CH2OH vs H2+HCO; abstraction/addition competition) — flagged in KIDA itself as guessed for many reactions.
+5. **Open declarative grain-KMC tooling** — see §2. Nobody can currently reproduce a Cuppen-style simulation without writing a code from scratch.
+
+**Crowded (stay out or collaborate, don't compete):**
+- **Benchmark-quality quantum dynamics on ≤4-atom systems** (ring-polymer MD, MCTDH, exact scattering) — specialist groups (Guo, Manolopoulos lineage) own this.
+- **Instanton tunneling rates** — Kästner's Stuttgart group has published dozens ([H2CO+H on ASW](https://arxiv.org/abs/2009.05442), CH3OH+H KIEs, H+H2S, NH2CHO). Their numbers are the *validation anchors* for quarry's cheaper Eckart machinery, not competition to beat — the play is coverage at slightly lower rigor, honestly labeled.
+- **Gas-phase ion-neutral rates** — capture-theory territory, largely solved.
+- **New rate-equation network codes** — PEGASIS just landed; the world does not need another.
+
+## 4. The quarry angle
+
+**Fit.** Astrochemical reactions are *smaller* than quarry's aluminosilicate clusters: H+CO, H+H2CO, OH+H2, H+CH3OH, NH3+CN — 2–7 heavy atoms. At this size, DFT opt+freq+IRC plus DLPNO-CCSD(T)/CBS single points (via ORCA) is *the published standard* in this field, and the ~1 h/barrier figure is conservative; many of these will run in minutes on the 4090, with the honest cost being TS search robustness, not SCF time. Quarry's existing pieces map one-to-one: Sella saddle search → TS; CI-NEB → path; quasi-RRHO Eyring → k(T); asymmetric Eckart → the tunneling correction the field's databases actually parameterize.
+
+**The tunneling caveat to own upfront.** Wigner is useless below ~150 K; asymmetric Eckart fit to (ΔE‡, ΔE_rxn, imaginary frequency) is respectable to ~50–70 K and is what many astrochemistry papers use, but in the deep-tunneling regime (10–20 K, where rates go temperature-independent) Eckart can err by orders of magnitude vs instanton. Strategy: (i) publish k(T) tables over 20–300 K with Eckart, *benchmarked reaction-by-reaction against published instanton rates* (Kästner's H2CO+H, OH+H2, CH3OH+H — free calibration data); (ii) report the low-T plateau via the Eckart T→0 limit with explicit uncertainty; (iii) as a stretch, add SCT (small-curvature tunneling) along the CI-NEB/IRC path — a bounded, well-documented algorithm that would move quarry from "respectable" to "competitive" below 50 K.
+
+**Surface effects.** The field's accepted cheap model is implicit-surface / small-cluster QM: reaction on a 1–3 H2O cluster or QM/MM on an ASW slab. Quarry's cluster builder (terminated, constrained clusters per site family) is architecturally the same thing pointed at water instead of aluminosilicate. Phase-1 scope should be gas-phase + few-water-cluster rates; QM/MM ASW slabs are Phase 3.
+
+**Throughput.** At an honest all-in 2–6 GPU-hours per reaction (conformer/site sampling, TS search retries, IRC, single points), one workstation does **100–300 fully-provenanced reactions/year** as a background queue — which is the *entire* CO→CH3OH network plus the water network plus the flagged-uncertain H-abstraction family, several times over. The KIDA-relevant unit of work is small; the value is coverage + uniform provenance, which is precisely what an agent-driven pipeline with a SQLite provenance store delivers and what ad-hoc grad-student calculations don't.
+
+## 5. The petra angle
+
+**Why KMC is required, not optional.** On a 0.1 μm grain there are ~10^6 sites but often *less than one reactive H atom at a time*; rate equations then overcount encounters catastrophically ([the classic stochastic-limit literature](https://www.sciencedirect.com/science/article/pii/S2405675817300271); [KMC H2-formation studies](https://iopscience.iop.org/article/10.1088/0004-637X/751/1/58)). This is the textbook justification for stochastic simulation, and small-grain fluctuation effects are exactly what an ensemble-of-seeds lattice code shows and a rate-equation code cannot.
+
+**Ice-mantle deck sketch.** Petra's model-as-data design maps cleanly:
+- **Lattice:** amorphous-ish surface as a periodic lattice with quenched site-energy disorder (sampled from a binding-energy distribution — feeds directly from quarry/§3 item 2), 50×50 to 500×500 sites, optionally multilayer for mantle growth.
+- **State vocabulary per site:** `empty | H | H2 | O | OH | H2O | CO | HCO | H2CO | CH3O | CH3OH | ...` (interned states — already how petra works).
+- **Transitions:** *adsorption* (flux-driven source events at rate F·σ per site — needs an open-system "bath reaction" event class, petra's main missing feature); *thermal hop* to neighbor site (Arrhenius, E_diff possibly site-pair dependent via disorder); *tunneling hop for H* (temperature-independent floor rate — needs a fixed-rate/custom-rate-law escape hatch alongside TST rates); *Langmuir–Hinshelwood reaction* (guarded transition: neighbor pair (H, CO) → (empty, HCO), rate = computed k including Eckart tunneling — petra's guarded rewrites do this natively); *desorption* (Arrhenius in E_bind(site)); optionally *Eley–Rideal* and photo/CR desorption as fixed-rate events.
+- **Observables:** per-state populations vs time (already emitted), H2 formation efficiency vs T (the canonical validation curve), CH3OH:H2CO:CO yield vs H-fluence at 10–15 K (matches the Watanabe/Fuchs experiments), ensemble variance vs lattice size (the stochastic-effects money plot), and the WASM live-browser demo of a grain being hydrogenated — a genuinely novel piece of outreach/review-figure candy no group in this field has.
+- **Engineering delta:** deposition/source events, non-Arrhenius rate laws, quenched per-site energy disorder, and (later) mantle burial/multilayer bookkeeping. The Fenwick-tree engine, guards, modifiers, ensemble runner, and viz all transfer unchanged.
+
+**The combined pitch** — one pipeline from DFT barrier → tunneling-corrected k(T) → declarative KMC deck → observable ice composition, all open, all reproducible in a browser — is something no group currently has end-to-end, including Nijmegen.
+
+## 6. Validation anchors
+
+1. **Watanabe & Kouchi 2002** ([ApJ 571, L173](https://iopscience.iop.org/article/10.1086/341412)) and Fuchs et al. 2009 ([A&A](https://arxiv.org/abs/0906.2292)): CO+H → H2CO → CH3OH yields vs temperature and fluence at 10–20 K; the H/D ratio ≈ 12. Simons, Lamberts & Cuppen 2020 ([A&A](https://arxiv.org/abs/2001.04895)) is the KMC-reproduces-experiment template to match.
+2. **Hama & Watanabe 2013** (Rev. Mod. Phys./Chem. Rev. review of surface tunneling reactions) — the compendium of what's experimentally established.
+3. **TPD binding energies:** Minissale et al. 2022 recommended-values compilation (ACS Earth & Space Chem.) plus per-species TPD papers — direct checks on computed E_bind distributions.
+4. **Published instanton rates** (Kästner group: [H2CO+H](https://arxiv.org/abs/2009.05442), OH+H2, CH3OH+H) — quarry's tunneling-accuracy gate.
+5. **H2 formation efficiency vs grain T** — the classic curve every stochastic model must reproduce.
+6. **JWST Ice Age abundances** ([McClure 2023](https://arxiv.org/abs/2301.09140)) and the [five-code comparison](https://arxiv.org/abs/2502.10123) — the end-to-end target: does a petra grain + quarry rates land inside the observed CH3OH/CO/CO2 ranges where the five codes scatter?
+
+## 7. Phased plan (one person + agents + one GPU)
+
+- **Phase 0 (2–3 weeks): calibration.** Reproduce 5 published rates: H+CO (gas + 2-H2O cluster), H+H2CO (all three channels), OH+H2, H+CH3OH abstraction, CH3O+H. Gate: within literature spread of published instanton/experimental values 50–300 K; document Eckart-vs-instanton deviation below 50 K. Deliverable: a validation note + the quarry astro config.
+- **Phase 1 (4–8 weeks): the methanol ladder, properly.** Full CO→HCO→H2CO→CH3O/CH2OH→CH3OH network + abstraction back-reactions + D-isotopologues (KIEs are free discriminators and the deuteration community will care). ~25 reactions, k(T) tables 10–300 K with stated validity floors, KIDA-format. Submit to KIDA; post preprint ("GPU-accelerated tunneling-corrected rate constants for the interstellar methanol network").
+- **Phase 2 (4–8 weeks, parallel): petra ice deck v1.** Deposition events + fixed-rate laws + site disorder in petra-core; H2-formation deck (H, H2 only) validated against the classic efficiency-vs-T curve and stochastic small-grain results; then the CO-hydrogenation deck consuming Phase-1 rates, matched against Watanabe/Fuchs yield curves à la Simons 2020. WASM demo: "hydrogenate a grain live."
+- **Phase 3 (2–4 months): the paper.** "An open declarative kinetic Monte Carlo model of CO hydrogenation on interstellar ices with ab initio tunneling rates" — A&A or ApJ, code + decks + rate tables archived (Zenodo), reproducible end-to-end. Optional stretch: E_bind/E_diff distributions for 5 species on an ASW slab model; SCT tunneling.
+- **Ongoing:** the agent queue grinds the KIDA "flagged uncertain" reaction list in the background at ~5–10 reactions/week; each batch is a KIDA submission and a dataset DOI.
+
+## 8. Risks, and what a referee would say
+
+- **"Eckart at 10 K is not credible"** — the top technical objection, and it's correct in the deep-tunneling limit. Mitigation: benchmark against instanton values, state validity floors on every table, never headline a 10 K number without an instanton cross-check or SCT. Framing rates as 50–300 K + calibrated extrapolation survives review; pretending Eckart is exact at 10 K does not.
+- **"Gas-phase clusters aren't ice"** — surface changes barriers and opens dissipation channels. Mitigation: follow field practice (small water clusters, cite the QM/MM literature), quantify cluster-size sensitivity, keep ASW slabs as future work.
+- **"Who are you?"** — outsider with no astrochemistry publication record submitting to A&A. Mitigations: KIDA submission first (expert-reviewed, low-stakes, builds record); reproduce known results before claiming new ones; consider emailing Cuppen or Lamberts (Leiden) with the Phase-2 demo — an open KMC is more likely to be adopted than resented, since no group's code competes in the open; the WASM live demo is a disarming door-opener.
+- **"Another code, unvalidated"** — mitigated by golden-gating petra against published KMC results (Simons 2020 figures) exactly as it was gated against the C++ kaolinite model.
+- **Scope creep** is the real internal risk: the field will happily absorb infinite compute. The phase gates above are the control.
+
+## 9. Venues and contribution pathways
+
+- **KIDA** — direct expert-reviewed submission of computed rates ([kida.astrochem-tools.org](https://kida.astrochem-tools.org/)); the on-ramp. Grain-surface section explicitly incomplete → greenfield.
+- **UMIST/UDfA** — harvested from literature; publishing the rates is the submission.
+- **Journals:** A&A (home of KIDA/Ice Age modeling papers), ApJ/ApJS, ACS Earth & Space Chemistry (rate + surface papers), PCCP (tunneling/method papers), JOSS or A&A for the petra-astro code release.
+- **Community:** COSPAR/IAU astrochemistry symposia, the Astrochemical Frontiers / Protostars & Planets orbit, and the KIDA/Ice Age mailing lists; a live WASM grain simulation is a poster that demos itself.
