@@ -68,8 +68,9 @@ def test_proton_neb_fallback_reconstructs_resumed_approach_seed(monkeypatch, tmp
 
     neb_inputs = []
 
-    def fake_neb(reactant, product, settings):
+    def fake_neb(reactant, product, settings, **kwargs):
         neb_inputs.append((reactant, product))
+        assert kwargs == {"fmax_ev_a": 0.5, "pre_relax_fmax_ev_a": 0.8}
         return geometry("neb-guess", 2.0)
 
     monkeypatch.setattr(phase1, "constrained_scan", fake_constrained_scan)
@@ -115,7 +116,7 @@ def test_rolled_back_product_extends_cleavage_without_repeating_proton_scan(
     monkeypatch.setattr(
         phase1,
         "neb_ts_guess",
-        lambda reactant, product, settings: geometry("neb-guess", 2.0),
+        lambda reactant, product, settings, **kwargs: geometry("neb-guess", 2.0),
     )
 
     result = phase1.proton_neb_guess(direct_crest, complex_opt, CHEAP, tmp_path, 2)

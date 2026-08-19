@@ -124,6 +124,78 @@ class TestSaddleSearch:
         assert e_guess > energy(back, CHEAP)
 
 
+class TestNebConvergence:
+    @staticmethod
+    def _endpoints():
+        reactant = Cluster("r", ["H"], np.array([[0.0, 0.0, 0.0]]))
+        product = Cluster("p", ["H"], np.array([[1.0, 0.0, 0.0]]))
+        return reactant, product
+
+    @pytest.mark.parametrize(
+        ("stage_results", "message"),
+        [
+            ([False], "pre-relaxation did not converge"),
+            ([True, False], "climbing-image"),
+        ],
+    )
+    def test_unconverged_band_is_rejected(self, monkeypatch, stage_results, message):
+        import ase.mep
+        import ase.optimize
+
+        neb_calls = []
+        fire_calls = []
+        results = iter(stage_results)
+
+        class FakeNeb:
+            def __init__(self, images, **kwargs):
+                self.images = images
+                self.climb = kwargs["climb"]
+                neb_calls.append(kwargs)
+
+            def interpolate(self, *, method):
+                assert method == "idpp"
+
+        class FakeFire:
+            def __init__(self, neb, **kwargs):
+                self.neb = neb
+                fire_calls.append((neb.climb, kwargs))
+
+            def run(self, *, fmax, steps):
+                fire_calls[-1] += (fmax, steps)
+                return next(results)
+
+        monkeypatch.setattr(ase.mep, "NEB", FakeNeb)
+        monkeypatch.setattr(ase.optimize, "FIRE", FakeFire)
+        reactant, product = self._endpoints()
+
+        with pytest.raises(RuntimeError, match=message):
+            from quarry.ts import neb_ts_guess
+
+            neb_ts_guess(
+                reactant,
+                product,
+                CHEAP,
+                n_images=3,
+                pre_relax_steps=4,
+                max_steps=5,
+            )
+
+        assert neb_calls == [{"climb": False, "method": "improvedtangent"}]
+        assert fire_calls[0] == (
+            False,
+            {"dt": 0.02, "dtmax": 0.2, "maxstep": 0.03},
+            0.3,
+            4,
+        )
+        if len(stage_results) == 2:
+            assert fire_calls[1] == (
+                True,
+                {"dt": 0.02, "dtmax": 0.2, "maxstep": 0.03},
+                0.1,
+                5,
+            )
+
+
 class TestConstraints:
     """These run real geomeTRIC constraint plumbing — the inline-text
     regression (FileNotFoundError on the constraint string) died here."""
