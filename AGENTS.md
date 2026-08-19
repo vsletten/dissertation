@@ -66,7 +66,7 @@ The Monte Carlo simulation models chemical reactions at the atomic level for alu
 2. **Simulation Loop** (mckaol.cpp:61-102): For each step, generate event list → select and execute random event → update time → write output
 3. **Output** (mckaol.cpp:103-115): Write final state files (MSI, XYZ, surface analysis)
 
-For detailed model documentation, see `legacy/cpp-model/AGENTS.md`.
+For detailed model documentation, see `legacy/cpp-model/CLAUDE.md`.
 
 ### Key Components
 
@@ -126,7 +126,7 @@ React application using Three.js (via @react-three/fiber) to render molecular st
 5. ModelInfo displays structural metadata
 
 ### File Format Support
-Parser handles Cerius2 .msi files (see msi-schema.md for format details). The MSI format uses keyword-value pairs with sections like (1 Atom), (1 Bond) for defining molecular structure.
+Parser handles Cerius2 .msi files (see `legacy/viewer/msi-schema.md` for format details). The MSI format uses keyword-value pairs with sections like (1 Atom), (1 Bond) for defining molecular structure.
 
 ### Styling
 Element colors are defined in utils/elementColors.ts and support charge-based and element-based coloring schemes.
@@ -146,7 +146,7 @@ Element colors are defined in utils/elementColors.ts and support charge-based an
 - Three.js r174+ with @react-three/fiber for declarative 3D
 - No tests currently configured (npm test will fail)
 
-### Code Style (from viewer/AGENTS.md)
+### Code Style (from `legacy/viewer/CLAUDE.md`)
 - Imports: Group as (1) React/framework (2) External libraries (3) Internal modules
 - TypeScript: Prefer interfaces over types, explicit return types on functions
 - Naming: camelCase for variables/functions, PascalCase for classes/components
