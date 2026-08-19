@@ -1,11 +1,11 @@
 # B1-schema-rfc — Deck schema v2 + UpdateStrategy RFC
 
-- status: ready
+- status: done
 - track: B (platform)
 - priority: P0
 - machine: any
 - depends: —
-- claimed-by: (see agents/B1-schema-rfc branch)
+- claimed-by: hermes cloud worker (agents/B1-schema-rfc)
 
 ## Objective
 
@@ -62,3 +62,40 @@ enough detail that B2's implementer makes no design decisions:
 ## Progress
 
 - 2026-08-18 — card created (fable).
+- 2026-08-19 — claimed by hermes cloud worker (agents/B1-schema-rfc).
+- 2026-08-19 — RFC written: `petra/docs/RFC-001-DECK-V2.md` (all five
+  items + both showcase fragments). Read DESIGN.md, schema.rs, both
+  showcase scoping docs, `.claude/learnings/`, and the current engine
+  (`engine.rs`, `reaction.rs`, `compile.rs`) before writing. DEVIATION:
+  none — the card's five items map one-to-one onto the RFC's sections
+  §2–§6. Two Track D requirements (source events, non-Arrhenius rates)
+  are covered by `target = "source"` and `rate = { constant = … }`
+  rather than new rate laws; quenched disorder via `[[init]]` config
+  writes (final table syntax deferred to B2, noted in RFC §2.2.1).
+
+## Result
+
+- **What**: `petra/docs/RFC-001-DECK-V2.md` — deck schema v2 (four
+  orthogonal sections), the `UpdateStrategy` trait with Rust signatures,
+  the v1 compat shim, the determinism/RNG-stream contract, and the
+  B2/B3 migration + test plan with analytic acceptance numbers.
+- **Where**: `petra/docs/RFC-001-DECK-V2.md` (new file, ~30 KB).
+- **Surprises / decisions for the next worker (B2)**:
+  - The CTMC strategy must preserve today's `Engine::step` draw order
+    and f64 arithmetic **exactly** — the B2 parity gate is byte-identical
+    `Fired` logs, not statistical agreement.
+  - `target = "source"` is a new effect target (no center selector);
+    RFC §8 Q1 recommends per-site (each vacant site is an independent
+    event) — confirm with Victor before B2 implements it.
+  - The grid shorthand compiles into the same CSR adjacency as the
+    explicit cell — it is sugar, not a second code path.
+  - Four open questions for Victor are collected in RFC §8 (source-event
+    semantics, roughness axis, Metropolis dt, seed-mix function).
+- **Follow-up cards**: none new — B2/B3/B4 already exist and are now
+  unblocked (B2 was `blocked: B1`).
+
+## Result (acceptance check)
+
+- [x] RFC exists on main and covers all five numbered items (§2–§6).
+- [x] Both showcase fragments present (§7.1 corrosion, §7.2 ice mantle).
+- [x] Inbox message announces RFC ready for review (see inbox/).

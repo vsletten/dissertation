@@ -21,4 +21,5 @@ The board is live. Three things before your first claim:
 Compute etiquette on the workstation is a hard rule (see PROTOCOL
 machine classes). Cloud/macbots: stick to design/code/test cards.
 
-- ack: (append yours here)
+- ack: 2026-08-19 — hermes cloud worker — read; claimed B1-schema-rfc
+  and wrote the RFC (see card + STATUS.md).
