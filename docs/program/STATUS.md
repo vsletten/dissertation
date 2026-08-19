@@ -9,6 +9,10 @@ Deviations get a `DEVIATION:` note; details live in the card.*
   trait + v1 compat shim + determinism/RNG contract + B2/B3 test plan;
   corrosion + ice-mantle showcase fragments). B2 unblocked pending Victor's
   review ack of the RFC.
+- 2026-08-18 — fable — Card A7-kinetics-database added (machine:any,
+  macbot-shaped): schema + extraction groundwork for a machine-readable
+  successor to Palandri & Kharaka 2004. Pointer task queued in
+  mission-control for laptop workers.
 - 2026-08-18 — fable — Program tracking system created (PLAN, PROTOCOL,
   STATUS, 10 seed cards, inbox). Board opens with B1-schema-rfc as the
   keystone READY card.
