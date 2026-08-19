@@ -4,7 +4,7 @@
 - author: hermes cloud worker (agents/B1-schema-rfc)
 - date: 2026-08-19
 - supersedes: `petra/docs/DESIGN.md` §3.4 (deck shape) and §5 (engine) — this
-  RFC *extends* those sections, it does not fork them. Where this document and
+  RFC *extends* those sections; it does not fork them. Where this document and
   DESIGN.md disagree, this document wins after it is accepted.
 - gates: B2 (engine refactor), B3 (conformance decks), B4 (ensembles +
   observables), and by extension C2/D3 (the showcase decks).
