@@ -1,6 +1,6 @@
 # A7-kinetics-database — machine-readable dissolution-kinetics compilation, v0
 
-- status: ready
+- status: done
 - track: A (geochemistry, community-infrastructure lane)
 - priority: P2
 - machine: any (laptop-shaped by design: reading, extraction, structuring — no GPU, no long compute)
@@ -62,3 +62,13 @@ machine-readable. This card is v0: schema + the core extraction.
 ## Progress
 
 - 2026-08-18 — card created (fable), macbot-targeted by design.
+- 2026-08-18 — hermes-workstation — extracted the P&K silicate core into 36 records (74 mechanisms), documented schema/provenance and area-basis rules, added a stdlib validator, and assembled a DOI-checked 49-source expansion inventory.
+- 2026-08-18 — DEVIATION: the P&K Table 29 montmorillonite footnote omits the tetrahedral-sheet `O10`; the record restores `O10` and preserves the printed omission in its caveat instead of emitting a chemically incomplete formula.
+
+## Result
+
+- `kinetics-db/SCHEMA.md` defines schema v0, rate-law units, BET/geometric/unspecified normalization, source references, and uncertainty placeholders.
+- `kinetics-db/minerals/` contains 36 TOML records spanning silica polymorphs, feldspars/feldspathoids, olivines, pyroxenes/pyroxenoids, micas, clays, and miscellaneous phyllosilicates. Every kinetic mechanism points to its P&K printed page/table.
+- `kinetics-db/SOURCES.md` inventories 49 verified candidate sources (48 DOI-linked plus P&K), including Heřmanská Parts I–II, Ganor/Cama kaolinite anchors, Brantley lab/field work, and olivine/wollastonite ERW studies.
+- `kinetics-db/validate.py` uses only stdlib `tomllib`; final receipt: `OK: 36 mineral files, 74 mechanisms, schema v0`.
+- Kaolinite cross-check is explicit: P&K Table 29 gives acidic/base `Ea` of 65.9/17.9 kJ/mol, outside the `qm/SURVEY.md` section 7.3 experimental ranges of ~29 and 33–51 kJ/mol; the record keeps both claims distinct and flags the discrepancy.
