@@ -128,3 +128,25 @@ def test_rolled_back_product_extends_cleavage_without_repeating_proton_scan(
     assert result.name == "neb-guess"
     assert break_targets == [2.3, 2.6, 3.0, 3.4, 3.6]
     assert (tmp_path / "product.rejected-rollback.xyz").exists()
+
+
+def test_completed_product_prefers_closer_concerted_neb_endpoint(monkeypatch, tmp_path):
+    approach = geometry("approach", 2.2)
+    complex_opt = geometry("complex", 3.2)
+    phase1.save_xyz(geometry("full-product", 1.66, 3.50), tmp_path / "product.xyz")
+    near = geometry("near-product", 1.67, 2.07)
+    near.coords[3] = np.array([2.07, 0.96, 0.0])
+    phase1.save_xyz(near, tmp_path / "product.rejected-rollback.xyz")
+    endpoints = []
+
+    def fake_neb(reactant, product, settings, **kwargs):
+        endpoints.append(product)
+        return geometry("neb-guess", 2.0)
+
+    monkeypatch.setattr(phase1, "neb_ts_guess", fake_neb)
+
+    result = phase1.proton_neb_guess(approach, complex_opt, CHEAP, tmp_path, 2)
+
+    assert result.name == "neb-guess"
+    assert len(endpoints) == 1
+    assert np.linalg.norm(endpoints[0].coords[1] - endpoints[0].coords[0]) == 2.07

@@ -153,6 +153,36 @@ def proton_neb_guess(
             f"r(Si-Ow)={r_prod_ow:.2f} A, r(Si-Obr)={r_prod_br:.2f} A"
         )
         if r_prod_ow <= 1.9 and r_prod_br >= 2.2:
+            # A fully separated product is a poor linear NEB endpoint for
+            # this concerted substitution: the first image can climb by
+            # dissociating water before proton transfer begins.  Prefer a
+            # validated, just-past-the-ridge checkpoint when one survived
+            # the deliberate product construction.
+            near_path = run_dir / "product.rejected-rollback.xyz"
+            if near_path.exists():
+                near = load_xyz(near_path, approach_seed)
+                r_near_ow = float(
+                    np.linalg.norm(near.coords[SI_INDEX] - near.coords[ow_index])
+                )
+                r_near_br = float(
+                    np.linalg.norm(near.coords[SI_INDEX] - near.coords[BR_INDEX])
+                )
+                r_near_h = min(
+                    float(np.linalg.norm(near.coords[h] - near.coords[BR_INDEX]))
+                    for h in h_candidates
+                )
+                if (
+                    r_near_ow <= 1.9
+                    and 1.9 <= r_near_br < r_prod_br
+                    and r_near_h <= 1.2
+                ):
+                    log(
+                        "  using closer concerted NEB endpoint: "
+                        f"r(Si-Ow)={r_near_ow:.2f} A, "
+                        f"r(Si-Obr)={r_near_br:.2f} A, "
+                        f"r(Obr-H)={r_near_h:.2f} A"
+                    )
+                    product = near
             log(
                 "  stage 2d: staged CI-NEB complex -> product "
                 "(5 images; 3.0 pre-relax -> 0.8 climb eV/A)"
@@ -359,6 +389,24 @@ def main() -> int:
     if ts_guess_path.exists():
         ts_guess = load_xyz(ts_guess_path, complex_opt)
         log(f"  resume: ts_guess.xyz exists ({route} route)")
+        if route == "proton-neb" and channel_escape_reason(
+            ts_guess, ts_guess, ow_index
+        ):
+            r_bad = float(
+                np.linalg.norm(ts_guess.coords[SI_INDEX] - ts_guess.coords[ow_index])
+            )
+            log(
+                "  saved NEB peak is outside the channel "
+                f"(r(Si-Ow)={r_bad:.2f} A); rebuilding from the closer endpoint"
+            )
+            ts_guess_path.replace(run_dir / "ts_guess.rejected-neb-escape.xyz")
+            stale_traj = run_dir / "sella.traj"
+            if stale_traj.exists():
+                stale_traj.replace(run_dir / "sella.rejected-neb-escape.traj")
+            ts_guess = proton_neb_guess(
+                ts_guess, complex_opt, settings, run_dir, ow_index
+            )
+            save_xyz(ts_guess, ts_guess_path)
     else:
         # A route marker without its geometry can only be a crash between
         # checkpoint writes. Reconstruct from the direct route safely.
