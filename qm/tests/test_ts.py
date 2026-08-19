@@ -183,14 +183,14 @@ class TestNebConvergence:
         assert neb_calls == [{"climb": False, "method": "improvedtangent"}]
         assert fire_calls[0] == (
             False,
-            {"dt": 0.02, "dtmax": 0.2, "maxstep": 0.03},
+            {"dt": 0.05, "dtmax": 0.2, "maxstep": 0.05},
             0.3,
             4,
         )
         if len(stage_results) == 2:
             assert fire_calls[1] == (
                 True,
-                {"dt": 0.02, "dtmax": 0.2, "maxstep": 0.03},
+                {"dt": 0.05, "dtmax": 0.2, "maxstep": 0.05},
                 0.1,
                 5,
             )
