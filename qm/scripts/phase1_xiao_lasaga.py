@@ -78,6 +78,9 @@ REACTIONS = {
 BR_INDEX = 0
 SI_INDEX = 1
 KCAL = 4.184
+REACTANT_BASIN = (False, True, False)
+ASSOCIATIVE_BASIN = (True, True, True)
+HYDROLYZED_BASIN = (True, False, True)
 
 
 def log(msg: str) -> None:
@@ -142,14 +145,67 @@ def hydrolysis_basin_signature(
 
 def quick_irc_channel_reason(back: Cluster, fwd: Cluster, ow_index: int) -> str | None:
     """Explain why quick-IRC did not connect reactant and hydrolyzed basins."""
+    return quick_irc_basin_reason(
+        back,
+        fwd,
+        ow_index,
+        expected={REACTANT_BASIN, HYDROLYZED_BASIN},
+    )
+
+
+def quick_irc_basin_reason(
+    back: Cluster,
+    fwd: Cluster,
+    ow_index: int,
+    *,
+    expected: set[tuple[bool, bool, bool]],
+) -> str | None:
+    """Explain why two quick-IRC endpoints missed the expected basins."""
     actual = {
         hydrolysis_basin_signature(back, ow_index),
         hydrolysis_basin_signature(fwd, ow_index),
     }
-    expected = {(False, True, False), (True, False, True)}
     if actual != expected:
         return f"quick-IRC basin signatures {sorted(actual)} != {sorted(expected)}"
     return None
+
+
+def quick_irc_addition_reason(back: Cluster, fwd: Cluster, ow_index: int) -> str | None:
+    """Require reactant ↔ associative-intermediate connectivity."""
+    return quick_irc_basin_reason(
+        back,
+        fwd,
+        ow_index,
+        expected={REACTANT_BASIN, ASSOCIATIVE_BASIN},
+    )
+
+
+def quick_irc_cleavage_reason(back: Cluster, fwd: Cluster, ow_index: int) -> str | None:
+    """Require associative-intermediate ↔ hydrolyzed-product connectivity."""
+    return quick_irc_basin_reason(
+        back,
+        fwd,
+        ow_index,
+        expected={ASSOCIATIVE_BASIN, HYDROLYZED_BASIN},
+    )
+
+
+def endpoint_in_basin(
+    back: Cluster,
+    fwd: Cluster,
+    ow_index: int,
+    signature: tuple[bool, bool, bool],
+) -> Cluster:
+    """Return the unique quick-IRC endpoint in ``signature`` or fail closed."""
+    matches = [
+        endpoint
+        for endpoint in (back, fwd)
+        if hydrolysis_basin_signature(endpoint, ow_index) == signature
+    ]
+    if len(matches) != 1:
+        detail = f"basin {signature}, found {len(matches)}"
+        raise RuntimeError(f"expected one quick-IRC endpoint in {detail}")
+    return matches[0]
 
 
 def proton_neb_guess(

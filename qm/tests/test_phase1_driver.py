@@ -50,6 +50,44 @@ def test_quick_irc_requires_reactant_and_hydrolyzed_basins():
     assert reason is not None and "basin signatures" in reason
 
 
+def test_sequential_quick_irc_gates_each_elementary_step():
+    reactant = geometry("reactant", 3.2, si_obr=1.6)
+    reactant.coords[3:] += np.array([0.0, 3.0, 0.0])
+    intermediate = geometry("intermediate", 1.8, si_obr=1.8)
+    intermediate.coords[3] = np.array([1.8, 0.98, 0.0])
+    product = geometry("product", 1.7, si_obr=3.5)
+    product.coords[3] = np.array([3.5, 0.98, 0.0])
+
+    assert phase1.quick_irc_addition_reason(reactant, intermediate, 2) is None
+    assert phase1.quick_irc_cleavage_reason(intermediate, product, 2) is None
+    assert phase1.quick_irc_addition_reason(intermediate, product, 2) is not None
+    assert phase1.quick_irc_cleavage_reason(reactant, intermediate, 2) is not None
+
+
+def test_endpoint_in_basin_requires_exactly_one_match():
+    reactant = geometry("reactant", 3.2, si_obr=1.6)
+    reactant.coords[3:] += np.array([0.0, 3.0, 0.0])
+    intermediate = geometry("intermediate", 1.8, si_obr=1.8)
+    intermediate.coords[3] = np.array([1.8, 0.98, 0.0])
+
+    assert (
+        phase1.endpoint_in_basin(
+            reactant,
+            intermediate,
+            2,
+            phase1.ASSOCIATIVE_BASIN,
+        )
+        is intermediate
+    )
+    with np.testing.assert_raises_regex(RuntimeError, "found 0"):
+        phase1.endpoint_in_basin(
+            reactant,
+            intermediate,
+            2,
+            phase1.HYDROLYZED_BASIN,
+        )
+
+
 def test_proton_neb_fallback_reconstructs_resumed_approach_seed(monkeypatch, tmp_path):
     direct_crest = geometry("direct-crest", 2.2)
     complex_opt = geometry("complex", 3.2)
