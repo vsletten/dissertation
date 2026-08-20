@@ -1,6 +1,6 @@
 # D2a-astro-rate-reproduction — reproduce 5 known astrochemical rates
 
-- status: ready
+- status: done
 - track: D (astrochemistry)
 - priority: P1
 - machine: workstation (GPU preferred; systems are small — CPU fallback
@@ -45,5 +45,27 @@ is quarry's 50–300 K accuracy sufficient for KIDA-grade submissions?)
 - Compute etiquette respected (GPU-first, thread caps).
 
 ## Progress
+
+- 2026-08-19 — local Hermes worker (gpt-5.6 sol) claimed via branch push
+  — the protocol's first non-Claude runtime. Built the checkpointed
+  campaign driver + open-shell GPU Hessian fallback + first-crest
+  seeding + per-reaction failure isolation (commits 689fbed..b03d599);
+  ran the full 6-reaction campaign on the GPU (etiquette followed,
+  logs teed). Hit the tool-iteration ceiling during closeout.
+- 2026-08-20 — fable — closeout: summary doc written from the durable
+  artifacts, verdict recorded. DEVIATION: card scoped "~5 reproduced
+  rates"; delivered 4 completed + 2 honestly-rejected-with-receipts —
+  for a de-risking gate the rejections are results.
+
+## Result
+
+Verdict: **GO for gas-phase rate classes, NO-GO for surface (LH) rates
+from the cheap gas-phase protocol** (4–5 orders low vs surface
+literature for H+H2CO→CH3O; abstraction channel within 3–50× across
+50–300 K; barrierless control κ=1 exact). Full analysis:
+docs/program/results/D2a-rate-reproduction.md. Artifacts:
+qm/runs/D2a-astro-rate-reproduction/ (workstation). Follow-ups worth
+carding: OH+H2 TS guess strategy; CH2OH constrained approach; explicit-
+surface machinery before any KIDA surface submission.
 
 - 2026-08-18 — card created (fable).

@@ -4,6 +4,17 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-20 — fable — Board refresh: B1+D2a+A7 done, B2 READY (keystone
+  merged), A3 active. PROTOCOL amendment: incremental bookkeeping
+  (the D2a iteration-ceiling lesson). Hermes worker-profile max_turns
+  raised 90 -> 1000 fleet-side (infra, not repo; the raise gives workers
+  more headroom, but the PROTOCOL closeout rule still applies — budget
+  the last ~15% of turns so a capped worker leaves legible state).
+- 2026-08-20 — local-hermes + fable — D2a DONE: 6-reaction astro rate
+  campaign on the 4090. Verdict: GO gas-phase / NO-GO surface-LH rates
+  (4–5 orders low without explicit-surface treatment). First non-Claude
+  runtime to work the board end-to-end; worker hit iteration ceiling at
+  closeout, fable finished bookkeeping. results/D2a-rate-reproduction.md.
 - 2026-08-18 — hermes-workstation — A7-kinetics-database done: schema v0,
   36 P&K silicate records / 74 mechanisms, stdlib validator, and a
   49-source 2004–present expansion inventory under `kinetics-db/`.
