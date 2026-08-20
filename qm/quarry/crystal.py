@@ -47,6 +47,10 @@ FORMAL_CHARGE = {"Si": 4, "Al": 3}
 STRUCTURAL_H = {"Oaa": 1}
 O_VALENCE = 2.0
 MIN_INTERATOMIC_A = 0.75
+# Determinant magnitude below which lattice vectors are treated as degenerate
+# (zero cell volume). Absolute tolerance on |det|; scale conventions vary, so
+# keep it a named constant for easy tuning.
+DEGENERATE_DET_TOL = 1e-12
 
 # A node is one site in one periodic image.
 Node = tuple[int, tuple[int, int, int]]
@@ -82,7 +86,7 @@ class DeckCell:
             raise ValueError(f"deck cell matrix must be 3x3, got {matrix.shape}")
         if not np.all(np.isfinite(matrix)):
             raise ValueError("deck cell matrix must be finite")
-        if abs(float(np.linalg.det(matrix))) < 1e-12:
+        if abs(float(np.linalg.det(matrix))) < DEGENERATE_DET_TOL:
             raise ValueError(
                 "deck cell lattice vectors are degenerate (zero cell volume)"
             )
