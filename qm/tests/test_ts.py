@@ -397,6 +397,52 @@ class TestNebConvergence:
             ("ode-run", 0.1, 5),
         ]
 
+    def test_unconverged_bfgs_climb_is_rejected(self, monkeypatch):
+        import ase.mep
+        import ase.optimize
+
+        calls = []
+
+        class FakeNeb:
+            def __init__(self, images, **kwargs):
+                self.climb = kwargs["climb"]
+
+            def interpolate(self, *, method):
+                assert method == "idpp"
+
+        class FakeMdMin:
+            def __init__(self, neb, **kwargs):
+                pass
+
+            def run(self, *, fmax, steps):
+                return True
+
+        class FakeBfgs:
+            def __init__(self, neb, **kwargs):
+                calls.append((neb.climb, kwargs))
+
+            def run(self, *, fmax, steps):
+                return False
+
+        monkeypatch.setattr(ase.mep, "NEB", FakeNeb)
+        monkeypatch.setattr(ase.optimize, "MDMin", FakeMdMin)
+        monkeypatch.setattr(ase.optimize, "BFGS", FakeBfgs)
+        reactant, product = self._endpoints()
+
+        with pytest.raises(RuntimeError, match="climbing-image"):
+            from quarry.ts import neb_ts_guess
+
+            neb_ts_guess(
+                reactant,
+                product,
+                CHEAP,
+                n_images=3,
+                max_steps=5,
+                climb_optimizer="bfgs",
+            )
+
+        assert calls == [(True, {"maxstep": 0.05})]
+
 
 class TestConstraints:
     """These run real geomeTRIC constraint plumbing — the inline-text

@@ -438,10 +438,10 @@ def neb_ts_guess(
     ``fmax_ev_a`` is deliberately loose — this produces a guess, and
     Sella does the tight convergence.  The band is first relaxed without a
     climbing image, then the climb is enabled.  Pre-relaxation uses bounded
-    MDMin. The climbing stage uses MDMin by default or ASE's bounded ODE
-    optimizer when ``climb_optimizer="ode"``; ODE is the measured fallback for
-    a live al-neutral associative band whose MDMin climb stalled. Both stages
-    must converge; returning an arbitrary peak from an exhausted optimizer is
+    MDMin. The climbing stage uses MDMin by default, ASE's bounded ODE
+    optimizer, or BFGS. ODE and BFGS are the measured fallbacks for a live
+    al-neutral associative band whose MDMin climb stalled. Both stages must
+    converge; returning an arbitrary peak from an exhausted optimizer is
     forbidden.
     """
     from ase import Atoms
@@ -451,11 +451,11 @@ def neb_ts_guess(
         from ase.mep import NEB
     except ImportError:  # older ASE layout
         from ase.neb import NEB
-    from ase.optimize import MDMin
+    from ase.optimize import BFGS, MDMin
 
     if reactant.charge != product.charge or reactant.spin != product.spin:
         raise ValueError("reactant/product electronic states differ")
-    if climb_optimizer not in {"mdmin", "ode"}:
+    if climb_optimizer not in {"mdmin", "ode", "bfgs"}:
         raise ValueError(f"unknown NEB climb optimizer '{climb_optimizer}'")
     images = [Atoms(symbols=reactant.symbols, positions=reactant.coords)]
     for _ in range(n_images - 2):
@@ -498,12 +498,17 @@ def neb_ts_guess(
             dt=optimizer_dt,
             maxstep=optimizer_maxstep,
         )
-    else:
+    elif climb_optimizer == "ode":
         from ase.mep.neb import NEBOptimizer
 
         climb = NEBOptimizer(
             neb,  # type: ignore[arg-type] -- ASE accepts NEB objects
             method="ODE",
+        )
+    else:
+        climb = BFGS(
+            neb,  # type: ignore[arg-type] -- ASE optimizers accept NEB objects
+            maxstep=optimizer_maxstep,
         )
     climbed = climb.run(fmax=fmax_ev_a, steps=max_steps)
     if not climbed:
