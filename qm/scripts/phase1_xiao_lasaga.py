@@ -80,6 +80,8 @@ REACTIONS = {
 BR_INDEX = 0
 SI_INDEX = 1
 KCAL = 4.184
+SI_NEUTRAL_DG_KJ = 113.048262
+SI_NEUTRAL_DG_KCAL = 27.019
 REACTANT_BASIN = (False, True, False)
 ASSOCIATIVE_BASIN = (True, True, True)
 HYDROLYZED_BASIN = (True, False, True)
@@ -550,7 +552,7 @@ def finish_al_neutral_sequential(
         tunneling="wigner",
     )
     overall_dg = float(metrics["overall_profile_dG_dagger_kj"])
-    si_neutral_dg = 113.048262
+    si_neutral_dg = SI_NEUTRAL_DG_KJ
     al_easier = overall_dg < si_neutral_dg
     de_kj = (
         highest_freq.electronic_hartree - complex_freq.electronic_hartree
@@ -597,7 +599,7 @@ def finish_al_neutral_sequential(
         },
         "comparison": {
             "si_neutral_dG_kj": si_neutral_dg,
-            "si_neutral_dG_kcal": 27.019,
+            "si_neutral_dG_kcal": SI_NEUTRAL_DG_KCAL,
             "al_easier_than_si": al_easier,
             "xiao_lasaga_easier_si_o_al_ordering_confirmed": al_easier,
         },
@@ -610,7 +612,6 @@ def finish_al_neutral_sequential(
     }
     results_tmp = run_dir / "results.json.tmp"
     results_tmp.write_text(json.dumps(results, indent=2))
-    results_tmp.replace(run_dir / "results.json")
 
     store_tmp = run_dir / "store.sequential.tmp.sqlite"
     store_tmp.unlink(missing_ok=True)
@@ -637,6 +638,7 @@ def finish_al_neutral_sequential(
             store.set_job_status(jid, "done")
             store.add_result(jid, "electronic", freq.electronic_hartree, "hartree")
     store_tmp.replace(run_dir / "store.sqlite")
+    results_tmp.replace(run_dir / "results.json")
 
     log("")
     log(f"=== al-neutral sequential @ {results['method']} ===")
