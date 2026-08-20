@@ -59,6 +59,23 @@ normally.
 - Non-obvious discoveries go to `.claude/learnings/` (existing
   convention: topic files + INDEX.md one-liner).
 
+## Bookkeeping is incremental, not terminal (amendment, 2026-08-20)
+
+Learned from D2a: the worker did excellent science, then hit its
+tool-iteration ceiling during the closeout — summary, card update, and
+PR all unwritten (supervision finished them from artifacts). Rules:
+
+- **Push durable state as you go.** Implementation commits go up when
+  green, not at the end. Campaign artifacts checkpoint continuously.
+- **Update the card's Progress log at each stage boundary** (committed
+  and pushed), so a dead or capped worker leaves a legible trail.
+- **Budget the closeout.** When ~15% of your iteration budget remains,
+  STOP new work and execute the closeout (summary → card → STATUS →
+  PR). An incomplete card with finished bookkeeping beats a finished
+  card with no bookkeeping.
+- Exit reports matter: state precisely what is and is not done —
+  D2a's honest exit made supervision closeout a 15-minute job.
+
 ## Finishing a card — the single PR
 
 Your PR contains, atomically:
