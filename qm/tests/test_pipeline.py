@@ -59,6 +59,27 @@ def test_frequency_geometry_fingerprint_is_exact_identity():
     assert frequency_geometry_fingerprint(charged) != base_fp
 
 
+def test_frequency_geometry_fingerprint_includes_frozen_indices():
+    """The frozen-atom set is part of the geometry identity.
+
+    PHVA (partial Hessian) and TS verification branch on ``frozen_indices``,
+    so a Hessian computed with a different frozen set must never be reused
+    for the same coordinates.
+    """
+    from dataclasses import replace
+
+    base = water()
+    frozen = replace(base, frozen_indices=[0])
+
+    assert frequency_geometry_fingerprint(frozen) != frequency_geometry_fingerprint(
+        base
+    )
+    # Order-independent: the frozen set is sorted before hashing.
+    assert frequency_geometry_fingerprint(
+        replace(base, frozen_indices=[0, 1])
+    ) == frequency_geometry_fingerprint(replace(base, frozen_indices=[1, 0]))
+
+
 def test_gpu_hessian_assertion_retries_only_hessian_on_cpu(monkeypatch):
     calls = []
 
