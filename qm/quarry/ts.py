@@ -198,13 +198,22 @@ def find_ts(
     return replace(cluster, coords=atoms.positions.copy(), name=f"{cluster.name}-ts")
 
 
-def verify_ts(cluster: Cluster, settings: DftSettings) -> FrequencyResult:
-    """Frequency-verify a saddle: exactly one imaginary mode or raise."""
+def verify_ts(
+    cluster: Cluster, settings: DftSettings, *, noise_floor_cm: float = 0.0
+) -> FrequencyResult:
+    """Frequency-verify a saddle: exactly one imaginary mode or raise.
+
+    ``noise_floor_cm`` ignores imaginary modes below the threshold —
+    partial-Hessian analyses on peripherally-frozen clusters can carry a
+    few numerically-imaginary soft modes that are not reaction modes.
+    The default (0) keeps the strict free-cluster behavior.
+    """
     freq = frequencies(cluster, settings)
-    if freq.n_imaginary != 1:
+    significant = freq.imaginary_cm[freq.imaginary_cm > noise_floor_cm]
+    if significant.size != 1:
         raise RuntimeError(
-            f"{cluster.name}: expected exactly 1 imaginary mode, "
-            f"found {freq.n_imaginary} "
+            f"{cluster.name}: expected exactly 1 imaginary mode "
+            f"above {noise_floor_cm:.0f} cm^-1, found {significant.size} "
             f"(imaginary: {np.round(freq.imaginary_cm, 1).tolist()} cm^-1)"
         )
     return freq
@@ -217,22 +226,29 @@ def quick_irc(
     displacement_a: float = 0.15,
     max_steps: int = 200,
     frequency: FrequencyResult | None = None,
+    noise_floor_cm: float = 0.0,
 ) -> tuple[Cluster, Cluster]:
     """Displace ± along the imaginary mode and relax to the two minima.
 
     The cheap stand-in for a full IRC: confirms which basins the saddle
     connects. Returns (backward, forward) relaxed clusters.
     """
-    freq = frequency if frequency is not None else verify_ts(ts, settings)
+    freq = (
+        frequency
+        if frequency is not None
+        else verify_ts(ts, settings, noise_floor_cm=noise_floor_cm)
+    )
     if frequency is not None:
         if freq.geometry_fingerprint != frequency_geometry_fingerprint(ts):
             raise ValueError("precomputed frequency belongs to a different geometry")
         if freq.settings_fingerprint != frequency_settings_fingerprint(settings):
             raise ValueError("precomputed frequency used different DFT settings")
-    if freq.n_imaginary != 1:
-        raise RuntimeError(
-            f"{ts.name}: expected exactly 1 imaginary mode, found {freq.n_imaginary}"
-        )
+        significant = freq.imaginary_cm[freq.imaginary_cm > noise_floor_cm]
+        if significant.size != 1:
+            raise RuntimeError(
+                f"{ts.name}: expected exactly 1 imaginary mode "
+                f"above {noise_floor_cm:.0f} cm^-1, found {significant.size}"
+            )
     mode = freq.imaginary_mode
     if mode is None:
         raise RuntimeError(f"{ts.name}: no imaginary-mode vector available")

@@ -181,11 +181,22 @@ def frequency_settings_fingerprint(settings: DftSettings) -> str:
 
 
 def frequencies(cluster: Cluster, settings: DftSettings) -> FrequencyResult:
-    """Analytic Hessian -> projected harmonic analysis (pyscf thermo)."""
+    """Analytic Hessian -> harmonic analysis.
+
+    Free clusters get the standard projected analysis (pyscf thermo).
+    Clusters with ``frozen_indices`` get a partial-Hessian vibrational
+    analysis (PHVA) over the free-atom block instead: no trans/rot
+    projection (the frozen lattice removes those motions) and no
+    rotational temperatures — the embedded cluster does not rotate.
+    Translational terms downstream cancel in any barrier between states
+    of identical composition, which is the only use PHVA results have.
+    """
     from pyscf.hessian import thermo as pyscf_thermo
 
     mf, e, hess = _scf_hessian(cluster, settings)
     hess = np.asarray(hess.get() if hasattr(hess, "get") else hess)
+    if cluster.frozen_indices:
+        return _partial_hessian_analysis(cluster, settings, mf, hess, float(e))
     freq_info = pyscf_thermo.harmonic_analysis(mf.mol, hess)
     nu = np.asarray(freq_info["freq_wavenumber"])
     modes = np.asarray(freq_info["norm_mode"])  # (nmodes, natm, 3)
@@ -216,6 +227,64 @@ def frequencies(cluster: Cluster, settings: DftSettings) -> FrequencyResult:
         molar_mass_kg=mass_kg,
         rotational_temperatures_k=rot[0],
         linear=rot[1],
+        imaginary_mode=imag_mode,
+        imaginary_modes=imag_modes,
+        geometry_fingerprint=frequency_geometry_fingerprint(cluster),
+        settings_fingerprint=frequency_settings_fingerprint(settings),
+    )
+
+
+def _partial_hessian_analysis(
+    cluster: Cluster,
+    settings: DftSettings,
+    mf: Any,
+    hess: np.ndarray,
+    e: float,
+) -> FrequencyResult:
+    """PHVA: diagonalize the mass-weighted free-atom Hessian block."""
+    from pyscf.data import elements, nist
+
+    n = len(cluster.symbols)
+    free = sorted(set(range(n)) - set(cluster.frozen_indices))
+    masses = np.array(
+        [elements.MASSES[elements.charge(cluster.symbols[i])] for i in free]
+    )
+    sub = hess[np.ix_(free, free)]  # (nf, nf, 3, 3)
+    nf = len(free)
+    h = sub.transpose(0, 2, 1, 3).reshape(3 * nf, 3 * nf)
+    h = 0.5 * (h + h.T)
+    inv_sqrt_m = 1.0 / np.sqrt(np.repeat(masses, 3))
+    h_mw = h * np.outer(inv_sqrt_m, inv_sqrt_m)  # Hartree/(Bohr^2 amu)
+    eigvals, eigvecs = np.linalg.eigh(h_mw)
+    # Hartree/(Bohr^2 amu) -> s^-2 -> cm^-1.
+    to_si = nist.HARTREE2J / (nist.ATOMIC_MASS * (nist.BOHR_SI**2))
+    nu_cm = np.sqrt(np.abs(eigvals) * to_si) / (2.0 * np.pi * nist.LIGHT_SPEED_SI * 100)
+    imag_mask = eigvals < 0
+    imag = np.asarray(nu_cm[imag_mask])
+    real = np.asarray(nu_cm[~imag_mask])
+    imag_mode = None
+    imag_modes = None
+    if imag.size:
+        indices = np.flatnonzero(imag_mask)
+        order = np.argsort(imag)
+        imag = imag[order]
+        full_modes = []
+        for idx in indices[order]:
+            vec = (eigvecs[:, idx] * inv_sqrt_m).reshape(nf, 3)
+            full = np.zeros((n, 3))
+            full[free] = vec
+            full_modes.append(full)
+        imag_modes = np.asarray(full_modes)
+        imag_mode = imag_modes[-1]
+
+    mass_kg = float(np.sum(mf.mol.atom_mass_list())) * 1e-3
+    return FrequencyResult(
+        frequencies_cm=np.sort(real[real > 0]),
+        imaginary_cm=imag,
+        electronic_hartree=e,
+        molar_mass_kg=mass_kg,
+        rotational_temperatures_k=None,
+        linear=False,
         imaginary_mode=imag_mode,
         imaginary_modes=imag_modes,
         geometry_fingerprint=frequency_geometry_fingerprint(cluster),

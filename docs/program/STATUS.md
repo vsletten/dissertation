@@ -4,6 +4,15 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-20 — fable — A3-barrier-ladder claimed + platform half landed:
+  crystallographic cluster builder (`qm/quarry/crystal.py`, deck-cell
+  parser + bond-valence termination/charge + n_intact pruning + frozen
+  shell), PHVA frequencies for frozen clusters, and the per-cell campaign
+  driver (`qm/scripts/phase2_ladder.py`). Pilot cell oss-neutral running
+  on the GPU; barriers land in follow-up per-family PRs.
+- 2026-08-20 — fable — Card QI1: campaign drivers must enforce their own
+  thread caps + niceness (a live worker probe ran 22 threads past the
+  prompt-level cap — prompts don't bind subprocesses).
 - 2026-08-20 — fable — Board refresh: B1+D2a+A7 done, B2 READY (keystone
   merged), A3 active. PROTOCOL amendment: incremental bookkeeping
   (the D2a iteration-ceiling lesson). Hermes worker-profile max_turns
@@ -46,3 +55,9 @@ Deviations get a `DEVIATION:` note; details live in the card.*
   (barrier-ladder build plan: crystallographic cluster builder from the
   kaolinite deck cell, per-cell campaign driver, by_count emission,
   CALC-002..005 closure); new READY card A3-barrier-ladder.
+- 2026-08-19 — fable — Track E opened: Ar-in-muscovite scoping doc
+  landed (docs/scoping/ar-muscovite.md — the 1998 Sletten & Onstott
+  circle, Nteme 2022–24 barriers, the uncomputed middle, Villa
+  arbitration). New cards: E1-muscovite-deck (READY, published numbers
+  only) and B5-execution-schedule (blocked: B2 — piecewise-isothermal
+  T(t), the one engine feature the flagship needs).
