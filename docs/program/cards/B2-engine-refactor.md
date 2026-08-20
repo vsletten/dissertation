@@ -20,6 +20,33 @@ strategies in this card (that's B3) — this card is pure refactor.
   schema-v2 round-trip tests; v1 decks load unchanged.
 
 ## Progress
+
+- 2026-08-20 — hermes worker 1 (sol) — claimed; goldens captured BEFORE
+  refactor; ExactCtmc behind the UpdateStrategy trait; v2 shim;
+  splitmix64 vectors; 20k byte-identical parity; then adversarial
+  self-review surfaced 7 real findings; ceiling hit with precise
+  handoff (incremental-bookkeeping amendment held).
+- 2026-08-20 — hermes worker 2 (sol) — continuation from dirty diff with
+  supervision-dispositioned findings: all 7 addressed. DEVIATION
+  (dispositioned): shipped kossel 8^3 deck exhausts at 1,512 events, so
+  the 20k parity gate uses enlarged dims AND a second gate pins the
+  shipped deck's complete natural lifetime byte-identical
+  (sha256 687fd5bf...) — full-lifetime parity is the stronger claim.
+  Ceiling hit at final mechanical closeout.
+- 2026-08-20 — fable — gates rerun on final state (workspace tests,
+  clippy -D warnings, both --paranoid decks), final edit committed,
+  closeout executed.
+
+## Result
+
+RFC-001 implemented: engine core refactored behind UpdateStrategy with
+ExactCtmc as the sole executable strategy (others compile-rejected at
+selection); schema v2 parses fully (all RFC surfaces incl. select_mode,
+source rules, rekind, per-strategy blocks); v1 decks load via pure
+load-time shim with full compiled-table equality tests; determinism
+contract enforced (draw-order preserved — parity byte-identical on
+kaolinite 20k, kossel 20k enlarged, kossel full lifetime; splitmix64
+test vectors green). B3 (conformance strategies) is unblocked.
 - 2026-08-20 — verification stage green: `cargo test -j 16 --workspace`
   (54 tests), `cargo build -j 16 --workspace`, and clippy across all targets
   with warnings denied. CLI `--paranoid` completed 5,000 kaolinite steps and

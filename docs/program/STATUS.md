@@ -4,6 +4,11 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-20 — hermes x2 + fable — B2 DONE: petra engine behind the
+  UpdateStrategy trait, schema v2 complete, bitwise parity green on
+  three gates (incl. shipped-kossel full-lifetime). Two-worker relay +
+  supervision closeout; 7 self-review findings all dispositioned and
+  fixed. B3 unblocked.
 - 2026-08-20 — fable — Board refresh: B1+D2a+A7 done, B2 READY (keystone
   merged), A3 active. PROTOCOL amendment: incremental bookkeeping
   (the D2a iteration-ceiling lesson). Hermes worker-profile max_turns
