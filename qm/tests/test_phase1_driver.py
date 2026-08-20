@@ -4,6 +4,7 @@ import numpy as np
 
 from quarry.clusters import Cluster
 from quarry.pipeline import DftSettings
+from quarry.rates import Thermo
 from scripts import phase1_xiao_lasaga as phase1
 
 CHEAP = DftSettings(xc="hf", basis="sto-3g")
@@ -86,6 +87,24 @@ def test_endpoint_in_basin_requires_exactly_one_match():
             2,
             phase1.HYDROLYZED_BASIN,
         )
+
+
+def test_sequential_barrier_metrics_separate_local_and_profile_barriers():
+    def thermo(gibbs_kj: float) -> Thermo:
+        return Thermo(gibbs_kj, 0.0, 0.0, 0.0, 298.15)
+
+    metrics = phase1.sequential_barrier_metrics(
+        reactant=thermo(0.0),
+        intermediate=thermo(-20.0),
+        addition_ts=thermo(70.0),
+        cleavage_ts=thermo(100.0),
+    )
+
+    assert metrics["addition_dG_dagger_kj"] == 70.0
+    assert metrics["cleavage_dG_dagger_kj"] == 120.0
+    assert metrics["overall_profile_dG_dagger_kj"] == 100.0
+    assert metrics["rate_limiting_local_step"] == "cleavage"
+    assert metrics["highest_profile_ts"] == "cleavage"
 
 
 def test_proton_neb_fallback_reconstructs_resumed_approach_seed(monkeypatch, tmp_path):

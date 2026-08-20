@@ -54,7 +54,7 @@ from quarry.pipeline import (  # noqa: E402
     frequencies,
     optimize,
 )
-from quarry.rates import rate_from_thermo, thermo_from_frequencies  # noqa: E402
+from quarry.rates import Thermo, rate_from_thermo, thermo_from_frequencies  # noqa: E402
 from quarry.store import Store  # noqa: E402
 from quarry.ts import (  # noqa: E402
     ScanNoMaximumError,
@@ -206,6 +206,41 @@ def endpoint_in_basin(
         detail = f"basin {signature}, found {len(matches)}"
         raise RuntimeError(f"expected one quick-IRC endpoint in {detail}")
     return matches[0]
+
+
+def sequential_barrier_metrics(
+    reactant: Thermo,
+    intermediate: Thermo,
+    addition_ts: Thermo,
+    cleavage_ts: Thermo,
+) -> dict[str, float | str]:
+    """Free-energy profile metrics for R → I → P through two saddles.
+
+    Local forward barriers identify the slow elementary step.  The overall
+    profile barrier, used for the like-for-like comparison with a concerted
+    reactant-referenced barrier, is the highest saddle above the initial
+    reactant complex.  Both are reported because a stabilized intermediate can
+    make those two notions differ substantially.
+    """
+    addition_local = addition_ts.gibbs - reactant.gibbs
+    cleavage_local = cleavage_ts.gibbs - intermediate.gibbs
+    addition_from_reactant = addition_local
+    cleavage_from_reactant = cleavage_ts.gibbs - reactant.gibbs
+    local = {"addition": addition_local, "cleavage": cleavage_local}
+    profile = {
+        "addition": addition_from_reactant,
+        "cleavage": cleavage_from_reactant,
+    }
+    return {
+        "intermediate_dG_vs_reactant_kj": intermediate.gibbs - reactant.gibbs,
+        "addition_dG_dagger_kj": addition_local,
+        "cleavage_dG_dagger_kj": cleavage_local,
+        "addition_ts_dG_vs_reactant_kj": addition_from_reactant,
+        "cleavage_ts_dG_vs_reactant_kj": cleavage_from_reactant,
+        "overall_profile_dG_dagger_kj": max(profile.values()),
+        "rate_limiting_local_step": max(local, key=local.__getitem__),
+        "highest_profile_ts": max(profile, key=profile.__getitem__),
+    }
 
 
 def proton_neb_guess(
