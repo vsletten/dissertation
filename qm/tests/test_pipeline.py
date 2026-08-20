@@ -66,6 +66,34 @@ def test_gpu_hessian_assertion_retries_only_hessian_on_cpu(monkeypatch):
     assert np.array_equal(hessian, np.eye(3))
 
 
+def test_gpu_hessian_unrelated_assertion_is_not_masked(monkeypatch):
+    """A non-contiguity AssertionError must propagate, not trigger CPU fallback."""
+
+    class FakeHessian:
+        def kernel(self):
+            raise AssertionError("some unrelated programming bug")
+
+    class FakeScf:
+        converged = True
+
+        def kernel(self):
+            return -1.0
+
+        def Hessian(self):
+            return FakeHessian()
+
+    monkeypatch.setattr(pipeline, "build_mol", lambda cluster, settings: object())
+    monkeypatch.setattr(
+        pipeline,
+        "_make_scf",
+        lambda mol, settings: FakeScf(),
+    )
+    gpu = DftSettings(xc="b3lyp", basis="sto-3g", use_gpu=True)
+
+    with pytest.raises(AssertionError, match="unrelated programming bug"):
+        pipeline._scf_hessian(water(), gpu)
+
+
 @pytest.fixture(scope="module")
 def opt_water():
     return optimize(water(), CHEAP)

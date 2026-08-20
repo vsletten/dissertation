@@ -502,7 +502,7 @@ def main() -> int:
         f"complete: {len(results)} results, {len(failures)} failures -> "
         f"{RUN_ROOT / 'results.json'}"
     )
-    return 1 if failures and not results else 0
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
