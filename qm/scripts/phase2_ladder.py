@@ -84,6 +84,26 @@ def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
+def preload_cutensor() -> None:
+    """Load the cutensor-cu12 wheel's libraries with RTLD_GLOBAL.
+
+    The wheel lands in site-packages/cutensor/lib, which is not on the
+    dynamic loader's path; cupy then silently falls back to its einsum
+    contraction engine, which materializes temporaries that OOM a 24 GB
+    card at ~60 atoms/def2-svp (seen live, twice). Preloading by
+    absolute path makes cupy's dlopen find them regardless of
+    LD_LIBRARY_PATH. Harmless no-op when the wheel is absent (CPU runs).
+    """
+    import contextlib
+    import ctypes
+    import sysconfig
+
+    libdir = Path(sysconfig.get_paths()["purelib"]) / "cutensor" / "lib"
+    for name in ("libcutensor.so.2", "libcutensorMg.so.2"):
+        with contextlib.suppress(OSError):
+            ctypes.CDLL(str(libdir / name), mode=ctypes.RTLD_GLOBAL)
+
+
 def trim_gpu_pool() -> None:
     """Return CuPy pool blocks to the CUDA driver between stages.
 
@@ -300,6 +320,8 @@ def main() -> int:
     args = ap.parse_args()
 
     os.environ.setdefault("OMP_NUM_THREADS", str(args.threads))
+    if args.gpu:
+        preload_cutensor()
     qm_root = Path(__file__).resolve().parent.parent
     deck = Path(args.deck) if args.deck else (
         qm_root.parent / "petra" / "examples" / "kaolinite.toml"
