@@ -24,6 +24,8 @@ from quarry.pipeline import (
     _make_scf,
     build_mol,
     frequencies,
+    frequency_geometry_fingerprint,
+    frequency_settings_fingerprint,
     optimize,
 )
 
@@ -69,6 +71,63 @@ def make_ase_calculator(settings: DftSettings, charge: int, spin: int):
     return PyscfCalculator()
 
 
+def reaction_path_vector(reactant: Cluster, product: Cluster) -> np.ndarray:
+    """Normalized Cartesian endpoint displacement with rigid motion removed.
+
+    The vector is a physically motivated initial mode for a directed Cartesian
+    Sella search.  Endpoint optimizations may independently rotate or translate
+    a cluster, so that meaningless motion is removed before differencing.  Any
+    frozen shell is excluded from the mode.
+    """
+    from ase import Atoms
+    from ase.build.rotate import minimize_rotation_and_translation
+
+    if reactant.symbols != product.symbols:
+        raise ValueError("reactant/product atom order differs")
+    if reactant.charge != product.charge or reactant.spin != product.spin:
+        raise ValueError("reactant/product electronic states differ")
+    if reactant.frozen_indices != product.frozen_indices:
+        raise ValueError("reactant/product frozen atom sets differ")
+
+    start = Atoms(symbols=reactant.symbols, positions=reactant.coords)
+    end = Atoms(symbols=product.symbols, positions=product.coords)
+    minimize_rotation_and_translation(start, end)
+    mode = end.positions - start.positions
+    if reactant.frozen_indices:
+        mode[np.asarray(reactant.frozen_indices, dtype=int)] = 0.0
+    norm = float(np.linalg.norm(mode))
+    if not np.isfinite(norm) or norm < 1e-12:
+        raise ValueError("reactant/product displacement has no non-rigid component")
+    return mode / norm
+
+
+def reaction_aligned_imaginary_mode(
+    frequency: FrequencyResult,
+    reaction_vector: np.ndarray,
+) -> tuple[np.ndarray, float]:
+    """Imaginary mode with the largest absolute overlap to a reaction vector."""
+    modes = frequency.imaginary_modes
+    if modes is None:
+        if frequency.n_imaginary == 1 and frequency.imaginary_mode is not None:
+            modes = frequency.imaginary_mode[None, ...]
+        else:
+            raise ValueError("all imaginary modes are required for reaction alignment")
+    vector = np.asarray(reaction_vector, dtype=float)
+    if modes.ndim != 3 or vector.shape != modes.shape[1:]:
+        raise ValueError("reaction vector and imaginary modes have incompatible shapes")
+    vector_norm = float(np.linalg.norm(vector))
+    if not np.isfinite(vector_norm) or vector_norm < 1e-12:
+        raise ValueError("reaction vector is non-finite or zero")
+    unit_vector = vector.reshape(-1) / vector_norm
+    flattened = modes.reshape(modes.shape[0], -1)
+    mode_norms = np.linalg.norm(flattened, axis=1)
+    if np.any(~np.isfinite(mode_norms)) or np.any(mode_norms < 1e-12):
+        raise ValueError("imaginary modes contain a non-finite or zero vector")
+    overlaps = np.abs((flattened / mode_norms[:, None]) @ unit_vector)
+    selected = int(np.argmax(overlaps))
+    return modes[selected], float(overlaps[selected])
+
+
 def find_ts(
     cluster: Cluster,
     settings: DftSettings,
@@ -76,25 +135,56 @@ def find_ts(
     fmax_ev_a: float = 0.02,
     max_steps: int = 300,
     trajectory: str | None = None,
+    initial_mode: np.ndarray | None = None,
+    internal: bool = True,
 ) -> Cluster:
     """First-order saddle search (Sella, partitioned RFO) from a TS guess.
 
     ``fmax_ev_a`` is the ASE force-convergence threshold in eV/Angstrom
     (0.02 ~ 4e-4 Hartree/Bohr). Frozen atoms in the cluster are held
-    fixed (the lattice-resistance contract). Raises if Sella does not
-    converge within ``max_steps``.
+    fixed (the lattice-resistance contract). ``initial_mode`` supplies a
+    normalized Cartesian reaction direction, normally from
+    :func:`reaction_path_vector`; directed searches must use
+    ``internal=False`` so the mode and optimizer basis agree. Raises if Sella
+    does not converge within ``max_steps``.
     """
     from ase import Atoms
     from ase.constraints import FixAtoms
     from sella import Sella
 
+    mode = None
+    if initial_mode is not None:
+        mode = np.asarray(initial_mode, dtype=float)
+        if mode.shape != cluster.coords.shape:
+            expected = cluster.coords.shape
+            detail = f"got {mode.shape}, expected {expected}"
+            raise ValueError(f"initial_mode shape mismatch: {detail}")
+        if internal:
+            raise ValueError("a Cartesian initial_mode requires internal=False")
+        if not np.all(np.isfinite(mode)):
+            raise ValueError("initial_mode contains non-finite values")
+        mode_norm = float(np.linalg.norm(mode))
+        if mode_norm < 1e-12:
+            raise ValueError("initial_mode has zero norm")
+        mode = mode / mode_norm
+
     atoms = Atoms(symbols=cluster.symbols, positions=cluster.coords)
     atoms.calc = make_ase_calculator(settings, cluster.charge, cluster.spin)
     if cluster.frozen_indices:
         atoms.set_constraint(FixAtoms(indices=cluster.frozen_indices))
-    # internal=True uses Sella's internal coordinates — the right choice
-    # for molecular clusters; order=1 requests a first-order saddle.
-    dyn = Sella(atoms, order=1, internal=True, trajectory=trajectory)
+    # Internal coordinates are the default for an undirected molecular search.
+    # A directed endpoint mode is Cartesian and therefore opts into the
+    # Cartesian PES explicitly.
+    dyn = Sella(atoms, order=1, internal=internal, trajectory=trajectory)
+    if mode is not None:
+        free_basis = dyn.pes.get_Ufree()
+        if free_basis is None:
+            raise RuntimeError("Sella did not expose a free-coordinate basis")
+        projected = mode.reshape(-1) @ np.asarray(free_basis)
+        projected_norm = float(np.linalg.norm(projected))
+        if projected_norm < 1e-12:
+            raise ValueError("initial_mode has no component in the free coordinates")
+        dyn.pes.v0 = projected / projected_norm
     converged = dyn.run(fmax=fmax_ev_a, steps=max_steps)
     if converged is None:
         # Older ASE returned None from run(); fall back to the force test
@@ -135,6 +225,7 @@ def quick_irc(
     *,
     displacement_a: float = 0.15,
     max_steps: int = 200,
+    frequency: FrequencyResult | None = None,
     noise_floor_cm: float = 0.0,
 ) -> tuple[Cluster, Cluster]:
     """Displace ± along the imaginary mode and relax to the two minima.
@@ -142,10 +233,29 @@ def quick_irc(
     The cheap stand-in for a full IRC: confirms which basins the saddle
     connects. Returns (backward, forward) relaxed clusters.
     """
-    freq = verify_ts(ts, settings, noise_floor_cm=noise_floor_cm)
+    freq = (
+        frequency
+        if frequency is not None
+        else verify_ts(ts, settings, noise_floor_cm=noise_floor_cm)
+    )
+    if frequency is not None:
+        if freq.geometry_fingerprint != frequency_geometry_fingerprint(ts):
+            raise ValueError("precomputed frequency belongs to a different geometry")
+        if freq.settings_fingerprint != frequency_settings_fingerprint(settings):
+            raise ValueError("precomputed frequency used different DFT settings")
+        significant = freq.imaginary_cm[freq.imaginary_cm > noise_floor_cm]
+        if significant.size != 1:
+            raise RuntimeError(
+                f"{ts.name}: expected exactly 1 imaginary mode "
+                f"above {noise_floor_cm:.0f} cm^-1, found {significant.size}"
+            )
     mode = freq.imaginary_mode
     if mode is None:
         raise RuntimeError(f"{ts.name}: no imaginary-mode vector available")
+    if mode.shape != ts.coords.shape:
+        raise ValueError("imaginary-mode shape does not match TS coordinates")
+    if not np.all(np.isfinite(mode)) or float(np.linalg.norm(mode)) < 1e-12:
+        raise ValueError("imaginary-mode vector is non-finite or zero")
     step = displacement_a * mode / np.linalg.norm(mode)
     ends = []
     for sign, tag in ((-1.0, "back"), (+1.0, "fwd")):
@@ -330,6 +440,7 @@ def neb_ts_guess(
     pre_relax_steps: int = 80,
     optimizer_dt: float = 0.05,
     optimizer_maxstep: float = 0.05,
+    climb_optimizer: str = "mdmin",
 ) -> Cluster:
     """Climbing-image NEB between two basins; returns the peak image.
 
@@ -342,11 +453,12 @@ def neb_ts_guess(
 
     ``fmax_ev_a`` is deliberately loose — this produces a guess, and
     Sella does the tight convergence.  The band is first relaxed without a
-    climbing image, then the climb is enabled.  Both stages use bounded MDMin,
-    ASE's documented stable NEB optimizer: FIRE oscillated and repeatedly
-    re-inflated the force on the live al-neutral full-product band.  Both
-    bounded stages must converge; returning an arbitrary peak from an
-    exhausted optimizer is forbidden.
+    climbing image, then the climb is enabled.  Pre-relaxation uses bounded
+    MDMin. The climbing stage uses MDMin by default, ASE's bounded ODE
+    optimizer, or BFGS. ODE and BFGS are the measured fallbacks for a live
+    al-neutral associative band whose MDMin climb stalled. Both stages must
+    converge; returning an arbitrary peak from an exhausted optimizer is
+    forbidden.
     """
     from ase import Atoms
     from ase.build.rotate import minimize_rotation_and_translation
@@ -355,10 +467,12 @@ def neb_ts_guess(
         from ase.mep import NEB
     except ImportError:  # older ASE layout
         from ase.neb import NEB
-    from ase.optimize import MDMin
+    from ase.optimize import BFGS, MDMin
 
     if reactant.charge != product.charge or reactant.spin != product.spin:
         raise ValueError("reactant/product electronic states differ")
+    if climb_optimizer not in {"mdmin", "ode", "bfgs"}:
+        raise ValueError(f"unknown NEB climb optimizer '{climb_optimizer}'")
     images = [Atoms(symbols=reactant.symbols, positions=reactant.coords)]
     for _ in range(n_images - 2):
         images.append(images[0].copy())
@@ -394,11 +508,25 @@ def neb_ts_guess(
         )
 
     neb.climb = True
-    climbed = MDMin(
-        neb,  # type: ignore[arg-type] -- ASE optimizers accept NEB objects
-        dt=optimizer_dt,
-        maxstep=optimizer_maxstep,
-    ).run(fmax=fmax_ev_a, steps=max_steps)
+    if climb_optimizer == "mdmin":
+        climb = MDMin(
+            neb,  # type: ignore[arg-type] -- ASE optimizers accept NEB objects
+            dt=optimizer_dt,
+            maxstep=optimizer_maxstep,
+        )
+    elif climb_optimizer == "ode":
+        from ase.mep.neb import NEBOptimizer
+
+        climb = NEBOptimizer(
+            neb,  # type: ignore[arg-type] -- ASE accepts NEB objects
+            method="ODE",
+        )
+    else:
+        climb = BFGS(
+            neb,  # type: ignore[arg-type] -- ASE optimizers accept NEB objects
+            maxstep=optimizer_maxstep,
+        )
+    climbed = climb.run(fmax=fmax_ev_a, steps=max_steps)
     if not climbed:
         raise RuntimeError(
             "climbing-image NEB did not converge "

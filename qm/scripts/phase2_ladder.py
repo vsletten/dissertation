@@ -323,8 +323,10 @@ def main() -> int:
     if args.gpu:
         preload_cutensor()
     qm_root = Path(__file__).resolve().parent.parent
-    deck = Path(args.deck) if args.deck else (
-        qm_root.parent / "petra" / "examples" / "kaolinite.toml"
+    deck = (
+        Path(args.deck)
+        if args.deck
+        else (qm_root.parent / "petra" / "examples" / "kaolinite.toml")
     )
     settings = DftSettings(
         xc=args.xc, basis=args.basis, density_fit=True, use_gpu=args.gpu

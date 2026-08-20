@@ -441,7 +441,7 @@ def from_deck_cell(
                 f"cannot reach charge {target_charge}: need {-need} "
                 f"deprotonations, only {len(candidates)} candidates"
             )
-        for r in candidates[: -need]:
+        for r in candidates[:-need]:
             r[2] -= 1
             r[3] += 1.0
             log.append(f"deprotonated O {r[1]} for charge balance")

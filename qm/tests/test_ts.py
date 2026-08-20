@@ -19,7 +19,15 @@ from quarry.clusters import (
     merge,
     water,
 )
-from quarry.pipeline import DftSettings, energy, frequencies, optimize
+from quarry.pipeline import (
+    DftSettings,
+    FrequencyResult,
+    energy,
+    frequencies,
+    frequency_geometry_fingerprint,
+    frequency_settings_fingerprint,
+    optimize,
+)
 from quarry.ts import find_ts, make_ase_calculator, quick_irc, verify_ts
 
 CHEAP = DftSettings(xc="hf", basis="sto-3g")
@@ -81,6 +89,130 @@ class TestAseAdapter:
             e.append(shifted.get_potential_energy())
         f_numeric = -(e[0] - e[1]) / (2.0 * h)
         assert f_analytic == pytest.approx(f_numeric, abs=1e-3)
+
+
+class TestReactionPathVector:
+    def test_removes_rigid_motion_and_normalizes_internal_change(self):
+        from dataclasses import replace
+
+        from quarry.ts import reaction_path_vector
+
+        reactant = water()
+        angle = np.deg2rad(37.0)
+        rotation = np.array(
+            [
+                [np.cos(angle), -np.sin(angle), 0.0],
+                [np.sin(angle), np.cos(angle), 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+        product_coords = reactant.coords @ rotation.T + np.array([3.0, -2.0, 1.5])
+        product_coords[1] += np.array([0.20, 0.0, 0.0])
+        product = replace(reactant, coords=product_coords)
+
+        mode = reaction_path_vector(reactant, product)
+
+        assert mode.shape == reactant.coords.shape
+        assert np.linalg.norm(mode) == pytest.approx(1.0)
+        assert np.all(np.isfinite(mode))
+
+    def test_rejects_pure_rigid_motion(self):
+        from dataclasses import replace
+
+        from quarry.ts import reaction_path_vector
+
+        reactant = water()
+        product = replace(reactant, coords=reactant.coords + np.array([2.0, -1.0, 0.5]))
+        with pytest.raises(ValueError, match="no non-rigid component"):
+            reaction_path_vector(reactant, product)
+
+    def test_directed_find_requires_cartesian_coordinates(self):
+        with pytest.raises(ValueError, match="requires internal=False"):
+            find_ts(hcn_ts_guess(), CHEAP, initial_mode=np.ones((3, 3)))
+
+
+def test_quick_irc_reuses_precomputed_frequency(monkeypatch):
+    import quarry.ts as ts_mod
+
+    cluster = water()
+    frequency = FrequencyResult(
+        frequencies_cm=np.array([1000.0]),
+        imaginary_cm=np.array([500.0]),
+        electronic_hartree=-75.0,
+        molar_mass_kg=0.018,
+        rotational_temperatures_k=(1.0, 2.0, 3.0),
+        linear=False,
+        imaginary_mode=np.ones_like(cluster.coords),
+        geometry_fingerprint=frequency_geometry_fingerprint(cluster),
+        settings_fingerprint=frequency_settings_fingerprint(CHEAP),
+    )
+    monkeypatch.setattr(
+        ts_mod,
+        "verify_ts",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("frequency should be reused")
+        ),
+    )
+
+    def fake_optimize(endpoint, settings, **kwargs):
+        return endpoint
+
+    monkeypatch.setattr(ts_mod, "optimize", fake_optimize)
+
+    back, fwd = quick_irc(cluster, CHEAP, frequency=frequency)
+
+    assert not np.allclose(back.coords, fwd.coords)
+
+
+def test_quick_irc_rejects_stale_precomputed_frequency():
+    from dataclasses import replace
+
+    cluster = water()
+    stale_geometry = replace(cluster, coords=cluster.coords + 0.1)
+    stale = FrequencyResult(
+        frequencies_cm=np.array([1000.0]),
+        imaginary_cm=np.array([500.0]),
+        electronic_hartree=-75.0,
+        molar_mass_kg=0.018,
+        rotational_temperatures_k=(1.0, 2.0, 3.0),
+        linear=False,
+        imaginary_mode=np.ones_like(cluster.coords),
+        geometry_fingerprint=frequency_geometry_fingerprint(stale_geometry),
+        settings_fingerprint=frequency_settings_fingerprint(CHEAP),
+    )
+
+    with pytest.raises(ValueError, match="different geometry"):
+        quick_irc(cluster, CHEAP, frequency=stale)
+
+
+def test_reaction_aligned_imaginary_mode_beats_largest_frequency():
+    from quarry.ts import reaction_aligned_imaginary_mode
+
+    modes = np.array(
+        [
+            [[1.0, 0.0, 0.0]],
+            [[0.0, 1.0, 0.0]],
+            [[0.0, 0.0, 1.0]],
+        ]
+    )
+    frequency = FrequencyResult(
+        frequencies_cm=np.array([1000.0]),
+        imaginary_cm=np.array([50.0, 100.0, 500.0]),
+        electronic_hartree=-1.0,
+        molar_mass_kg=0.001,
+        rotational_temperatures_k=None,
+        linear=False,
+        imaginary_mode=modes[-1],
+        imaginary_modes=modes,
+    )
+
+    selected, overlap = reaction_aligned_imaginary_mode(
+        frequency,
+        np.array([[0.0, 2.0, 0.0]]),
+    )
+
+    assert np.array_equal(selected, modes[1])
+    assert overlap == pytest.approx(1.0)
 
 
 @pytest.mark.slow
@@ -211,6 +343,105 @@ class TestNebConvergence:
                 0.1,
                 5,
             )
+
+    def test_unconverged_ode_climb_is_rejected(self, monkeypatch):
+        import ase.mep
+        import ase.mep.neb
+        import ase.optimize
+
+        calls = []
+
+        class FakeNeb:
+            def __init__(self, images, **kwargs):
+                self.climb = kwargs["climb"]
+
+            def interpolate(self, *, method):
+                assert method == "idpp"
+
+        class FakeMdMin:
+            def __init__(self, neb, **kwargs):
+                calls.append(("mdmin", neb.climb, kwargs))
+
+            def run(self, *, fmax, steps):
+                return True
+
+        class FakeOde:
+            def __init__(self, neb, **kwargs):
+                calls.append(("ode", neb.climb, kwargs))
+
+            def run(self, *, fmax, steps):
+                calls.append(("ode-run", fmax, steps))
+                return False
+
+        monkeypatch.setattr(ase.mep, "NEB", FakeNeb)
+        monkeypatch.setattr(ase.optimize, "MDMin", FakeMdMin)
+        monkeypatch.setattr(ase.mep.neb, "NEBOptimizer", FakeOde)
+        reactant, product = self._endpoints()
+
+        with pytest.raises(RuntimeError, match="climbing-image"):
+            from quarry.ts import neb_ts_guess
+
+            neb_ts_guess(
+                reactant,
+                product,
+                CHEAP,
+                n_images=3,
+                pre_relax_steps=4,
+                max_steps=5,
+                climb_optimizer="ode",
+            )
+
+        assert calls == [
+            ("mdmin", False, {"dt": 0.05, "maxstep": 0.05}),
+            ("ode", True, {"method": "ODE"}),
+            ("ode-run", 0.1, 5),
+        ]
+
+    def test_unconverged_bfgs_climb_is_rejected(self, monkeypatch):
+        import ase.mep
+        import ase.optimize
+
+        calls = []
+
+        class FakeNeb:
+            def __init__(self, images, **kwargs):
+                self.climb = kwargs["climb"]
+
+            def interpolate(self, *, method):
+                assert method == "idpp"
+
+        class FakeMdMin:
+            def __init__(self, neb, **kwargs):
+                pass
+
+            def run(self, *, fmax, steps):
+                return True
+
+        class FakeBfgs:
+            def __init__(self, neb, **kwargs):
+                calls.append((neb.climb, kwargs))
+
+            def run(self, *, fmax, steps):
+                return False
+
+        monkeypatch.setattr(ase.mep, "NEB", FakeNeb)
+        monkeypatch.setattr(ase.optimize, "MDMin", FakeMdMin)
+        monkeypatch.setattr(ase.optimize, "BFGS", FakeBfgs)
+        reactant, product = self._endpoints()
+
+        with pytest.raises(RuntimeError, match="climbing-image"):
+            from quarry.ts import neb_ts_guess
+
+            neb_ts_guess(
+                reactant,
+                product,
+                CHEAP,
+                n_images=3,
+                max_steps=5,
+                climb_optimizer="bfgs",
+            )
+
+        assert calls == [(True, {"maxstep": 0.05})]
 
 
 class TestConstraints:

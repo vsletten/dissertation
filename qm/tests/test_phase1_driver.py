@@ -1,9 +1,13 @@
 """Fast orchestration gates for the Xiao & Lasaga Phase-1 driver."""
 
+import json
+from pathlib import Path
+
 import numpy as np
 
 from quarry.clusters import Cluster
-from quarry.pipeline import DftSettings
+from quarry.pipeline import DftSettings, FrequencyResult
+from quarry.rates import Thermo
 from scripts import phase1_xiao_lasaga as phase1
 
 CHEAP = DftSettings(xc="hf", basis="sto-3g")
@@ -48,6 +52,199 @@ def test_quick_irc_requires_reactant_and_hydrolyzed_basins():
     assert phase1.quick_irc_channel_reason(reactant, product, 2) is None
     reason = phase1.quick_irc_channel_reason(trapped, trapped, 2)
     assert reason is not None and "basin signatures" in reason
+
+
+def test_sequential_quick_irc_gates_each_elementary_step():
+    reactant = geometry("reactant", 3.2, si_obr=1.6)
+    reactant.coords[3:] += np.array([0.0, 3.0, 0.0])
+    intermediate = geometry("intermediate", 1.8, si_obr=1.8)
+    intermediate.coords[3] = np.array([1.8, 0.98, 0.0])
+    product = geometry("product", 1.7, si_obr=3.5)
+    product.coords[3] = np.array([3.5, 0.98, 0.0])
+
+    assert phase1.quick_irc_addition_reason(reactant, intermediate, 2) is None
+    assert phase1.quick_irc_cleavage_reason(intermediate, product, 2) is None
+    assert phase1.quick_irc_cleavage_reason(reactant, product, 2) is not None
+    assert phase1.quick_irc_addition_reason(intermediate, product, 2) is not None
+    assert phase1.quick_irc_cleavage_reason(reactant, intermediate, 2) is not None
+
+
+def test_endpoint_in_basin_requires_exactly_one_match():
+    reactant = geometry("reactant", 3.2, si_obr=1.6)
+    reactant.coords[3:] += np.array([0.0, 3.0, 0.0])
+    intermediate = geometry("intermediate", 1.8, si_obr=1.8)
+    intermediate.coords[3] = np.array([1.8, 0.98, 0.0])
+
+    assert (
+        phase1.endpoint_in_basin(
+            reactant,
+            intermediate,
+            2,
+            phase1.ASSOCIATIVE_BASIN,
+        )
+        is intermediate
+    )
+    with np.testing.assert_raises_regex(RuntimeError, "found 0"):
+        phase1.endpoint_in_basin(
+            reactant,
+            intermediate,
+            2,
+            phase1.HYDROLYZED_BASIN,
+        )
+
+
+def test_sequential_barrier_metrics_separate_local_and_profile_barriers():
+    def thermo(gibbs_kj: float) -> Thermo:
+        return Thermo(gibbs_kj, 0.0, 0.0, 0.0, 298.15)
+
+    metrics = phase1.sequential_barrier_metrics(
+        reactant=thermo(0.0),
+        intermediate=thermo(-20.0),
+        addition_ts=thermo(70.0),
+        cleavage_ts=thermo(100.0),
+    )
+
+    assert metrics["addition_dG_dagger_kj"] == 70.0
+    assert metrics["cleavage_dG_dagger_kj"] == 120.0
+    assert metrics["overall_profile_dG_dagger_kj"] == 100.0
+    assert metrics["rate_limiting_local_step"] == "cleavage"
+    assert metrics["highest_profile_ts"] == "cleavage"
+
+
+def test_basin_equivalence_rejects_same_signature_different_conformer():
+    from dataclasses import replace
+
+    canonical = geometry("intermediate", 1.8, si_obr=1.8)
+    canonical.coords[3] = np.array([1.8, 0.98, 0.0])
+    changed_coords = canonical.coords.copy()
+    changed_coords[4] += np.array([0.0, 0.0, 1.5])
+    candidate = replace(canonical, coords=changed_coords)
+
+    assert phase1.hydrolysis_basin_signature(candidate, 2) == (phase1.ASSOCIATIVE_BASIN)
+    reason = phase1.basin_equivalence_reason(
+        candidate,
+        canonical,
+        [0, 1, 2, 3, 4],
+        candidate_energy_hartree=-100.0,
+        canonical_energy_hartree=-100.0,
+    )
+    assert reason is not None and "RMSD" in reason
+
+
+def test_begin_sequential_run_quarantines_stale_final_outputs(tmp_path):
+    (tmp_path / "results.json").write_text("stale")
+    (tmp_path / "store.sqlite").write_text("stale")
+
+    phase1.begin_sequential_run(tmp_path)
+
+    assert not (tmp_path / "results.json").exists()
+    assert not (tmp_path / "store.sqlite").exists()
+    assert len(list(tmp_path.glob("results.superseded-*.json"))) == 1
+    assert len(list(tmp_path.glob("store.superseded-*.sqlite"))) == 1
+    status = json.loads((tmp_path / "run_status.json").read_text())
+    assert status["status"] == "running"
+
+
+def test_sequential_closeout_writes_gated_profile(monkeypatch, tmp_path):
+    reactant = geometry("complex", 3.2, si_obr=1.6)
+    reactant.coords[3:] += np.array([0.0, 3.0, 0.0])
+    intermediate = geometry("intermediate", 1.8, si_obr=1.8)
+    intermediate.coords[3] = np.array([1.8, 0.98, 0.0])
+    product = geometry("product", 1.7, si_obr=3.5)
+    product.coords[3] = np.array([3.5, 0.98, 0.0])
+    addition_guess = geometry("addition-guess", 2.0, si_obr=1.7)
+    addition_ts = geometry("addition-ts", 2.0, si_obr=1.7)
+    cleavage_ts = geometry("cleavage-ts", 1.8, si_obr=2.0)
+
+    def frequency(cluster, electronic, imaginary=()):
+        return FrequencyResult(
+            frequencies_cm=np.array([300.0, 700.0, 1100.0]),
+            imaginary_cm=np.array(imaginary),
+            electronic_hartree=electronic,
+            molar_mass_kg=0.1,
+            rotational_temperatures_k=(1.0, 2.0, 3.0),
+            linear=False,
+            imaginary_mode=(
+                np.ones_like(cluster.coords) if len(imaginary) == 1 else None
+            ),
+        )
+
+    frequencies_by_name = {
+        "complex": frequency(reactant, -100.00),
+        "intermediate": frequency(intermediate, -100.01),
+        "addition-ts": frequency(addition_ts, -99.96, (500.0,)),
+        "cleavage-ts": frequency(cleavage_ts, -99.95, (300.0,)),
+    }
+
+    monkeypatch.setattr(phase1, "neb_ts_guess", lambda *args, **kwargs: addition_guess)
+    monkeypatch.setattr(phase1, "find_ts", lambda *args, **kwargs: addition_ts)
+    monkeypatch.setattr(
+        phase1,
+        "quick_irc",
+        lambda *args, **kwargs: (reactant, intermediate),
+    )
+    monkeypatch.setattr(
+        phase1,
+        "frequencies",
+        lambda cluster, settings: frequencies_by_name[cluster.name],
+    )
+    monkeypatch.setattr(
+        phase1,
+        "energy",
+        lambda cluster, settings: frequencies_by_name[cluster.name].electronic_hartree,
+    )
+
+    class FakeStore:
+        def __init__(self, path):
+            self.path = Path(path)
+            self.path.touch()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def add_structure(self, *args, **kwargs):
+            return 1
+
+        def add_job(self, *args, **kwargs):
+            return 1
+
+        def set_job_status(self, *args, **kwargs):
+            return None
+
+        def add_result(self, *args, **kwargs):
+            return None
+
+    monkeypatch.setattr(phase1, "Store", FakeStore)
+
+    (tmp_path / "results.json").write_text("stale")
+    (tmp_path / "store.sqlite").write_text("stale")
+    status = phase1.finish_al_neutral_sequential(
+        complex_opt=reactant,
+        cleavage_ts=cleavage_ts,
+        cleavage_freq=frequencies_by_name["cleavage-ts"],
+        cleavage_back=intermediate,
+        cleavage_fwd=product,
+        settings=CHEAP,
+        run_dir=tmp_path,
+        ow_index=2,
+        temperature=298.15,
+        dimer_opt=reactant,
+        attacker_opt=reactant,
+    )
+
+    results = json.loads((tmp_path / "results.json").read_text())
+    assert status == 0
+    assert results["mechanism"] == "sequential-associative"
+    assert set(results["steps"]) == {"addition", "cleavage"}
+    assert results["profile"]["highest_profile_ts"] == "cleavage"
+    assert (tmp_path / "store.sqlite").exists()
+    run_status = json.loads((tmp_path / "run_status.json").read_text())
+    assert run_status["status"] == "completed"
+    assert len(list(tmp_path.glob("results.superseded-*.json"))) == 1
+    assert len(list(tmp_path.glob("store.superseded-*.sqlite"))) == 1
 
 
 def test_proton_neb_fallback_reconstructs_resumed_approach_seed(monkeypatch, tmp_path):
