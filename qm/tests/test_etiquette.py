@@ -92,7 +92,7 @@ def test_all_campaign_entrypoints_bootstrap_before_heavy_imports():
         ]
         main_guards = [
             node
-            for node in ast.walk(tree)
+            for node in tree.body
             if isinstance(node, ast.If)
             and isinstance(node.test, ast.Compare)
             and isinstance(node.test.left, ast.Name)
@@ -104,7 +104,10 @@ def test_all_campaign_entrypoints_bootstrap_before_heavy_imports():
             and node.test.comparators[0].value == "__main__"
         ]
         guarded_nodes = {
-            nested for guard in main_guards for nested in ast.walk(guard)
+            nested
+            for guard in main_guards
+            for statement in guard.body
+            for nested in ast.walk(statement)
         }
         heavy_imports = [
             match.start()
