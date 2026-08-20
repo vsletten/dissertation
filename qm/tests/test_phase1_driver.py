@@ -177,7 +177,21 @@ def test_sequential_closeout_writes_gated_profile(monkeypatch, tmp_path):
     }
 
     monkeypatch.setattr(phase1, "neb_ts_guess", lambda *args, **kwargs: addition_guess)
-    monkeypatch.setattr(phase1, "find_ts", lambda *args, **kwargs: addition_ts)
+    relaxed_calls = []
+
+    def fake_relax(cluster, settings, **kwargs):
+        relaxed_calls.append((cluster, kwargs))
+        return addition_guess
+
+    monkeypatch.setattr(phase1, "relax_at_fixed_distances", fake_relax)
+
+    def fake_find_ts(cluster, settings, **kwargs):
+        assert cluster is addition_guess
+        assert kwargs["internal"] is False
+        assert kwargs["initial_mode"].shape == addition_guess.coords.shape
+        return addition_ts
+
+    monkeypatch.setattr(phase1, "find_ts", fake_find_ts)
     monkeypatch.setattr(
         phase1,
         "quick_irc",
@@ -237,6 +251,8 @@ def test_sequential_closeout_writes_gated_profile(monkeypatch, tmp_path):
 
     results = json.loads((tmp_path / "results.json").read_text())
     assert status == 0
+    assert len(relaxed_calls) == 1
+    assert len(relaxed_calls[0][1]["fixed_distances"]) == 2
     assert results["mechanism"] == "sequential-associative"
     assert set(results["steps"]) == {"addition", "cleavage"}
     assert results["profile"]["highest_profile_ts"] == "cleavage"

@@ -65,6 +65,7 @@ from quarry.ts import (  # noqa: E402
     neb_ts_guess,
     quick_irc,
     reaction_path_vector,
+    relax_at_fixed_distances,
     scan_to_maximum,
     scan_ts_guess,
 )
@@ -540,19 +541,69 @@ def finish_al_neutral_sequential(
             climb_optimizer="ode",
         ),
     )
+    transfer_h = min(
+        (ow_index + 1, ow_index + 2),
+        key=lambda i: np.linalg.norm(
+            addition_guess.coords[i] - addition_guess.coords[BR_INDEX]
+        ),
+    )
+    pinned_distances = [
+        (
+            SI_INDEX,
+            ow_index,
+            float(
+                np.linalg.norm(
+                    addition_guess.coords[SI_INDEX]
+                    - addition_guess.coords[ow_index]
+                )
+            ),
+        ),
+        (
+            BR_INDEX,
+            transfer_h,
+            float(
+                np.linalg.norm(
+                    addition_guess.coords[BR_INDEX] - addition_guess.coords[transfer_h]
+                )
+            ),
+        ),
+    ]
+    log("stage 4c: exact two-coordinate relaxation of addition-peak spectators")
+    addition_relaxed_guess = checkpointed(
+        run_dir / "addition_pinned_relaxed.xyz",
+        addition_guess,
+        lambda: relax_at_fixed_distances(
+            addition_guess,
+            settings,
+            fixed_distances=pinned_distances,
+            fmax_ev_a=0.02,
+            max_steps=120,
+            optimizer_maxstep=0.05,
+            trajectory=str(run_dir / "addition_pinned_relax.traj"),
+        ),
+    )
+    reactive_core = sorted(
+        {BR_INDEX, SI_INDEX, 2, ow_index, ow_index + 1, ow_index + 2}
+    )
     addition_ts_path = run_dir / "addition_directed_ts.xyz"
     addition_ts = checkpointed(
         addition_ts_path,
-        addition_guess,
+        addition_relaxed_guess,
         lambda: find_ts(
-            addition_guess,
+            addition_relaxed_guess,
             settings,
             trajectory=str(run_dir / "addition_directed_sella.traj"),
-            initial_mode=reaction_path_vector(complex_opt, intermediate),
+            initial_mode=reaction_path_vector(
+                complex_opt,
+                intermediate,
+                active_indices=reactive_core,
+            ),
             internal=False,
         ),
     )
-    addition_escape = channel_escape_reason(addition_guess, addition_ts, ow_index)
+    addition_escape = channel_escape_reason(
+        addition_relaxed_guess, addition_ts, ow_index
+    )
     if addition_escape:
         rejected = run_dir / (
             f"addition_directed_ts.rejected-channel-escape-{time.time_ns()}.xyz"
