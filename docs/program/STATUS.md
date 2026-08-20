@@ -101,4 +101,7 @@ Deviations get a `DEVIATION:` note; details live in the card.*
   POLICY v7 (open PR and STOP; watcher owns lifecycle; human-merge
   label) — the stale auto-merge/Sourcery wording was flagged by the
   cloud Hermes worker during its enrollment (it correctly refused to
-  follow it). Companion factory fixes landed in mission-control.
+  follow it). Companion fixes landed in `vsletten/mission-control`
+  commit `a2edf91`: `factory/hermes/cron/queue-drain.md` now points to
+  POLICY v7, and service activation moved to
+  `factory/services/activate.sh` for cloud-safe installation.

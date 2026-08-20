@@ -98,8 +98,9 @@ repairs, branch updates against main, and the squash-merge. Do NOT
 enable auto-merge, reply to or resolve review threads, poll checks, or
 merge locally; a worker racing the watcher corrupts both. To hold a PR
 for human/Fable review instead, add the `human-merge` label. A PR
-still open after ~48h means the watcher has stalled: flag it (the
-daily supervisor also watches for this). Background on the underlying
+still open after ~48h means the watcher has stalled: add the
+`needs-human` label to that PR; the daily `omnibus-supervisor` (07:50)
+also watches for this. Background on the underlying
 gates (four required checks, strict up-to-date, required conversation
 resolution): `.claude/learnings/` and the memory of PRs #12–#21.
 
