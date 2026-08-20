@@ -9,8 +9,8 @@
 
 ## Objective
 Phase 1 of docs/scoping/ar-muscovite.md §6: the minimal muscovite deck
-using published barriers only. Single-gallery 2M₁ reduction — K/vacancy/
-Ar40 interlayer gallery with divacancy hops (Em ≈ 66 kcal/mol, Nteme
+using published barriers only. Single-gallery 2M₁ reduction — K/vacancy/Ar40
+interlayer gallery with divacancy hops (Em ≈ 66 kcal/mol, Nteme
 et al. 2022), paired OH sites with bulk dehydroxylation kinetics
 (by_count steric table raising Ea with neighboring O_residual —
 Guggenheim mechanism), open c-axis boundary with fast Ar desorption at

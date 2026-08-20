@@ -31,5 +31,5 @@ unchanged within segments) plus implementation plus tests.
   (compat gate).
 
 ## Progress
-- 2026-08-19 — card created (fable), motivated by the ar-muscovite
+- 2026-08-19 — card created (fable), motivated by the Ar-muscovite
   scoping doc.
