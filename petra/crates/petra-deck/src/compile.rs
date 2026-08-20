@@ -818,9 +818,9 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         temperature,
         dims,
         boundary,
-        steps: deck.simulation.steps,
-        seed: deck.simulation.seed,
-        report_every: deck.simulation.report_every.unwrap_or(0),
+        steps: deck.execution.stop.steps.unwrap_or(0),
+        seed: deck.execution.ensemble.seed,
+        report_every: deck.observables.report_every,
     })
 }
 

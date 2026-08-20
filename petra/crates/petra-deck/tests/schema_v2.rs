@@ -210,6 +210,42 @@ fn non_ctmc_strategy_is_rejected_in_b2() {
 }
 
 #[test]
+fn every_rfc_strategy_parameter_block_parses() {
+    let text = V2.replace(
+        "[execution.stop]",
+        "[execution.ctmc]\n[execution.synchronous]\n[execution.metropolis]\ntemperature = 310.0\n[execution.pca]\n[execution.stop]",
+    );
+    let parsed: petra_deck::DeckFile = toml::from_str(&text).expect("all blocks parse");
+    assert!(parsed.execution.ctmc.is_some());
+    assert!(parsed.execution.synchronous.is_some());
+    assert_eq!(
+        parsed
+            .execution
+            .metropolis
+            .as_ref()
+            .and_then(|spec| spec.temperature),
+        Some(310.0)
+    );
+    assert!(parsed.execution.pca.is_some());
+}
+
+#[test]
+fn execution_parameter_blocks_validate_at_parse_time() {
+    let bad_temperature = V2.replace(
+        "[execution.stop]",
+        "[execution.metropolis]\ntemperature = -1.0\n[execution.stop]",
+    );
+    let error = toml::from_str::<petra_deck::DeckFile>(&bad_temperature)
+        .expect_err("negative temperature rejected");
+    assert!(error.to_string().contains("finite and positive"), "{error}");
+
+    let no_replicas = V2.replace("n_replicas = 1", "n_replicas = 0");
+    let error =
+        toml::from_str::<petra_deck::DeckFile>(&no_replicas).expect_err("zero replicas rejected");
+    assert!(error.to_string().contains("at least 1"), "{error}");
+}
+
+#[test]
 fn grid_v2_parses_but_waits_for_b3_compilation() {
     let text = r#"
 [deck]

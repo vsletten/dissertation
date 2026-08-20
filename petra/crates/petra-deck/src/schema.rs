@@ -22,7 +22,6 @@ pub struct DeckFile {
     pub thermo: ThermoSpec,
     pub init: Vec<InitPassSpec>,
     pub reactions: Vec<ReactionSpec>,
-    pub simulation: SimSpec,
     pub execution: ExecutionSpec,
     pub observables: ObservablesSpec,
 }
@@ -49,6 +48,12 @@ pub struct ExecutionSpec {
     #[serde(default)]
     pub ctmc: Option<CtmcSpec>,
     #[serde(default)]
+    pub synchronous: Option<SynchronousSpec>,
+    #[serde(default)]
+    pub metropolis: Option<MetropolisSpec>,
+    #[serde(default)]
+    pub pca: Option<PcaSpec>,
+    #[serde(default)]
     pub stop: StopSpec,
     #[serde(default)]
     pub ensemble: EnsembleSpec,
@@ -57,6 +62,21 @@ pub struct ExecutionSpec {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CtmcSpec {}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SynchronousSpec {}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MetropolisSpec {
+    #[serde(default)]
+    pub temperature: Option<f64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PcaSpec {}
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -198,6 +218,9 @@ impl DeckFile {
         let execution = ExecutionSpec {
             strategy: "ctmc".to_string(),
             ctmc: None,
+            synchronous: None,
+            metropolis: None,
+            pca: None,
             stop: StopSpec {
                 steps: Some(v1.simulation.steps),
                 time: None,
@@ -226,7 +249,6 @@ impl DeckFile {
             thermo: v1.thermo,
             init: v1.init,
             reactions: v1.reactions,
-            simulation: v1.simulation,
             execution,
             observables,
         }
@@ -296,11 +318,7 @@ impl DeckFile {
             }
             other => return Err(format!("unknown structure kind '{other}'")),
         };
-        let simulation = SimSpec {
-            steps: v2.execution.stop.steps.unwrap_or(0),
-            seed: v2.execution.ensemble.seed,
-            report_every: Some(v2.observables.report_every),
-        };
+        validate_execution(&v2.execution)?;
         Ok(Self {
             deck: v2.deck,
             structure_kind,
@@ -314,11 +332,37 @@ impl DeckFile {
             thermo: v2.dynamics.thermo,
             init,
             reactions: v2.dynamics.rules,
-            simulation,
             execution: v2.execution,
             observables: v2.observables,
         })
     }
+}
+
+fn validate_execution(execution: &ExecutionSpec) -> Result<(), String> {
+    match execution.strategy.as_str() {
+        "ctmc" | "synchronous" | "metropolis" | "pca" => {}
+        other => return Err(format!("unknown execution strategy '{other}'")),
+    }
+    if let Some(temperature) = execution
+        .metropolis
+        .as_ref()
+        .and_then(|spec| spec.temperature)
+    {
+        if !temperature.is_finite() || temperature <= 0.0 {
+            return Err(
+                "[execution.metropolis] temperature must be finite and positive".to_string(),
+            );
+        }
+    }
+    if let Some(time) = execution.stop.time {
+        if !time.is_finite() || time < 0.0 {
+            return Err("[execution.stop] time must be finite and non-negative".to_string());
+        }
+    }
+    if execution.ensemble.n_replicas == 0 {
+        return Err("[execution.ensemble] n_replicas must be at least 1".to_string());
+    }
+    Ok(())
 }
 
 impl<'de> Deserialize<'de> for DeckFile {
