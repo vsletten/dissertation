@@ -24,6 +24,8 @@ from quarry.pipeline import (
     _make_scf,
     build_mol,
     frequencies,
+    frequency_geometry_fingerprint,
+    frequency_settings_fingerprint,
     optimize,
 )
 
@@ -195,6 +197,11 @@ def quick_irc(
     connects. Returns (backward, forward) relaxed clusters.
     """
     freq = frequency if frequency is not None else verify_ts(ts, settings)
+    if frequency is not None:
+        if freq.geometry_fingerprint != frequency_geometry_fingerprint(ts):
+            raise ValueError("precomputed frequency belongs to a different geometry")
+        if freq.settings_fingerprint != frequency_settings_fingerprint(settings):
+            raise ValueError("precomputed frequency used different DFT settings")
     if freq.n_imaginary != 1:
         raise RuntimeError(
             f"{ts.name}: expected exactly 1 imaginary mode, found {freq.n_imaginary}"
@@ -202,6 +209,10 @@ def quick_irc(
     mode = freq.imaginary_mode
     if mode is None:
         raise RuntimeError(f"{ts.name}: no imaginary-mode vector available")
+    if mode.shape != ts.coords.shape:
+        raise ValueError("imaginary-mode shape does not match TS coordinates")
+    if not np.all(np.isfinite(mode)) or float(np.linalg.norm(mode)) < 1e-12:
+        raise ValueError("imaginary-mode vector is non-finite or zero")
     step = displacement_a * mode / np.linalg.norm(mode)
     ends = []
     for sign, tag in ((-1.0, "back"), (+1.0, "fwd")):

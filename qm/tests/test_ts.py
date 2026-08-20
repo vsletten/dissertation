@@ -19,7 +19,15 @@ from quarry.clusters import (
     merge,
     water,
 )
-from quarry.pipeline import DftSettings, FrequencyResult, energy, frequencies, optimize
+from quarry.pipeline import (
+    DftSettings,
+    FrequencyResult,
+    energy,
+    frequencies,
+    frequency_geometry_fingerprint,
+    frequency_settings_fingerprint,
+    optimize,
+)
 from quarry.ts import find_ts, make_ase_calculator, quick_irc, verify_ts
 
 CHEAP = DftSettings(xc="hf", basis="sto-3g")
@@ -135,6 +143,8 @@ def test_quick_irc_reuses_precomputed_frequency(monkeypatch):
         rotational_temperatures_k=(1.0, 2.0, 3.0),
         linear=False,
         imaginary_mode=np.ones_like(cluster.coords),
+        geometry_fingerprint=frequency_geometry_fingerprint(cluster),
+        settings_fingerprint=frequency_settings_fingerprint(CHEAP),
     )
     monkeypatch.setattr(
         ts_mod,
@@ -152,6 +162,27 @@ def test_quick_irc_reuses_precomputed_frequency(monkeypatch):
     back, fwd = quick_irc(cluster, CHEAP, frequency=frequency)
 
     assert not np.allclose(back.coords, fwd.coords)
+
+
+def test_quick_irc_rejects_stale_precomputed_frequency():
+    from dataclasses import replace
+
+    cluster = water()
+    stale_geometry = replace(cluster, coords=cluster.coords + 0.1)
+    stale = FrequencyResult(
+        frequencies_cm=np.array([1000.0]),
+        imaginary_cm=np.array([500.0]),
+        electronic_hartree=-75.0,
+        molar_mass_kg=0.018,
+        rotational_temperatures_k=(1.0, 2.0, 3.0),
+        linear=False,
+        imaginary_mode=np.ones_like(cluster.coords),
+        geometry_fingerprint=frequency_geometry_fingerprint(stale_geometry),
+        settings_fingerprint=frequency_settings_fingerprint(CHEAP),
+    )
+
+    with pytest.raises(ValueError, match="different geometry"):
+        quick_irc(cluster, CHEAP, frequency=stale)
 
 
 @pytest.mark.slow

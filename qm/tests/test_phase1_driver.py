@@ -64,6 +64,7 @@ def test_sequential_quick_irc_gates_each_elementary_step():
 
     assert phase1.quick_irc_addition_reason(reactant, intermediate, 2) is None
     assert phase1.quick_irc_cleavage_reason(intermediate, product, 2) is None
+    assert phase1.quick_irc_cleavage_reason(reactant, product, 2) is not None
     assert phase1.quick_irc_addition_reason(intermediate, product, 2) is not None
     assert phase1.quick_irc_cleavage_reason(reactant, intermediate, 2) is not None
 
@@ -110,6 +111,40 @@ def test_sequential_barrier_metrics_separate_local_and_profile_barriers():
     assert metrics["highest_profile_ts"] == "cleavage"
 
 
+def test_basin_equivalence_rejects_same_signature_different_conformer():
+    from dataclasses import replace
+
+    canonical = geometry("intermediate", 1.8, si_obr=1.8)
+    canonical.coords[3] = np.array([1.8, 0.98, 0.0])
+    changed_coords = canonical.coords.copy()
+    changed_coords[4] += np.array([0.0, 0.0, 1.5])
+    candidate = replace(canonical, coords=changed_coords)
+
+    assert phase1.hydrolysis_basin_signature(candidate, 2) == (phase1.ASSOCIATIVE_BASIN)
+    reason = phase1.basin_equivalence_reason(
+        candidate,
+        canonical,
+        [0, 1, 2, 3, 4],
+        candidate_energy_hartree=-100.0,
+        canonical_energy_hartree=-100.0,
+    )
+    assert reason is not None and "RMSD" in reason
+
+
+def test_begin_sequential_run_quarantines_stale_final_outputs(tmp_path):
+    (tmp_path / "results.json").write_text("stale")
+    (tmp_path / "store.sqlite").write_text("stale")
+
+    phase1.begin_sequential_run(tmp_path)
+
+    assert not (tmp_path / "results.json").exists()
+    assert not (tmp_path / "store.sqlite").exists()
+    assert len(list(tmp_path.glob("results.superseded-*.json"))) == 1
+    assert len(list(tmp_path.glob("store.superseded-*.sqlite"))) == 1
+    status = json.loads((tmp_path / "run_status.json").read_text())
+    assert status["status"] == "running"
+
+
 def test_sequential_closeout_writes_gated_profile(monkeypatch, tmp_path):
     reactant = geometry("complex", 3.2, si_obr=1.6)
     reactant.coords[3:] += np.array([0.0, 3.0, 0.0])
@@ -153,7 +188,11 @@ def test_sequential_closeout_writes_gated_profile(monkeypatch, tmp_path):
         "frequencies",
         lambda cluster, settings: frequencies_by_name[cluster.name],
     )
-    monkeypatch.setattr(phase1, "energy", lambda cluster, settings: -50.0)
+    monkeypatch.setattr(
+        phase1,
+        "energy",
+        lambda cluster, settings: frequencies_by_name[cluster.name].electronic_hartree,
+    )
 
     class FakeStore:
         def __init__(self, path):
@@ -180,6 +219,8 @@ def test_sequential_closeout_writes_gated_profile(monkeypatch, tmp_path):
 
     monkeypatch.setattr(phase1, "Store", FakeStore)
 
+    (tmp_path / "results.json").write_text("stale")
+    (tmp_path / "store.sqlite").write_text("stale")
     status = phase1.finish_al_neutral_sequential(
         complex_opt=reactant,
         cleavage_ts=cleavage_ts,
@@ -200,6 +241,10 @@ def test_sequential_closeout_writes_gated_profile(monkeypatch, tmp_path):
     assert set(results["steps"]) == {"addition", "cleavage"}
     assert results["profile"]["highest_profile_ts"] == "cleavage"
     assert (tmp_path / "store.sqlite").exists()
+    run_status = json.loads((tmp_path / "run_status.json").read_text())
+    assert run_status["status"] == "completed"
+    assert len(list(tmp_path.glob("results.superseded-*.json"))) == 1
+    assert len(list(tmp_path.glob("store.superseded-*.sqlite"))) == 1
 
 
 def test_proton_neb_fallback_reconstructs_resumed_approach_seed(monkeypatch, tmp_path):

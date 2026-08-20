@@ -13,6 +13,7 @@ default test gate exercises each rung on H2O/Si(OH)4.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import tempfile
 import warnings
@@ -155,10 +156,27 @@ class FrequencyResult:
     # None when there is no imaginary mode. This is the reaction mode a
     # TS hands to quick-IRC and to the tunneling correction.
     imaginary_mode: np.ndarray | None = None
+    geometry_fingerprint: str | None = None
+    settings_fingerprint: str | None = None
 
     @property
     def n_imaginary(self) -> int:
         return int(self.imaginary_cm.size)
+
+
+def frequency_geometry_fingerprint(cluster: Cluster) -> str:
+    """Exact geometry/electronic-state identity for reusable Hessian results."""
+    digest = hashlib.sha256()
+    digest.update("\0".join(cluster.symbols).encode())
+    digest.update(f"\0{cluster.charge}\0{cluster.spin}\0".encode())
+    coords = np.ascontiguousarray(cluster.coords, dtype="<f8")
+    digest.update(coords.tobytes())
+    return digest.hexdigest()
+
+
+def frequency_settings_fingerprint(settings: DftSettings) -> str:
+    """Stable identity for the electronic-structure settings of a Hessian."""
+    return repr(settings)
 
 
 def frequencies(cluster: Cluster, settings: DftSettings) -> FrequencyResult:
@@ -195,6 +213,8 @@ def frequencies(cluster: Cluster, settings: DftSettings) -> FrequencyResult:
         rotational_temperatures_k=rot[0],
         linear=rot[1],
         imaginary_mode=imag_mode,
+        geometry_fingerprint=frequency_geometry_fingerprint(cluster),
+        settings_fingerprint=frequency_settings_fingerprint(settings),
     )
 
 

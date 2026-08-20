@@ -82,6 +82,8 @@ SI_INDEX = 1
 KCAL = 4.184
 SI_NEUTRAL_DG_KJ = 113.048262
 SI_NEUTRAL_DG_KCAL = 27.019
+BASIN_CORE_RMSD_MAX_A = 0.30
+BASIN_ENERGY_DELTA_MAX_KJ = 5.0
 REACTANT_BASIN = (False, True, False)
 ASSOCIATIVE_BASIN = (True, True, True)
 HYDROLYZED_BASIN = (True, False, True)
@@ -212,6 +214,38 @@ def endpoint_in_basin(
     return matches[0]
 
 
+def basin_equivalence_reason(
+    candidate: Cluster,
+    canonical: Cluster,
+    atom_indices: list[int],
+    *,
+    candidate_energy_hartree: float,
+    canonical_energy_hartree: float,
+) -> str | None:
+    """Require the same reactive-core conformer and near-identical energy."""
+    from ase import Atoms
+    from ase.build.rotate import minimize_rotation_and_translation
+
+    if candidate.symbols != canonical.symbols:
+        return "atom order differs"
+    symbols = [candidate.symbols[i] for i in atom_indices]
+    candidate_core = Atoms(symbols, positions=candidate.coords[atom_indices])
+    canonical_core = Atoms(symbols, positions=canonical.coords[atom_indices])
+    minimize_rotation_and_translation(candidate_core, canonical_core)
+    delta = canonical_core.positions - candidate_core.positions
+    rmsd = float(np.sqrt(np.mean(np.sum(delta**2, axis=1))))
+    if rmsd > BASIN_CORE_RMSD_MAX_A:
+        return f"reactive-core RMSD {rmsd:.3f} A exceeds {BASIN_CORE_RMSD_MAX_A:.3f} A"
+    energy_delta = abs(candidate_energy_hartree - canonical_energy_hartree)
+    energy_delta *= HARTREE_TO_KJ
+    if energy_delta > BASIN_ENERGY_DELTA_MAX_KJ:
+        return (
+            f"energy delta {energy_delta:.3f} kJ/mol exceeds "
+            f"{BASIN_ENERGY_DELTA_MAX_KJ:.3f} kJ/mol"
+        )
+    return None
+
+
 def sequential_barrier_metrics(
     reactant: Thermo,
     intermediate: Thermo,
@@ -261,6 +295,35 @@ def thermo_result(freq: FrequencyResult, temperature: float) -> Thermo:
         ),
         linear=freq.linear,
     )
+
+
+def write_sequential_run_status(
+    run_dir: Path,
+    status: str,
+    *,
+    detail: str | None = None,
+) -> None:
+    """Atomically publish whether canonical sequential outputs are current."""
+    payload = {
+        "status": status,
+        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+    if detail is not None:
+        payload["detail"] = detail
+    path = run_dir / "run_status.json"
+    temporary = run_dir / "run_status.json.tmp"
+    temporary.write_text(json.dumps(payload, indent=2))
+    temporary.replace(path)
+
+
+def begin_sequential_run(run_dir: Path) -> None:
+    """Quarantine prior final outputs before a new gated attempt starts."""
+    stamp = f"{time.strftime('%Y%m%dT%H%M%S')}-{time.time_ns()}"
+    for path in (run_dir / "results.json", run_dir / "store.sqlite"):
+        if path.exists():
+            quarantined = path.with_name(f"{path.stem}.superseded-{stamp}{path.suffix}")
+            path.replace(quarantined)
+    write_sequential_run_status(run_dir, "running")
 
 
 def proton_neb_guess(
@@ -438,9 +501,16 @@ def finish_al_neutral_sequential(
     attacker_opt: Cluster,
 ) -> int:
     """Close the proven R → associative I → hydrolyzed P mechanism."""
+    begin_sequential_run(run_dir)
+
+    def fail(detail: str) -> int:
+        log(f"  !! {detail}")
+        write_sequential_run_status(run_dir, "failed", detail=detail)
+        return 1
+
     cleavage_failure = quick_irc_cleavage_reason(cleavage_back, cleavage_fwd, ow_index)
     if cleavage_failure:
-        raise RuntimeError(f"invalid cleavage handoff: {cleavage_failure}")
+        return fail(f"invalid cleavage handoff: {cleavage_failure}")
 
     intermediate = endpoint_in_basin(
         cleavage_back, cleavage_fwd, ow_index, ASSOCIATIVE_BASIN
@@ -469,8 +539,9 @@ def finish_al_neutral_sequential(
             pre_relax_steps=120,
         ),
     )
+    addition_ts_path = run_dir / "addition_directed_ts.xyz"
     addition_ts = checkpointed(
-        run_dir / "addition_directed_ts.xyz",
+        addition_ts_path,
         addition_guess,
         lambda: find_ts(
             addition_guess,
@@ -480,14 +551,20 @@ def finish_al_neutral_sequential(
             internal=False,
         ),
     )
+    addition_escape = channel_escape_reason(addition_guess, addition_ts, ow_index)
+    if addition_escape:
+        rejected = run_dir / (
+            f"addition_directed_ts.rejected-channel-escape-{time.time_ns()}.xyz"
+        )
+        addition_ts_path.replace(rejected)
+        return fail(f"{addition_escape}; rejected directed addition saddle")
     addition_freq = frequencies(addition_ts, settings)
     log(
         "  addition TS imaginary modes: "
         f"{np.round(addition_freq.imaginary_cm, 1).tolist()}"
     )
     if addition_freq.n_imaginary != 1:
-        log("  !! addition saddle is not first order; aborting")
-        return 1
+        return fail("addition saddle is not first order")
 
     accepted_addition_irc = None
     for displacement in (0.50, 1.00):
@@ -506,8 +583,7 @@ def finish_al_neutral_sequential(
             break
         log(f"  displacement {displacement:.2f} A: {failure}")
     if accepted_addition_irc is None:
-        log("  !! addition saddle does not connect reactant and intermediate")
-        return 1
+        return fail("addition saddle does not connect reactant and intermediate")
     addition_back, addition_fwd, accepted_displacement = accepted_addition_irc
     save_xyz(addition_back, run_dir / "addition_irc_back.xyz")
     save_xyz(addition_fwd, run_dir / "addition_irc_fwd.xyz")
@@ -520,8 +596,39 @@ def finish_al_neutral_sequential(
         ("intermediate", intermediate_freq),
     ):
         if freq.n_imaginary:
-            log(f"  !! {label} minimum has {freq.n_imaginary} imaginary modes")
-            return 1
+            return fail(f"{label} minimum has {freq.n_imaginary} imaginary modes")
+
+    addition_reactant = endpoint_in_basin(
+        addition_back, addition_fwd, ow_index, REACTANT_BASIN
+    )
+    addition_intermediate = endpoint_in_basin(
+        addition_back, addition_fwd, ow_index, ASSOCIATIVE_BASIN
+    )
+    reactive_core = [BR_INDEX, SI_INDEX, ow_index, ow_index + 1, ow_index + 2]
+    equivalence_checks = (
+        (
+            "reactant",
+            addition_reactant,
+            complex_opt,
+            complex_freq.electronic_hartree,
+        ),
+        (
+            "intermediate",
+            addition_intermediate,
+            intermediate,
+            intermediate_freq.electronic_hartree,
+        ),
+    )
+    for label, candidate, canonical, canonical_energy in equivalence_checks:
+        failure = basin_equivalence_reason(
+            candidate,
+            canonical,
+            reactive_core,
+            candidate_energy_hartree=energy(candidate, settings),
+            canonical_energy_hartree=canonical_energy,
+        )
+        if failure:
+            return fail(f"addition IRC {label} differs from canonical basin: {failure}")
 
     th_complex = thermo_result(complex_freq, temperature)
     th_intermediate = thermo_result(intermediate_freq, temperature)
@@ -639,6 +746,11 @@ def finish_al_neutral_sequential(
             store.add_result(jid, "electronic", freq.electronic_hartree, "hartree")
     store_tmp.replace(run_dir / "store.sqlite")
     results_tmp.replace(run_dir / "results.json")
+    write_sequential_run_status(
+        run_dir,
+        "completed",
+        detail="results.json and store.sqlite passed both saddle/IRC gates",
+    )
 
     log("")
     log(f"=== al-neutral sequential @ {results['method']} ===")
@@ -863,23 +975,29 @@ def main() -> int:
     save_xyz(back, run_dir / "irc_back.xyz")
     save_xyz(fwd, run_dir / "irc_fwd.xyz")
     irc_failure = quick_irc_channel_reason(back, fwd, ow_index)
-    if irc_failure:
+    if args.reaction == "al-neutral":
         cleavage_failure = quick_irc_cleavage_reason(back, fwd, ow_index)
-        if args.reaction == "al-neutral" and cleavage_failure is None:
-            log("  full path resolved as sequential associative hydrolysis")
-            return finish_al_neutral_sequential(
-                complex_opt=complex_opt,
-                cleavage_ts=ts,
-                cleavage_freq=ts_freq,
-                cleavage_back=back,
-                cleavage_fwd=fwd,
-                settings=settings,
-                run_dir=run_dir,
-                ow_index=ow_index,
-                temperature=args.temperature,
-                dimer_opt=dimer_opt,
-                attacker_opt=attacker_opt,
+        if cleavage_failure:
+            log(
+                "  !! al-neutral requires the proven associative-intermediate "
+                f"mechanism; {cleavage_failure}"
             )
+            return 1
+        log("  full path resolved as sequential associative hydrolysis")
+        return finish_al_neutral_sequential(
+            complex_opt=complex_opt,
+            cleavage_ts=ts,
+            cleavage_freq=ts_freq,
+            cleavage_back=back,
+            cleavage_fwd=fwd,
+            settings=settings,
+            run_dir=run_dir,
+            ow_index=ow_index,
+            temperature=args.temperature,
+            dimer_opt=dimer_opt,
+            attacker_opt=attacker_opt,
+        )
+    if irc_failure:
         log(f"  !! {irc_failure}; aborting before thermochemistry")
         return 1
 
