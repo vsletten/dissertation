@@ -124,6 +124,95 @@ class TestSaddleSearch:
         assert e_guess > energy(back, CHEAP)
 
 
+class TestNebConvergence:
+    @staticmethod
+    def _endpoints():
+        reactant = Cluster("r", ["H"], np.array([[0.0, 0.0, 0.0]]))
+        product = Cluster("p", ["H"], np.array([[1.0, 0.0, 0.0]]))
+        return reactant, product
+
+    @pytest.mark.parametrize(
+        ("stage_results", "message"),
+        [
+            ([False], "pre-relaxation did not converge"),
+            ([True, False], "climbing-image"),
+        ],
+    )
+    def test_unconverged_band_is_rejected(self, monkeypatch, stage_results, message):
+        import ase.mep
+        import ase.optimize
+
+        neb_calls = []
+        aligned_endpoint_rms = []
+        optimizer_calls = []
+        results = iter(stage_results)
+
+        class FakeNeb:
+            def __init__(self, images, **kwargs):
+                self.images = images
+                self.climb = kwargs["climb"]
+                neb_calls.append(kwargs)
+                delta = images[-1].positions - images[0].positions
+                aligned_endpoint_rms.append(float(np.sqrt(np.mean(delta**2))))
+
+            def interpolate(self, *, method):
+                assert method == "idpp"
+
+        class FakeOptimizer:
+            name = "optimizer"
+
+            def __init__(self, neb, **kwargs):
+                self.neb = neb
+                optimizer_calls.append((self.name, neb.climb, kwargs))
+
+            def run(self, *, fmax, steps):
+                optimizer_calls[-1] += (fmax, steps)
+                return next(results)
+
+        class FakeMdMin(FakeOptimizer):
+            name = "MDMin"
+
+        monkeypatch.setattr(ase.mep, "NEB", FakeNeb)
+        monkeypatch.setattr(ase.optimize, "MDMin", FakeMdMin)
+        reactant, product = self._endpoints()
+
+        with pytest.raises(RuntimeError, match=message):
+            from quarry.ts import neb_ts_guess
+
+            neb_ts_guess(
+                reactant,
+                product,
+                CHEAP,
+                n_images=3,
+                pre_relax_steps=4,
+                max_steps=5,
+            )
+
+        assert neb_calls == [
+            {
+                "climb": False,
+                "method": "improvedtangent",
+                "remove_rotation_and_translation": True,
+            }
+        ]
+        assert aligned_endpoint_rms == pytest.approx([0.0], abs=1e-12)
+        assert optimizer_calls[0] == (
+            "MDMin",
+            False,
+            {"dt": 0.05, "maxstep": 0.05},
+            0.3,
+            4,
+        )
+        if len(stage_results) == 2:
+            assert optimizer_calls[1] == (
+                "MDMin",
+                True,
+                {"dt": 0.05, "maxstep": 0.05},
+                0.1,
+                5,
+            )
+
+
 class TestConstraints:
     """These run real geomeTRIC constraint plumbing — the inline-text
     regression (FileNotFoundError on the constraint string) died here."""
