@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import importlib.util
 import json
+import math
 import sys
 import tempfile
 import unittest
@@ -133,6 +134,25 @@ class QualitativeGateTests(unittest.TestCase):
         gate = muscovite_release.evaluate_gate(points, 50, 40)
         self.assertFalse(gate.enough_release)
         self.assertFalse(gate.pass_all)
+
+    def test_fewer_than_six_crossings_returns_failing_gate_not_raise(self) -> None:
+        points = tuple(
+            muscovite_release.ReleasePoint(
+                fraction=0.02 * (index + 1),
+                released=index + 1,
+                time_s=float(index + 1),
+                sqrt_time_sqrt_s=(index + 1) ** 0.5,
+                cylinder_tau=0.01 * (index + 1),
+                apparent_da2_per_s=1.0,
+            )
+            for index in range(3)
+        )
+        gate = muscovite_release.evaluate_gate(points, 100, 6)
+        self.assertFalse(gate.pass_all)
+        self.assertFalse(gate.early_rise)
+        self.assertFalse(gate.later_fall)
+        self.assertTrue(math.isnan(gate.rise_ratio))
+        self.assertTrue(math.isnan(gate.fall_ratio))
 
 
 class SvgPanelTests(unittest.TestCase):

@@ -210,8 +210,27 @@ def quantile_points(
 def evaluate_gate(
     points: tuple[ReleasePoint, ...], initial_ar: int, released_ar: int
 ) -> GateMetrics:
+    final_fraction = released_ar / initial_ar
+    enough_release = initial_ar >= 100 and final_fraction >= 0.50
     if len(points) < 6:
-        raise ValueError("need at least six release crossings for the qualitative gate")
+        # Marginal runs (low initial Ar or short trajectories) may not reach six
+        # 2%-release crossings. Surface a clear gate failure instead of aborting
+        # the whole analysis, so callers/CLI can still emit outputs.
+        return GateMetrics(
+            initial_ar=initial_ar,
+            released_ar=released_ar,
+            final_fraction=final_fraction,
+            early_peak_fraction=math.nan,
+            early_peak_da2_per_s=math.nan,
+            first_da2_per_s=math.nan,
+            tail_median_da2_per_s=math.nan,
+            rise_ratio=math.nan,
+            fall_ratio=math.nan,
+            enough_release=enough_release,
+            early_rise=False,
+            later_fall=False,
+            pass_all=False,
+        )
     early = [point for point in points if point.fraction <= 0.12 + 1.0e-12]
     peak = max(early, key=lambda point: point.apparent_da2_per_s)
     tail_values = [point.apparent_da2_per_s for point in points[-5:]]
@@ -219,8 +238,6 @@ def evaluate_gate(
     first = points[0].apparent_da2_per_s
     rise_ratio = peak.apparent_da2_per_s / first
     fall_ratio = peak.apparent_da2_per_s / tail_median
-    final_fraction = released_ar / initial_ar
-    enough_release = initial_ar >= 100 and final_fraction >= 0.50
     early_rise = peak.fraction > points[0].fraction and rise_ratio >= 1.5
     later_fall = fall_ratio >= 10.0
     return GateMetrics(
@@ -335,8 +352,14 @@ def _svg_panels(results: tuple[RunResult, ...], metric: str) -> str:
         verdict = result.gate
         verdict_text = "gate PASS" if verdict.pass_all else "gate FAIL"
         verdict_fill = "#166534" if verdict.pass_all else "#b42318"
+        if math.isfinite(verdict.rise_ratio) and math.isfinite(verdict.fall_ratio):
+            verdict_detail = (
+                f"rise x{verdict.rise_ratio:.1f}; fall x{verdict.fall_ratio:.0f}; "
+            )
+        else:
+            verdict_detail = ""
         parts.append(
-            f'<text x="{x0 + plot_width - 5}" y="{origin_y + 25}" text-anchor="end" font-family="monospace" font-size="13" fill="{verdict_fill}">rise x{verdict.rise_ratio:.1f}; fall x{verdict.fall_ratio:.0f}; {verdict_text}</text>'
+            f'<text x="{x0 + plot_width - 5}" y="{origin_y + 25}" text-anchor="end" font-family="monospace" font-size="13" fill="{verdict_fill}">{verdict_detail}{verdict_text}</text>'
         )
     parts.append("</svg>")
     return "\n".join(parts) + "\n"
