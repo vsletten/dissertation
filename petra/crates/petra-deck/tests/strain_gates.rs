@@ -6,6 +6,7 @@
 
 use std::path::PathBuf;
 
+use petra_core::Lattice;
 use petra_core::rate::R_KCAL;
 use petra_core::reaction::resolve_rate;
 
@@ -86,6 +87,12 @@ fn compile(src: &str) -> petra_deck::CompiledDeck {
     petra_deck::compile(&deck).expect("deck compiles")
 }
 
+/// Flat site index for the single-site, single-layer `FIELD_DECK` lattice:
+/// `lat.index([row, col, 0], 0)` == `row * dims[1] + col`.
+fn site(lat: &Lattice, row: usize, col: usize) -> usize {
+    lat.index([row, col, 0], 0)
+}
+
 #[test]
 fn strain_field_matches_hand_formula_with_clamp_and_min_image() {
     let deck = compile(FIELD_DECK);
@@ -93,8 +100,7 @@ fn strain_field_matches_hand_formula_with_clamp_and_min_image() {
     let lat = &engine.lattice;
     // Site index derived from the lattice config (single site per cell, one
     // layer): lat.index([row, col, 0], 0) == row * dims[1] + col.
-    let site = |row: usize, col: usize| lat.index([row, col, 0], 0);
-    let u = |row: usize, col: usize| lat.strain[site(row, col)];
+    let u = |row: usize, col: usize| lat.strain[site(lat, row, col)];
 
     // Line pierces cell (1,1) → cartesian (3,3). Distances in Å:
     // site (1,1): r = 0 → clamped to 2 → u = 16/4 = 4.
@@ -153,9 +159,8 @@ fn strain_rate_coupling_is_exact() {
     // Both sites are interior with identical 4-neighbor environments; the
     // only rate difference is the strain term: k1/k2 = exp((u1 − u2)/RT)
     // for scale = −1.
-    let site = |row: usize, col: usize| lat.index([row, col, 0], 0);
-    let s1 = site(1, 1); // at the core (u = 4)
-    let s2 = site(5, 5); // far away
+    let s1 = site(lat, 1, 1); // at the core (u = 4)
+    let s2 = site(lat, 5, 5); // far away
     let k1 = resolve_rate(lat, &kinds, rxn, s1, 300.0, &mut scratch);
     let k2 = resolve_rate(lat, &kinds, rxn, s2, 300.0, &mut scratch);
     let expect = ((lat.strain[s1] - lat.strain[s2]) / rt).exp();
