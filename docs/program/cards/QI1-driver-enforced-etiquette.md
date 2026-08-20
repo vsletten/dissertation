@@ -60,4 +60,5 @@ because the box was lightly loaded). Move enforcement into the code:
 
 ## Progress
 
+- 2026-08-20 22:51 UTC — Implementation and verification checkpoint: added `quarry.etiquette`, wired all four campaign entry points before heavy imports, and added CLI/logging gates. `uv run --frozen pytest -q` passed (162 tests), `ruff check .` passed, and an unset-environment Phase-2 dry run reported all three managed thread variables at 16.
 - 2026-08-20 — card created (fable) after the live 22-thread probe.

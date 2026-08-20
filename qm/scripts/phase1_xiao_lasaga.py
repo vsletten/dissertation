@@ -37,6 +37,14 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+if __name__ == "__main__":
+    from quarry.etiquette import bootstrap_cli
+
+    bootstrap_cli(
+        "phase1_xiao_lasaga",
+        default_run_root=Path(__file__).resolve().parent.parent / "runs",
+    )
+
 import numpy as np  # noqa: E402
 
 from quarry.clusters import (  # noqa: E402
@@ -842,6 +850,8 @@ def main() -> int:
         default=16,
         help="OMP thread cap for CPU stages (default 16 — leave the box usable)",
     )
+    ap.add_argument("--nice", type=int, default=10, help="process niceness increment")
+    ap.add_argument("--log", help="tee output to this path (default: qm/runs)")
     ap.add_argument(
         "--approach",
         choices=["flank", "backside"],
@@ -852,7 +862,6 @@ def main() -> int:
     ap.add_argument("--temperature", type=float, default=298.15)
     args = ap.parse_args()
 
-    os.environ.setdefault("OMP_NUM_THREADS", str(args.threads))
     settings = DftSettings(
         xc=args.xc, basis=args.basis, density_fit=True, use_gpu=args.gpu
     )

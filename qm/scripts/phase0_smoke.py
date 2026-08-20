@@ -22,8 +22,17 @@ import platform
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+if __name__ == "__main__":
+    from quarry.etiquette import bootstrap_cli
+
+    bootstrap_cli(
+        "phase0_smoke",
+        default_run_root=Path(__file__).resolve().parent.parent / "runs",
+    )
 
 from quarry.clusters import silicic_acid_hydrate, water  # noqa: E402
 from quarry.pipeline import DftSettings, _make_scf, build_mol  # noqa: E402
@@ -128,6 +137,9 @@ def time_engine(cluster, settings: DftSettings, *, hessian: bool) -> Timing:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--threads", type=int, default=16, help="numerical thread cap")
+    ap.add_argument("--nice", type=int, default=10, help="process niceness increment")
+    ap.add_argument("--log", help="tee output to this path (default: qm/runs)")
     ap.add_argument(
         "--quick",
         action="store_true",
