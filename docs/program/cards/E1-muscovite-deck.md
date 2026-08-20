@@ -57,6 +57,10 @@ kinds, rules, and barrier provenance (§4 table).
 - 2026-08-20 — hermes-workstation — a fresh merged-main Ruff 0.15.1 format
   check caught the cloud review-fix commit's long `sy()` expression. Reformatted
   that expression only; no model, gate, or artifact semantics changed.
+- 2026-08-20 — hermes-workstation — exact-main closeout after PR #48 found
+  that the earlier pushed `strain_gates.rs` identity-op correction was absent
+  from the squash-merged tree. Restored the one-line Clippy fix on a fresh
+  follow-up branch; the five strain gates and workspace all-target Clippy pass.
 
 ## Result
 
