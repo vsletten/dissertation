@@ -4,6 +4,11 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-20 — hermes-cloud-default — QI3 Fenwick cancellation hardening:
+  impossible zero totals now rebuild from authoritative positive leaves; a
+  deterministic `1e12`/`1e-6 s⁻¹` regression, all 43 Petra tests, and an
+  explicit 1000-step Kossel `--paranoid` run are green.
+
 - 2026-08-20 — hermes-workstation — E1 exact-main lint closeout: restored the
   one-line `strain_gates.rs` identity-op fix that the prior squash merge omitted;
   all Rust/Python/lint gates plus both full trajectories and generated-product
