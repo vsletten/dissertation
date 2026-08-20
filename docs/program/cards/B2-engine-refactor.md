@@ -20,6 +20,11 @@ strategies in this card (that's B3) — this card is pure refactor.
   schema-v2 round-trip tests; v1 decks load unchanged.
 
 ## Progress
+- 2026-08-20 — `UpdateStrategy`, `StepCtx`, `StepOutcome`, and stateless
+  `ExactCtmc` seam landed in petra-core. The existing selection/wait/apply/
+  dirty-propagation order moved intact behind the trait; `Engine::step` remains
+  the compatibility wrapper. Core tests pass and both 20k Fired goldens remain
+  byte-identical after the move.
 - 2026-08-20 — baseline parity harness complete before engine changes:
   `parity_golden.rs` records full `Fired` values as fixed-width bytes
   (including exact `f64::to_bits()` time) for seed 42 and 20,000 steps.

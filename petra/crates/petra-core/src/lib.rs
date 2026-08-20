@@ -12,6 +12,6 @@ pub mod rate;
 pub mod reaction;
 pub mod state;
 
-pub use engine::{Engine, Fired, Stop};
+pub use engine::{Engine, ExactCtmc, Fired, StepCtx, StepOutcome, Stop, UpdateStrategy};
 pub use lattice::{Boundary, Lattice, SiteId};
 pub use state::{StateId, StateSet};

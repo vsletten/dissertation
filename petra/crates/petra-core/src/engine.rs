@@ -135,6 +135,41 @@ pub enum Stop {
 /// Steps between full tree rebuilds (float-drift hygiene).
 const REBUILD_EVERY: u64 = 1 << 16;
 
+/// The result of one strategy step. CTMC fires exactly one transition;
+/// future synchronous strategies may return several.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StepOutcome {
+    pub fired: Vec<Fired>,
+    pub dt: f64,
+}
+
+/// Mutable engine context handed to an update strategy. The context keeps
+/// mutation behind the core: strategies choose selection-and-time, while the
+/// engine's private apply/dirty-propagation machinery remains authoritative.
+pub struct StepCtx<'a> {
+    engine: &'a mut Engine,
+}
+
+impl StepCtx<'_> {
+    pub fn lattice(&self) -> &Lattice {
+        &self.engine.lattice
+    }
+
+    pub fn rules(&self) -> &[Reaction] {
+        &self.engine.reactions
+    }
+}
+
+/// A strategy decides which transition fires and how simulation time advances.
+pub trait UpdateStrategy {
+    fn step(&mut self, ctx: &mut StepCtx<'_>) -> Result<StepOutcome, Stop>;
+}
+
+/// Exact rejection-free CTMC: the pre-RFC Petra algorithm, moved intact
+/// behind [`UpdateStrategy`].
+#[derive(Debug, Default)]
+pub struct ExactCtmc;
+
 pub struct Engine {
     pub lattice: Lattice,
     pub reactions: Vec<Reaction>,
@@ -242,69 +277,13 @@ impl Engine {
         self.site_events[s] = events;
     }
 
-    /// One KMC step: select, apply, propagate, advance time.
+    /// Compatibility wrapper for the default exact-CTMC strategy.
     pub fn step(&mut self) -> Result<Fired, Stop> {
-        let total = self.tree.total();
-        if total <= 0.0 {
-            let any = self.site_events.iter().any(|e| !e.is_empty());
-            return Err(if any { Stop::ZeroRate } else { Stop::NoEvents });
-        }
-
-        // Site, then event within site. A `None` here means the positive
-        // `total` was pure accumulated drift over zero leaves — no events.
-        let Some((site, mut residual)) = self.tree.find(self.rng.gen::<f64>() * total) else {
-            let any = self.site_events.iter().any(|e| !e.is_empty());
-            return Err(if any { Stop::ZeroRate } else { Stop::NoEvents });
-        };
-        let events = &self.site_events[site];
-        debug_assert!(!events.is_empty(), "tree selected an event-less site");
-        let mut chosen = events.len() - 1; // clamp to last on float edge
-        for (i, &(_, rate)) in events.iter().enumerate() {
-            if residual < rate {
-                chosen = i;
-                break;
-            }
-            residual -= rate;
-        }
-        let (ri, _) = events[chosen];
-
-        // Poisson waiting time; map u∈[0,1) to (0,1] so ln never sees 0.
-        let u: f64 = self.rng.gen();
-        let dt = -(1.0 - u).ln() / total;
-
-        let changed = self.apply(site, ri)?;
-
-        // Dirty propagation: changed sites plus everything within max_read.
-        let mut dirty: Vec<SiteId> = changed.clone();
-        let mut ring = Vec::new();
-        for &c in &changed {
-            for d in 1..=self.max_read {
-                // No label exclusion here: the dirty ring is the union of
-                // every selector's possible reach, so it walks the
-                // unfiltered graph (a superset is always safe).
-                sites_at_distance(&self.lattice, c, d, None, &mut ring);
-                for &s in &ring {
-                    if !dirty.contains(&s) {
-                        dirty.push(s);
-                    }
-                }
-            }
-        }
-        for s in dirty {
-            self.refresh_site(s);
-        }
-
-        self.time += dt;
-        self.step_count += 1;
-        if self.step_count % REBUILD_EVERY == 0 {
-            self.tree.rebuild();
-        }
-        Ok(Fired {
-            step: self.step_count,
-            time: self.time,
-            site,
-            reaction: ri,
-        })
+        let mut strategy = ExactCtmc;
+        let mut ctx = StepCtx { engine: self };
+        let outcome = strategy.step(&mut ctx)?;
+        debug_assert_eq!(outcome.fired.len(), 1);
+        outcome.fired.into_iter().next().ok_or(Stop::NoEvents)
     }
 
     /// Apply the chosen reaction's effects (choosing a branch if several),
@@ -432,6 +411,76 @@ impl Engine {
             }
         }
         Ok(())
+    }
+}
+
+impl UpdateStrategy for ExactCtmc {
+    fn step(&mut self, ctx: &mut StepCtx<'_>) -> Result<StepOutcome, Stop> {
+        let engine = &mut *ctx.engine;
+        let total = engine.tree.total();
+        if total <= 0.0 {
+            let any = engine.site_events.iter().any(|e| !e.is_empty());
+            return Err(if any { Stop::ZeroRate } else { Stop::NoEvents });
+        }
+
+        // Site, then event within site. A `None` here means the positive
+        // `total` was pure accumulated drift over zero leaves — no events.
+        let Some((site, mut residual)) = engine.tree.find(engine.rng.gen::<f64>() * total) else {
+            let any = engine.site_events.iter().any(|e| !e.is_empty());
+            return Err(if any { Stop::ZeroRate } else { Stop::NoEvents });
+        };
+        let events = &engine.site_events[site];
+        debug_assert!(!events.is_empty(), "tree selected an event-less site");
+        let mut chosen = events.len() - 1; // clamp to last on float edge
+        for (i, &(_, rate)) in events.iter().enumerate() {
+            if residual < rate {
+                chosen = i;
+                break;
+            }
+            residual -= rate;
+        }
+        let (ri, _) = events[chosen];
+
+        // Poisson waiting time; map u∈[0,1) to (0,1] so ln never sees 0.
+        let u: f64 = engine.rng.gen();
+        let dt = -(1.0 - u).ln() / total;
+
+        let changed = engine.apply(site, ri)?;
+
+        // Dirty propagation: changed sites plus everything within max_read.
+        let mut dirty: Vec<SiteId> = changed.clone();
+        let mut ring = Vec::new();
+        for &c in &changed {
+            for d in 1..=engine.max_read {
+                // No label exclusion here: the dirty ring is the union of
+                // every selector's possible reach, so it walks the
+                // unfiltered graph (a superset is always safe).
+                sites_at_distance(&engine.lattice, c, d, None, &mut ring);
+                for &s in &ring {
+                    if !dirty.contains(&s) {
+                        dirty.push(s);
+                    }
+                }
+            }
+        }
+        for s in dirty {
+            engine.refresh_site(s);
+        }
+
+        engine.time += dt;
+        engine.step_count += 1;
+        if engine.step_count % REBUILD_EVERY == 0 {
+            engine.tree.rebuild();
+        }
+        Ok(StepOutcome {
+            fired: vec![Fired {
+                step: engine.step_count,
+                time: engine.time,
+                site,
+                reaction: ri,
+            }],
+            dt,
+        })
     }
 }
 
