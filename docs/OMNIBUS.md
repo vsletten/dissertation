@@ -229,6 +229,34 @@ creating demand for exactly these kinetics *right now*.
 
 ---
 
+## Track E — The perfect circle: Ar release from muscovite
+
+*Scoped → `docs/scoping/ar-muscovite.md`. Added 2026-08-19.*
+
+The bet: Sletten & Onstott (GCA 1998) showed empirically that in-vacuo
+Ar release from muscovite is controlled by dehydroxylation and
+delamination, with distinct defect reservoirs per Ar species; Nteme &
+Scaillet (GCA 2022–2024) now supply first-principles barriers proving
+the ideal lattice is orders of magnitude too slow. Nobody has built
+the middle: a lattice model whose *structure evolves* (dehydroxylation
+fronts, delamination, defect zones) while Ar migrates through it with
+siting-specific barriers, driven by a laboratory T(t) staircase to
+emit synthetic ⁴⁰Ar/³⁹Ar age spectra. Petra can express nearly all of
+it today; the one missing engine feature is piecewise-isothermal
+schedules (B5). First paper: the 1998 interpretation tested
+quantitatively, 28 years later, by its author.
+
+- **E1. Minimal deck** (READY): published numbers only — divacancy
+  hops, bulk dehydroxylation kinetics, open c-boundary; two-stage
+  release-curve gate against the 1998 figures.
+- **E2+ (per scoping §6)**: defect zones + delamination + species-
+  resolved recoil init + T(t) spectra (needs B5); classical-NEB
+  barrier campaign for the missing numbers (Ar-in-dehydroxylate,
+  Xe everything — the Villa discriminant).
+- Venue targets: GCA / Chemical Geology / Geochronology.
+
+---
+
 ## Sequencing and milestones
 
 ```

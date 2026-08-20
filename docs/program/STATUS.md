@@ -49,3 +49,9 @@ Deviations get a `DEVIATION:` note; details live in the card.*
   (barrier-ladder build plan: crystallographic cluster builder from the
   kaolinite deck cell, per-cell campaign driver, by_count emission,
   CALC-002..005 closure); new READY card A3-barrier-ladder.
+- 2026-08-19 — fable — Track E opened: Ar-in-muscovite scoping doc
+  landed (docs/scoping/ar-muscovite.md — the 1998 Sletten & Onstott
+  circle, Nteme 2022–24 barriers, the uncomputed middle, Villa
+  arbitration). New cards: E1-muscovite-deck (READY, published numbers
+  only) and B5-execution-schedule (blocked: B2 — piecewise-isothermal
+  T(t), the one engine feature the flagship needs).

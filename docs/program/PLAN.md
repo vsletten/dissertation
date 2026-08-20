@@ -28,12 +28,14 @@ on main). Priority P0 > P1 > P2 within READY.
 | [B1-schema-rfc](cards/B1-schema-rfc.md) | B | P0 | any | done | — |
 | [B2-engine-refactor](cards/B2-engine-refactor.md) | B | P0 | any | ready | B1 ✅ |
 | [QI1-driver-enforced-etiquette](cards/QI1-driver-enforced-etiquette.md) | A | P2 | any | ready | — |
+| [E1-muscovite-deck](cards/E1-muscovite-deck.md) | E | P1 | any | ready | — (phase 1 isothermal) |
 | [A1b-acid-mechanisms](cards/A1b-acid-mechanisms.md) | A | P1 | workstation | ready | — |
 | [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | ready | — |
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
 | [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: ORCA install (Victor) + A1b | A1b |
 | [B3-conformance-decks](cards/B3-conformance-decks.md) | B | P1 | any | blocked: B2 | B2 |
 | [B4-ensembles-observables](cards/B4-ensembles-observables.md) | B | P1 | any | blocked: B2 | B2 |
+| [B5-execution-schedule](cards/B5-execution-schedule.md) | B | P1 | any | blocked: B2 | B2 |
 | [C2-corrosion-deck](cards/C2-corrosion-deck.md) | C | P2 | any | blocked: B3 | B3 |
 | [D3-ice-mantle-deck](cards/D3-ice-mantle-deck.md) | D | P2 | any | blocked: B3 + D2a | B3, D2a |
 | [A5p0-aging-observables](cards/A5p0-aging-observables.md) | A | P1 | any | blocked: B4 | B4 |
@@ -53,7 +55,7 @@ whoever lands it.
 
 - Program rationale + track detail: [`docs/OMNIBUS.md`](../OMNIBUS.md)
 - Research grounding: [`docs/scoping/`](../scoping/) (field-lab
-  discrepancy, pitting corrosion, astrochemistry)
+  discrepancy, pitting corrosion, astrochemistry, Ar-in-muscovite)
 - Engine: [`petra/docs/DESIGN.md`](../../petra/docs/DESIGN.md);
   QM lab: [`qm/SURVEY.md`](../../qm/SURVEY.md),
   [`qm/README.md`](../../qm/README.md)
