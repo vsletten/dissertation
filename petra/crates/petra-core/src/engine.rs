@@ -420,6 +420,7 @@ impl Engine {
 }
 
 impl UpdateStrategy for ExactCtmc {
+    #[allow(clippy::manual_is_multiple_of)] // Preserve the pre-refactor expression verbatim.
     fn step(&mut self, ctx: &mut StepCtx<'_>) -> Result<StepOutcome, Stop> {
         let engine = &mut *ctx.engine;
         let total = engine.tree.total();

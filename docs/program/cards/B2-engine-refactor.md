@@ -20,6 +20,11 @@ strategies in this card (that's B3) — this card is pure refactor.
   schema-v2 round-trip tests; v1 decks load unchanged.
 
 ## Progress
+- 2026-08-20 — verification stage green: `cargo test -j 16 --workspace`
+  (54 tests), `cargo build -j 16 --workspace`, and clippy across all targets
+  with warnings denied. CLI `--paranoid` completed 5,000 kaolinite steps and
+  correctly tracked Kossel through full dissolution (1,512 fired events).
+  The two 20k parity logs and all analytic gates remain green.
 - 2026-08-20 — deck schema v2 + v1 shim complete. A custom one-pass
   deserializer normalizes every schema-less v1 deck to v2/`ctmc`; explicit
   cell-form v2 decks compile through the same dense tables, mixed/unknown

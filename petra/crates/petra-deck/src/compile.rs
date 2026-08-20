@@ -707,7 +707,7 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
     }
 
     let dims = deck.lattice.dims;
-    if dims.iter().any(|&d| d == 0) {
+    if dims.contains(&0) {
         return err("lattice dims must be nonzero");
     }
 
@@ -908,6 +908,7 @@ fn state_in_kind(names: &Names, kind: u16, name: &str, ctx: &str) -> Result<Stat
 
 /// Compile the set/shift/map trio into an EffectOp. `kind` scopes state-name
 /// resolution and is required for `set`/`map`.
+#[allow(clippy::too_many_arguments)]
 fn compile_op(
     names: &Names,
     kind: Option<u16>,
