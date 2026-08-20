@@ -20,6 +20,12 @@ strategies in this card (that's B3) — this card is pure refactor.
   schema-v2 round-trip tests; v1 decks load unchanged.
 
 ## Progress
+- 2026-08-20 — baseline parity harness complete before engine changes:
+  `parity_golden.rs` records full `Fired` values as fixed-width bytes
+  (including exact `f64::to_bits()` time) for seed 42 and 20,000 steps.
+  Kaolinite uses its shipped dimensions; Kossel uses the shipped deck physics
+  on a 20³ lattice because the tutorial's 8³ crystal fully dissolves at step
+  1,513. Both checked-in 520,031-byte goldens regenerate and compare cleanly.
 - 2026-08-20 — claimed by hermes workstation worker. Read the contract,
   corrected RFC-001 in full, DESIGN.md, and the current petra-core/
   petra-deck implementation. Recovered the accepted RFC review commit
