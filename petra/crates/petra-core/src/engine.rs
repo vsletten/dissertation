@@ -244,10 +244,20 @@ impl Engine {
 
     /// One KMC step: select, apply, propagate, advance time.
     pub fn step(&mut self) -> Result<Fired, Stop> {
-        let total = self.tree.total();
+        let mut total = self.tree.total();
         if total <= 0.0 {
             let any = self.site_events.iter().any(|e| !e.is_empty());
-            return Err(if any { Stop::ZeroRate } else { Stop::NoEvents });
+            if any {
+                // Removing an extreme rate can cancel much smaller surviving
+                // rates out of an incrementally maintained internal node.
+                // The leaves remain authoritative, so repair this impossible
+                // total before deciding that the simulation is terminal.
+                self.tree.rebuild();
+                total = self.tree.total();
+            }
+            if total <= 0.0 {
+                return Err(if any { Stop::ZeroRate } else { Stop::NoEvents });
+            }
         }
 
         // Site, then event within site. A `None` here means the positive

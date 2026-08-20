@@ -231,3 +231,98 @@ fn mean_waiting_time_tracks_total_rate() {
         "mean dt·R_total: got {mean:.4}, expected 1.0"
     );
 }
+
+const EXTREME_RATE_CANCELLATION: &str = r#"
+[deck]
+name = "extreme-rate-cancellation"
+comment = "a fast one-shot event must not erase a surviving slow event"
+
+[cell]
+a = 5.0
+b = 5.0
+c = 5.0
+alpha = 90.0
+beta = 90.0
+gamma = 90.0
+
+[[cell.sites]]
+kind = "Fast"
+frac = [0.0, 0.0, 0.0]
+
+[[cell.sites]]
+kind = "Slow"
+frac = [0.5, 0.5, 0.5]
+
+[[species]]
+name = "X"
+
+[[kinds]]
+name = "Fast"
+initial = "armed"
+
+[[kinds.states]]
+name = "armed"
+occupant = "X"
+
+[[kinds.states]]
+name = "done"
+occupant = "X"
+
+[[kinds]]
+name = "Slow"
+initial = "armed"
+
+[[kinds.states]]
+name = "armed"
+occupant = "X"
+
+[[kinds.states]]
+name = "done"
+occupant = "X"
+
+[lattice]
+dims = [1, 1, 1]
+boundary = ["open", "open", "open"]
+
+[thermo]
+temperature = 300.0
+
+[[reactions]]
+name = "fast_once"
+center = { kind = "Fast", state = ["armed"] }
+rate = { constant = 1.0e12 }
+
+[[reactions.effects]]
+target = "center"
+set = "done"
+
+[[reactions]]
+name = "slow_once"
+center = { kind = "Slow", state = ["armed"] }
+rate = { constant = 1.0e-6 }
+
+[[reactions.effects]]
+target = "center"
+set = "done"
+
+[simulation]
+steps = 3
+seed = 1998
+"#;
+
+#[test]
+fn extreme_fast_event_cannot_erase_surviving_slow_event() {
+    let parsed: petra_deck::DeckFile =
+        toml::from_str(EXTREME_RATE_CANCELLATION).expect("valid deck");
+    let deck = petra_deck::compile(&parsed).expect("compiles");
+    let mut engine = deck.build_engine(Some(1998)).expect("engine builds");
+
+    let fast = engine.step().expect("fast event fires");
+    assert_eq!(fast.site, 0);
+
+    let slow = engine
+        .step()
+        .expect("surviving slow event must not be lost to Fenwick cancellation");
+    assert_eq!(slow.site, 1);
+    assert_eq!(engine.step(), Err(petra_core::Stop::NoEvents));
+}
