@@ -16,12 +16,20 @@ from quarry.pipeline import (
     build_mol,
     energy,
     frequencies,
+    frequency_settings_fingerprint,
     gradient,
     optimize,
 )
 from quarry.rates import thermo_from_frequencies
 
 CHEAP = DftSettings(xc="hf", basis="sto-3g")
+
+
+def test_frequency_settings_fingerprint_ignores_execution_backend():
+    cpu = DftSettings(xc="b3lyp", basis="def2-svp", density_fit=True)
+    gpu = DftSettings(xc="b3lyp", basis="def2-svp", density_fit=True, use_gpu=True)
+
+    assert frequency_settings_fingerprint(cpu) == frequency_settings_fingerprint(gpu)
 
 
 def test_gpu_hessian_assertion_retries_only_hessian_on_cpu(monkeypatch):

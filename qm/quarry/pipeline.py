@@ -175,8 +175,8 @@ def frequency_geometry_fingerprint(cluster: Cluster) -> str:
 
 
 def frequency_settings_fingerprint(settings: DftSettings) -> str:
-    """Stable identity for the electronic-structure settings of a Hessian."""
-    return repr(settings)
+    """Scientific settings identity, independent of CPU/GPU execution backend."""
+    return repr(replace(settings, use_gpu=False))
 
 
 def frequencies(cluster: Cluster, settings: DftSettings) -> FrequencyResult:
