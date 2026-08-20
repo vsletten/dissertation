@@ -198,6 +198,24 @@ def find_ts(
     return replace(cluster, coords=atoms.positions.copy(), name=f"{cluster.name}-ts")
 
 
+def _require_single_imaginary_mode(
+    freq: FrequencyResult, *, name: str, noise_floor_cm: float
+) -> None:
+    """Raise unless exactly one imaginary mode clears the noise floor.
+
+    Shared by :func:`verify_ts` and the precomputed-``FrequencyResult`` path
+    in :func:`quick_irc` so the reuse path cannot drift from the main TS
+    verification behavior.
+    """
+    significant = freq.imaginary_cm[freq.imaginary_cm > noise_floor_cm]
+    if significant.size != 1:
+        raise RuntimeError(
+            f"{name}: expected exactly 1 imaginary mode "
+            f"above {noise_floor_cm:.0f} cm^-1, found {significant.size} "
+            f"(imaginary: {np.round(freq.imaginary_cm, 1).tolist()} cm^-1)"
+        )
+
+
 def verify_ts(
     cluster: Cluster, settings: DftSettings, *, noise_floor_cm: float = 0.0
 ) -> FrequencyResult:
@@ -209,13 +227,9 @@ def verify_ts(
     The default (0) keeps the strict free-cluster behavior.
     """
     freq = frequencies(cluster, settings)
-    significant = freq.imaginary_cm[freq.imaginary_cm > noise_floor_cm]
-    if significant.size != 1:
-        raise RuntimeError(
-            f"{cluster.name}: expected exactly 1 imaginary mode "
-            f"above {noise_floor_cm:.0f} cm^-1, found {significant.size} "
-            f"(imaginary: {np.round(freq.imaginary_cm, 1).tolist()} cm^-1)"
-        )
+    _require_single_imaginary_mode(
+        freq, name=cluster.name, noise_floor_cm=noise_floor_cm
+    )
     return freq
 
 
@@ -243,12 +257,9 @@ def quick_irc(
             raise ValueError("precomputed frequency belongs to a different geometry")
         if freq.settings_fingerprint != frequency_settings_fingerprint(settings):
             raise ValueError("precomputed frequency used different DFT settings")
-        significant = freq.imaginary_cm[freq.imaginary_cm > noise_floor_cm]
-        if significant.size != 1:
-            raise RuntimeError(
-                f"{ts.name}: expected exactly 1 imaginary mode "
-                f"above {noise_floor_cm:.0f} cm^-1, found {significant.size}"
-            )
+        _require_single_imaginary_mode(
+            freq, name=ts.name, noise_floor_cm=noise_floor_cm
+        )
     mode = freq.imaginary_mode
     if mode is None:
         raise RuntimeError(f"{ts.name}: no imaginary-mode vector available")
