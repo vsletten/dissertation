@@ -36,7 +36,13 @@ from quarry.pipeline import (
     frequencies,
 )
 from quarry.rates import eckart_kappa, thermo_from_frequencies
-from quarry.ts import ScanNoMaximumError, find_ts, quick_irc, scan_to_maximum
+from quarry.ts import (
+    ScanNoMaximumError,
+    find_ts,
+    quick_irc,
+    scan_to_maximum,
+    scan_ts_guess,
+)
 
 TEMPERATURES = (50.0, 60.0, 75.0, 100.0, 150.0, 200.0, 250.0, 300.0)
 RUN_ROOT = (
@@ -299,7 +305,7 @@ def run_reaction(reaction: Reaction, *, force: bool = False) -> dict:
         if reaction.barrierless:
             raise RuntimeError("barrierless control produced an interior maximum")
 
-        ts_guess = scan[max(range(1, len(scan) - 1), key=lambda i: scan[i][1])][2]
+        ts_guess = scan_ts_guess(scan)
         save_xyz(ts_guess, ts_guess_path)
 
     ts_path = run_dir / "ts.xyz"
@@ -310,9 +316,10 @@ def run_reaction(reaction: Reaction, *, force: bool = False) -> dict:
     )
     save_xyz(ts, ts_path)
     ts_freq = frequencies(ts, reaction.method)
-    if ts_freq.n_imaginary != 1:
+    if ts_freq.n_imaginary != 1 or ts_freq.imaginary_cm[0] < 200.0:
         raise RuntimeError(
-            f"{reaction.key}: expected one imaginary mode, got {ts_freq.imaginary_cm}"
+            f"{reaction.key}: expected one chemical imaginary mode, "
+            f"got {ts_freq.imaginary_cm}"
         )
 
     back_path, fwd_path = run_dir / "irc_back.xyz", run_dir / "irc_fwd.xyz"
