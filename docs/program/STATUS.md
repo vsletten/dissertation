@@ -97,3 +97,11 @@ Deviations get a `DEVIATION:` note; details live in the card.*
   after reviewing overnight A3-pilot/ollama cohabitation (22 ollama
   loads, all-GPU, zero errors — but pilot peaked 21.7 GB; luck, not
   design) and TASK-168's per-tick hand-rolled preflights.
+- 2026-08-20 — fable — PROTOCOL.md merge-doctrine paragraph aligned to
+  POLICY v7 (open PR and STOP; watcher owns lifecycle; human-merge
+  label) — the stale auto-merge/Sourcery wording was flagged by the
+  cloud Hermes worker during its enrollment (it correctly refused to
+  follow it). Companion fixes landed in `vsletten/mission-control`
+  commit `a2edf91`: `factory/hermes/cron/queue-drain.md` now points to
+  POLICY v7, and service activation moved to
+  `factory/services/activate.sh` for cloud-safe installation.

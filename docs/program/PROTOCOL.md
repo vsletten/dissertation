@@ -90,14 +90,19 @@ Your PR contains, atomically:
 3. One line appended to [`STATUS.md`](STATUS.md) (newest first).
 4. Any new follow-up cards (status: ready or blocked) your work exposed.
 
-Open the PR (`gh pr create`), enable auto-merge
-(`gh pr merge --auto --squash`), then **deal with review**: this repo
-requires all four checks green, the branch up to date with main
-(merge main in if a concurrent PR lands first), and **every Sourcery
-review thread resolved** (fix legitimate points, then resolve via the
-GraphQL `resolveReviewThread` mutation — the PR will sit silently
-BLOCKED forever if you skip this). Known failure modes and diagnostics:
-`.claude/learnings/` and the memory of PRs #12–#21.
+Open the PR (`gh pr create`) — **then STOP** (amended 2026-08-20 to
+match fleet POLICY §1 v7, which supersedes the old wording here): this
+repo is webhook-wired, and the cloud Hermes PR watcher owns the rest
+of the lifecycle — review fixes (including Sourcery threads), CI
+repairs, branch updates against main, and the squash-merge. Do NOT
+enable auto-merge, reply to or resolve review threads, poll checks, or
+merge locally; a worker racing the watcher corrupts both. To hold a PR
+for human/Fable review instead, add the `human-merge` label. A PR
+still open after ~48h means the watcher has stalled: add the
+`needs-human` label to that PR; the daily `omnibus-supervisor` (07:50)
+also watches for this. Background on the underlying
+gates (four required checks, strict up-to-date, required conversation
+resolution): `.claude/learnings/` and the memory of PRs #12–#21.
 
 ## Machine classes
 
