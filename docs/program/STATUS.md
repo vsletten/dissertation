@@ -4,6 +4,9 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-20 — fable — Card QI1: campaign drivers must enforce their own
+  thread caps + niceness (a live worker probe ran 22 threads past the
+  prompt-level cap — prompts don't bind subprocesses).
 - 2026-08-20 — fable — Board refresh: B1+D2a+A7 done, B2 READY (keystone
   merged), A3 active. PROTOCOL amendment: incremental bookkeeping
   (the D2a iteration-ceiling lesson). Hermes worker-profile max_turns
