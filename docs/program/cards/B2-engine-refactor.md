@@ -28,7 +28,7 @@ strategies in this card (that's B3) — this card is pure refactor.
   handoff (incremental-bookkeeping amendment held).
 - 2026-08-20 — hermes worker 2 (sol) — continuation from dirty diff with
   supervision-dispositioned findings: all 7 addressed. DEVIATION
-  (dispositioned): shipped kossel 8^3 deck exhausts at 1,512 events, so
+  (dispositioned): shipped Kossel 8^3 deck exhausts at 1,512 events, so
   the 20k parity gate uses enlarged dims AND a second gate pins the
   shipped deck's complete natural lifetime byte-identical
   (sha256 687fd5bf...) — full-lifetime parity is the stronger claim.
