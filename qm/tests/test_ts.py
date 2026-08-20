@@ -19,7 +19,7 @@ from quarry.clusters import (
     merge,
     water,
 )
-from quarry.pipeline import DftSettings, energy, frequencies, optimize
+from quarry.pipeline import DftSettings, FrequencyResult, energy, frequencies, optimize
 from quarry.ts import find_ts, make_ase_calculator, quick_irc, verify_ts
 
 CHEAP = DftSettings(xc="hf", basis="sto-3g")
@@ -121,6 +121,37 @@ class TestReactionPathVector:
     def test_directed_find_requires_cartesian_coordinates(self):
         with pytest.raises(ValueError, match="requires internal=False"):
             find_ts(hcn_ts_guess(), CHEAP, initial_mode=np.ones((3, 3)))
+
+
+def test_quick_irc_reuses_precomputed_frequency(monkeypatch):
+    import quarry.ts as ts_mod
+
+    cluster = water()
+    frequency = FrequencyResult(
+        frequencies_cm=np.array([1000.0]),
+        imaginary_cm=np.array([500.0]),
+        electronic_hartree=-75.0,
+        molar_mass_kg=0.018,
+        rotational_temperatures_k=(1.0, 2.0, 3.0),
+        linear=False,
+        imaginary_mode=np.ones_like(cluster.coords),
+    )
+    monkeypatch.setattr(
+        ts_mod,
+        "verify_ts",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("frequency should be reused")
+        ),
+    )
+
+    def fake_optimize(endpoint, settings, **kwargs):
+        return endpoint
+
+    monkeypatch.setattr(ts_mod, "optimize", fake_optimize)
+
+    back, fwd = quick_irc(cluster, CHEAP, frequency=frequency)
+
+    assert not np.allclose(back.coords, fwd.coords)
 
 
 @pytest.mark.slow

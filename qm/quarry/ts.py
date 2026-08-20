@@ -187,13 +187,18 @@ def quick_irc(
     *,
     displacement_a: float = 0.15,
     max_steps: int = 200,
+    frequency: FrequencyResult | None = None,
 ) -> tuple[Cluster, Cluster]:
     """Displace ± along the imaginary mode and relax to the two minima.
 
     The cheap stand-in for a full IRC: confirms which basins the saddle
     connects. Returns (backward, forward) relaxed clusters.
     """
-    freq = verify_ts(ts, settings)
+    freq = frequency if frequency is not None else verify_ts(ts, settings)
+    if freq.n_imaginary != 1:
+        raise RuntimeError(
+            f"{ts.name}: expected exactly 1 imaginary mode, found {freq.n_imaginary}"
+        )
     mode = freq.imaginary_mode
     if mode is None:
         raise RuntimeError(f"{ts.name}: no imaginary-mode vector available")
