@@ -6,33 +6,347 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// Canonical in-memory deck. Both v1 and v2 TOML deserialize to this shape;
+/// v1 is upgraded by the custom deserializer before compilation.
+#[derive(Debug)]
 pub struct DeckFile {
     pub deck: Meta,
+    pub structure_kind: StructureKind,
+    pub grid: Option<GridSpec>,
     pub cell: CellSpec,
-    #[serde(default)]
     pub species: Vec<SpeciesSpec>,
     pub kinds: Vec<KindSpec>,
-    /// Named state-set aliases, referenced as `"@name"` in selectors.
-    #[serde(default)]
     pub aliases: BTreeMap<String, Vec<String>>,
     pub lattice: LatticeSpec,
-    /// Crystallographic line defects: each contributes an analytic elastic
-    /// strain-energy field u(r) = A/max(r, r_core)² over the lattice
-    /// (docs/STRAIN.md §5). Fields superpose.
-    #[serde(default)]
     pub defects: Vec<DefectSpec>,
     pub thermo: ThermoSpec,
-    /// Ordered build-time passes applied after the uniform per-kind fill
-    /// and before dynamics: surface termination, region clearing, defect
-    /// seeding. Each pass sweeps all sites in index order with writes
-    /// immediately visible (the legacy TerminateSurface convention).
-    #[serde(default)]
     pub init: Vec<InitPassSpec>,
-    #[serde(default)]
     pub reactions: Vec<ReactionSpec>,
     pub simulation: SimSpec,
+    pub execution: ExecutionSpec,
+    pub observables: ObservablesSpec,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StructureKind {
+    Cell,
+    Grid,
+}
+
+#[derive(Debug)]
+pub struct GridSpec {
+    pub family: String,
+    pub neighborhood: Option<String>,
+    pub dims: Vec<usize>,
+    pub boundary: Vec<String>,
+    pub default_kind: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionSpec {
+    pub strategy: String,
+    #[serde(default)]
+    pub ctmc: Option<CtmcSpec>,
+    #[serde(default)]
+    pub stop: StopSpec,
+    #[serde(default)]
+    pub ensemble: EnsembleSpec,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CtmcSpec {}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StopSpec {
+    #[serde(default)]
+    pub steps: Option<u64>,
+    #[serde(default)]
+    pub time: Option<f64>,
+    #[serde(default)]
+    pub predicate: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SeedPolicy {
+    Increment,
+    Hash,
+}
+
+fn one_replica() -> u64 {
+    1
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EnsembleSpec {
+    /// Base seed. v1 `[simulation] seed` is moved here by the shim.
+    #[serde(default)]
+    pub seed: u64,
+    #[serde(default = "one_replica")]
+    pub n_replicas: u64,
+    #[serde(default = "default_seed_policy")]
+    pub seed_policy: SeedPolicy,
+}
+
+fn default_seed_policy() -> SeedPolicy {
+    SeedPolicy::Increment
+}
+
+impl Default for EnsembleSpec {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            n_replicas: 1,
+            seed_policy: SeedPolicy::Increment,
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservablesSpec {
+    #[serde(default)]
+    pub report_every: u64,
+    #[serde(default)]
+    pub series: Vec<ObservableSpec>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ObservableSpec {
+    pub kind: String,
+    #[serde(flatten)]
+    pub parameters: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeckV1 {
+    deck: Meta,
+    cell: CellSpec,
+    #[serde(default)]
+    species: Vec<SpeciesSpec>,
+    kinds: Vec<KindSpec>,
+    #[serde(default)]
+    aliases: BTreeMap<String, Vec<String>>,
+    lattice: LatticeSpec,
+    #[serde(default)]
+    defects: Vec<DefectSpec>,
+    thermo: ThermoSpec,
+    #[serde(default)]
+    init: Vec<InitPassSpec>,
+    #[serde(default)]
+    reactions: Vec<ReactionSpec>,
+    simulation: SimSpec,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeckV2 {
+    deck: Meta,
+    structure: StructureV2,
+    dynamics: DynamicsV2,
+    execution: ExecutionSpec,
+    #[serde(default)]
+    observables: ObservablesSpec,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StructureV2 {
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    cell: Option<CellSpec>,
+    #[serde(default)]
+    lattice: Option<LatticeSpec>,
+    #[serde(default)]
+    grid: Option<String>,
+    #[serde(default)]
+    neighborhood: Option<String>,
+    #[serde(default)]
+    dims: Option<Vec<usize>>,
+    #[serde(default)]
+    boundary: Option<Vec<String>>,
+    #[serde(default)]
+    default_kind: Option<String>,
+    #[serde(default)]
+    species: Vec<SpeciesSpec>,
+    kinds: Vec<KindSpec>,
+    #[serde(default)]
+    init: Vec<InitPassSpec>,
+    #[serde(default)]
+    defects: Vec<DefectSpec>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DynamicsV2 {
+    thermo: ThermoSpec,
+    #[serde(default)]
+    aliases: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    rules: Vec<ReactionSpec>,
+}
+
+impl DeckFile {
+    fn from_v1(mut v1: DeckV1) -> Self {
+        v1.deck.schema = Some(2);
+        let execution = ExecutionSpec {
+            strategy: "ctmc".to_string(),
+            ctmc: None,
+            stop: StopSpec {
+                steps: Some(v1.simulation.steps),
+                time: None,
+                predicate: None,
+            },
+            ensemble: EnsembleSpec {
+                seed: v1.simulation.seed,
+                n_replicas: 1,
+                seed_policy: SeedPolicy::Increment,
+            },
+        };
+        let observables = ObservablesSpec {
+            report_every: v1.simulation.report_every.unwrap_or(0),
+            series: Vec::new(),
+        };
+        Self {
+            deck: v1.deck,
+            structure_kind: StructureKind::Cell,
+            grid: None,
+            cell: v1.cell,
+            species: v1.species,
+            kinds: v1.kinds,
+            aliases: v1.aliases,
+            lattice: v1.lattice,
+            defects: v1.defects,
+            thermo: v1.thermo,
+            init: v1.init,
+            reactions: v1.reactions,
+            simulation: v1.simulation,
+            execution,
+            observables,
+        }
+    }
+
+    fn from_v2(v2: DeckV2) -> Result<Self, String> {
+        if v2.deck.schema != Some(2) {
+            return Err("v2 deck must declare [deck] schema = 2".to_string());
+        }
+        let StructureV2 {
+            kind,
+            cell,
+            lattice,
+            grid,
+            neighborhood,
+            dims,
+            boundary,
+            default_kind,
+            species,
+            kinds,
+            init,
+            defects,
+        } = v2.structure;
+        let (structure_kind, grid_spec, cell, lattice) = match kind.as_deref().unwrap_or("cell") {
+            "cell" => (
+                StructureKind::Cell,
+                None,
+                cell.ok_or("[structure] kind = 'cell' requires [structure.cell]")?,
+                lattice.ok_or("[structure] kind = 'cell' requires [structure.lattice]")?,
+            ),
+            "grid" => {
+                let dims_vec = dims.ok_or("[structure] kind = 'grid' requires dims")?;
+                let boundary_vec = boundary.ok_or("[structure] kind = 'grid' requires boundary")?;
+                let grid_spec = GridSpec {
+                    family: grid.ok_or("[structure] kind = 'grid' requires grid")?,
+                    neighborhood,
+                    dims: dims_vec,
+                    boundary: boundary_vec,
+                    default_kind: default_kind
+                        .ok_or("[structure] kind = 'grid' requires default_kind")?,
+                };
+                // Grid compilation is B3. Preserve the parsed grid verbatim
+                // and carry inert placeholders that compile() never reaches.
+                (
+                    StructureKind::Grid,
+                    Some(grid_spec),
+                    CellSpec {
+                        a: None,
+                        b: None,
+                        c: None,
+                        alpha: None,
+                        beta: None,
+                        gamma: None,
+                        matrix: Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+                        sites: Vec::new(),
+                        bonds: Vec::new(),
+                    },
+                    LatticeSpec {
+                        dims: [1, 1, 1],
+                        boundary: [
+                            "periodic".to_string(),
+                            "periodic".to_string(),
+                            "periodic".to_string(),
+                        ],
+                    },
+                )
+            }
+            other => return Err(format!("unknown structure kind '{other}'")),
+        };
+        let simulation = SimSpec {
+            steps: v2.execution.stop.steps.unwrap_or(0),
+            seed: v2.execution.ensemble.seed,
+            report_every: Some(v2.observables.report_every),
+        };
+        Ok(Self {
+            deck: v2.deck,
+            structure_kind,
+            grid: grid_spec,
+            cell,
+            species,
+            kinds,
+            aliases: v2.dynamics.aliases,
+            lattice,
+            defects,
+            thermo: v2.dynamics.thermo,
+            init,
+            reactions: v2.dynamics.rules,
+            simulation,
+            execution: v2.execution,
+            observables: v2.observables,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for DeckFile {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+
+        let value = toml::Value::deserialize(deserializer)?;
+        let schema = value
+            .get("deck")
+            .and_then(|deck| deck.get("schema"))
+            .and_then(toml::Value::as_integer);
+        match schema {
+            None => {
+                let v1: DeckV1 = value.try_into().map_err(D::Error::custom)?;
+                Ok(Self::from_v1(v1))
+            }
+            Some(2) => {
+                let v2: DeckV2 = value.try_into().map_err(D::Error::custom)?;
+                Self::from_v2(v2).map_err(D::Error::custom)
+            }
+            Some(other) => Err(D::Error::custom(format!(
+                "unsupported deck schema {other}; expected absent (v1) or 2"
+            ))),
+        }
+    }
 }
 
 /// One build-time pass. The operation applies to the *center* site — once,
@@ -106,6 +420,9 @@ pub struct Meta {
     pub name: String,
     #[serde(default)]
     pub comment: Option<String>,
+    /// Schema marker. The v1 shim normalizes an absent marker to `Some(2)`.
+    #[serde(default)]
+    pub schema: Option<u32>,
     /// Energy unit for every energy-valued field in this deck (activation
     /// energies, ΔEa modifiers, chemical potentials, ΔH‡, and ΔS‡ per K):
     /// `"kcal/mol"` (default), `"kJ/mol"`, or `"eV"`. Temperatures are

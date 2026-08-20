@@ -16,7 +16,7 @@ use petra_core::Engine;
 use rand::{Rng as _, SeedableRng};
 use rand_pcg::Pcg64Mcg;
 
-use crate::schema::{DeckFile, EffectSpec, RateSpec, SelectorSpec};
+use crate::schema::{DeckFile, EffectSpec, RateSpec, SeedPolicy, SelectorSpec, StructureKind};
 
 #[derive(Debug, thiserror::Error)]
 #[error("deck error: {0}")]
@@ -97,8 +97,7 @@ impl CompiledDeck {
     pub fn build_engine(&self, seed_override: Option<u64>) -> Result<Engine, CompileError> {
         let seed = seed_override.unwrap_or(self.seed);
         let initial = self.initial_per_template.clone();
-        let mut lattice =
-            Lattice::build(&self.unit_cell, self.dims, self.boundary, |t| initial[t]);
+        let mut lattice = Lattice::build(&self.unit_cell, self.dims, self.boundary, |t| initial[t]);
         let kinds: Vec<KindId> = lattice
             .template_index
             .iter()
@@ -149,11 +148,7 @@ impl CompiledDeck {
                     [cell[0] as i32, cell[1] as i32, cell[2] as i32],
                 );
                 let v = [p[0] - q[0], p[1] - q[1], p[2] - q[2]];
-                let mut f = self
-                    .unit_cell
-                    .cell
-                    .to_fractional(v)
-                    .map_err(CompileError)?;
+                let mut f = self.unit_cell.cell.to_fractional(v).map_err(CompileError)?;
                 for (axis, fc) in f.iter_mut().enumerate() {
                     if self.boundary[axis] == Boundary::Periodic {
                         let period = self.dims[axis] as f64;
@@ -347,7 +342,36 @@ fn energy_factor(units: Option<&str>) -> Result<f64, CompileError> {
     }
 }
 
+pub fn replica_seed(seed: u64, replica: u64, policy: SeedPolicy) -> u64 {
+    match policy {
+        SeedPolicy::Increment => seed.wrapping_add(replica),
+        SeedPolicy::Hash => splitmix64(splitmix64(seed) ^ replica),
+    }
+}
+
+fn splitmix64(mut x: u64) -> u64 {
+    x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut z = x;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
 pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
+    if deck.structure_kind != StructureKind::Cell {
+        return err(
+            "grid structures parse in schema v2 but compile with B3's conformance strategies",
+        );
+    }
+    if deck.execution.strategy != "ctmc" {
+        return err(format!(
+            "strategy '{}' is not implemented in B2 (only 'ctmc' is available)",
+            deck.execution.strategy
+        ));
+    }
+    if deck.execution.ensemble.n_replicas == 0 {
+        return err("execution.ensemble.n_replicas must be at least 1");
+    }
     let eunit = energy_factor(deck.deck.units.as_deref())?;
 
     // --- species ---
@@ -396,7 +420,10 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
                     .map_err(|_| CompileError("more than 65535 states".into()))?,
             );
             if per_kind.insert(st.name.clone(), id).is_some() {
-                return err(format!("duplicate state '{}' in kind '{}'", st.name, k.name));
+                return err(format!(
+                    "duplicate state '{}' in kind '{}'",
+                    st.name, k.name
+                ));
             }
             state_names.push(format!("{}.{}", k.name, st.name));
             state_occupants.push(if st.occupant == "vacant" {
@@ -433,17 +460,16 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         deck.cell.beta,
         deck.cell.gamma,
     );
-    let cell = match (deck.cell.matrix, params) {
-        (Some(m), (None, None, None, None, None, None)) => Cell::from_matrix(m),
-        (None, (Some(a), Some(b), Some(c), Some(al), Some(be), Some(ga))) => {
-            Cell::from_params(a, b, c, al, be, ga)
-        }
-        _ => {
-            return err(
+    let cell =
+        match (deck.cell.matrix, params) {
+            (Some(m), (None, None, None, None, None, None)) => Cell::from_matrix(m),
+            (None, (Some(a), Some(b), Some(c), Some(al), Some(be), Some(ga))) => {
+                Cell::from_params(a, b, c, al, be, ga)
+            }
+            _ => return err(
                 "cell geometry must be either all of a,b,c,alpha,beta,gamma or a matrix, not a mix",
-            )
-        }
-    };
+            ),
+        };
     let mut tsites = Vec::new();
     let mut kinds_per_template = Vec::new();
     let mut initial_per_template = Vec::new();
@@ -528,10 +554,9 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
     let mut reactions = Vec::new();
     for r in &deck.reactions {
         let ctx = format!("reaction '{}'", r.name);
-        let center_kind = *names
-            .kind_ids
-            .get(&r.center.kind)
-            .ok_or_else(|| CompileError(format!("{ctx}: unknown center kind '{}'", r.center.kind)))?;
+        let center_kind = *names.kind_ids.get(&r.center.kind).ok_or_else(|| {
+            CompileError(format!("{ctx}: unknown center kind '{}'", r.center.kind))
+        })?;
         let center_states = names.state_set(&r.center.state, Some(center_kind), &ctx)?;
 
         let mut guards = Vec::new();
@@ -632,8 +657,7 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
     // kcal/mol per GPa·Å³: 1 GPa·Å³ = 1e-21 J → × N_A / 4184.
     const KCAL_PER_GPA_A3: f64 = 0.143_932_6;
     let mm = unit_cell.cell.matrix();
-    let cell_volume = (mm[0][0]
-        * (mm[1][1] * mm[2][2] - mm[1][2] * mm[2][1])
+    let cell_volume = (mm[0][0] * (mm[1][1] * mm[2][2] - mm[1][2] * mm[2][1])
         - mm[0][1] * (mm[1][0] * mm[2][2] - mm[1][2] * mm[2][0])
         + mm[0][2] * (mm[1][0] * mm[2][1] - mm[1][1] * mm[2][0]))
         .abs();
@@ -693,9 +717,12 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         let ctx = format!("init pass '{}'", p.name);
         let center_kind = match &p.center.kind {
             None => None,
-            Some(k) => Some(*names.kind_ids.get(k).ok_or_else(|| {
-                CompileError(format!("{ctx}: unknown center kind '{k}'"))
-            })?),
+            Some(k) => Some(
+                *names
+                    .kind_ids
+                    .get(k)
+                    .ok_or_else(|| CompileError(format!("{ctx}: unknown center kind '{k}'")))?,
+            ),
         };
         let center_states = names.state_set(&p.center.state, center_kind, &ctx)?;
         let region = match &p.region {
@@ -709,9 +736,7 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         };
         if let Some(prob) = p.probability {
             if !(0.0..=1.0).contains(&prob) {
-                return err(format!(
-                    "{ctx}: probability must be in [0, 1], got {prob}"
-                ));
+                return err(format!("{ctx}: probability must be in [0, 1], got {prob}"));
             }
         }
         if let Some(sites) = &p.sites {
@@ -826,9 +851,7 @@ fn compile_selector(
     let exclude_label = match &s.exclude_label {
         None => None,
         Some(l) => Some(*names.labels.get(l).ok_or_else(|| {
-            CompileError(format!(
-                "{ctx}: selector excludes unknown bond label '{l}'"
-            ))
+            CompileError(format!("{ctx}: selector excludes unknown bond label '{l}'"))
         })?),
     };
     if label.is_some() && exclude_label.is_some() {
@@ -899,20 +922,25 @@ fn compile_op(
         None => missing_default_error,
         Some("error") => true,
         Some("skip") => false,
-        Some(other) => return err(format!("{ctx}: missing must be 'error' or 'skip', not '{other}'")),
+        Some(other) => {
+            return err(format!(
+                "{ctx}: missing must be 'error' or 'skip', not '{other}'"
+            ))
+        }
     };
     match (set, shift, map) {
         (Some(name), None, None) => {
             let k = kind.ok_or_else(|| {
-                CompileError(format!("{ctx}: 'set' needs a kind in scope to resolve '{name}'"))
+                CompileError(format!(
+                    "{ctx}: 'set' needs a kind in scope to resolve '{name}'"
+                ))
             })?;
             Ok(EffectOp::Set(state_in_kind(names, k, name, ctx)?))
         }
         (None, Some(n), None) => Ok(EffectOp::Shift(*n)),
         (None, None, Some(m)) => {
-            let k = kind.ok_or_else(|| {
-                CompileError(format!("{ctx}: 'map' needs a kind in scope"))
-            })?;
+            let k =
+                kind.ok_or_else(|| CompileError(format!("{ctx}: 'map' needs a kind in scope")))?;
             let mut entries = Vec::new();
             for (from, to) in m {
                 entries.push((

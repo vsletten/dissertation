@@ -277,11 +277,16 @@ impl Engine {
         self.site_events[s] = events;
     }
 
+    /// Advance with an explicitly supplied strategy.
+    pub fn step_with(&mut self, strategy: &mut impl UpdateStrategy) -> Result<StepOutcome, Stop> {
+        let mut ctx = StepCtx { engine: self };
+        strategy.step(&mut ctx)
+    }
+
     /// Compatibility wrapper for the default exact-CTMC strategy.
     pub fn step(&mut self) -> Result<Fired, Stop> {
         let mut strategy = ExactCtmc;
-        let mut ctx = StepCtx { engine: self };
-        let outcome = strategy.step(&mut ctx)?;
+        let outcome = self.step_with(&mut strategy)?;
         debug_assert_eq!(outcome.fired.len(), 1);
         outcome.fired.into_iter().next().ok_or(Stop::NoEvents)
     }
@@ -500,7 +505,9 @@ mod tests {
 
         // Every probe must land on a nonzero-rate leaf whose prefix window
         // contains the target, matching a linear scan.
-        let probes = [0.0, 0.4999, 0.5, 1.0, 2.4999, 2.5, 3.7, 5.7499, 5.75, 6.9999];
+        let probes = [
+            0.0, 0.4999, 0.5, 1.0, 2.4999, 2.5, 3.7, 5.7499, 5.75, 6.9999,
+        ];
         for &p in &probes {
             let (idx, residual) = tree.find(p).expect("nonzero leaves exist");
             // linear reference
@@ -514,7 +521,10 @@ mod tests {
                 acc += r;
             }
             assert_eq!(idx, want, "probe {p}");
-            assert!(residual >= 0.0 && residual <= rates[idx] + 1e-12, "probe {p}");
+            assert!(
+                residual >= 0.0 && residual <= rates[idx] + 1e-12,
+                "probe {p}"
+            );
         }
     }
 

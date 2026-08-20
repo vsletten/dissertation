@@ -7,8 +7,8 @@ pub mod schema;
 
 use std::path::Path;
 
-pub use compile::{compile, CompileError, CompiledDeck};
-pub use schema::DeckFile;
+pub use compile::{compile, replica_seed, CompileError, CompiledDeck};
+pub use schema::{DeckFile, SeedPolicy, StructureKind};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LoadError {

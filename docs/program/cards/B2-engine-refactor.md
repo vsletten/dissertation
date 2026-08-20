@@ -20,6 +20,14 @@ strategies in this card (that's B3) — this card is pure refactor.
   schema-v2 round-trip tests; v1 decks load unchanged.
 
 ## Progress
+- 2026-08-20 — deck schema v2 + v1 shim complete. A custom one-pass
+  deserializer normalizes every schema-less v1 deck to v2/`ctmc`; explicit
+  cell-form v2 decks compile through the same dense tables, mixed/unknown
+  schemas fail closed, and future strategies parse but cannot silently run as
+  CTMC. All four shipped v1 decks shim+compile. Added the RFC's exact
+  splitmix64 replica-seed function/vectors and a v1↔v2 trajectory-equivalence
+  gate. Grid-form v2 parses and is deliberately compile-rejected until B3,
+  which owns the first grid conformance decks and non-CTMC strategies.
 - 2026-08-20 — `UpdateStrategy`, `StepCtx`, `StepOutcome`, and stateless
   `ExactCtmc` seam landed in petra-core. The existing selection/wait/apply/
   dirty-propagation order moved intact behind the trait; `Engine::step` remains
