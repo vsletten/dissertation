@@ -122,6 +122,36 @@ def channel_escape_reason(ts_guess: Cluster, ts: Cluster, ow_index: int) -> str 
     return None
 
 
+def hydrolysis_basin_signature(
+    cluster: Cluster, ow_index: int
+) -> tuple[bool, bool, bool]:
+    """Return (Si-Ow bonded, Si-Obr bonded, proton on Obr) for IRC gating."""
+    h_candidates = [ow_index + 1, ow_index + 2]
+    return (
+        float(np.linalg.norm(cluster.coords[SI_INDEX] - cluster.coords[ow_index]))
+        < 2.3,
+        float(np.linalg.norm(cluster.coords[SI_INDEX] - cluster.coords[BR_INDEX]))
+        < 2.3,
+        min(
+            float(np.linalg.norm(cluster.coords[BR_INDEX] - cluster.coords[h_idx]))
+            for h_idx in h_candidates
+        )
+        < 1.25,
+    )
+
+
+def quick_irc_channel_reason(back: Cluster, fwd: Cluster, ow_index: int) -> str | None:
+    """Explain why quick-IRC did not connect reactant and hydrolyzed basins."""
+    actual = {
+        hydrolysis_basin_signature(back, ow_index),
+        hydrolysis_basin_signature(fwd, ow_index),
+    }
+    expected = {(False, True, False), (True, False, True)}
+    if actual != expected:
+        return f"quick-IRC basin signatures {sorted(actual)} != {sorted(expected)}"
+    return None
+
+
 def proton_neb_guess(
     approach_seed: Cluster,
     complex_opt: Cluster,
@@ -153,8 +183,25 @@ def proton_neb_guess(
             f"r(Si-Ow)={r_prod_ow:.2f} A, r(Si-Obr)={r_prod_br:.2f} A"
         )
         if r_prod_ow <= 1.9 and r_prod_br >= 2.2:
-            log("  stage 2d: CI-NEB complex -> product (7 images)")
-            return neb_ts_guess(complex_opt, product, settings)
+            # Endpoint alignment in ``neb_ts_guess`` removes the rigid-frame
+            # mismatch that made the full hydrolysis product fail its first
+            # image SCF.  Use the actual product basin here: the older
+            # rolled-back r(Si-Obr)≈2.07 checkpoint yielded a product-like
+            # four-imaginary-mode NEB peak, not the concerted saddle.
+            log(
+                "  stage 2d: staged CI-NEB complex -> aligned full product "
+                "(5 images; MDMin 1.5 pre-relax -> 0.2 climb eV/A)"
+            )
+            return neb_ts_guess(
+                complex_opt,
+                product,
+                settings,
+                n_images=5,
+                fmax_ev_a=0.2,
+                max_steps=240,
+                pre_relax_fmax_ev_a=1.5,
+                pre_relax_steps=120,
+            )
         log("  saved product is not hydrolyzed; extending Si-Obr cleavage")
         rejected = run_dir / "product.rejected-rollback.xyz"
         product_path.replace(rejected)
@@ -249,8 +296,20 @@ def proton_neb_guess(
             "product rolled back toward reactants; expected Si-Ow bonded "
             "and Si-Obr broken"
         )
-    log("  stage 2d: CI-NEB complex -> product (7 images)")
-    return neb_ts_guess(complex_opt, product, settings)
+    log(
+        "  stage 2d: staged CI-NEB complex -> aligned full product "
+        "(5 images; MDMin 1.5 pre-relax -> 0.2 climb eV/A)"
+    )
+    return neb_ts_guess(
+        complex_opt,
+        product,
+        settings,
+        n_images=5,
+        fmax_ev_a=0.2,
+        max_steps=240,
+        pre_relax_fmax_ev_a=1.5,
+        pre_relax_steps=120,
+    )
 
 
 def main() -> int:
@@ -339,9 +398,35 @@ def main() -> int:
     if ts_guess_path.exists():
         ts_guess = load_xyz(ts_guess_path, complex_opt)
         log(f"  resume: ts_guess.xyz exists ({route} route)")
+        if route == "proton-neb" and channel_escape_reason(
+            ts_guess, ts_guess, ow_index
+        ):
+            r_bad = float(
+                np.linalg.norm(ts_guess.coords[SI_INDEX] - ts_guess.coords[ow_index])
+            )
+            log(
+                "  saved NEB peak is outside the channel "
+                f"(r(Si-Ow)={r_bad:.2f} A); rebuilding from the closer endpoint"
+            )
+            ts_guess_path.replace(run_dir / "ts_guess.rejected-neb-escape.xyz")
+            stale_traj = run_dir / "sella.traj"
+            if stale_traj.exists():
+                stale_traj.replace(run_dir / "sella.rejected-neb-escape.traj")
+            ts_guess = proton_neb_guess(
+                ts_guess, complex_opt, settings, run_dir, ow_index
+            )
+            save_xyz(ts_guess, ts_guess_path)
+    elif route == "proton-neb" and (run_dir / "product.xyz").exists():
+        # A failed bounded NEB leaves the route and validated product durable
+        # but no ts_guess.xyz.  Resume that exact stage instead of repeating
+        # the already-completed direct/proton scans.
+        log("  resume: proton-NEB route/product exist; rebuilding only the band")
+        ts_guess = proton_neb_guess(
+            complex_opt, complex_opt, settings, run_dir, ow_index
+        )
+        save_xyz(ts_guess, ts_guess_path)
     else:
-        # A route marker without its geometry can only be a crash between
-        # checkpoint writes. Reconstruct from the direct route safely.
+        # No reusable product exists. Reconstruct from the direct route.
         route = "direct"
         route_path.unlink(missing_ok=True)
         try:
@@ -421,9 +506,13 @@ def main() -> int:
     if ts_freq.n_imaginary != 1:
         log("  !! not a clean first-order saddle — inspect ts.xyz; aborting")
         return 1
-    back, fwd = quick_irc(ts, settings)
+    back, fwd = quick_irc(ts, settings, displacement_a=0.50)
     save_xyz(back, run_dir / "irc_back.xyz")
     save_xyz(fwd, run_dir / "irc_fwd.xyz")
+    irc_failure = quick_irc_channel_reason(back, fwd, ow_index)
+    if irc_failure:
+        log(f"  !! {irc_failure}; aborting before thermochemistry")
+        return 1
 
     # Stage 5 — thermochemistry.
     log("stage 5: thermochemistry")

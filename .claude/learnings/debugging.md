@@ -18,3 +18,11 @@ fragmented across thousands of allocations. Fix: free_all_blocks() on the
 default + pinned pools at every stage boundary and scan point
 (phase2_ladder.trim_gpu_pool). Also: `cmd | tee log` reports tee's exit
 code — a crashed driver looks like exit 0 unless `set -o pipefail`.
+
+### GPU4PySCF 1.8.1 DF-UKS Hessian can assert on contiguity (2026-08-19)
+Open-shell D2a saddles optimized normally on the GPU, but the analytic
+density-fitted UKS Hessian aborted inside `gpu4pyscf.hessian.uks` at
+`assert wv.flags.c_contiguous`. Quarry now retries only that failed Hessian on
+CPU; geometry, scans, and saddle optimization remain GPU-first. The affected
+astro systems contain 3–5 atoms, so this is a bounded tiny-molecule fallback,
+not a license to move campaigns onto CPU.

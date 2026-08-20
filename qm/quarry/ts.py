@@ -326,6 +326,10 @@ def neb_ts_guess(
     n_images: int = 7,
     fmax_ev_a: float = 0.10,
     max_steps: int = 150,
+    pre_relax_fmax_ev_a: float = 0.30,
+    pre_relax_steps: int = 80,
+    optimizer_dt: float = 0.05,
+    optimizer_maxstep: float = 0.05,
 ) -> Cluster:
     """Climbing-image NEB between two basins; returns the peak image.
 
@@ -337,15 +341,21 @@ def neb_ts_guess(
     is then a Sella start it can refine rather than flee.
 
     ``fmax_ev_a`` is deliberately loose — this produces a guess, and
-    Sella does the tight convergence.
+    Sella does the tight convergence.  The band is first relaxed without a
+    climbing image, then the climb is enabled.  Both stages use bounded MDMin,
+    ASE's documented stable NEB optimizer: FIRE oscillated and repeatedly
+    re-inflated the force on the live al-neutral full-product band.  Both
+    bounded stages must converge; returning an arbitrary peak from an
+    exhausted optimizer is forbidden.
     """
     from ase import Atoms
+    from ase.build.rotate import minimize_rotation_and_translation
 
     try:
         from ase.mep import NEB
     except ImportError:  # older ASE layout
         from ase.neb import NEB
-    from ase.optimize import FIRE
+    from ase.optimize import MDMin
 
     if reactant.charge != product.charge or reactant.spin != product.spin:
         raise ValueError("reactant/product electronic states differ")
@@ -353,15 +363,47 @@ def neb_ts_guess(
     for _ in range(n_images - 2):
         images.append(images[0].copy())
     images.append(Atoms(symbols=product.symbols, positions=product.coords))
+    # Independent optimizations can rigidly rotate/translate the product.
+    # Interpolating those raw Cartesian frames sent the transferring proton
+    # several Angstroms into vacuum and made the first DFT SCF fail. Remove
+    # only that physically meaningless global motion before IDPP.
+    minimize_rotation_and_translation(images[0], images[-1])
     for image in images:
         image.calc = make_ase_calculator(settings, reactant.charge, reactant.spin)
         if reactant.frozen_indices:
             from ase.constraints import FixAtoms
 
             image.set_constraint(FixAtoms(indices=reactant.frozen_indices))
-    neb = NEB(images, climb=True)
+    neb = NEB(
+        images,
+        climb=False,
+        method="improvedtangent",
+        remove_rotation_and_translation=True,
+    )
     neb.interpolate(method="idpp")
-    FIRE(neb).run(fmax=fmax_ev_a, steps=max_steps)
+
+    relaxed = MDMin(
+        neb,  # type: ignore[arg-type] -- ASE optimizers accept NEB objects
+        dt=optimizer_dt,
+        maxstep=optimizer_maxstep,
+    ).run(fmax=pre_relax_fmax_ev_a, steps=pre_relax_steps)
+    if not relaxed:
+        raise RuntimeError(
+            "NEB pre-relaxation did not converge "
+            f"to {pre_relax_fmax_ev_a:.3f} eV/A within {pre_relax_steps} steps"
+        )
+
+    neb.climb = True
+    climbed = MDMin(
+        neb,  # type: ignore[arg-type] -- ASE optimizers accept NEB objects
+        dt=optimizer_dt,
+        maxstep=optimizer_maxstep,
+    ).run(fmax=fmax_ev_a, steps=max_steps)
+    if not climbed:
+        raise RuntimeError(
+            "climbing-image NEB did not converge "
+            f"to {fmax_ev_a:.3f} eV/A within {max_steps} steps"
+        )
     energies = [float(image.get_potential_energy()) for image in images]
     peak = int(np.argmax(energies))
     if peak in (0, len(images) - 1):
