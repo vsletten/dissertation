@@ -29,8 +29,7 @@ class CylinderInversionTests(unittest.TestCase):
     def test_short_time_limit(self) -> None:
         fraction = 0.02
         expected = (
-            2.0 / (3.141592653589793**0.5)
-            - (4.0 / 3.141592653589793 - fraction) ** 0.5
+            2.0 / (3.141592653589793**0.5) - (4.0 / 3.141592653589793 - fraction) ** 0.5
         ) ** 2
         self.assertAlmostEqual(
             muscovite_release.invert_cylinder_fraction(fraction),
