@@ -62,6 +62,36 @@ class TestDeckCell:
             d = float(np.linalg.norm(ri - rj))
             assert 1.3 < d < 3.0, f"bond {b.i}-{b.j} at {d:.2f} A"
 
+    def test_matrix_is_normalized_3x3(self, cell):
+        assert cell.matrix.shape == (3, 3)
+        assert np.issubdtype(cell.matrix.dtype, np.floating)
+        assert np.all(np.isfinite(cell.matrix))
+
+    def test_matrix_rejects_wrong_shape(self):
+        with pytest.raises(ValueError, match="3x3"):
+            DeckCell(matrix=[[1.0, 0.0, 0.0]], sites=[], bonds=[])
+
+    def test_matrix_rejects_degenerate_vectors(self):
+        # Two identical lattice vectors -> zero cell volume.
+        with pytest.raises(ValueError, match="degenerate"):
+            DeckCell(
+                matrix=[[1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+                sites=[],
+                bonds=[],
+            )
+
+    def test_matrix_rejects_nonfinite(self):
+        with pytest.raises(ValueError, match="finite"):
+            DeckCell(
+                matrix=[
+                    [1.0, 0.0, 0.0],
+                    [0.0, float("nan"), 0.0],
+                    [0.0, 0.0, 1.0],
+                ],
+                sites=[],
+                bonds=[],
+            )
+
 
 def _parse_legacy_cell(path: Path):
     """(kinds, adjacency) from legacy data.cell; adjacency is per-site
