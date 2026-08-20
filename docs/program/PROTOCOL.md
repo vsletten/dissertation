@@ -126,17 +126,35 @@ questions — not for status (STATUS.md) or results (cards).
 
 The mission-control queue remains the *scheduler* for autonomous
 drain-engine runs; this repo is the *source of truth* for program
-state. To aim the drain engine at program work, drop a thin pointer
-card in mission-control's inbox: "Work the next READY card in
-dissertation docs/program/PLAN.md per docs/program/PROTOCOL.md." Never
-duplicate card content across the two — pointer there, substance here.
-(TASK-164 predates this system and lives whole in mission-control;
-PLAN.md notes it.)
+state. Never duplicate card content across the two — pointer there,
+substance here. (TASK-164 predates this system and lives whole in
+mission-control; PLAN.md notes it.)
 
-## How Fable supervises (pull, not push)
+**Autopilot (since 2026-08-20): pointer cards are enqueued
+automatically.** `scripts/board_feeder.py` in mission-control runs
+hourly (`ophir-board-feeder.timer`, workstation): it reads this board
+from origin/main, and for every card that is READY — or blocked only
+on cards that are now done (stale rows count) — writes a thin pointer
+task into the mission-control queue, capped at 2 open pointers and 1
+workstation-pinned card in flight. The 30-minute drain cron and
+macbots claim from there. Do NOT hand-enqueue pointers for board
+cards; the feeder is idempotent and will not double-dispatch, but
+hand-written duplicates confuse it. Kill switch:
+`systemctl --user disable --now ophir-board-feeder.timer` (feeder) +
+`hermes cron pause 71b7edd429c0` (drain).
 
-No standing orchestration. At session start (or when Victor asks),
-Fable reads STATUS.md + `git log --oneline` since last sync + open
-`agents/*` branches, and intervenes only on: stale claims, BLOCKED
-PRs, contradictory deviations, or cards stuck blocked whose blockers
-have cleared. Anything a worker needs from Fable goes in the inbox.
+## How the program is supervised (pull, not push)
+
+Daily automated pass: the `omnibus-supervisor` Hermes cron
+(workstation, 07:50) checks feeder/drain/queue health, fixes stale
+board bookkeeping via small docs-only PRs, applies the stale-claim
+rule, flags stuck PRs, and delivers a one-line digest to Victor's
+Telegram. It never starts campaigns, never merges, never runs heavy
+compute.
+
+Fable adds judgment on top, pull-based: at session start (or when
+Victor asks), read STATUS.md + `git log --oneline` since last sync +
+open `agents/*` branches, and intervene only on: contradictory
+deviations, quality problems in merged work, design questions, or
+anything the supervisor flagged. Anything a worker needs from Fable
+goes in the inbox.
