@@ -22,7 +22,7 @@ mission-control TASK-168 progress log). Make the lane explicit:
    expected_gb). Stale detection: lease pid dead → break with a dated
    note. Refuse to acquire when a live lease exists; drivers exit with
    a clear "GPU lane busy (owner=X)" message instead of contending.
-2. VRAM headroom: leased DFT processes set a cupy memory-pool limit
+2. VRAM headroom: leased DFT processes set a CuPy memory-pool limit
    (default 16 GB, `--gpu-mem-gb` override) so ollama always has ≥6 GB
    to land models in. Document the floor in qm/README.md.
 3. Shared preflight for queue workers: `scripts/gpu_preflight.sh`
