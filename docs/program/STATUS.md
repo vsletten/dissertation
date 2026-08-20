@@ -66,3 +66,8 @@ Deviations get a `DEVIATION:` note; details live in the card.*
   tasks; omnibus-supervisor Hermes cron (daily 07:50) does bookkeeping
   + stale claims + Telegram digest. PROTOCOL.md amended. Humans and
   Fable are now exception handlers, not schedulers.
+- 2026-08-20 — fable — card QI2-gpu-lease (READY, P1): explicit
+  single-lane GPU lease + 16 GB cupy cap + shared worker preflight,
+  after reviewing overnight A3-pilot/ollama cohabitation (22 ollama
+  loads, all-GPU, zero errors — but pilot peaked 21.7 GB; luck, not
+  design) and TASK-168's per-tick hand-rolled preflights.
