@@ -453,12 +453,19 @@ fn validate_structure(structure: &StructureV2) -> Result<(), String> {
             "{family} grid requires {expected_dimensions} nonzero dimensions"
         ));
     }
-    if boundary.len() != expected_dimensions
-        || boundary
-            .iter()
-            .any(|value| !matches!(value.as_str(), "periodic" | "open" | "fixed"))
+    if boundary.len() != expected_dimensions {
+        return Err(format!(
+            "{family} grid boundary must have {expected_dimensions} values (one per axis), got {}",
+            boundary.len()
+        ));
+    }
+    if boundary
+        .iter()
+        .any(|value| !matches!(value.as_str(), "periodic" | "open" | "fixed"))
     {
-        return Err("grid boundary must have one valid value per axis".to_string());
+        return Err(format!(
+            "{family} grid boundary values must be one of 'periodic', 'open', or 'fixed'"
+        ));
     }
     match (family, structure.neighborhood.as_deref()) {
         ("hex", None) => {}

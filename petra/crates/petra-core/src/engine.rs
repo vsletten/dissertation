@@ -501,6 +501,9 @@ impl Engine {
     /// changes, and refresh the union of their dirty neighborhoods once.
     fn commit_transitions(&mut self, transitions: Vec<PreparedTransition>) {
         self.last_changes.clear();
+        // Marking array gives O(1) dedup while preserving insertion order, so
+        // refresh order (and thus RNG consumption) stays deterministic.
+        let mut seen = vec![false; self.lattice.len()];
         let mut changed = Vec::new();
         for transition in transitions {
             let before = changed.len();
@@ -508,13 +511,15 @@ impl Engine {
                 let old = self.lattice.states[target];
                 if old != new_state {
                     self.lattice.states[target] = new_state;
-                    if !changed.contains(&target) {
+                    if !seen[target] {
+                        seen[target] = true;
                         changed.push(target);
                     }
                     self.last_changes.push((target, old, new_state));
                 }
             }
-            if changed.len() == before && !changed.contains(&transition.site) {
+            if changed.len() == before && !seen[transition.site] {
+                seen[transition.site] = true;
                 changed.push(transition.site);
             }
         }
@@ -525,7 +530,8 @@ impl Engine {
             for distance in 1..=self.max_read {
                 sites_at_distance(&self.lattice, site, distance, None, &mut ring);
                 for &neighbor in &ring {
-                    if !dirty.contains(&neighbor) {
+                    if !seen[neighbor] {
+                        seen[neighbor] = true;
                         dirty.push(neighbor);
                     }
                 }
