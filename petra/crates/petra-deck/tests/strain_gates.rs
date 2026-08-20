@@ -86,13 +86,16 @@ fn compile(src: &str) -> petra_deck::CompiledDeck {
     petra_deck::compile(&deck).expect("deck compiles")
 }
 
+/// Row-major site index for the 9×9 single-site sheet: index = a*9 + b.
+const fn site(a: usize, b: usize) -> usize {
+    a * 9 + b
+}
+
 #[test]
 fn strain_field_matches_hand_formula_with_clamp_and_min_image() {
     let deck = compile(FIELD_DECK);
     let engine = deck.build_engine(Some(1)).expect("engine builds");
     let lat = &engine.lattice;
-    // site index = (a*9 + b) for this single-site 2D sheet.
-    let site = |a: usize, b: usize| a * 9 + b;
     let u = |a: usize, b: usize| lat.strain[site(a, b)];
 
     // Line pierces cell (1,1) → cartesian (3,3). Distances in Å:
@@ -152,8 +155,8 @@ fn strain_rate_coupling_is_exact() {
     // Both sites are interior with identical 4-neighbor environments; the
     // only rate difference is the strain term: k1/k2 = exp((u1 − u2)/RT)
     // for scale = −1.
-    let s1 = 10; // at the core (u = 4)
-    let s2 = 5 * 9 + 5; // far away
+    let s1 = site(1, 1); // at the core (u = 4)
+    let s2 = site(5, 5); // far away
     let k1 = resolve_rate(lat, &kinds, rxn, s1, 300.0, &mut scratch);
     let k2 = resolve_rate(lat, &kinds, rxn, s2, 300.0, &mut scratch);
     let expect = ((lat.strain[s1] - lat.strain[s2]) / rt).exp();
