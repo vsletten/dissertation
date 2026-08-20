@@ -242,12 +242,20 @@ impl Engine {
         self.site_events[s] = events;
     }
 
+    fn terminal_stop(&self) -> Stop {
+        if self.site_events.iter().any(|events| !events.is_empty()) {
+            Stop::ZeroRate
+        } else {
+            Stop::NoEvents
+        }
+    }
+
     /// One KMC step: select, apply, propagate, advance time.
     pub fn step(&mut self) -> Result<Fired, Stop> {
         let mut total = self.tree.total();
         if total <= 0.0 {
-            let any = self.site_events.iter().any(|e| !e.is_empty());
-            if any {
+            let stop = self.terminal_stop();
+            if stop == Stop::ZeroRate {
                 // Removing an extreme rate can cancel much smaller surviving
                 // rates out of an incrementally maintained internal node.
                 // The leaves remain authoritative, so repair this impossible
@@ -256,15 +264,14 @@ impl Engine {
                 total = self.tree.total();
             }
             if total <= 0.0 {
-                return Err(if any { Stop::ZeroRate } else { Stop::NoEvents });
+                return Err(stop);
             }
         }
 
         // Site, then event within site. A `None` here means the positive
         // `total` was pure accumulated drift over zero leaves — no events.
         let Some((site, mut residual)) = self.tree.find(self.rng.gen::<f64>() * total) else {
-            let any = self.site_events.iter().any(|e| !e.is_empty());
-            return Err(if any { Stop::ZeroRate } else { Stop::NoEvents });
+            return Err(self.terminal_stop());
         };
         let events = &self.site_events[site];
         debug_assert!(!events.is_empty(), "tree selected an event-less site");
