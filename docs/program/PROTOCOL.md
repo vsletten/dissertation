@@ -69,10 +69,13 @@ PR all unwritten (supervision finished them from artifacts). Rules:
   green, not at the end. Campaign artifacts checkpoint continuously.
 - **Update the card's Progress log at each stage boundary** (committed
   and pushed), so a dead or capped worker leaves a legible trail.
-- **Budget the closeout.** When ~15% of your iteration budget remains,
-  STOP new work and execute the closeout (summary → card → STATUS →
-  PR). An incomplete card with finished bookkeeping beats a finished
-  card with no bookkeeping.
+- **Budget the closeout.** Your *iteration budget* is the worker's
+  tool-iteration ceiling (Hermes worker-profile `max_turns`); every
+  tool call — model turn, file read/write, shell command — spends one
+  iteration. Track turns used against the ceiling and, when ~15% of
+  the budget remains, STOP new work and execute the closeout (summary
+  → card → STATUS → PR). An incomplete card with finished bookkeeping
+  beats a finished card with no bookkeeping.
 - Exit reports matter: state precisely what is and is not done —
   D2a's honest exit made supervision closeout a 15-minute job.
 
