@@ -1,13 +1,13 @@
 # A3-barrier-ladder — connectivity × protonation barrier ladder (Phase 2)
 
-- status: ready
+- status: in-progress
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaigns; cluster-builder code is machine-any)
 - depends: — (runs at the validated b3lyp/def2-svp/df tier; A2 re-tiers
   the finished ladder later; acid-state variants may reuse A1b's
   protonated-bridge machinery when it lands but are not blocked by it)
-- claimed-by:
+- claimed-by: fable (agents/A3-barrier-ladder, 2026-08-19)
 
 ## Objective
 Execute qm/HANDOFF.md (Phase 2 edition — the full build plan lives
@@ -42,3 +42,17 @@ with provenance. Closes CALCULATIONS.md rows CALC-002..005 from
 
 ## Progress
 - 2026-08-19 — card created with the Phase-2 handoff rewrite (fable).
+- 2026-08-19 — claimed; cluster builder (`qm/quarry/crystal.py`) +
+  campaign driver (`qm/scripts/phase2_ladder.py`) built and gated
+  (27 new CPU-only tests, full fast suite 117 green, ruff clean).
+  DEVIATION: builder lives in a new module `quarry/crystal.py`, not as
+  a clusters.py extension (clusters.py stays the hand-built benchmark
+  set; the Cluster contract is shared). Pilot cell oss-neutral-n4-s2
+  (Al3H25O29Si6, 63 atoms, 29 frozen heavies) launched on the GPU.
+  Findings so far: (1) the deck cell faithfully imports the legacy
+  data.cell crystallography, which is crude (bonds 1.38–2.88 A) — a
+  logged systematic in every frozen-shell number (learnings/gotchas);
+  (2) constructed protons are never frozen — only crystallographic
+  heavy atoms; (3) frequencies() now does partial-Hessian analysis on
+  frozen clusters (no trans/rot projection), so verify/IRC/thermo flow
+  through the existing machinery unchanged.

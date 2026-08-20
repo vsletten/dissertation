@@ -4,6 +4,13 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-19 — fable — A3-barrier-ladder claimed + platform half landed:
+  crystallographic cluster builder (`qm/quarry/crystal.py`, deck-cell
+  parser + bond-valence termination/charge + n_intact pruning + frozen
+  shell), PHVA frequencies for frozen clusters, and the per-cell campaign
+  driver (`qm/scripts/phase2_ladder.py`). Pilot cell oss-neutral running
+  on the GPU; barriers land in follow-up per-family PRs.
+
 - 2026-08-18 — hermes-workstation — A7-kinetics-database done: schema v0,
   36 P&K silicate records / 74 mechanisms, stdlib validator, and a
   49-source 2004–present expansion inventory under `kinetics-db/`.
