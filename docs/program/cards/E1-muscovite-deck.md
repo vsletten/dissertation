@@ -46,6 +46,14 @@ kinds, rules, and barrier provenance (§4 table).
   with typed nested functions without changing output; the full Petra suite,
   focused post-processing tests, Ruff, and regenerated-result equivalence are
   the follow-up gate.
+- 2026-08-20 — hermes-workstation — follow-up gate PASS: 42 Rust tests and
+  10 focused Python tests passed; current Rust Clippy (`-D warnings`) and
+  Python Ruff check/format passed after clearing four additional toolchain
+  findings. Fresh 500/700 °C `--viz --paranoid` runs reproduced 630/831 and
+  631/831 release with 2.13×/13.55× rise and 275×/32.3× fall. All five
+  regenerated CSV/SVG/JSON products are byte-identical to the tracked
+  artifacts, all nine relative report links resolve, and both rasterized SVGs
+  were visually inspected with readable, unclipped two-panel PASS plots.
 
 ## Result
 
@@ -62,7 +70,9 @@ kinds, rules, and barrier provenance (§4 table).
   falls 32.3× from its early peak — PASS.
 - Verification: both complete runs exited at the truthful no-possible-event
   state under `--paranoid`; `cargo test` passed 42 tests; focused Python
-  suite passed 10 tests; generated SVGs were rasterized and visually checked.
+  suite passed 10 tests; Clippy and Ruff passed; generated SVGs were rasterized
+  and visually checked. No runtime activation applies; dissertation has no
+  installed service for these paths.
 - No quantitative fit is claimed. Every phase-2 limitation and proxy is
   enumerated in the result doc. Executable continuation is captured by
   `E2-muscovite-full-mechanism`; the numerical-range engine defect found
