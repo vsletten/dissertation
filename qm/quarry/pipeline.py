@@ -198,6 +198,24 @@ def frequencies(cluster: Cluster, settings: DftSettings) -> FrequencyResult:
     )
 
 
+def _is_gpu_hessian_contiguity_assertion(err: AssertionError) -> bool:
+    """True only for the known GPU4PySCF DF-UKS Hessian contiguity defect.
+
+    GPU4PySCF 1.8.1 aborts inside ``gpu4pyscf.hessian.uks`` on
+    ``assert wv.flags.c_contiguous`` for open-shell molecules.  We match on the
+    assertion's message or its origin (a gpu4pyscf frame) and re-raise anything
+    else, so genuine programming errors are never masked by the CPU fallback.
+    """
+    if "contiguous" in str(err).lower():
+        return True
+    tb = err.__traceback__
+    while tb is not None:
+        if "gpu4pyscf" in tb.tb_frame.f_code.co_filename:
+            return True
+        tb = tb.tb_next
+    return False
+
+
 def _scf_hessian(cluster: Cluster, settings: DftSettings) -> tuple[Any, float, Any]:
     """Run SCF + Hessian, with a bounded CPU fallback for GPU backend defects.
 
@@ -213,7 +231,7 @@ def _scf_hessian(cluster: Cluster, settings: DftSettings) -> tuple[Any, float, A
     try:
         return mf, float(e), mf.Hessian().kernel()
     except AssertionError as gpu_error:
-        if not settings.use_gpu:
+        if not settings.use_gpu or not _is_gpu_hessian_contiguity_assertion(gpu_error):
             raise
         warnings.warn(
             "GPU4PySCF Hessian assertion; retrying this Hessian on CPU",
