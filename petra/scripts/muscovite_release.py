@@ -401,7 +401,9 @@ def _svg_panels(results: tuple[RunResult, ...], metric: str) -> str:
             return x0 + (value - x_low) * plot_width / _span(x_low, x_high)
 
         def sy(value: float) -> float:
-            return y0 + plot_height - (value - y_low) * plot_height / _span(y_low, y_high)
+            return (
+                y0 + plot_height - (value - y_low) * plot_height / _span(y_low, y_high)
+            )
 
         parts.extend(
             [
