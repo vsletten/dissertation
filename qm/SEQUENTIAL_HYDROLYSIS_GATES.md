@@ -45,7 +45,15 @@ Each elementary saddle must satisfy all of the following:
 4. Quick-IRC at 0.50 Å or 1.00 Å reaches exactly the allowed endpoint pair.
 5. Reused frequency/mode data carry exact geometry and scientific-settings fingerprints; a stale same-sized Hessian is rejected.
 
-The addition search is initialized with the aligned R → I Cartesian reaction vector. CI-NEB remains a bounded guess generator and fails closed on either unconverged relaxation stage.
+The addition search is initialized with the aligned R → I Cartesian reaction
+vector masked to the reactive Si/Al/Obr/water core; endpoint terminal-hydroxyl
+conformer changes may not choose the unstable direction. The loose CI-NEB peak
+is first relaxed with exact Cartesian pins on `r(Si–Ow)` and
+`r(Obr–Htransfer)`, allowing every transverse spectator coordinate to minimize.
+That preparation must converge at projected `fmax ≤ 0.02 eV Å⁻¹`, preserve both
+pins within `10⁻⁶ Å`, and fail closed after 120 BFGS steps. The pins are then
+removed before a fresh Cartesian Sella search. CI-NEB remains a bounded guess
+generator and fails closed on either unconverged relaxation stage.
 
 ## Barrier reporting
 

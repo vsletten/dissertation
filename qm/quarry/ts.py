@@ -71,13 +71,21 @@ def make_ase_calculator(settings: DftSettings, charge: int, spin: int):
     return PyscfCalculator()
 
 
-def reaction_path_vector(reactant: Cluster, product: Cluster) -> np.ndarray:
+def reaction_path_vector(
+    reactant: Cluster,
+    product: Cluster,
+    *,
+    active_indices: list[int] | None = None,
+) -> np.ndarray:
     """Normalized Cartesian endpoint displacement with rigid motion removed.
 
     The vector is a physically motivated initial mode for a directed Cartesian
     Sella search.  Endpoint optimizations may independently rotate or translate
     a cluster, so that meaningless motion is removed before differencing.  Any
-    frozen shell is excluded from the mode.
+    frozen shell is excluded from the mode. ``active_indices`` can additionally
+    restrict the displacement to a reactive core. This prevents unrelated
+    endpoint conformer changes (for example, terminal-hydroxyl rotations) from
+    choosing the initial unstable direction for a directed saddle search.
     """
     from ase import Atoms
     from ase.build.rotate import minimize_rotation_and_translation
@@ -93,6 +101,18 @@ def reaction_path_vector(reactant: Cluster, product: Cluster) -> np.ndarray:
     end = Atoms(symbols=product.symbols, positions=product.coords)
     minimize_rotation_and_translation(start, end)
     mode = end.positions - start.positions
+    if active_indices is not None:
+        if not active_indices:
+            raise ValueError("active_indices must not be empty")
+        if len(set(active_indices)) != len(active_indices):
+            raise ValueError("active_indices contains duplicates")
+        if any(i < 0 or i >= len(reactant.symbols) for i in active_indices):
+            raise ValueError("active_indices contains an out-of-range atom")
+        masked = np.zeros_like(mode)
+        masked[np.asarray(active_indices, dtype=int)] = mode[
+            np.asarray(active_indices, dtype=int)
+        ]
+        mode = masked
     if reactant.frozen_indices:
         mode[np.asarray(reactant.frozen_indices, dtype=int)] = 0.0
     norm = float(np.linalg.norm(mode))
@@ -196,6 +216,124 @@ def find_ts(
             f"within {max_steps} steps"
         )
     return replace(cluster, coords=atoms.positions.copy(), name=f"{cluster.name}-ts")
+
+
+def relax_at_fixed_distances(
+    cluster: Cluster,
+    settings: DftSettings,
+    *,
+    fixed_distances: list[tuple[int, int, float]],
+    fmax_ev_a: float = 0.02,
+    max_steps: int = 120,
+    optimizer_maxstep: float = 0.05,
+    distance_tolerance_a: float = 1e-6,
+    trajectory: str | None = None,
+    logfile: str | None = "-",
+) -> Cluster:
+    """Relax transverse modes while holding exact Cartesian bond distances.
+
+    This is a topology-agnostic alternative to a geomeTRIC ``$set``
+    optimization when a transition-state guess sits on a known multidimensional
+    reaction-coordinate crest. ASE's ``FixBondLengths`` projects both positions
+    and forces, so spectator coordinates can minimize without the pinned bond
+    distances drifting as the molecular connectivity changes.
+
+    The optimizer must converge and the final projected force and distance
+    residuals are checked independently. Frozen atoms may be retained only when
+    they do not participate in a pinned pair; overlapping exact constraints have
+    order-dependent behavior in ASE and are rejected rather than guessed at.
+    """
+    from ase import Atoms
+    from ase.constraints import FixAtoms, FixBondLengths
+    from ase.optimize import BFGS
+
+    if not fixed_distances:
+        raise ValueError("fixed_distances must not be empty")
+    if not np.isfinite(fmax_ev_a) or fmax_ev_a <= 0.0:
+        raise ValueError("fmax_ev_a must be finite and positive")
+    if max_steps <= 0:
+        raise ValueError("max_steps must be positive")
+    if not np.isfinite(optimizer_maxstep) or optimizer_maxstep <= 0.0:
+        raise ValueError("optimizer_maxstep must be finite and positive")
+    if not np.isfinite(distance_tolerance_a) or distance_tolerance_a <= 0.0:
+        raise ValueError("distance_tolerance_a must be finite and positive")
+
+    pairs: list[tuple[int, int]] = []
+    targets: list[float] = []
+    seen: set[tuple[int, int]] = set()
+    frozen = set(cluster.frozen_indices or [])
+    for atom_i, atom_j, target in fixed_distances:
+        if atom_i == atom_j:
+            raise ValueError("a fixed distance requires two distinct atoms")
+        if atom_i < 0 or atom_j < 0 or atom_i >= len(cluster.symbols) or atom_j >= len(
+            cluster.symbols
+        ):
+            raise ValueError("fixed_distances contains an out-of-range atom")
+        pair_key = (
+            (atom_i, atom_j) if atom_i < atom_j else (atom_j, atom_i)
+        )
+        if pair_key in seen:
+            raise ValueError("fixed_distances contains a duplicate atom pair")
+        if atom_i in frozen or atom_j in frozen:
+            raise ValueError("a fixed-distance atom may not also be frozen")
+        if not np.isfinite(target) or target <= 0.0:
+            raise ValueError("fixed-distance targets must be finite and positive")
+        seen.add(pair_key)
+        pairs.append((atom_i, atom_j))
+        targets.append(float(target))
+
+    atoms = Atoms(symbols=cluster.symbols, positions=cluster.coords)
+    atoms.calc = make_ase_calculator(settings, cluster.charge, cluster.spin)
+    constraints = []
+    if cluster.frozen_indices:
+        constraints.append(FixAtoms(indices=cluster.frozen_indices))
+    constraints.append(
+        FixBondLengths(
+            pairs,
+            bondlengths=targets,
+            tolerance=distance_tolerance_a,
+        )
+    )
+    atoms.set_constraint(constraints)
+    # Explicit targets are not applied until ASE adjusts a position update.
+    # Project before BFGS's initial force-only convergence check, otherwise an
+    # off-target zero-force geometry can falsely return converged.
+    atoms.set_positions(atoms.positions.copy())
+
+    optimizer = BFGS(
+        atoms,
+        maxstep=optimizer_maxstep,
+        trajectory=trajectory,
+        logfile=logfile,
+    )
+    optimizer_reported_convergence = optimizer.run(
+        fmax=fmax_ev_a,
+        steps=max_steps,
+    )
+    projected_forces = np.asarray(atoms.get_forces(), dtype=float)
+    projected_fmax = float(np.linalg.norm(projected_forces, axis=1).max())
+    if not optimizer_reported_convergence:
+        raise RuntimeError(
+            f"fixed-distance relaxation did not converge within {max_steps} steps"
+        )
+
+    actual = np.asarray([atoms.get_distance(i, j) for i, j in pairs])
+    residual = float(np.max(np.abs(actual - np.asarray(targets))))
+    if residual > distance_tolerance_a:
+        raise RuntimeError(
+            "fixed-distance relaxation violated a target by "
+            f"{residual:.3e} A (limit {distance_tolerance_a:.3e} A)"
+        )
+    if projected_fmax >= fmax_ev_a:
+        raise RuntimeError(
+            "fixed-distance relaxation reported convergence with projected "
+            f"fmax {projected_fmax:.6f} eV/A"
+        )
+    return replace(
+        cluster,
+        coords=atoms.positions.copy(),
+        name=f"{cluster.name}-fixed-distance-relaxed",
+    )
 
 
 def _require_single_imaginary_mode(

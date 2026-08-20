@@ -126,6 +126,22 @@ class TestReactionPathVector:
         with pytest.raises(ValueError, match="no non-rigid component"):
             reaction_path_vector(reactant, product)
 
+    def test_active_indices_mask_endpoint_conformer_motion(self):
+        from dataclasses import replace
+
+        from quarry.ts import reaction_path_vector
+
+        reactant = water()
+        changed = reactant.coords.copy()
+        changed[1] += np.array([0.20, 0.0, 0.0])
+        changed[2] += np.array([0.0, 0.0, 4.0])
+        product = replace(reactant, coords=changed)
+
+        mode = reaction_path_vector(reactant, product, active_indices=[0, 1])
+
+        assert np.linalg.norm(mode) == pytest.approx(1.0)
+        assert np.allclose(mode[2], 0.0)
+
     def test_directed_find_requires_cartesian_coordinates(self):
         with pytest.raises(ValueError, match="requires internal=False"):
             find_ts(hcn_ts_guess(), CHEAP, initial_mode=np.ones((3, 3)))
@@ -470,6 +486,86 @@ class TestConstraints:
         assert np.allclose(opt.coords[1], w.coords[1], atol=1e-4)
         # The free H must have moved off the deliberately-bad guess.
         assert not np.allclose(opt.coords[2], w.coords[2], atol=1e-3)
+
+    def test_fixed_distance_relax_projects_targets_and_moves_spectator(
+        self, monkeypatch
+    ):
+        from ase.calculators.calculator import Calculator, all_changes
+
+        import quarry.ts as ts_mod
+
+        equilibrium = np.array(
+            [
+                [-0.5, 0.0, 0.0],
+                [0.5, 0.0, 0.0],
+                [0.0, 2.4, 0.0],
+                [0.0, 3.6, 0.0],
+                [2.0, 2.0, 0.0],
+            ]
+        )
+
+        class HarmonicCalculator(Calculator):
+            implemented_properties = ["energy", "forces"]
+
+            def calculate(
+                self, atoms=None, properties=("energy",), system_changes=all_changes
+            ):
+                super().calculate(atoms, properties, system_changes)
+                assert atoms is not None
+                delta = atoms.positions - equilibrium
+                self.results = {
+                    "energy": 0.5 * float(np.sum(delta**2)),
+                    "forces": -delta,
+                }
+
+        monkeypatch.setattr(
+            ts_mod,
+            "make_ase_calculator",
+            lambda settings, charge, spin: HarmonicCalculator(),
+        )
+        start = Cluster(
+            "two-pins",
+            ["H"] * 5,
+            np.array(
+                [
+                    [-0.75, 0.0, 0.0],
+                    [0.75, 0.0, 0.0],
+                    [0.0, 2.0, 0.0],
+                    [0.0, 4.0, 0.0],
+                    [4.0, 4.0, 0.0],
+                ]
+            ),
+        )
+
+        relaxed = ts_mod.relax_at_fixed_distances(
+            start,
+            CHEAP,
+            fixed_distances=[(0, 1, 1.0), (2, 3, 1.2)],
+            fmax_ev_a=1e-5,
+            max_steps=100,
+            logfile=None,
+        )
+
+        assert np.linalg.norm(relaxed.coords[0] - relaxed.coords[1]) == pytest.approx(
+            1.0, abs=1e-8
+        )
+        assert np.linalg.norm(relaxed.coords[2] - relaxed.coords[3]) == pytest.approx(
+            1.2, abs=1e-8
+        )
+        assert not np.allclose(relaxed.coords[4], start.coords[4])
+
+    def test_fixed_distance_relax_rejects_frozen_pair_overlap(self):
+        from dataclasses import replace
+
+        from quarry.ts import relax_at_fixed_distances
+
+        cluster = replace(water(), frozen_indices=[0])
+        with pytest.raises(ValueError, match="may not also be frozen"):
+            relax_at_fixed_distances(
+                cluster,
+                CHEAP,
+                fixed_distances=[(0, 1, 1.0)],
+            )
 
 
 class TestScanExtension:
