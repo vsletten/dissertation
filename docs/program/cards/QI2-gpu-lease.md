@@ -38,7 +38,7 @@ mission-control TASK-168 progress log). Make the lane explicit:
   ruff + suite green.
 - Both campaign drivers take/release the lease; running a second
   driver while one holds it exits non-zero with the busy message.
-- cupy pool limit verifiably applied (test may mock cupy).
+- CuPy pool limit verifiably applied (test may mock CuPy).
 - qm/README.md documents the lane rules + ollama floor.
 
 ## Progress
