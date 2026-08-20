@@ -166,12 +166,19 @@ class FrequencyResult:
 
 
 def frequency_geometry_fingerprint(cluster: Cluster) -> str:
-    """Exact geometry/electronic-state identity for reusable Hessian results."""
+    """Exact geometry/electronic-state identity for reusable Hessian results.
+
+    Includes the frozen-atom set: PHVA (partial Hessian) and TS verification
+    depend on which atoms are frozen, so a Hessian computed with a different
+    frozen set must never be reused for this geometry.
+    """
     digest = hashlib.sha256()
     digest.update("\0".join(cluster.symbols).encode())
     digest.update(f"\0{cluster.charge}\0{cluster.spin}\0".encode())
     coords = np.ascontiguousarray(cluster.coords, dtype="<f8")
     digest.update(coords.tobytes())
+    frozen = ",".join(str(i) for i in sorted(cluster.frozen_indices))
+    digest.update(f"\0frozen:{frozen}\0".encode())
     return digest.hexdigest()
 
 
