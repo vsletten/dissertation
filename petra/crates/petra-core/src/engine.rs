@@ -296,7 +296,7 @@ impl Engine {
 
         self.time += dt;
         self.step_count += 1;
-        if self.step_count % REBUILD_EVERY == 0 {
+        if self.step_count.is_multiple_of(REBUILD_EVERY) {
             self.tree.rebuild();
         }
         Ok(Fired {
@@ -451,7 +451,9 @@ mod tests {
 
         // Every probe must land on a nonzero-rate leaf whose prefix window
         // contains the target, matching a linear scan.
-        let probes = [0.0, 0.4999, 0.5, 1.0, 2.4999, 2.5, 3.7, 5.7499, 5.75, 6.9999];
+        let probes = [
+            0.0, 0.4999, 0.5, 1.0, 2.4999, 2.5, 3.7, 5.7499, 5.75, 6.9999,
+        ];
         for &p in &probes {
             let (idx, residual) = tree.find(p).expect("nonzero leaves exist");
             // linear reference
@@ -465,7 +467,10 @@ mod tests {
                 acc += r;
             }
             assert_eq!(idx, want, "probe {p}");
-            assert!(residual >= 0.0 && residual <= rates[idx] + 1e-12, "probe {p}");
+            assert!(
+                residual >= 0.0 && residual <= rates[idx] + 1e-12,
+                "probe {p}"
+            );
         }
     }
 

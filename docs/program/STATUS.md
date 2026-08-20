@@ -4,6 +4,10 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-20 — hermes-workstation — E1 merged-main closeout: removed four
+  default-Ruff E731 violations from the muscovite SVG post-processor with
+  typed local helpers, cleared current Clippy findings, and reverified both
+  full trajectories plus byte-identical CSV/SVG/JSON products.
 - 2026-08-20 — hermes-workstation — E1-muscovite-deck done: schema-v1
   500/700 °C paired-OH + divacancy decks, Hames–Bowring cylinder `D/a²`
   inversion, reproducible CSV/SVG/JSON products, and qualitative gates green

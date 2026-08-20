@@ -65,22 +65,70 @@ class RunResult:
 # The short-time heat-content expansion handles smaller tau without needing
 # hundreds of roots. Values are fixed mathematical constants, not model data.
 CYLINDER_J0_ZEROS = (
-    2.40482555769577, 5.52007811028631, 8.65372791291101, 11.7915344390143,
-    14.9309177084878, 18.0710639679109, 21.2116366298793, 24.3524715307493,
-    27.4934791320403, 30.634606468432, 33.7758202135736, 36.917098353664,
-    40.0584257646282, 43.1997917131767, 46.3411883716618, 49.4826098973978,
-    52.624051841115, 55.76551075502, 58.9069839260809, 62.0484691902272,
-    65.1899648002069, 68.3314693298568, 71.4729816035937, 74.6145006437018,
-    77.7560256303881, 80.8975558711376, 84.0390907769382, 87.1806298436412,
-    90.3221726372105, 93.4637187819448, 96.6052679509963, 99.7468198586806,
-    102.888374254195, 106.029930916452, 109.171489649805, 112.313050280495,
-    115.454612653667, 118.596176630873, 121.737742087951, 124.879308913233,
-    128.020877006008, 131.162446275214, 134.304016638305, 137.445588020284,
-    140.587160352854, 143.72873357369, 146.870307625797, 150.011882456955,
-    153.153458019228, 156.295034268534, 159.436611164263, 162.578188668947,
-    165.719766747955, 168.861345369236, 172.002924503078, 175.144504121903,
-    178.286084200074, 181.427664713731, 184.569245640639, 187.710826960049,
-    190.852408652582, 193.993990700109, 197.135573085661, 200.277155793332,
+    2.40482555769577,
+    5.52007811028631,
+    8.65372791291101,
+    11.7915344390143,
+    14.9309177084878,
+    18.0710639679109,
+    21.2116366298793,
+    24.3524715307493,
+    27.4934791320403,
+    30.634606468432,
+    33.7758202135736,
+    36.917098353664,
+    40.0584257646282,
+    43.1997917131767,
+    46.3411883716618,
+    49.4826098973978,
+    52.624051841115,
+    55.76551075502,
+    58.9069839260809,
+    62.0484691902272,
+    65.1899648002069,
+    68.3314693298568,
+    71.4729816035937,
+    74.6145006437018,
+    77.7560256303881,
+    80.8975558711376,
+    84.0390907769382,
+    87.1806298436412,
+    90.3221726372105,
+    93.4637187819448,
+    96.6052679509963,
+    99.7468198586806,
+    102.888374254195,
+    106.029930916452,
+    109.171489649805,
+    112.313050280495,
+    115.454612653667,
+    118.596176630873,
+    121.737742087951,
+    124.879308913233,
+    128.020877006008,
+    131.162446275214,
+    134.304016638305,
+    137.445588020284,
+    140.587160352854,
+    143.72873357369,
+    146.870307625797,
+    150.011882456955,
+    153.153458019228,
+    156.295034268534,
+    159.436611164263,
+    162.578188668947,
+    165.719766747955,
+    168.861345369236,
+    172.002924503078,
+    175.144504121903,
+    178.286084200074,
+    181.427664713731,
+    184.569245640639,
+    187.710826960049,
+    190.852408652582,
+    193.993990700109,
+    197.135573085661,
+    200.277155793332,
 )
 
 
@@ -97,8 +145,7 @@ def cylinder_fraction(tau: float) -> float:
     if tau < 1.0e-3:
         return min(1.0, 4.0 * math.sqrt(tau / math.pi) - tau)
     retained = 4.0 * sum(
-        math.exp(-(root * root) * tau) / (root * root)
-        for root in CYLINDER_J0_ZEROS
+        math.exp(-(root * root) * tau) / (root * root) for root in CYLINDER_J0_ZEROS
     )
     return max(0.0, min(1.0, 1.0 - retained))
 
@@ -159,7 +206,9 @@ def _release_events(events: Path) -> tuple[list[float], dict[str, int]]:
             if not isinstance(row, list) or len(row) != 4:
                 raise ValueError(f"{events}:{line_number}: invalid event row")
             _, time_s, reaction_id, _ = row
-            if not isinstance(reaction_id, int) or not 0 <= reaction_id < len(reactions):
+            if not isinstance(reaction_id, int) or not 0 <= reaction_id < len(
+                reactions
+            ):
                 raise ValueError(f"{events}:{line_number}: invalid reaction id")
             time_s = float(time_s)
             if time_s < previous_time:
@@ -289,6 +338,18 @@ def _ticks(low: float, high: float, count: int = 5) -> list[float]:
     return [low + index * (high - low) / (count - 1) for index in range(count)]
 
 
+def _span(low: float, high: float) -> float:
+    """Non-zero plot span, so a collapsed range renders as a degenerate plot.
+
+    When every x (or y) value in a panel is identical, ``high - low`` is zero
+    and the ``sx``/``sy`` scale functions would divide by zero. Return a unit
+    span instead so all points map to the same coordinate rather than raising.
+    """
+
+    span = high - low
+    return span if span > 0.0 else 1.0
+
+
 def _svg_panels(results: tuple[RunResult, ...], metric: str) -> str:
     width = 1100
     panel_height = 340
@@ -315,7 +376,7 @@ def _svg_panels(results: tuple[RunResult, ...], metric: str) -> str:
             x_label, y_label = "sqrt(time / s)", "fraction released"
             x_low, x_high = 0.0, max(xs) * 1.03
             y_low, y_high = 0.0, max(ys) * 1.05
-            display_y = lambda value: f"{value:.2f}"
+            y_precision = 2
         else:
             xs = [point.fraction for point in result.points]
             raw_y = [point.apparent_da2_per_s for point in result.points]
@@ -324,11 +385,24 @@ def _svg_panels(results: tuple[RunResult, ...], metric: str) -> str:
             x_low, x_high = 0.0, max(xs) * 1.03
             y_low = math.floor(min(ys))
             y_high = math.ceil(max(ys))
-            display_y = lambda value: f"{value:.1f}"
-        sx = lambda value: x0 + (value - x_low) * plot_width / (x_high - x_low)
-        sy = lambda value: y0 + plot_height - (value - y_low) * plot_height / (
-            y_high - y_low
-        )
+            y_precision = 1
+
+        # Guard against a degenerate panel (all values identical) collapsing
+        # the range to zero, which would divide by zero in sx/sy below.
+        if x_high <= x_low:
+            x_high = x_low + 1.0
+        if y_high <= y_low:
+            y_high = y_low + 1.0
+
+        def display_y(value: float) -> str:
+            return f"{value:.{y_precision}f}"
+
+        def sx(value: float) -> float:
+            return x0 + (value - x_low) * plot_width / _span(x_low, x_high)
+
+        def sy(value: float) -> float:
+            return y0 + plot_height - (value - y_low) * plot_height / _span(y_low, y_high)
+
         parts.extend(
             [
                 f'<rect x="{x0}" y="{y0}" width="{plot_width}" height="{plot_height}" fill="#ffffff" stroke="#4b5563"/>',
@@ -337,18 +411,32 @@ def _svg_panels(results: tuple[RunResult, ...], metric: str) -> str:
         )
         for value in _ticks(x_low, x_high):
             x = sx(value)
-            parts.append(f'<line x1="{x:.2f}" y1="{y0}" x2="{x:.2f}" y2="{y0 + plot_height}" stroke="#e5e7eb"/>')
-            parts.append(f'<text x="{x:.2f}" y="{y0 + plot_height + 22}" text-anchor="middle" font-family="monospace" font-size="12">{value:.2g}</text>')
+            parts.append(
+                f'<line x1="{x:.2f}" y1="{y0}" x2="{x:.2f}" y2="{y0 + plot_height}" stroke="#e5e7eb"/>'
+            )
+            parts.append(
+                f'<text x="{x:.2f}" y="{y0 + plot_height + 22}" text-anchor="middle" font-family="monospace" font-size="12">{value:.2g}</text>'
+            )
         for value in _ticks(y_low, y_high):
             y = sy(value)
-            parts.append(f'<line x1="{x0}" y1="{y:.2f}" x2="{x0 + plot_width}" y2="{y:.2f}" stroke="#e5e7eb"/>')
-            parts.append(f'<text x="{x0 - 12}" y="{y + 4:.2f}" text-anchor="end" font-family="monospace" font-size="12">{display_y(value)}</text>')
+            parts.append(
+                f'<line x1="{x0}" y1="{y:.2f}" x2="{x0 + plot_width}" y2="{y:.2f}" stroke="#e5e7eb"/>'
+            )
+            parts.append(
+                f'<text x="{x0 - 12}" y="{y + 4:.2f}" text-anchor="end" font-family="monospace" font-size="12">{display_y(value)}</text>'
+            )
         coordinates = " ".join(
             f"{sx(x):.2f},{sy(y):.2f}" for x, y in zip(xs, ys, strict=True)
         )
-        parts.append(f'<polyline points="{coordinates}" fill="none" stroke="#b42318" stroke-width="3"/>')
-        parts.append(f'<text x="{x0 + plot_width / 2}" y="{y0 + plot_height + 48}" text-anchor="middle" font-family="sans-serif" font-size="14">{html.escape(x_label)}</text>')
-        parts.append(f'<text x="{x0 + 4}" y="{origin_y + 42}" font-family="sans-serif" font-size="12" fill="#374151">{html.escape(y_label)}</text>')
+        parts.append(
+            f'<polyline points="{coordinates}" fill="none" stroke="#b42318" stroke-width="3"/>'
+        )
+        parts.append(
+            f'<text x="{x0 + plot_width / 2}" y="{y0 + plot_height + 48}" text-anchor="middle" font-family="sans-serif" font-size="14">{html.escape(x_label)}</text>'
+        )
+        parts.append(
+            f'<text x="{x0 + 4}" y="{origin_y + 42}" font-family="sans-serif" font-size="12" fill="#374151">{html.escape(y_label)}</text>'
+        )
         verdict = result.gate
         verdict_text = "gate PASS" if verdict.pass_all else "gate FAIL"
         verdict_fill = "#166534" if verdict.pass_all else "#b42318"
