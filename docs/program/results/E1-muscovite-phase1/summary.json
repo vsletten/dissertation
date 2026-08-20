@@ -1,0 +1,62 @@
+{
+  "all_gates_pass": true,
+  "inversion": "Hames-Bowring infinite-cylinder cumulative-loss series; 2%-release increments",
+  "runs": [
+    {
+      "gate": {
+        "early_peak_da2_per_s": 1.515412800052288e-06,
+        "early_peak_fraction": 0.04,
+        "early_rise": true,
+        "enough_release": true,
+        "fall_ratio": 275.47398072429473,
+        "final_fraction": 0.7581227436823105,
+        "first_da2_per_s": 7.103622591769878e-07,
+        "initial_ar": 831,
+        "later_fall": true,
+        "pass_all": true,
+        "released_ar": 630,
+        "rise_ratio": 2.133295766315086,
+        "tail_median_da2_per_s": 5.501110471732621e-09
+      },
+      "label": "500 C",
+      "reaction_counts": {
+        "dehydroxylate_pair": 8192,
+        "hop_A_to_B_inter": 4584,
+        "hop_A_to_B_intra": 4582,
+        "hop_B_to_A_inter": 4623,
+        "hop_B_to_A_intra": 4516,
+        "release_A_surface": 292,
+        "release_B_surface": 338
+      },
+      "temperature_c": 500.0
+    },
+    {
+      "gate": {
+        "early_peak_da2_per_s": 0.0018887510326114408,
+        "early_peak_fraction": 0.12,
+        "early_rise": true,
+        "enough_release": true,
+        "fall_ratio": 32.33015905870974,
+        "final_fraction": 0.7593261131167268,
+        "first_da2_per_s": 0.00013941079672358622,
+        "initial_ar": 831,
+        "later_fall": true,
+        "pass_all": true,
+        "released_ar": 631,
+        "rise_ratio": 13.54809725645799,
+        "tail_median_da2_per_s": 5.842071575279217e-05
+      },
+      "label": "700 C",
+      "reaction_counts": {
+        "dehydroxylate_pair": 8192,
+        "hop_A_to_B_inter": 4543,
+        "hop_A_to_B_intra": 4449,
+        "hop_B_to_A_inter": 4577,
+        "hop_B_to_A_intra": 4390,
+        "release_A_surface": 294,
+        "release_B_surface": 337
+      },
+      "temperature_c": 700.0
+    }
+  ]
+}

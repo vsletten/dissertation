@@ -4,6 +4,12 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-20 — hermes-workstation — E1-muscovite-deck done: schema-v1
+  500/700 °C paired-OH + divacancy decks, Hames–Bowring cylinder `D/a²`
+  inversion, reproducible CSV/SVG/JSON products, and qualitative gates green
+  (rise 2.13×/13.55×; fall 275×/32.3×). Result:
+  `docs/program/results/E1-muscovite-phase1.md`. Added executable E2 and QI3
+  cards for the full mechanism and Fenwick dynamic-range hardening.
 - 2026-08-20 — fable — A3-barrier-ladder claimed + platform half landed:
   crystallographic cluster builder (`qm/quarry/crystal.py`, deck-cell
   parser + bond-valence termination/charge + n_intact pruning + frozen
