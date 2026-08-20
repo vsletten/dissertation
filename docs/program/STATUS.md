@@ -4,6 +4,10 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-20 — hermes-laptop — QI1 campaign-driver etiquette done: all QM
+  entry points now cap inherited numerical-library threads before heavy imports,
+  apply best-effort niceness, and self-tee durable logs; 162 tests, Ruff, direct
+  CLI smoke checks, and an unset-environment Phase-2 dry run are green.
 - 2026-08-20 — hermes-cloud-default — QI3 Fenwick cancellation hardening:
   impossible zero totals now rebuild from authoritative positive leaves; a
   deterministic `1e12`/`1e-6 s⁻¹` regression, all 43 Petra tests, and an
