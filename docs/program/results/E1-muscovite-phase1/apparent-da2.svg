@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="760" viewBox="0 0 1100 760">
+<rect width="100%" height="100%" fill="#fbfaf7"/>
+<text x="550.0" y="30" text-anchor="middle" font-family="sans-serif" font-size="22" font-weight="700">Apparent D/a^2 from Hames-Bowring cylinder inversion</text>
+<rect x="100" y="100" width="945" height="230" fill="#ffffff" stroke="#4b5563"/>
+<text x="100" y="80" font-family="sans-serif" font-size="18" font-weight="700">500 C</text>
+<line x1="100.00" y1="100" x2="100.00" y2="330" stroke="#e5e7eb"/>
+<text x="100.00" y="352" text-anchor="middle" font-family="monospace" font-size="12">0</text>
+<line x1="336.25" y1="100" x2="336.25" y2="330" stroke="#e5e7eb"/>
+<text x="336.25" y="352" text-anchor="middle" font-family="monospace" font-size="12">0.19</text>
+<line x1="572.50" y1="100" x2="572.50" y2="330" stroke="#e5e7eb"/>
+<text x="572.50" y="352" text-anchor="middle" font-family="monospace" font-size="12">0.38</text>
+<line x1="808.75" y1="100" x2="808.75" y2="330" stroke="#e5e7eb"/>
+<text x="808.75" y="352" text-anchor="middle" font-family="monospace" font-size="12">0.57</text>
+<line x1="1045.00" y1="100" x2="1045.00" y2="330" stroke="#e5e7eb"/>
+<text x="1045.00" y="352" text-anchor="middle" font-family="monospace" font-size="12">0.76</text>
+<line x1="100" y1="330.00" x2="1045" y2="330.00" stroke="#e5e7eb"/>
+<text x="88" y="334.00" text-anchor="end" font-family="monospace" font-size="12">-9.0</text>
+<line x1="100" y1="272.50" x2="1045" y2="272.50" stroke="#e5e7eb"/>
+<text x="88" y="276.50" text-anchor="end" font-family="monospace" font-size="12">-8.0</text>
+<line x1="100" y1="215.00" x2="1045" y2="215.00" stroke="#e5e7eb"/>
+<text x="88" y="219.00" text-anchor="end" font-family="monospace" font-size="12">-7.0</text>
+<line x1="100" y1="157.50" x2="1045" y2="157.50" stroke="#e5e7eb"/>
+<text x="88" y="161.50" text-anchor="end" font-family="monospace" font-size="12">-6.0</text>
+<line x1="100" y1="100.00" x2="1045" y2="100.00" stroke="#e5e7eb"/>
+<text x="88" y="104.00" text-anchor="end" font-family="monospace" font-size="12">-5.0</text>
+<polyline points="124.80,166.04 149.59,147.12 174.39,150.43 199.19,154.53 223.98,156.71 248.78,184.86 273.58,212.09 298.37,224.41 323.17,257.52 347.97,260.95 372.76,258.37 397.56,265.21 422.36,280.50 447.15,276.39 471.95,288.67 496.75,265.75 521.54,279.26 546.34,284.98 571.14,258.67 595.93,268.50 620.73,277.82 645.53,274.08 670.32,265.56 695.12,270.37 719.92,275.92 744.71,264.22 769.51,269.91 794.31,264.02 819.10,264.33 843.90,270.05 868.70,273.75 893.49,270.05 918.29,270.51 943.09,282.85 967.88,287.42 992.68,304.03 1017.48,300.71" fill="none" stroke="#b42318" stroke-width="3"/>
+<text x="572.5" y="378" text-anchor="middle" font-family="sans-serif" font-size="14">fraction released</text>
+<text x="104" y="97" font-family="sans-serif" font-size="12" fill="#374151">log10(D/a^2 / s^-1)</text>
+<text x="1040" y="80" text-anchor="end" font-family="monospace" font-size="13" fill="#166534">rise x2.1; fall x275; gate PASS</text>
+<rect x="100" y="440" width="945" height="230" fill="#ffffff" stroke="#4b5563"/>
+<text x="100" y="420" font-family="sans-serif" font-size="18" font-weight="700">700 C</text>
+<line x1="100.00" y1="440" x2="100.00" y2="670" stroke="#e5e7eb"/>
+<text x="100.00" y="692" text-anchor="middle" font-family="monospace" font-size="12">0</text>
+<line x1="336.25" y1="440" x2="336.25" y2="670" stroke="#e5e7eb"/>
+<text x="336.25" y="692" text-anchor="middle" font-family="monospace" font-size="12">0.19</text>
+<line x1="572.50" y1="440" x2="572.50" y2="670" stroke="#e5e7eb"/>
+<text x="572.50" y="692" text-anchor="middle" font-family="monospace" font-size="12">0.38</text>
+<line x1="808.75" y1="440" x2="808.75" y2="670" stroke="#e5e7eb"/>
+<text x="808.75" y="692" text-anchor="middle" font-family="monospace" font-size="12">0.57</text>
+<line x1="1045.00" y1="440" x2="1045.00" y2="670" stroke="#e5e7eb"/>
+<text x="1045.00" y="692" text-anchor="middle" font-family="monospace" font-size="12">0.76</text>
+<line x1="100" y1="670.00" x2="1045" y2="670.00" stroke="#e5e7eb"/>
+<text x="88" y="674.00" text-anchor="end" font-family="monospace" font-size="12">-5.0</text>
+<line x1="100" y1="612.50" x2="1045" y2="612.50" stroke="#e5e7eb"/>
+<text x="88" y="616.50" text-anchor="end" font-family="monospace" font-size="12">-4.2</text>
+<line x1="100" y1="555.00" x2="1045" y2="555.00" stroke="#e5e7eb"/>
+<text x="88" y="559.00" text-anchor="end" font-family="monospace" font-size="12">-3.5</text>
+<line x1="100" y1="497.50" x2="1045" y2="497.50" stroke="#e5e7eb"/>
+<text x="88" y="501.50" text-anchor="end" font-family="monospace" font-size="12">-2.8</text>
+<line x1="100" y1="440.00" x2="1045" y2="440.00" stroke="#e5e7eb"/>
+<text x="88" y="444.00" text-anchor="end" font-family="monospace" font-size="12">-2.0</text>
+<polyline points="124.80,582.27 149.59,530.11 174.39,507.21 199.19,516.36 223.98,510.74 248.78,495.49 273.58,526.34 298.37,553.74 323.17,579.96 347.97,578.37 372.76,583.78 397.56,611.71 422.36,595.67 447.15,615.28 471.95,589.55 496.75,596.66 521.54,592.27 546.34,583.56 571.14,583.75 595.93,576.04 620.73,590.19 645.53,586.75 670.32,584.69 695.12,595.01 719.92,569.45 744.71,601.99 769.51,596.81 794.31,602.90 819.10,586.69 843.90,597.48 868.70,599.81 893.49,594.67 918.29,606.63 943.09,598.86 967.88,611.23 992.68,630.32 1017.48,643.38" fill="none" stroke="#b42318" stroke-width="3"/>
+<text x="572.5" y="718" text-anchor="middle" font-family="sans-serif" font-size="14">fraction released</text>
+<text x="104" y="437" font-family="sans-serif" font-size="12" fill="#374151">log10(D/a^2 / s^-1)</text>
+<text x="1040" y="420" text-anchor="end" font-family="monospace" font-size="13" fill="#166534">rise x13.5; fall x32; gate PASS</text>
+</svg>

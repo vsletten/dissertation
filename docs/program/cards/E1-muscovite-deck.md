@@ -1,11 +1,11 @@
 # E1-muscovite-deck — Ar release from muscovite, phase 1 (published numbers)
 
-- status: ready
+- status: done
 - track: E (muscovite / the perfect circle)
 - priority: P1
 - machine: any (KMC is CPU-light; no QM in this phase)
 - depends: — (phase 1 is isothermal; staircase spectra later need B5)
-- claimed-by:
+- claimed-by: hermes-workstation
 
 ## Objective
 Phase 1 of docs/scoping/ar-muscovite.md §6: the minimal muscovite deck
@@ -33,3 +33,33 @@ kinds, rules, and barrier provenance (§4 table).
 
 ## Progress
 - 2026-08-19 — card created (fable); scoping doc landed same PR.
+- 2026-08-20 — hermes-workstation — claimed atomically on
+  `agents/E1-muscovite-deck`; pushed schema-v1 500/700 °C deck checkpoint
+  `c977bfa` after both decks compiled and initialized identically.
+- 2026-08-20 — hermes-workstation — completed both `--viz --paranoid`
+  isothermal trajectories, Hames–Bowring cylinder inversion, machine-readable
+  rise-then-fall gates, plots, gap ledger, full Petra suite, and focused
+  post-processing tests. DEVIATION: phase 1 uses one tracked deck per fixed
+  temperature because B5 schedule/schema-v2 support has not landed.
+
+## Result
+
+- status: done
+- Decks: `petra/decks/muscovite-phase1-{500c,700c}.toml` (Petra schema v1).
+- Analysis: `petra/scripts/muscovite_release.py`; Hames–Bowring
+  infinite-cylinder cumulative-loss inversion at 2%-release crossings.
+- Durable report/artifacts:
+  `docs/program/results/E1-muscovite-phase1.md` and
+  `docs/program/results/E1-muscovite-phase1/` (CSV, SVG, JSON verdict).
+- 500 °C: 630/831 Ar released (75.8%); apparent `D/a²` rises 2.13× then
+  falls 275× from its early peak — PASS.
+- 700 °C: 631/831 Ar released (75.9%); apparent `D/a²` rises 13.55× then
+  falls 32.3× from its early peak — PASS.
+- Verification: both complete runs exited at the truthful no-possible-event
+  state under `--paranoid`; `cargo test` passed 42 tests; focused Python
+  suite passed 7 tests; generated SVGs were rasterized and visually checked.
+- No quantitative fit is claimed. Every phase-2 limitation and proxy is
+  enumerated in the result doc. Executable continuation is captured by
+  `E2-muscovite-full-mechanism`; the numerical-range engine defect found
+  during prototyping is captured by `QI3-fenwick-total-cancellation`; B5 is
+  the existing schedule dependency.

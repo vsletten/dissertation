@@ -29,7 +29,9 @@ on main). Priority P0 > P1 > P2 within READY.
 | [B2-engine-refactor](cards/B2-engine-refactor.md) | B | P0 | any | ready | B1 ✅ |
 | [QI1-driver-enforced-etiquette](cards/QI1-driver-enforced-etiquette.md) | A | P2 | any | ready | — |
 | [QI2-gpu-lease](cards/QI2-gpu-lease.md) | A | P1 | any | ready | — |
-| [E1-muscovite-deck](cards/E1-muscovite-deck.md) | E | P1 | any | ready | — (phase 1 isothermal) |
+| [QI3-fenwick-total-cancellation](cards/QI3-fenwick-total-cancellation.md) | B | P1 | any | ready | — |
+| [E1-muscovite-deck](cards/E1-muscovite-deck.md) | E | P1 | any | done | — (phase 1 isothermal) |
+| [E2-muscovite-full-mechanism](cards/E2-muscovite-full-mechanism.md) | E | P1 | any | blocked: B5 | B5 |
 | [A1b-acid-mechanisms](cards/A1b-acid-mechanisms.md) | A | P1 | workstation | ready | — |
 | [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | ready | — |
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |

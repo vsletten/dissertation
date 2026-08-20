@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="760" viewBox="0 0 1100 760">
+<rect width="100%" height="100%" fill="#fbfaf7"/>
+<text x="550.0" y="30" text-anchor="middle" font-family="sans-serif" font-size="22" font-weight="700">Cumulative 40Ar release vs square-root time</text>
+<rect x="100" y="100" width="945" height="230" fill="#ffffff" stroke="#4b5563"/>
+<text x="100" y="80" font-family="sans-serif" font-size="18" font-weight="700">500 C</text>
+<line x1="100.00" y1="100" x2="100.00" y2="330" stroke="#e5e7eb"/>
+<text x="100.00" y="352" text-anchor="middle" font-family="monospace" font-size="12">0</text>
+<line x1="336.25" y1="100" x2="336.25" y2="330" stroke="#e5e7eb"/>
+<text x="336.25" y="352" text-anchor="middle" font-family="monospace" font-size="12">1.2e+03</text>
+<line x1="572.50" y1="100" x2="572.50" y2="330" stroke="#e5e7eb"/>
+<text x="572.50" y="352" text-anchor="middle" font-family="monospace" font-size="12">2.5e+03</text>
+<line x1="808.75" y1="100" x2="808.75" y2="330" stroke="#e5e7eb"/>
+<text x="808.75" y="352" text-anchor="middle" font-family="monospace" font-size="12">3.7e+03</text>
+<line x1="1045.00" y1="100" x2="1045.00" y2="330" stroke="#e5e7eb"/>
+<text x="1045.00" y="352" text-anchor="middle" font-family="monospace" font-size="12">4.9e+03</text>
+<line x1="100" y1="330.00" x2="1045" y2="330.00" stroke="#e5e7eb"/>
+<text x="88" y="334.00" text-anchor="end" font-family="monospace" font-size="12">0.00</text>
+<line x1="100" y1="272.50" x2="1045" y2="272.50" stroke="#e5e7eb"/>
+<text x="88" y="276.50" text-anchor="end" font-family="monospace" font-size="12">0.19</text>
+<line x1="100" y1="215.00" x2="1045" y2="215.00" stroke="#e5e7eb"/>
+<text x="88" y="219.00" text-anchor="end" font-family="monospace" font-size="12">0.39</text>
+<line x1="100" y1="157.50" x2="1045" y2="157.50" stroke="#e5e7eb"/>
+<text x="88" y="161.50" text-anchor="end" font-family="monospace" font-size="12">0.58</text>
+<line x1="100" y1="100.00" x2="1045" y2="100.00" stroke="#e5e7eb"/>
+<text x="88" y="104.00" text-anchor="end" font-family="monospace" font-size="12">0.78</text>
+<polyline points="102.03,324.08 103.15,318.16 104.60,312.24 106.32,306.32 108.16,300.40 112.98,294.48 123.05,288.56 135.02,282.64 165.08,276.72 190.27,270.80 210.03,264.88 233.77,258.96 272.26,253.04 301.59,247.12 345.37,241.20 362.11,235.28 390.69,229.36 425.50,223.44 437.64,217.52 456.11,211.60 483.10,205.68 506.38,199.76 523.21,193.84 544.04,187.92 570.35,181.99 587.10,176.07 608.65,170.15 626.09,164.23 644.27,158.31 667.71,152.39 695.40,146.47 719.77,140.55 745.24,134.63 787.65,128.71 838.69,122.79 935.41,116.87 1017.48,110.95" fill="none" stroke="#b42318" stroke-width="3"/>
+<text x="572.5" y="378" text-anchor="middle" font-family="sans-serif" font-size="14">sqrt(time / s)</text>
+<text x="104" y="97" font-family="sans-serif" font-size="12" fill="#374151">fraction released</text>
+<text x="1040" y="80" text-anchor="end" font-family="monospace" font-size="13" fill="#166534">rise x2.1; fall x275; gate PASS</text>
+<rect x="100" y="440" width="945" height="230" fill="#ffffff" stroke="#4b5563"/>
+<text x="100" y="420" font-family="sans-serif" font-size="18" font-weight="700">700 C</text>
+<line x1="100.00" y1="440" x2="100.00" y2="670" stroke="#e5e7eb"/>
+<text x="100.00" y="692" text-anchor="middle" font-family="monospace" font-size="12">0</text>
+<line x1="336.25" y1="440" x2="336.25" y2="670" stroke="#e5e7eb"/>
+<text x="336.25" y="692" text-anchor="middle" font-family="monospace" font-size="12">13</text>
+<line x1="572.50" y1="440" x2="572.50" y2="670" stroke="#e5e7eb"/>
+<text x="572.50" y="692" text-anchor="middle" font-family="monospace" font-size="12">26</text>
+<line x1="808.75" y1="440" x2="808.75" y2="670" stroke="#e5e7eb"/>
+<text x="808.75" y="692" text-anchor="middle" font-family="monospace" font-size="12">38</text>
+<line x1="1045.00" y1="440" x2="1045.00" y2="670" stroke="#e5e7eb"/>
+<text x="1045.00" y="692" text-anchor="middle" font-family="monospace" font-size="12">51</text>
+<line x1="100" y1="670.00" x2="1045" y2="670.00" stroke="#e5e7eb"/>
+<text x="88" y="674.00" text-anchor="end" font-family="monospace" font-size="12">0.00</text>
+<line x1="100" y1="612.50" x2="1045" y2="612.50" stroke="#e5e7eb"/>
+<text x="88" y="616.50" text-anchor="end" font-family="monospace" font-size="12">0.19</text>
+<line x1="100" y1="555.00" x2="1045" y2="555.00" stroke="#e5e7eb"/>
+<text x="88" y="559.00" text-anchor="end" font-family="monospace" font-size="12">0.39</text>
+<line x1="100" y1="497.50" x2="1045" y2="497.50" stroke="#e5e7eb"/>
+<text x="88" y="501.50" text-anchor="end" font-family="monospace" font-size="12">0.58</text>
+<line x1="100" y1="440.00" x2="1045" y2="440.00" stroke="#e5e7eb"/>
+<text x="88" y="444.00" text-anchor="end" font-family="monospace" font-size="12">0.78</text>
+<polyline points="113.88,664.08 117.74,658.16 120.45,652.24 124.73,646.32 128.70,640.40 131.46,634.48 138.64,628.56 153.23,622.64 178.85,616.72 199.37,610.80 221.24,604.88 264.66,598.96 288.62,593.04 328.71,587.12 346.45,581.20 368.49,575.28 387.85,569.36 403.00,563.44 418.59,557.52 431.29,551.60 451.12,545.68 469.25,539.76 486.60,533.84 510.54,527.92 521.89,521.99 552.47,516.07 578.65,510.15 610.17,504.23 629.78,498.31 657.41,492.39 687.39,486.47 713.52,480.55 751.46,474.63 781.96,468.71 826.84,462.79 905.59,456.87 1017.48,450.95" fill="none" stroke="#b42318" stroke-width="3"/>
+<text x="572.5" y="718" text-anchor="middle" font-family="sans-serif" font-size="14">sqrt(time / s)</text>
+<text x="104" y="437" font-family="sans-serif" font-size="12" fill="#374151">fraction released</text>
+<text x="1040" y="420" text-anchor="end" font-family="monospace" font-size="13" fill="#166534">rise x13.5; fall x32; gate PASS</text>
+</svg>
