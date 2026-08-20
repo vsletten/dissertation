@@ -28,6 +28,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [B1-schema-rfc](cards/B1-schema-rfc.md) | B | P0 | any | done | — |
 | [D2a-astro-rate-reproduction](cards/D2a-astro-rate-reproduction.md) | D | P1 | workstation | ready | — |
 | [A1b-acid-mechanisms](cards/A1b-acid-mechanisms.md) | A | P1 | workstation | ready | — |
+| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | ready | — |
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
 | [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: ORCA install (Victor) + A1b | A1b |
 | [B2-engine-refactor](cards/B2-engine-refactor.md) | B | P0 | any | blocked: Victor review ack of RFC-001 | B1 |
