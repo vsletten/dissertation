@@ -77,6 +77,16 @@ class DeckCell:
     )
 
     def __post_init__(self) -> None:
+        matrix = np.asarray(self.matrix, dtype=float)
+        if matrix.shape != (3, 3):
+            raise ValueError(f"deck cell matrix must be 3x3, got {matrix.shape}")
+        if not np.all(np.isfinite(matrix)):
+            raise ValueError("deck cell matrix must be finite")
+        if abs(float(np.linalg.det(matrix))) < 1e-12:
+            raise ValueError(
+                "deck cell lattice vectors are degenerate (zero cell volume)"
+            )
+        self.matrix = matrix
         unknown = {s.kind for s in self.sites} - set(KIND_TO_FAMILY)
         if unknown:
             raise ValueError(f"unknown site kinds in deck cell: {sorted(unknown)}")
