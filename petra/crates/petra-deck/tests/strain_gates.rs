@@ -152,7 +152,7 @@ fn strain_rate_coupling_is_exact() {
     // Both sites are interior with identical 4-neighbor environments; the
     // only rate difference is the strain term: k1/k2 = exp((u1 − u2)/RT)
     // for scale = −1.
-    let s1 = 1 * 9 + 1; // at the core (u = 4)
+    let s1 = 10; // at the core (u = 4)
     let s2 = 5 * 9 + 5; // far away
     let k1 = resolve_rate(lat, &kinds, rxn, s1, 300.0, &mut scratch);
     let k2 = resolve_rate(lat, &kinds, rxn, s2, 300.0, &mut scratch);
