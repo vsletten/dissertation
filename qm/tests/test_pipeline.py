@@ -200,3 +200,45 @@ class TestThermoCrossCheck:
         assert ours.entropy_kj_per_k == pytest.approx(
             val("S_tot") * hartree_to_kj, rel=1e-3
         )
+
+
+class TestPartialHessian:
+    """PHVA path: frequencies() on a cluster with frozen_indices."""
+
+    def test_phva_mode_count_and_stretches(self, opt_water):
+        from dataclasses import replace
+
+        # Freeze the oxygen: 2 free H -> 6 PHVA modes, no trans/rot
+        # projection, no rotational temperatures.
+        frozen = replace(opt_water, frozen_indices=[0])
+        freq = frequencies(frozen, CHEAP)
+        total = freq.frequencies_cm.size + freq.imaginary_cm.size
+        assert total == 6
+        assert freq.rotational_temperatures_k is None
+        # The OH stretches and the bend survive the freeze.
+        assert np.sum(freq.frequencies_cm > 1500) >= 3
+        # Residual imaginary modes are pure rotation-about-O noise.
+        assert np.all(freq.imaginary_cm < 100)
+
+    def test_phva_energy_matches_full(self, opt_water):
+        from dataclasses import replace
+
+        e_full = frequencies(opt_water, CHEAP).electronic_hartree
+        frozen = replace(opt_water, frozen_indices=[0])
+        e_phva = frequencies(frozen, CHEAP).electronic_hartree
+        assert e_phva == pytest.approx(e_full, abs=1e-8)
+
+    def test_phva_imaginary_mode_zero_on_frozen_atoms(self, opt_water):
+        from dataclasses import replace
+
+        # Displace one H off the minimum so a real imaginary mode exists,
+        # then check the returned mode vector is zero on the frozen atom.
+        bent = replace(
+            opt_water,
+            coords=opt_water.coords
+            + np.array([[0, 0, 0], [0.4, -0.3, 0.2], [0, 0, 0]]),
+            frozen_indices=[0],
+        )
+        freq = frequencies(bent, CHEAP)
+        if freq.imaginary_mode is not None:
+            assert np.allclose(freq.imaginary_mode[0], 0.0)

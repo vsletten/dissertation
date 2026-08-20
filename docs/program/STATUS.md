@@ -4,6 +4,12 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-20 — fable — A3-barrier-ladder claimed + platform half landed:
+  crystallographic cluster builder (`qm/quarry/crystal.py`, deck-cell
+  parser + bond-valence termination/charge + n_intact pruning + frozen
+  shell), PHVA frequencies for frozen clusters, and the per-cell campaign
+  driver (`qm/scripts/phase2_ladder.py`). Pilot cell oss-neutral running
+  on the GPU; barriers land in follow-up per-family PRs.
 - 2026-08-20 — fable — Card QI1: campaign drivers must enforce their own
   thread caps + niceness (a live worker probe ran 22 threads past the
   prompt-level cap — prompts don't bind subprocesses).

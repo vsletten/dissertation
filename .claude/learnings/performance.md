@@ -10,3 +10,14 @@ gpu4pyscf warned and fell back to CuPy contractions. smoke v2 fixes all
 three (warmup pass, DF default, cutensor-cu12 in the [gpu] extra) and adds
 --waters up to 24 to probe the 100+-atom regime; expect the survey's 2–5×
 (SCF/grad) and 5–10× (Hessian) only there. Small jobs should just run CPU.
+
+### cutensor-cu12 wheel is invisible to cupy without a preload (2026-08-19)
+The `cutensor-cu12` wheel installs its .so files to
+site-packages/cutensor/lib, which is NOT on the dynamic loader path, so
+cupy silently falls back to its einsum contraction engine (gpu4pyscf
+warns once: "using cupy as the tensor contraction engine"). At ~60
+atoms/def2-svp the fallback's temporaries OOM a 24 GB 4090 in the DF-K
+gradient — cuTENSOR isn't just speed, it's feasibility. Fix: ctypes-CDLL
+the libs with RTLD_GLOBAL before first cupy contraction
+(phase2_ladder.preload_cutensor) or export
+LD_LIBRARY_PATH=$VENV/lib/python3.13/site-packages/cutensor/lib.

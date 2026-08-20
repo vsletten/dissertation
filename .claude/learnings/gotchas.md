@@ -20,3 +20,14 @@ rate differs by ~0.17%. Negligible against DFT barrier error, but it means
 the QM→KMC bridge should always transmit barriers/ΔH‡/ΔS‡ and let the
 engine exponentiate — never pre-computed rate constants
 (documented in qm/tests/test_rates.py::test_petra_gate_value).
+
+### The kaolinite cell crystallography is legacy-crude (2026-08-19)
+The deck cell (petra/examples/kaolinite.toml [cell]) faithfully imports the
+dissertation-era data.cell, whose bond lengths run 1.38-2.88 A (real
+kaolinite: Si-O ~1.6, Al-O ~1.9). Fine for lattice KMC (topology only), but
+QM clusters cut from it start strained and the *frozen shell keeps those
+positions forever* — a systematic in every lattice-resistance number until
+someone re-derives the cell from a modern refinement (Bish 1993). The free
+region re-optimizes, so trends (ΔΔEa by connectivity) are safer than
+absolute barriers. Never freeze constructed protons: H positions are
+guesses, not crystallography (quarry/crystal.py freezes heavy atoms only).
