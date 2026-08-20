@@ -60,7 +60,12 @@ kinds, rules, and barrier provenance (§4 table).
 - 2026-08-20 — hermes-workstation — exact-main closeout after PR #48 found
   that the earlier pushed `strain_gates.rs` identity-op correction was absent
   from the squash-merged tree. Restored the one-line Clippy fix on a fresh
-  follow-up branch; the five strain gates and workspace all-target Clippy pass.
+  follow-up branch; 42 Rust tests, 11 focused Python tests, workspace
+  all-target Clippy, Ruff check/format, and release build pass. Both complete
+  `--viz --paranoid` trajectories again release 630/831 and 631/831 Ar with
+  the 2.13×/13.55× rise and 275.5×/32.3× fall gates passing; all five
+  regenerated products byte-match the tracked artifacts, all nine report
+  links resolve, and both rasterized plots are readable and unclipped.
 
 ## Result
 
