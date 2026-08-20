@@ -245,53 +245,63 @@ def run_reaction(reaction: Reaction, *, force: bool = False) -> dict:
         log(f"{reaction.key}: results.json exists; resume complete")
         return json.loads(result_path.read_text())
 
-    log(f"{reaction.key}: relaxed scan")
+    ts_guess_path = run_dir / "ts_guess.xyz"
     scan_path = run_dir / "scan.json"
-    try:
-        scan = scan_to_maximum(
-            reaction.cluster,
-            reaction.method,
-            atom_i=reaction.scan_i,
-            atom_j=reaction.scan_j,
-            distances_a=list(reaction.scan_distances_a),
-            min_distance_a=reaction.scan_floor_a,
-            progress=lambda r, e: log(f"{reaction.key}: r={r:.3f} A E={e:.10f} Ha"),
-        )
-        scan_path.write_text(
-            json.dumps(
-                [{"distance_a": r, "energy_hartree": e} for r, e, _ in scan], indent=2
+    if ts_guess_path.exists() and not force and not reaction.barrierless:
+        log(f"{reaction.key}: ts_guess.xyz exists; skipping completed scan")
+        ts_guess = load_xyz(ts_guess_path, reaction.cluster)
+    else:
+        log(f"{reaction.key}: relaxed scan")
+        try:
+            scan = scan_to_maximum(
+                reaction.cluster,
+                reaction.method,
+                atom_i=reaction.scan_i,
+                atom_j=reaction.scan_j,
+                distances_a=list(reaction.scan_distances_a),
+                min_distance_a=reaction.scan_floor_a,
+                progress=lambda r, e: log(f"{reaction.key}: r={r:.3f} A E={e:.10f} Ha"),
             )
-        )
-    except ScanNoMaximumError as exc:
-        scan = exc.scan
-        scan_path.write_text(
-            json.dumps(
-                [{"distance_a": r, "energy_hartree": e} for r, e, _ in scan], indent=2
+            scan_path.write_text(
+                json.dumps(
+                    [{"distance_a": r, "energy_hartree": e} for r, e, _ in scan],
+                    indent=2,
+                )
             )
-        )
-        if not reaction.barrierless:
-            raise
-        energies = np.array([e for _, e, _ in scan])
-        monotonic = bool(np.all(np.diff(energies) <= 1e-5))
-        result = {
-            "reaction": reaction.label,
-            "key": reaction.key,
-            "classification": "barrierless-control",
-            "scan_monotonic_downhill": monotonic,
-            "barrier_zpe_kj_mol": 0.0,
-            "imaginary_frequency_cm": None,
-            "rates": [{"temperature_k": t, "eckart_kappa": 1.0} for t in TEMPERATURES],
-            "method": vars(reaction.method),
-            "provenance": provenance(reaction, [reaction.cluster]),
-        }
-        result_path.write_text(json.dumps(result, indent=2))
-        return result
+        except ScanNoMaximumError as exc:
+            scan = exc.scan
+            scan_path.write_text(
+                json.dumps(
+                    [{"distance_a": r, "energy_hartree": e} for r, e, _ in scan],
+                    indent=2,
+                )
+            )
+            if not reaction.barrierless:
+                raise
+            energies = np.array([e for _, e, _ in scan])
+            monotonic = bool(np.all(np.diff(energies) <= 1e-5))
+            result = {
+                "reaction": reaction.label,
+                "key": reaction.key,
+                "classification": "barrierless-control",
+                "scan_monotonic_downhill": monotonic,
+                "barrier_zpe_kj_mol": 0.0,
+                "imaginary_frequency_cm": None,
+                "rates": [
+                    {"temperature_k": t, "eckart_kappa": 1.0} for t in TEMPERATURES
+                ],
+                "method": vars(reaction.method),
+                "provenance": provenance(reaction, [reaction.cluster]),
+            }
+            result_path.write_text(json.dumps(result, indent=2))
+            return result
 
-    if reaction.barrierless:
-        raise RuntimeError("barrierless control produced an interior maximum")
+        if reaction.barrierless:
+            raise RuntimeError("barrierless control produced an interior maximum")
 
-    ts_guess = scan[max(range(1, len(scan) - 1), key=lambda i: scan[i][1])][2]
-    save_xyz(ts_guess, run_dir / "ts_guess.xyz")
+        ts_guess = scan[max(range(1, len(scan) - 1), key=lambda i: scan[i][1])][2]
+        save_xyz(ts_guess, ts_guess_path)
+
     ts_path = run_dir / "ts.xyz"
     ts = (
         load_xyz(ts_path, ts_guess)

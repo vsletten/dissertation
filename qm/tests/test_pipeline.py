@@ -8,6 +8,7 @@ own formulas against pyscf's audited harmonic implementation.
 import numpy as np
 import pytest
 
+from quarry import pipeline
 from quarry.clusters import water
 from quarry.pipeline import (
     DftSettings,
@@ -21,6 +22,48 @@ from quarry.pipeline import (
 from quarry.rates import thermo_from_frequencies
 
 CHEAP = DftSettings(xc="hf", basis="sto-3g")
+
+
+def test_gpu_hessian_assertion_retries_only_hessian_on_cpu(monkeypatch):
+    calls = []
+
+    class FakeHessian:
+        def __init__(self, gpu):
+            self.gpu = gpu
+
+        def kernel(self):
+            if self.gpu:
+                raise AssertionError("gpu4pyscf non-contiguous UKS Hessian")
+            return np.eye(3)
+
+    class FakeScf:
+        converged = True
+
+        def __init__(self, gpu):
+            self.gpu = gpu
+
+        def kernel(self):
+            calls.append(self.gpu)
+            return -1.0
+
+        def Hessian(self):
+            return FakeHessian(self.gpu)
+
+    monkeypatch.setattr(pipeline, "build_mol", lambda cluster, settings: object())
+    monkeypatch.setattr(
+        pipeline,
+        "_make_scf",
+        lambda mol, settings: FakeScf(settings.use_gpu),
+    )
+    gpu = DftSettings(xc="b3lyp", basis="sto-3g", use_gpu=True)
+
+    with pytest.warns(RuntimeWarning, match="retrying this Hessian on CPU"):
+        mf, energy_value, hessian = pipeline._scf_hessian(water(), gpu)
+
+    assert calls == [True, False]
+    assert mf.gpu is False
+    assert energy_value == -1.0
+    assert np.array_equal(hessian, np.eye(3))
 
 
 @pytest.fixture(scope="module")

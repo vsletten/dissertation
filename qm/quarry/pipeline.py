@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import Any
@@ -164,11 +165,7 @@ def frequencies(cluster: Cluster, settings: DftSettings) -> FrequencyResult:
     """Analytic Hessian -> projected harmonic analysis (pyscf thermo)."""
     from pyscf.hessian import thermo as pyscf_thermo
 
-    mf = _make_scf(build_mol(cluster, settings), settings)
-    e = mf.kernel()
-    if not mf.converged:
-        raise RuntimeError(f"SCF did not converge for {cluster.name}")
-    hess = mf.Hessian().kernel()
+    mf, e, hess = _scf_hessian(cluster, settings)
     hess = np.asarray(hess.get() if hasattr(hess, "get") else hess)
     freq_info = pyscf_thermo.harmonic_analysis(mf.mol, hess)
     nu = np.asarray(freq_info["freq_wavenumber"])
@@ -199,6 +196,38 @@ def frequencies(cluster: Cluster, settings: DftSettings) -> FrequencyResult:
         linear=rot[1],
         imaginary_mode=imag_mode,
     )
+
+
+def _scf_hessian(cluster: Cluster, settings: DftSettings) -> tuple[Any, float, Any]:
+    """Run SCF + Hessian, with a bounded CPU fallback for GPU backend defects.
+
+    GPU4PySCF 1.8.1's density-fitted UKS Hessian can raise an internal
+    C-contiguity assertion for open-shell molecules.  Geometry and saddle
+    work remains GPU-first; only the tiny-molecule analytic Hessian retries on
+    CPU when that exact backend assertion occurs.
+    """
+    mf = _make_scf(build_mol(cluster, settings), settings)
+    e = mf.kernel()
+    if not mf.converged:
+        raise RuntimeError(f"SCF did not converge for {cluster.name}")
+    try:
+        return mf, float(e), mf.Hessian().kernel()
+    except AssertionError as gpu_error:
+        if not settings.use_gpu:
+            raise
+        warnings.warn(
+            "GPU4PySCF Hessian assertion; retrying this Hessian on CPU",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        cpu_settings = replace(settings, use_gpu=False)
+        cpu_mf = _make_scf(build_mol(cluster, cpu_settings), cpu_settings)
+        cpu_e = cpu_mf.kernel()
+        if not cpu_mf.converged:
+            raise RuntimeError(
+                f"CPU fallback SCF did not converge for {cluster.name}"
+            ) from gpu_error
+        return cpu_mf, float(cpu_e), cpu_mf.Hessian().kernel()
 
 
 def _rotational_temperatures(
