@@ -156,6 +156,7 @@ class FrequencyResult:
     # None when there is no imaginary mode. This is the reaction mode a
     # TS hands to quick-IRC and to the tunneling correction.
     imaginary_mode: np.ndarray | None = None
+    imaginary_modes: np.ndarray | None = None
     geometry_fingerprint: str | None = None
     settings_fingerprint: str | None = None
 
@@ -189,14 +190,17 @@ def frequencies(cluster: Cluster, settings: DftSettings) -> FrequencyResult:
     nu = np.asarray(freq_info["freq_wavenumber"])
     modes = np.asarray(freq_info["norm_mode"])  # (nmodes, natm, 3)
     imag_mode = None
+    imag_modes = None
     if np.iscomplexobj(nu):
         is_imag = np.abs(np.imag(nu)) > 0
         imag = np.abs(np.imag(nu[is_imag]))
         real = np.real(nu[~is_imag])
         if imag.size:
-            # Mode of the largest-magnitude imaginary frequency.
-            idx = np.flatnonzero(is_imag)[np.argmax(imag)]
-            imag_mode = np.real(modes[idx])
+            order = np.argsort(imag)
+            imag = imag[order]
+            imag_modes = np.real(modes[is_imag])[order]
+            # Backward-compatible default: largest-magnitude imaginary mode.
+            imag_mode = imag_modes[-1]
     else:
         imag = np.zeros(0)
         real = nu
@@ -207,12 +211,13 @@ def frequencies(cluster: Cluster, settings: DftSettings) -> FrequencyResult:
     rot = _rotational_temperatures(cluster)
     return FrequencyResult(
         frequencies_cm=np.sort(real),
-        imaginary_cm=np.sort(imag),
+        imaginary_cm=imag,
         electronic_hartree=float(e),
         molar_mass_kg=mass_kg,
         rotational_temperatures_k=rot[0],
         linear=rot[1],
         imaginary_mode=imag_mode,
+        imaginary_modes=imag_modes,
         geometry_fingerprint=frequency_geometry_fingerprint(cluster),
         settings_fingerprint=frequency_settings_fingerprint(settings),
     )

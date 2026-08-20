@@ -101,6 +101,33 @@ def reaction_path_vector(reactant: Cluster, product: Cluster) -> np.ndarray:
     return mode / norm
 
 
+def reaction_aligned_imaginary_mode(
+    frequency: FrequencyResult,
+    reaction_vector: np.ndarray,
+) -> tuple[np.ndarray, float]:
+    """Imaginary mode with the largest absolute overlap to a reaction vector."""
+    modes = frequency.imaginary_modes
+    if modes is None:
+        if frequency.n_imaginary == 1 and frequency.imaginary_mode is not None:
+            modes = frequency.imaginary_mode[None, ...]
+        else:
+            raise ValueError("all imaginary modes are required for reaction alignment")
+    vector = np.asarray(reaction_vector, dtype=float)
+    if modes.ndim != 3 or vector.shape != modes.shape[1:]:
+        raise ValueError("reaction vector and imaginary modes have incompatible shapes")
+    vector_norm = float(np.linalg.norm(vector))
+    if not np.isfinite(vector_norm) or vector_norm < 1e-12:
+        raise ValueError("reaction vector is non-finite or zero")
+    unit_vector = vector.reshape(-1) / vector_norm
+    flattened = modes.reshape(modes.shape[0], -1)
+    mode_norms = np.linalg.norm(flattened, axis=1)
+    if np.any(~np.isfinite(mode_norms)) or np.any(mode_norms < 1e-12):
+        raise ValueError("imaginary modes contain a non-finite or zero vector")
+    overlaps = np.abs((flattened / mode_norms[:, None]) @ unit_vector)
+    selected = int(np.argmax(overlaps))
+    return modes[selected], float(overlaps[selected])
+
+
 def find_ts(
     cluster: Cluster,
     settings: DftSettings,

@@ -185,6 +185,36 @@ def test_quick_irc_rejects_stale_precomputed_frequency():
         quick_irc(cluster, CHEAP, frequency=stale)
 
 
+def test_reaction_aligned_imaginary_mode_beats_largest_frequency():
+    from quarry.ts import reaction_aligned_imaginary_mode
+
+    modes = np.array(
+        [
+            [[1.0, 0.0, 0.0]],
+            [[0.0, 1.0, 0.0]],
+            [[0.0, 0.0, 1.0]],
+        ]
+    )
+    frequency = FrequencyResult(
+        frequencies_cm=np.array([1000.0]),
+        imaginary_cm=np.array([50.0, 100.0, 500.0]),
+        electronic_hartree=-1.0,
+        molar_mass_kg=0.001,
+        rotational_temperatures_k=None,
+        linear=False,
+        imaginary_mode=modes[-1],
+        imaginary_modes=modes,
+    )
+
+    selected, overlap = reaction_aligned_imaginary_mode(
+        frequency,
+        np.array([[0.0, 2.0, 0.0]]),
+    )
+
+    assert np.array_equal(selected, modes[1])
+    assert overlap == pytest.approx(1.0)
+
+
 @pytest.mark.slow
 class TestSaddleSearch:
     @pytest.fixture(scope="class")
