@@ -153,8 +153,8 @@ Telegram. It never starts campaigns, never merges, never runs heavy
 compute.
 
 Fable adds judgment on top, pull-based: at session start (or when
-Victor asks), read STATUS.md + `git log --oneline` since last sync +
-open `agents/*` branches, and intervene only on: contradictory
+Victor asks), Fable reads STATUS.md + `git log --oneline` since last
+sync + open `agents/*` branches, and intervenes only on: contradictory
 deviations, quality problems in merged work, design questions, or
 anything the supervisor flagged. Anything a worker needs from Fable
 goes in the inbox.

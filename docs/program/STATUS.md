@@ -61,7 +61,7 @@ Deviations get a `DEVIATION:` note; details live in the card.*
   arbitration). New cards: E1-muscovite-deck (READY, published numbers
   only) and B5-execution-schedule (blocked: B2 — piecewise-isothermal
   T(t), the one engine feature the flagship needs).
-- 2026-08-20 — fable — Autopilot engaged: board_feeder.py (mission-
+- 2026-08-20 — Fable — Autopilot engaged: board_feeder.py (mission-
   control, hourly) auto-enqueues READY/unblocked cards as queue pointer
   tasks; omnibus-supervisor Hermes cron (daily 07:50) does bookkeeping
   + stale claims + Telegram digest. PROTOCOL.md amended. Humans and
