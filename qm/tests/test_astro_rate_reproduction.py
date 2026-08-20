@@ -32,6 +32,7 @@ def test_target_set_has_four_saddles_and_barrierless_control():
         "h-h2co-ch2oh",
         "h-h2co-h2-hco",
         "oh-h2",
+        "h-h2-exchange",
         "h-oh-control",
     }
     assert sum(reaction.barrierless for reaction in targets.values()) == 1

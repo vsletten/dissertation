@@ -178,6 +178,24 @@ def reactions(*, gpu: bool, basis: str) -> dict[str, Reaction]:
             literature_fit=LiteratureFit(7.64e10, 1.0, 1339.9, 153.2, meisner, 60.0),
             method=bhlyp,
         ),
+        "h-h2-exchange": Reaction(
+            key="h-h2-exchange",
+            label="H + H2 -> H2 + H",
+            cluster=Cluster(
+                name="h-h2-exchange",
+                symbols=["H", "H", "H"],
+                coords=np.array([[0.0, 0.0, 0.0], [0.74, 0.0, 0.0], [-3.0, 0.0, 0.0]]),
+                spin=1,
+            ),
+            scan_i=0,
+            scan_j=2,
+            scan_distances_a=(2.8, 2.5, 2.2, 1.9, 1.6, 1.35, 1.15, 1.0, 0.9),
+            scan_floor_a=0.75,
+            literature_barrier_k=5030.0,
+            literature_imag_cm=1510.0,
+            literature_fit=None,
+            method=bhlyp,
+        ),
         "h-oh-control": Reaction(
             key="h-oh-control",
             label="H + OH -> H2O (barrierless control)",
@@ -462,10 +480,29 @@ def main() -> int:
     if unknown:
         raise SystemExit(f"unknown reactions: {unknown}")
     RUN_ROOT.mkdir(parents=True, exist_ok=True)
-    results = [run_reaction(all_reactions[key], force=args.force) for key in selected]
+    results = []
+    failures = []
+    for key in selected:
+        try:
+            results.append(run_reaction(all_reactions[key], force=args.force))
+        except Exception as exc:  # campaign isolation: preserve and continue
+            failure = {
+                "key": key,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "generated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+            failures.append(failure)
+            failure_path = RUN_ROOT / key / "failure.json"
+            failure_path.write_text(json.dumps(failure, indent=2))
+            log(f"{key}: FAILED but campaign continues: {exc}")
     (RUN_ROOT / "results.json").write_text(json.dumps(results, indent=2))
-    log(f"complete: {len(results)} reactions -> {RUN_ROOT / 'results.json'}")
-    return 0
+    (RUN_ROOT / "failures.json").write_text(json.dumps(failures, indent=2))
+    log(
+        f"complete: {len(results)} results, {len(failures)} failures -> "
+        f"{RUN_ROOT / 'results.json'}"
+    )
+    return 1 if failures and not results else 0
 
 
 if __name__ == "__main__":
