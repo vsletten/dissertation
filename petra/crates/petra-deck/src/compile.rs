@@ -28,7 +28,7 @@ fn err<T>(msg: impl Into<String>) -> Result<T, CompileError> {
 
 /// Everything the engine and the reporting layer need, with the name
 /// tables kept for output (the runtime itself sees only dense ids).
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct CompiledDeck {
     pub name: String,
     pub unit_cell: UnitCell,
@@ -59,7 +59,7 @@ pub struct CompiledDeck {
 /// One compiled build-time pass (design doc §3.1 fill rules): sweep all
 /// sites in index order, writes immediately visible — the legacy
 /// TerminateSurface convention.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct InitPass {
     pub name: String,
     pub center_kind: Option<KindId>,
@@ -75,12 +75,13 @@ pub struct InitPass {
     /// Apply the op once per matching neighbor instead of once.
     pub foreach: Option<NeighborSelect>,
     pub op: EffectOp,
+    pub rekind: Option<KindId>,
 }
 
 /// One compiled line defect: u(r) = prefactor / max(r, core_radius)²,
 /// capped, superposed over all defects (docs/STRAIN.md §5). All values in
 /// internal units (kcal/mol, Å).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CompiledDefect {
     pub line_axis: u8,
     /// A point on the line, cell coordinates.
@@ -98,16 +99,16 @@ impl CompiledDeck {
         let seed = seed_override.unwrap_or(self.seed);
         let initial = self.initial_per_template.clone();
         let mut lattice = Lattice::build(&self.unit_cell, self.dims, self.boundary, |t| initial[t]);
-        let kinds: Vec<KindId> = lattice
+        let mut kinds: Vec<KindId> = lattice
             .template_index
             .iter()
             .map(|&t| self.kinds_per_template[t as usize])
             .collect();
-        self.run_init(&mut lattice, &kinds, seed)?;
+        self.run_init(&mut lattice, &mut kinds, seed)?;
         self.compute_strain(&mut lattice)?;
-        Ok(Engine::new(
+        Ok(Engine::new_with_site_kinds(
             lattice,
-            &self.kinds_per_template,
+            kinds,
             self.kind_names.len(),
             self.kind_state_ranges.clone(),
             self.reactions.clone(),
@@ -172,7 +173,7 @@ impl CompiledDeck {
     fn run_init(
         &self,
         lattice: &mut Lattice,
-        kinds: &[KindId],
+        kinds: &mut [KindId],
         seed: u64,
     ) -> Result<(), CompileError> {
         let mut scratch = Vec::new();
@@ -241,6 +242,11 @@ impl CompiledDeck {
                                 pass.name
                             ))
                         }
+                    }
+                }
+                if times > 0 {
+                    if let Some(kind) = pass.rekind {
+                        kinds[s] = kind;
                     }
                 }
             }
@@ -554,10 +560,15 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
     let mut reactions = Vec::new();
     for r in &deck.reactions {
         let ctx = format!("reaction '{}'", r.name);
-        let center_kind = *names.kind_ids.get(&r.center.kind).ok_or_else(|| {
-            CompileError(format!("{ctx}: unknown center kind '{}'", r.center.kind))
-        })?;
-        let center_states = names.state_set(&r.center.state, Some(center_kind), &ctx)?;
+        let (center_kind, center_states) = match &r.center {
+            Some(center) => {
+                let kind = *names.kind_ids.get(&center.kind).ok_or_else(|| {
+                    CompileError(format!("{ctx}: unknown center kind '{}'", center.kind))
+                })?;
+                (kind, names.state_set(&center.state, Some(kind), &ctx)?)
+            }
+            None => infer_source_center(&names, &state_occupants, r, &ctx)?,
+        };
 
         let mut guards = Vec::new();
         for g in &r.guards {
@@ -569,7 +580,13 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
             });
         }
 
-        let rate = compile_rate(&r.rate, eunit, &ctx)?;
+        let rate = compile_rate(
+            r.rate
+                .as_ref()
+                .ok_or_else(|| CompileError(format!("{ctx}: CTMC rule requires rate")))?,
+            eunit,
+            &ctx,
+        )?;
 
         // Fold solution coupling into ln_thermo (design doc §4):
         // each consumed species contributes ln(activity) + Δμ/RT.
@@ -771,11 +788,23 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
             None => None,
             Some(sel) => Some(compile_selector(&names, sel, &ctx)?),
         };
+        let rekind = match &p.rekind {
+            None => None,
+            Some(kind) => {
+                if center_kind.is_none() {
+                    return err(format!("{ctx}: rekind requires center.kind"));
+                }
+                Some(KindId(*names.kind_ids.get(kind).ok_or_else(|| {
+                    CompileError(format!("{ctx}: rekind names unknown kind '{kind}'"))
+                })?))
+            }
+        };
         // Init maps default to skip (termination maps leave unlisted
         // states alone).
         let op = compile_op(
             &names,
             center_kind,
+            rekind.map(|kind| kind.0).or(center_kind),
             &p.set,
             &p.shift,
             &p.map,
@@ -793,6 +822,7 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
             guards,
             foreach,
             op,
+            rekind,
         });
     }
 
@@ -822,6 +852,69 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         seed: deck.execution.ensemble.seed,
         report_every: deck.observables.report_every,
     })
+}
+
+fn infer_source_center(
+    names: &Names,
+    state_occupants: &[Option<String>],
+    rule: &crate::schema::ReactionSpec,
+    ctx: &str,
+) -> Result<(u16, StateSet), CompileError> {
+    let effects = rule
+        .effects
+        .iter()
+        .chain(rule.branches.iter().flat_map(|branch| &branch.effects));
+    let mut target_kind = None;
+    for effect in effects {
+        let state = effect.set.as_deref().ok_or_else(|| {
+            CompileError(format!("{ctx}: source effects require a fixed 'set' state"))
+        })?;
+        if effect.shift.is_some() || effect.map.is_some() {
+            return err(format!("{ctx}: source effects support only 'set'"));
+        }
+        let mut resolved = Vec::new();
+        names.resolve_ref(state, &mut resolved, 0)?;
+        resolved.sort_unstable_by_key(|&(kind, state)| (kind, state.0));
+        resolved.dedup();
+        if resolved.len() != 1 {
+            return err(format!(
+                "{ctx}: source state '{state}' must identify exactly one kind"
+            ));
+        }
+        let kind = resolved[0].0;
+        if target_kind.is_some_and(|expected| expected != kind) {
+            return err(format!(
+                "{ctx}: all source effects must target the same kind"
+            ));
+        }
+        target_kind = Some(kind);
+    }
+    let kind =
+        target_kind.ok_or_else(|| CompileError(format!("{ctx}: source rule has no effects")))?;
+    let (start, count) = names
+        .kind_states
+        .get(kind as usize)
+        .and_then(|_| {
+            let ids: Vec<u16> = names.kind_states[kind as usize]
+                .values()
+                .map(|state| state.0)
+                .collect();
+            ids.iter()
+                .min()
+                .copied()
+                .map(|start| (start, ids.len() as u16))
+        })
+        .ok_or_else(|| CompileError(format!("{ctx}: source kind has no states")))?;
+    let mut vacant = StateSet::new(names.n_states);
+    for id in start..start + count {
+        if state_occupants[id as usize].is_none() {
+            vacant.insert(StateId(id));
+        }
+    }
+    if !(start..start + count).any(|id| vacant.contains(StateId(id))) {
+        return err(format!("{ctx}: source target kind has no vacant state"));
+    }
+    Ok((kind, vacant))
 }
 
 fn compile_selector(
@@ -871,18 +964,24 @@ fn compile_selector(
 }
 
 fn compile_rate(r: &RateSpec, eunit: f64, ctx: &str) -> Result<RateExpr, CompileError> {
-    match (r.constant, &r.arrhenius, &r.eyring) {
-        (Some(k), None, None) => Ok(RateExpr::Constant { k }),
-        (None, Some(a), None) => Ok(RateExpr::Arrhenius {
+    match (
+        r.constant,
+        &r.arrhenius,
+        &r.eyring,
+        &r.energy,
+        r.probability,
+    ) {
+        (Some(k), None, None, None, None) => Ok(RateExpr::Constant { k }),
+        (None, Some(a), None, None, None) => Ok(RateExpr::Arrhenius {
             prefactor: a.prefactor,
             ea: a.ea * eunit,
         }),
-        (None, None, Some(e)) => Ok(RateExpr::Eyring {
+        (None, None, Some(e), None, None) => Ok(RateExpr::Eyring {
             dh: e.dh * eunit,
             ds: e.ds * eunit,
         }),
         _ => err(format!(
-            "{ctx}: rate needs exactly one of constant/arrhenius/eyring"
+            "{ctx}: CTMC rate needs exactly one of constant/arrhenius/eyring"
         )),
     }
 }
@@ -911,7 +1010,8 @@ fn state_in_kind(names: &Names, kind: u16, name: &str, ctx: &str) -> Result<Stat
 #[allow(clippy::too_many_arguments)]
 fn compile_op(
     names: &Names,
-    kind: Option<u16>,
+    source_kind: Option<u16>,
+    target_kind: Option<u16>,
     set: &Option<String>,
     shift: &Option<i32>,
     map: &Option<std::collections::BTreeMap<String, String>>,
@@ -931,22 +1031,29 @@ fn compile_op(
     };
     match (set, shift, map) {
         (Some(name), None, None) => {
-            let k = kind.ok_or_else(|| {
+            let kind = target_kind.ok_or_else(|| {
                 CompileError(format!(
                     "{ctx}: 'set' needs a kind in scope to resolve '{name}'"
                 ))
             })?;
-            Ok(EffectOp::Set(state_in_kind(names, k, name, ctx)?))
+            Ok(EffectOp::Set(state_in_kind(names, kind, name, ctx)?))
         }
-        (None, Some(n), None) => Ok(EffectOp::Shift(*n)),
+        (None, Some(n), None) => {
+            if source_kind != target_kind {
+                return err(format!("{ctx}: shift cannot cross kinds during rekind"));
+            }
+            Ok(EffectOp::Shift(*n))
+        }
         (None, None, Some(m)) => {
-            let k =
-                kind.ok_or_else(|| CompileError(format!("{ctx}: 'map' needs a kind in scope")))?;
+            let from_kind = source_kind
+                .ok_or_else(|| CompileError(format!("{ctx}: 'map' needs a source kind")))?;
+            let to_kind = target_kind
+                .ok_or_else(|| CompileError(format!("{ctx}: 'map' needs a target kind")))?;
             let mut entries = Vec::new();
             for (from, to) in m {
                 entries.push((
-                    state_in_kind(names, k, from, ctx)?,
-                    state_in_kind(names, k, to, ctx)?,
+                    state_in_kind(names, from_kind, from, ctx)?,
+                    state_in_kind(names, to_kind, to, ctx)?,
                 ));
             }
             if entries.is_empty() {
@@ -973,11 +1080,16 @@ fn compile_effects(
     let mut out = Vec::new();
     for e in effects {
         let (target, target_kind) = match e.target.as_str() {
-            "center" => {
+            "center" | "source" => {
                 if e.select.is_some() {
-                    return err(format!("{ctx}: a center effect takes no selector"));
+                    return err(format!("{ctx}: a {} effect takes no selector", e.target));
                 }
-                (EffectTarget::Center, Some(center_kind))
+                let target = if e.target == "source" {
+                    EffectTarget::Source
+                } else {
+                    EffectTarget::Center
+                };
+                (target, Some(center_kind))
             }
             t @ ("neighbor" | "neighbors") => {
                 let sel = e.select.as_ref().ok_or_else(|| {
@@ -990,10 +1102,15 @@ fn compile_effects(
                     ));
                 }
                 let k = compiled.kind.map(|k| k.0);
-                let target = if t == "neighbor" {
-                    EffectTarget::FirstMatch(compiled)
-                } else {
-                    EffectTarget::AllMatches(compiled)
+                let target = match (t, e.select_mode.as_deref().unwrap_or("all")) {
+                    ("neighbor", "all") => EffectTarget::FirstMatch(compiled),
+                    ("neighbors", "all") => EffectTarget::AllMatches(compiled),
+                    ("neighbors", "one") => EffectTarget::RandomMatch(compiled),
+                    _ => {
+                        return err(format!(
+                            "{ctx}: select_mode is valid only for target = 'neighbors'"
+                        ));
+                    }
                 };
                 (target, k)
             }
@@ -1001,6 +1118,7 @@ fn compile_effects(
         };
         let op = compile_op(
             names,
+            target_kind,
             target_kind,
             &e.set,
             &e.shift,

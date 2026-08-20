@@ -258,6 +258,7 @@ impl DeckFile {
         if v2.deck.schema != Some(2) {
             return Err("v2 deck must declare [deck] schema = 2".to_string());
         }
+        validate_v2_surfaces(&v2)?;
         let StructureV2 {
             kind,
             cell,
@@ -273,13 +274,26 @@ impl DeckFile {
             defects,
         } = v2.structure;
         let (structure_kind, grid_spec, cell, lattice) = match kind.as_deref().unwrap_or("cell") {
-            "cell" => (
-                StructureKind::Cell,
-                None,
-                cell.ok_or("[structure] kind = 'cell' requires [structure.cell]")?,
-                lattice.ok_or("[structure] kind = 'cell' requires [structure.lattice]")?,
-            ),
+            "cell" => {
+                if grid.is_some()
+                    || neighborhood.is_some()
+                    || dims.is_some()
+                    || boundary.is_some()
+                    || default_kind.is_some()
+                {
+                    return Err("cell structure cannot contain grid-form fields".to_string());
+                }
+                (
+                    StructureKind::Cell,
+                    None,
+                    cell.ok_or("[structure] kind = 'cell' requires [structure.cell]")?,
+                    lattice.ok_or("[structure] kind = 'cell' requires [structure.lattice]")?,
+                )
+            }
             "grid" => {
+                if cell.is_some() || lattice.is_some() {
+                    return Err("grid structure cannot contain cell-form fields".to_string());
+                }
                 let dims_vec = dims.ok_or("[structure] kind = 'grid' requires dims")?;
                 let boundary_vec = boundary.ok_or("[structure] kind = 'grid' requires boundary")?;
                 let grid_spec = GridSpec {
@@ -318,7 +332,6 @@ impl DeckFile {
             }
             other => return Err(format!("unknown structure kind '{other}'")),
         };
-        validate_execution(&v2.execution)?;
         Ok(Self {
             deck: v2.deck,
             structure_kind,
@@ -336,6 +349,161 @@ impl DeckFile {
             observables: v2.observables,
         })
     }
+}
+
+fn validate_v2_surfaces(deck: &DeckV2) -> Result<(), String> {
+    validate_execution(&deck.execution)?;
+    validate_structure(&deck.structure)?;
+
+    for rule in &deck.dynamics.rules {
+        let ctx = format!("rule '{}'", rule.name);
+        if let Some(truth) = rule.truth.as_deref() {
+            if truth != "and" {
+                return Err(format!("{ctx}: truth must be 'and'"));
+            }
+        }
+        let effects: Vec<&EffectSpec> = rule
+            .effects
+            .iter()
+            .chain(rule.branches.iter().flat_map(|branch| &branch.effects))
+            .collect();
+        let source = rule.center.is_none();
+        if source && effects.iter().any(|effect| effect.target != "source") {
+            return Err(format!(
+                "{ctx}: a rule without center may contain only source effects"
+            ));
+        }
+        if !source && effects.iter().any(|effect| effect.target == "source") {
+            return Err(format!(
+                "{ctx}: a source effect requires the center to be absent"
+            ));
+        }
+        if source && (!rule.guards.is_empty() || !rule.modifiers.is_empty()) {
+            return Err(format!(
+                "{ctx}: source rules cannot declare center-relative guards or modifiers"
+            ));
+        }
+        for effect in effects {
+            match effect.target.as_str() {
+                "center" | "neighbor" | "neighbors" | "source" => {}
+                other => return Err(format!("{ctx}: unknown effect target '{other}'")),
+            }
+            match effect.select_mode.as_deref() {
+                None | Some("all") | Some("one") => {}
+                Some(other) => {
+                    return Err(format!(
+                        "{ctx}: select_mode must be 'all' or 'one', not '{other}'"
+                    ));
+                }
+            }
+            if effect.select_mode.is_some() && effect.target != "neighbors" {
+                return Err(format!(
+                    "{ctx}: select_mode is valid only for target = 'neighbors'"
+                ));
+            }
+            if effect.target == "source" && effect.select.is_some() {
+                return Err(format!("{ctx}: a source effect takes no selector"));
+            }
+        }
+        validate_rate_for_strategy(rule, &deck.execution.strategy, &ctx)?;
+    }
+
+    for observable in &deck.observables.series {
+        match observable.kind.as_str() {
+            "state_counts" | "event_rates" | "rate_spectra" | "cluster_sizes" | "snapshot" => {}
+            "interface_roughness" => {
+                let axis = observable
+                    .parameters
+                    .get("axis")
+                    .and_then(toml::Value::as_integer)
+                    .ok_or("interface_roughness observable requires integer axis")?;
+                if !(0..=2).contains(&axis) {
+                    return Err("interface_roughness axis must be 0, 1, or 2".to_string());
+                }
+            }
+            other => return Err(format!("unknown observable kind '{other}'")),
+        }
+    }
+    Ok(())
+}
+
+fn validate_structure(structure: &StructureV2) -> Result<(), String> {
+    if structure.kind.as_deref().unwrap_or("cell") != "grid" {
+        return Ok(());
+    }
+    let family = structure
+        .grid
+        .as_deref()
+        .ok_or("grid structure requires grid")?;
+    let dimensions = structure
+        .dims
+        .as_ref()
+        .ok_or("grid structure requires dims")?;
+    let boundary = structure
+        .boundary
+        .as_ref()
+        .ok_or("grid structure requires boundary")?;
+    let expected_dimensions = match family {
+        "square" | "hex" => 2,
+        "cubic" => 3,
+        other => return Err(format!("unknown grid family '{other}'")),
+    };
+    if dimensions.len() != expected_dimensions || dimensions.contains(&0) {
+        return Err(format!(
+            "{family} grid requires {expected_dimensions} nonzero dimensions"
+        ));
+    }
+    if boundary.len() != expected_dimensions
+        || boundary
+            .iter()
+            .any(|value| !matches!(value.as_str(), "periodic" | "open" | "fixed"))
+    {
+        return Err("grid boundary must have one valid value per axis".to_string());
+    }
+    match (family, structure.neighborhood.as_deref()) {
+        ("hex", None) => {}
+        ("hex", Some(_)) => return Err("hex grid has a fixed neighborhood".to_string()),
+        (_, Some("moore" | "von_neumann")) => {}
+        (_, None) => return Err("square/cubic grid requires neighborhood".to_string()),
+        (_, Some(other)) => return Err(format!("unknown grid neighborhood '{other}'")),
+    }
+    Ok(())
+}
+
+fn validate_rate_for_strategy(
+    rule: &ReactionSpec,
+    strategy: &str,
+    ctx: &str,
+) -> Result<(), String> {
+    let rate = rule.rate.as_ref();
+    let variants = rate.map_or(0, |rate| {
+        usize::from(rate.constant.is_some())
+            + usize::from(rate.arrhenius.is_some())
+            + usize::from(rate.eyring.is_some())
+            + usize::from(rate.energy.is_some())
+            + usize::from(rate.probability.is_some())
+    });
+    match strategy {
+        "ctmc"
+            if variants == 1
+                && rate.is_some_and(|rate| {
+                    rate.constant.is_some() || rate.arrhenius.is_some() || rate.eyring.is_some()
+                }) => {}
+        "synchronous" if variants == 0 => {}
+        "metropolis" if variants == 1 && rate.is_some_and(|rate| rate.energy.is_some()) => {}
+        "pca" if variants == 1 && rate.is_some_and(|rate| rate.probability.is_some()) => {
+            let probability = rate.and_then(|rate| rate.probability).unwrap();
+            if !probability.is_finite() || !(0.0..=1.0).contains(&probability) {
+                return Err(format!("{ctx}: PCA probability must be in [0, 1]"));
+            }
+        }
+        _ => {
+            return Err(format!(
+                "{ctx}: rate variant does not match execution strategy '{strategy}'"
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_execution(execution: &ExecutionSpec) -> Result<(), String> {
@@ -433,6 +601,10 @@ pub struct InitPassSpec {
     pub shift: Option<i32>,
     #[serde(default)]
     pub map: Option<BTreeMap<String, String>>,
+    /// Change the site's kind after applying the state operation. Used by
+    /// seeded binned-disorder init passes.
+    #[serde(default)]
+    pub rekind: Option<String>,
     /// `map` miss policy; init defaults to `"skip"` (the termination maps
     /// leave unlisted states alone).
     #[serde(default)]
@@ -612,10 +784,16 @@ pub struct ThermoSpec {
 #[serde(deny_unknown_fields)]
 pub struct ReactionSpec {
     pub name: String,
-    pub center: CenterSpec,
+    /// Absent only for a per-site `target = "source"` rule.
+    #[serde(default)]
+    pub center: Option<CenterSpec>,
     #[serde(default)]
     pub guards: Vec<SelectorSpec>,
-    pub rate: RateSpec,
+    #[serde(default)]
+    pub rate: Option<RateSpec>,
+    /// Deterministic-CA truth-table mode. Parsed in B2; executed in B3.
+    #[serde(default)]
+    pub truth: Option<String>,
     /// Species drawn from solution: each contributes activity and Δμ
     /// factors to the forward rate (design doc §4).
     #[serde(default)]
@@ -698,6 +876,16 @@ pub struct RateSpec {
     pub arrhenius: Option<ArrheniusSpec>,
     #[serde(default)]
     pub eyring: Option<EyringSpec>,
+    #[serde(default)]
+    pub energy: Option<EnergySpec>,
+    #[serde(default)]
+    pub probability: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EnergySpec {
+    pub delta: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -774,6 +962,9 @@ pub struct EffectSpec {
     /// `set`/`map` resolve unambiguously (v0 restriction).
     #[serde(default)]
     pub select: Option<SelectorSpec>,
+    /// Neighbor selection: `all` (default) or exactly `one` uniform match.
+    #[serde(default)]
+    pub select_mode: Option<String>,
     #[serde(default)]
     pub set: Option<String>,
     #[serde(default)]

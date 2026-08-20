@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use petra_deck::{replica_seed, SeedPolicy, StructureKind};
+use rand::Rng as _;
 
 const V1: &str = r#"
 [deck]
@@ -114,6 +115,69 @@ fn repo_path(rel: &str) -> PathBuf {
         .join(rel)
 }
 
+fn explicit_v2_from_v1(text: &str) -> String {
+    let mut value: toml::Value = text.parse().expect("v1 TOML value");
+    let root = value.as_table_mut().expect("deck root table");
+    root.get_mut("deck")
+        .and_then(toml::Value::as_table_mut)
+        .expect("deck metadata")
+        .insert("schema".to_string(), toml::Value::Integer(2));
+
+    let mut structure = toml::map::Map::new();
+    structure.insert("kind".to_string(), toml::Value::String("cell".to_string()));
+    for key in ["cell", "lattice", "species", "kinds", "init", "defects"] {
+        if let Some(section) = root.remove(key) {
+            structure.insert(key.to_string(), section);
+        }
+    }
+
+    let mut dynamics = toml::map::Map::new();
+    for (v1, v2) in [
+        ("thermo", "thermo"),
+        ("aliases", "aliases"),
+        ("reactions", "rules"),
+    ] {
+        if let Some(section) = root.remove(v1) {
+            dynamics.insert(v2.to_string(), section);
+        }
+    }
+
+    let simulation = root
+        .remove("simulation")
+        .and_then(|value| value.as_table().cloned())
+        .expect("v1 simulation");
+    let mut stop = toml::map::Map::new();
+    stop.insert("steps".to_string(), simulation["steps"].clone());
+    let mut ensemble = toml::map::Map::new();
+    ensemble.insert("seed".to_string(), simulation["seed"].clone());
+    ensemble.insert("n_replicas".to_string(), toml::Value::Integer(1));
+    ensemble.insert(
+        "seed_policy".to_string(),
+        toml::Value::String("increment".to_string()),
+    );
+    let mut execution = toml::map::Map::new();
+    execution.insert(
+        "strategy".to_string(),
+        toml::Value::String("ctmc".to_string()),
+    );
+    execution.insert("stop".to_string(), toml::Value::Table(stop));
+    execution.insert("ensemble".to_string(), toml::Value::Table(ensemble));
+    let mut observables = toml::map::Map::new();
+    observables.insert(
+        "report_every".to_string(),
+        simulation
+            .get("report_every")
+            .cloned()
+            .unwrap_or(toml::Value::Integer(0)),
+    );
+
+    root.insert("structure".to_string(), toml::Value::Table(structure));
+    root.insert("dynamics".to_string(), toml::Value::Table(dynamics));
+    root.insert("execution".to_string(), toml::Value::Table(execution));
+    root.insert("observables".to_string(), toml::Value::Table(observables));
+    toml::to_string(&value).expect("serialize explicit v2")
+}
+
 #[test]
 fn v1_without_schema_normalizes_to_ctmc_v2() {
     let deck: petra_deck::DeckFile = toml::from_str(V1).expect("v1 parses through shim");
@@ -165,7 +229,7 @@ fn v1_and_equivalent_v2_compile_to_identical_dense_tables_and_trajectory() {
 }
 
 #[test]
-fn every_shipped_v1_deck_shims_and_compiles() {
+fn every_shipped_v1_deck_matches_explicit_v2_in_every_compiled_table() {
     for name in [
         "kaolinite.toml",
         "kaolinite-multilayer.toml",
@@ -174,10 +238,16 @@ fn every_shipped_v1_deck_shims_and_compiles() {
     ] {
         let path = repo_path(&format!("petra/examples/{name}"));
         let text = std::fs::read_to_string(&path).expect("read shipped deck");
-        let parsed: petra_deck::DeckFile =
-            toml::from_str(&text).unwrap_or_else(|e| panic!("{name} shim parse: {e}"));
-        assert_eq!(parsed.deck.schema, Some(2), "{name}");
-        petra_deck::compile(&parsed).unwrap_or_else(|e| panic!("{name} compiles: {e}"));
+        let shimmed: petra_deck::DeckFile =
+            toml::from_str(&text).unwrap_or_else(|error| panic!("{name} shim parse: {error}"));
+        let explicit_text = explicit_v2_from_v1(&text);
+        let explicit: petra_deck::DeckFile = toml::from_str(&explicit_text)
+            .unwrap_or_else(|error| panic!("{name} explicit v2 parse: {error}"));
+        let shimmed = petra_deck::compile(&shimmed)
+            .unwrap_or_else(|error| panic!("{name} shim compiles: {error}"));
+        let explicit = petra_deck::compile(&explicit)
+            .unwrap_or_else(|error| panic!("{name} explicit v2 compiles: {error}"));
+        assert_eq!(shimmed, explicit, "all compiled tables for {name}");
     }
 }
 
@@ -200,7 +270,12 @@ fn unknown_schema_version_is_rejected() {
 
 #[test]
 fn non_ctmc_strategy_is_rejected_in_b2() {
-    let text = V2.replace("strategy = \"ctmc\"", "strategy = \"metropolis\"");
+    let text = V2
+        .replace("strategy = \"ctmc\"", "strategy = \"metropolis\"")
+        .replace(
+            "rate = { constant = 2.0 }",
+            "rate = { energy = { delta = 2.0 } }",
+        );
     let parsed: petra_deck::DeckFile = toml::from_str(&text).expect("future strategy parses");
     let error = petra_deck::compile(&parsed).expect_err("B2 implements only CTMC");
     assert!(
@@ -246,6 +321,42 @@ fn execution_parameter_blocks_validate_at_parse_time() {
 }
 
 #[test]
+fn future_strategy_rate_surfaces_parse_then_compile_reject() {
+    let synchronous = V2
+        .replace("strategy = \"ctmc\"", "strategy = \"synchronous\"")
+        .replace("rate = { constant = 2.0 }\n", "truth = \"and\"\n");
+    let parsed: petra_deck::DeckFile =
+        toml::from_str(&synchronous).expect("synchronous truth surface parses");
+    assert!(petra_deck::compile(&parsed).is_err());
+
+    let pca = V2
+        .replace("strategy = \"ctmc\"", "strategy = \"pca\"")
+        .replace("rate = { constant = 2.0 }", "rate = { probability = 0.25 }");
+    let parsed: petra_deck::DeckFile = toml::from_str(&pca).expect("PCA probability parses");
+    assert!(petra_deck::compile(&parsed).is_err());
+}
+
+#[test]
+fn rfc_surfaces_fail_closed_at_parse_time() {
+    let bad_mode = V2.replace(
+        "target = \"center\"",
+        "target = \"center\"\nselect_mode = \"one\"",
+    );
+    assert!(toml::from_str::<petra_deck::DeckFile>(&bad_mode).is_err());
+
+    let bad_probability = V2
+        .replace("strategy = \"ctmc\"", "strategy = \"pca\"")
+        .replace("rate = { constant = 2.0 }", "rate = { probability = 1.5 }");
+    assert!(toml::from_str::<petra_deck::DeckFile>(&bad_probability).is_err());
+
+    let bad_observable = V2.replace(
+        "report_every = 5",
+        "report_every = 5\n[[observables.series]]\nkind = \"interface_roughness\"",
+    );
+    assert!(toml::from_str::<petra_deck::DeckFile>(&bad_observable).is_err());
+}
+
+#[test]
 fn grid_v2_parses_but_waits_for_b3_compilation() {
     let text = r#"
 [deck]
@@ -278,6 +389,48 @@ steps = 10
     assert!(error.to_string().contains("B3"), "{error}");
 }
 
+struct PublicSeamCtmc;
+
+impl petra_core::UpdateStrategy for PublicSeamCtmc {
+    fn step(
+        &mut self,
+        ctx: &mut petra_core::StepCtx<'_>,
+    ) -> Result<petra_core::StepOutcome, petra_core::Stop> {
+        assert_eq!(ctx.lattice.len(), 8);
+        assert_eq!(ctx.rules.len(), 1);
+        let total = ctx.apply.total_rate();
+        let draw = ctx.rng.gen::<f64>() * total;
+        let (site, reaction) = ctx
+            .apply
+            .select_event(draw)
+            .ok_or(petra_core::Stop::NoEvents)?;
+        let wait_draw = ctx.rng.gen::<f64>();
+        let dt = -(1.0 - wait_draw).ln() / total;
+        ctx.apply.apply_transition(site, reaction, ctx.rng)?;
+        Ok(petra_core::StepOutcome {
+            fired: vec![petra_core::Fired {
+                step: 0,
+                time: 0.0,
+                site,
+                reaction,
+            }],
+            dt,
+        })
+    }
+}
+
+#[test]
+fn step_context_public_fields_are_a_complete_strategy_seam() {
+    let parsed: petra_deck::DeckFile = toml::from_str(V2).expect("v2 parses");
+    let deck = petra_deck::compile(&parsed).expect("v2 compiles");
+    let mut engine = deck.build_engine(None).expect("engine builds");
+    let outcome = engine
+        .step_with(&mut PublicSeamCtmc)
+        .expect("public-only strategy advances");
+    assert_eq!(outcome.fired[0].step, 1);
+    assert_eq!(outcome.fired[0].time.to_bits(), outcome.dt.to_bits());
+}
+
 #[test]
 fn explicit_exact_ctmc_strategy_matches_compatibility_wrapper() {
     let parsed: petra_deck::DeckFile = toml::from_str(V1).expect("v1 parses");
@@ -294,6 +447,94 @@ fn explicit_exact_ctmc_strategy_matches_compatibility_wrapper() {
     assert_eq!(outcome.fired[0].time.to_bits(), fired.time.to_bits());
     assert_eq!(outcome.fired[0].site, fired.site);
     assert_eq!(outcome.fired[0].reaction, fired.reaction);
+}
+
+#[test]
+fn select_mode_one_changes_exactly_one_matching_neighbor() {
+    let text = V2
+        .replace("dims = [2, 2, 2]", "dims = [3, 1, 1]")
+        .replace(
+            "frac = [0.0, 0.0, 0.0]",
+            "frac = [0.0, 0.0, 0.0]\n[[structure.cell.bonds]]\ni = 0\nj = 0\ndcell = [1, 0, 0]",
+        )
+        .replace(
+            "center = { kind = \"S\", state = [\"a\"] }",
+            "center = { kind = \"S\", state = [\"b\"] }",
+        )
+        .replace(
+            "initial = \"a\"",
+            "initial = \"a\"\n[[structure.init]]\nname = \"seed-center\"\ncenter = { kind = \"S\", state = [\"a\"] }\nsites = [[0, 0, 0, 0]]\nset = \"b\"",
+        )
+        .replace(
+            "target = \"center\"\nset = \"b\"",
+            "target = \"neighbors\"\nselect = { distance = 1, kind = \"S\", state = [\"a\"] }\nselect_mode = \"one\"\nset = \"b\"",
+        );
+    let parsed: petra_deck::DeckFile = toml::from_str(&text).expect("select_mode deck parses");
+    let deck = petra_deck::compile(&parsed).expect("select_mode deck compiles");
+    let mut engine = deck.build_engine(Some(17)).expect("engine builds");
+    engine.step().expect("one-neighbor event fires");
+    let b = deck
+        .state_names
+        .iter()
+        .position(|name| name == "S.b")
+        .expect("state exists") as u16;
+    assert_eq!(
+        engine
+            .lattice
+            .states
+            .iter()
+            .filter(|state| state.0 == b)
+            .count(),
+        2,
+        "the center plus exactly one of its two neighbors changes"
+    );
+}
+
+#[test]
+fn source_rule_is_one_independent_event_per_vacant_site() {
+    let text = V2
+        .replace("dims = [2, 2, 2]", "dims = [4, 1, 1]")
+        .replace(
+            "name = \"a\"\noccupant = \"A\"",
+            "name = \"a\"\noccupant = \"vacant\"",
+        )
+        .replace("center = { kind = \"S\", state = [\"a\"] }\n", "")
+        .replace("target = \"center\"", "target = \"source\"");
+    let parsed: petra_deck::DeckFile = toml::from_str(&text).expect("source deck parses");
+    let deck = petra_deck::compile(&parsed).expect("source deck compiles");
+    let mut engine = deck.build_engine(Some(9)).expect("engine builds");
+    let mut fired = 0;
+    while engine.step().is_ok() {
+        fired += 1;
+    }
+    assert_eq!(fired, 4, "one source event for each initially vacant site");
+}
+
+#[test]
+fn init_rekind_changes_runtime_site_kind_and_state() {
+    let text = V2
+        .replace(
+            "[[structure.kinds.states]]\nname = \"b\"\noccupant = \"A\"",
+            "[[structure.kinds.states]]\nname = \"b\"\noccupant = \"A\"\n\n[[structure.kinds]]\nname = \"T\"\ninitial = \"a\"\n[[structure.kinds.states]]\nname = \"a\"\noccupant = \"A\"\n[[structure.kinds.states]]\nname = \"b\"\noccupant = \"A\"",
+        )
+        .replace(
+            "center = { kind = \"S\", state = [\"a\"] }",
+            "center = { kind = \"T\", state = [\"a\"] }",
+        )
+        .replace(
+            "[structure.cell]",
+            "[[structure.init]]\nname = \"rekind-all\"\ncenter = { kind = \"S\", state = [\"a\"] }\nmap = { a = \"a\" }\nrekind = \"T\"\n\n[structure.cell]",
+        );
+    let parsed: petra_deck::DeckFile = toml::from_str(&text).expect("rekind deck parses");
+    let deck = petra_deck::compile(&parsed).expect("rekind deck compiles");
+    let mut engine = deck.build_engine(Some(3)).expect("rekind init runs");
+    engine.step().expect("T-kind reaction sees rekindled sites");
+    let t_b = deck
+        .state_names
+        .iter()
+        .position(|name| name == "T.b")
+        .expect("T.b exists") as u16;
+    assert!(engine.lattice.states.iter().any(|state| state.0 == t_b));
 }
 
 #[test]

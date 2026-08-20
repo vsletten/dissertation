@@ -10,7 +10,7 @@ use crate::state::{StateId, StateSet};
 /// Selects neighbors of a center site: sites at exact graph `distance`
 /// (1 or 2), optionally restricted by kind, bond label (distance 1 only),
 /// and a state set.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct NeighborSelect {
     pub distance: u8,
     pub kind: Option<KindId>,
@@ -30,7 +30,7 @@ pub struct NeighborSelect {
 }
 
 /// "Between `min` and `max` neighbors match the selector."
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Guard {
     pub select: NeighborSelect,
     pub min: u32,
@@ -38,7 +38,7 @@ pub struct Guard {
 }
 
 /// Environment-dependent rate adjustment (design doc §4).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ModifierKind {
     /// Each matching neighbor adds `dea` (kcal/mol) to the activation
     /// energy — bond-counting / BEP-style. The *linear* convenience case
@@ -60,19 +60,23 @@ pub enum ModifierKind {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Modifier {
     pub select: NeighborSelect,
     pub kind: ModifierKind,
 }
 
 /// Where an effect lands.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum EffectTarget {
     Center,
+    /// Per-site source/bath event. Compilation treats each eligible vacant
+    /// site as the event center; the explicit variant preserves the schema.
+    Source,
     /// The first neighbor (ascending site id) matching the selector.
-    /// v0 semantics; a random-match option is planned (design doc §3.3).
     FirstMatch(NeighborSelect),
+    /// One uniformly selected matching neighbor.
+    RandomMatch(NeighborSelect),
     /// Every neighbor matching the selector — the "update both Al
     /// neighbors of this bridging oxygen" pattern. Matching zero sites is
     /// legal (unlike `FirstMatch`, which is an error).
@@ -80,7 +84,7 @@ pub enum EffectTarget {
 }
 
 /// What an effect does to its target site's state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum EffectOp {
     /// Set to a fixed state.
     Set(StateId),
@@ -100,7 +104,7 @@ pub enum EffectOp {
 }
 
 /// One state rewrite.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Effect {
     pub target: EffectTarget,
     pub op: EffectOp,
@@ -140,14 +144,14 @@ impl EffectOp {
 
 /// A weighted alternative outcome (generalizes the legacy R4/R9 proton
 /// coin flip). A deterministic reaction has exactly one branch.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Branch {
     pub weight: f64,
     pub effects: Vec<Effect>,
 }
 
 /// A fully compiled elementary reaction.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Reaction {
     pub name: String,
     pub center_kind: KindId,
@@ -176,8 +180,10 @@ impl Reaction {
             .iter()
             .flat_map(|b| &b.effects)
             .filter_map(|e| match &e.target {
-                EffectTarget::Center => None,
-                EffectTarget::FirstMatch(s) | EffectTarget::AllMatches(s) => Some(s.distance),
+                EffectTarget::Center | EffectTarget::Source => None,
+                EffectTarget::FirstMatch(s)
+                | EffectTarget::RandomMatch(s)
+                | EffectTarget::AllMatches(s) => Some(s.distance),
             })
             .max();
         g.max(m).max(e).unwrap_or(0)
@@ -238,9 +244,7 @@ pub fn count_matches(
         return nbrs
             .iter()
             .zip(labels)
-            .filter(|&(&n, &l)| {
-                l == label && site_matches(lat, kinds, n as SiteId, sel)
-            })
+            .filter(|&(&n, &l)| l == label && site_matches(lat, kinds, n as SiteId, sel))
             .count() as u32;
     }
     sites_at_distance(lat, center, sel.distance, sel.exclude_label, scratch);
@@ -387,24 +391,35 @@ mod tests {
                     kind: KindId(0),
                     frac: [0.0; 3],
                     bonds: vec![
-                        TemplateBond { to: 0, dcell: [1, 0, 0], label: NO_LABEL },
-                        TemplateBond { to: 0, dcell: [-1, 0, 0], label: NO_LABEL },
-                        TemplateBond { to: 1, dcell: [0, 0, 0], label: 0 },
+                        TemplateBond {
+                            to: 0,
+                            dcell: [1, 0, 0],
+                            label: NO_LABEL,
+                        },
+                        TemplateBond {
+                            to: 0,
+                            dcell: [-1, 0, 0],
+                            label: NO_LABEL,
+                        },
+                        TemplateBond {
+                            to: 1,
+                            dcell: [0, 0, 0],
+                            label: 0,
+                        },
                     ],
                 },
                 TemplateSite {
                     kind: KindId(1),
                     frac: [0.5, 0.0, 0.0],
-                    bonds: vec![TemplateBond { to: 0, dcell: [0, 0, 0], label: 0 }],
+                    bonds: vec![TemplateBond {
+                        to: 0,
+                        dcell: [0, 0, 0],
+                        label: 0,
+                    }],
                 },
             ],
         };
-        Lattice::build(
-            &cell,
-            [5, 1, 1],
-            [Boundary::Periodic; 3],
-            |_| StateId(0),
-        )
+        Lattice::build(&cell, [5, 1, 1], [Boundary::Periodic; 3], |_| StateId(0))
     }
 
     #[test]
