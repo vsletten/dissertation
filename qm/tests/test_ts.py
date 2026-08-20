@@ -83,6 +83,46 @@ class TestAseAdapter:
         assert f_analytic == pytest.approx(f_numeric, abs=1e-3)
 
 
+class TestReactionPathVector:
+    def test_removes_rigid_motion_and_normalizes_internal_change(self):
+        from dataclasses import replace
+
+        from quarry.ts import reaction_path_vector
+
+        reactant = water()
+        angle = np.deg2rad(37.0)
+        rotation = np.array(
+            [
+                [np.cos(angle), -np.sin(angle), 0.0],
+                [np.sin(angle), np.cos(angle), 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+        product_coords = reactant.coords @ rotation.T + np.array([3.0, -2.0, 1.5])
+        product_coords[1] += np.array([0.20, 0.0, 0.0])
+        product = replace(reactant, coords=product_coords)
+
+        mode = reaction_path_vector(reactant, product)
+
+        assert mode.shape == reactant.coords.shape
+        assert np.linalg.norm(mode) == pytest.approx(1.0)
+        assert np.all(np.isfinite(mode))
+
+    def test_rejects_pure_rigid_motion(self):
+        from dataclasses import replace
+
+        from quarry.ts import reaction_path_vector
+
+        reactant = water()
+        product = replace(reactant, coords=reactant.coords + np.array([2.0, -1.0, 0.5]))
+        with pytest.raises(ValueError, match="no non-rigid component"):
+            reaction_path_vector(reactant, product)
+
+    def test_directed_find_requires_cartesian_coordinates(self):
+        with pytest.raises(ValueError, match="requires internal=False"):
+            find_ts(hcn_ts_guess(), CHEAP, initial_mode=np.ones((3, 3)))
+
+
 @pytest.mark.slow
 class TestSaddleSearch:
     @pytest.fixture(scope="class")
