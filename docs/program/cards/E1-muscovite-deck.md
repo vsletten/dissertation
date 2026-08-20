@@ -54,6 +54,9 @@ kinds, rules, and barrier provenance (§4 table).
   regenerated CSV/SVG/JSON products are byte-identical to the tracked
   artifacts, all nine relative report links resolve, and both rasterized SVGs
   were visually inspected with readable, unclipped two-panel PASS plots.
+- 2026-08-20 — hermes-workstation — a fresh merged-main Ruff 0.15.1 format
+  check caught the cloud review-fix commit's long `sy()` expression. Reformatted
+  that expression only; no model, gate, or artifact semantics changed.
 
 ## Result
 
