@@ -76,10 +76,12 @@ REACTIONS = {
     "al-neutral": (aluminosilicate_dimer, water),
     "al-acid": (aluminosilicate_dimer, hydronium),
 }
-# Indices from the builders: 0 = bridging O, 1 = Si under attack;
+# Indices from the builders: 0 = bridging O, 1 = Si under attack,
+# 2 = the Al across the bridge in the aluminosilicate dimer;
 # the attacker's O is the first atom appended after the dimer.
 BR_INDEX = 0
 SI_INDEX = 1
+AL_INDEX = 2
 KCAL = 4.184
 SI_NEUTRAL_DG_KJ = 113.048262
 SI_NEUTRAL_DG_KCAL = 27.019
@@ -583,7 +585,7 @@ def finish_al_neutral_sequential(
         ),
     )
     reactive_core = sorted(
-        {BR_INDEX, SI_INDEX, 2, ow_index, ow_index + 1, ow_index + 2}
+        {BR_INDEX, SI_INDEX, AL_INDEX, ow_index, ow_index + 1, ow_index + 2}
     )
     addition_ts_path = run_dir / "addition_directed_ts.xyz"
     addition_ts = checkpointed(

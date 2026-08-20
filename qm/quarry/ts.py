@@ -261,7 +261,7 @@ def relax_at_fixed_distances(
     pairs: list[tuple[int, int]] = []
     targets: list[float] = []
     seen: set[tuple[int, int]] = set()
-    frozen = set(cluster.frozen_indices)
+    frozen = set(cluster.frozen_indices or [])
     for atom_i, atom_j, target in fixed_distances:
         if atom_i == atom_j:
             raise ValueError("a fixed distance requires two distinct atoms")
@@ -288,7 +288,11 @@ def relax_at_fixed_distances(
     if cluster.frozen_indices:
         constraints.append(FixAtoms(indices=cluster.frozen_indices))
     constraints.append(
-        FixBondLengths(pairs, bondlengths=targets, tolerance=1e-10)
+        FixBondLengths(
+            pairs,
+            bondlengths=targets,
+            tolerance=distance_tolerance_a,
+        )
     )
     atoms.set_constraint(constraints)
     # Explicit targets are not applied until ASE adjusts a position update.
@@ -302,12 +306,13 @@ def relax_at_fixed_distances(
         trajectory=trajectory,
         logfile=logfile,
     )
-    converged = optimizer.run(fmax=fmax_ev_a, steps=max_steps)
+    optimizer_reported_convergence = optimizer.run(
+        fmax=fmax_ev_a,
+        steps=max_steps,
+    )
     projected_forces = np.asarray(atoms.get_forces(), dtype=float)
     projected_fmax = float(np.linalg.norm(projected_forces, axis=1).max())
-    if converged is None:
-        converged = projected_fmax < fmax_ev_a
-    if not converged:
+    if not optimizer_reported_convergence:
         raise RuntimeError(
             f"fixed-distance relaxation did not converge within {max_steps} steps"
         )
