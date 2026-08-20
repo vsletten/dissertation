@@ -31,3 +31,7 @@ Deviations get a `DEVIATION:` note; details live in the card.*
 - 2026-08-18 — fable — Phase 0 closed: quarry package (PR #12), smoke
   v2 (PR #14); measured 4090: 74× analytic Hessians vs 32-thread CPU,
   identical energies. GPU owns all frequency work.
+- 2026-08-19 — fable — qm/HANDOFF.md rewritten as the Phase-2 edition
+  (barrier-ladder build plan: crystallographic cluster builder from the
+  kaolinite deck cell, per-cell campaign driver, by_count emission,
+  CALC-002..005 closure); new READY card A3-barrier-ladder.
