@@ -1,3 +1,4 @@
+import ast
 import os
 import re
 import sys
@@ -80,7 +81,31 @@ def test_all_campaign_entrypoints_bootstrap_before_heavy_imports():
     scripts = Path(__file__).resolve().parent.parent / "scripts"
     for path in sorted(scripts.glob("*.py")):
         source = path.read_text()
+        tree = ast.parse(source)
         bootstrap_at = source.find("bootstrap_cli(")
+        bootstrap_calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "bootstrap_cli"
+        ]
+        main_guards = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.If)
+            and isinstance(node.test, ast.Compare)
+            and isinstance(node.test.left, ast.Name)
+            and node.test.left.id == "__name__"
+            and len(node.test.ops) == 1
+            and isinstance(node.test.ops[0], ast.Eq)
+            and len(node.test.comparators) == 1
+            and isinstance(node.test.comparators[0], ast.Constant)
+            and node.test.comparators[0].value == "__main__"
+        ]
+        guarded_nodes = {
+            nested for guard in main_guards for nested in ast.walk(guard)
+        }
         heavy_imports = [
             match.start()
             for match in re.finditer(
@@ -90,6 +115,10 @@ def test_all_campaign_entrypoints_bootstrap_before_heavy_imports():
             )
         ]
         assert bootstrap_at >= 0, f"{path.name} does not bootstrap etiquette"
+        assert bootstrap_calls, f"{path.name} does not call bootstrap_cli"
+        assert all(call in guarded_nodes for call in bootstrap_calls), (
+            f"{path.name} calls bootstrap_cli outside its __main__ guard"
+        )
         assert heavy_imports, f"{path.name} has no recognized heavy import"
         assert bootstrap_at < min(heavy_imports), (
             f"{path.name} bootstraps after a heavy import"
