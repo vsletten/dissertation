@@ -27,6 +27,7 @@ on main). Priority P0 > P1 > P2 within READY.
 |---|---|---|---|---|---|
 | [B1-schema-rfc](cards/B1-schema-rfc.md) | B | P0 | any | done | — |
 | [B2-engine-refactor](cards/B2-engine-refactor.md) | B | P0 | any | ready | B1 ✅ |
+| [QI1-driver-enforced-etiquette](cards/QI1-driver-enforced-etiquette.md) | A | P2 | any | ready | — |
 | [A1b-acid-mechanisms](cards/A1b-acid-mechanisms.md) | A | P1 | workstation | ready | — |
 | [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | ready | — |
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
