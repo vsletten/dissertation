@@ -145,7 +145,7 @@ connectivity n, protonation state) cell of the ladder":
 
 ## 4. Hard rules (unchanged, learned the hard way)
 
-- **Compute etiquette**: everything tee'd to files (never trust terminal
+- **Compute etiquette**: everything teed to files (never trust terminal
   scrollback), OMP_NUM_THREADS ≤ 16 for CPU stages, GPU for all DFT,
   no multi-hour full-CPU jobs without Victor's explicit go. The
   `quarry-campaign` skill is the checklist.
