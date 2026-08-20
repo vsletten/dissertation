@@ -16,4 +16,4 @@ density-fitted UKS Hessian aborted inside `gpu4pyscf.hessian.uks` at
 `assert wv.flags.c_contiguous`. Quarry now retries only that failed Hessian on
 CPU; geometry, scans, and saddle optimization remain GPU-first. The affected
 astro systems contain 3–5 atoms, so this is a bounded tiny-molecule fallback,
-not license to move campaigns onto CPU.
+not a license to move campaigns onto CPU.
