@@ -135,5 +135,46 @@ class QualitativeGateTests(unittest.TestCase):
         self.assertFalse(gate.pass_all)
 
 
+class SvgPanelTests(unittest.TestCase):
+    def _result(self, pass_all: bool):
+        values = [1.0, 2.0, 3.0, 2.5, 2.0, 1.0, 0.5, 0.2, 0.1, 0.05]
+        points = tuple(
+            muscovite_release.ReleasePoint(
+                fraction=0.02 * (index + 1),
+                released=index + 1,
+                time_s=float(index + 1),
+                sqrt_time_sqrt_s=(index + 1) ** 0.5,
+                cylinder_tau=0.01 * (index + 1),
+                apparent_da2_per_s=value,
+            )
+            for index, value in enumerate(values)
+        )
+        gate = muscovite_release.evaluate_gate(points, 100, 80)
+        if not pass_all:
+            gate = muscovite_release.evaluate_gate(points, 50, 40)
+        return muscovite_release.RunResult(
+            label="run",
+            temperature_c=500.0,
+            run_dir=".",
+            reaction_counts={},
+            points=points,
+            gate=gate,
+        )
+
+    def test_svg_verdict_text_matches_gate(self) -> None:
+        passing = muscovite_release._svg_panels((self._result(True),), "release")
+        self.assertIn("gate PASS", passing)
+        self.assertNotIn("gate FAIL", passing)
+        failing = muscovite_release._svg_panels((self._result(False),), "release")
+        self.assertIn("gate FAIL", failing)
+        self.assertNotIn("gate PASS", failing)
+
+    def test_svg_verdict_color_matches_gate(self) -> None:
+        passing = muscovite_release._svg_panels((self._result(True),), "release")
+        failing = muscovite_release._svg_panels((self._result(False),), "release")
+        self.assertIn('fill="#166534"', passing)
+        self.assertIn('fill="#b42318"', failing)
+
+
 if __name__ == "__main__":
     unittest.main()

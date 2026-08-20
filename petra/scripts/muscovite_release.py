@@ -333,8 +333,10 @@ def _svg_panels(results: tuple[RunResult, ...], metric: str) -> str:
         parts.append(f'<text x="{x0 + plot_width / 2}" y="{y0 + plot_height + 48}" text-anchor="middle" font-family="sans-serif" font-size="14">{html.escape(x_label)}</text>')
         parts.append(f'<text x="{x0 + 4}" y="{origin_y + 42}" font-family="sans-serif" font-size="12" fill="#374151">{html.escape(y_label)}</text>')
         verdict = result.gate
+        verdict_text = "gate PASS" if verdict.pass_all else "gate FAIL"
+        verdict_fill = "#166534" if verdict.pass_all else "#b42318"
         parts.append(
-            f'<text x="{x0 + plot_width - 5}" y="{origin_y + 25}" text-anchor="end" font-family="monospace" font-size="13" fill="#166534">rise x{verdict.rise_ratio:.1f}; fall x{verdict.fall_ratio:.0f}; gate PASS</text>'
+            f'<text x="{x0 + plot_width - 5}" y="{origin_y + 25}" text-anchor="end" font-family="monospace" font-size="13" fill="{verdict_fill}">rise x{verdict.rise_ratio:.1f}; fall x{verdict.fall_ratio:.0f}; {verdict_text}</text>'
         )
     parts.append("</svg>")
     return "\n".join(parts) + "\n"
