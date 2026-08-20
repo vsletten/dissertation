@@ -338,6 +338,18 @@ def _ticks(low: float, high: float, count: int = 5) -> list[float]:
     return [low + index * (high - low) / (count - 1) for index in range(count)]
 
 
+def _span(low: float, high: float) -> float:
+    """Non-zero plot span, so a collapsed range renders as a degenerate plot.
+
+    When every x (or y) value in a panel is identical, ``high - low`` is zero
+    and the ``sx``/``sy`` scale functions would divide by zero. Return a unit
+    span instead so all points map to the same coordinate rather than raising.
+    """
+
+    span = high - low
+    return span if span > 0.0 else 1.0
+
+
 def _svg_panels(results: tuple[RunResult, ...], metric: str) -> str:
     width = 1100
     panel_height = 340
@@ -375,14 +387,21 @@ def _svg_panels(results: tuple[RunResult, ...], metric: str) -> str:
             y_high = math.ceil(max(ys))
             y_precision = 1
 
+        # Guard against a degenerate panel (all values identical) collapsing
+        # the range to zero, which would divide by zero in sx/sy below.
+        if x_high <= x_low:
+            x_high = x_low + 1.0
+        if y_high <= y_low:
+            y_high = y_low + 1.0
+
         def display_y(value: float) -> str:
             return f"{value:.{y_precision}f}"
 
         def sx(value: float) -> float:
-            return x0 + (value - x_low) * plot_width / (x_high - x_low)
+            return x0 + (value - x_low) * plot_width / _span(x_low, x_high)
 
         def sy(value: float) -> float:
-            return y0 + plot_height - (value - y_low) * plot_height / (y_high - y_low)
+            return y0 + plot_height - (value - y_low) * plot_height / _span(y_low, y_high)
 
         parts.extend(
             [

@@ -194,6 +194,34 @@ class SvgPanelTests(unittest.TestCase):
         self.assertIn('fill="#166534"', passing)
         self.assertIn('fill="#b42318"', failing)
 
+    def test_collapsed_range_does_not_divide_by_zero(self) -> None:
+        # All x (and y) values identical -> x_high == x_low and y_high == y_low.
+        # sx/sy must not raise ZeroDivisionError; the panel renders degenerate.
+        points = tuple(
+            muscovite_release.ReleasePoint(
+                fraction=0.02,
+                released=1,
+                time_s=1.0,
+                sqrt_time_sqrt_s=1.0,
+                cylinder_tau=0.01,
+                apparent_da2_per_s=1.0,
+            )
+            for _ in range(3)
+        )
+        gate = muscovite_release.evaluate_gate(points, 100, 6)
+        result = muscovite_release.RunResult(
+            label="flat",
+            temperature_c=500.0,
+            run_dir=".",
+            reaction_counts={},
+            points=points,
+            gate=gate,
+        )
+        for metric in ("release", "da2"):
+            svg = muscovite_release._svg_panels((result,), metric)
+            self.assertIn("<svg", svg)
+            self.assertIn("<polyline", svg)
+
 
 if __name__ == "__main__":
     unittest.main()
