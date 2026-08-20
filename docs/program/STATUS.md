@@ -4,6 +4,11 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-20 — local-hermes + fable — D2a DONE: 6-reaction astro rate
+  campaign on the 4090. Verdict: GO gas-phase / NO-GO surface-LH rates
+  (4–5 orders low without explicit-surface treatment). First non-Claude
+  runtime to work the board end-to-end; worker hit iteration ceiling at
+  closeout, fable finished bookkeeping. results/D2a-rate-reproduction.md.
 - 2026-08-18 — hermes-workstation — A7-kinetics-database done: schema v0,
   36 P&K silicate records / 74 mechanisms, stdlib validator, and a
   49-source 2004–present expansion inventory under `kinetics-db/`.
