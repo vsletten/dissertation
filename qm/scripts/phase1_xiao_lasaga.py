@@ -537,6 +537,7 @@ def finish_al_neutral_sequential(
             max_steps=240,
             pre_relax_fmax_ev_a=1.0,
             pre_relax_steps=120,
+            climb_optimizer="ode",
         ),
     )
     addition_ts_path = run_dir / "addition_directed_ts.xyz"

@@ -314,6 +314,59 @@ class TestNebConvergence:
                 5,
             )
 
+    def test_unconverged_ode_climb_is_rejected(self, monkeypatch):
+        import ase.mep
+        import ase.mep.neb
+        import ase.optimize
+
+        calls = []
+
+        class FakeNeb:
+            def __init__(self, images, **kwargs):
+                self.climb = kwargs["climb"]
+
+            def interpolate(self, *, method):
+                assert method == "idpp"
+
+        class FakeMdMin:
+            def __init__(self, neb, **kwargs):
+                calls.append(("mdmin", neb.climb, kwargs))
+
+            def run(self, *, fmax, steps):
+                return True
+
+        class FakeOde:
+            def __init__(self, neb, **kwargs):
+                calls.append(("ode", neb.climb, kwargs))
+
+            def run(self, *, fmax, steps):
+                calls.append(("ode-run", fmax, steps))
+                return False
+
+        monkeypatch.setattr(ase.mep, "NEB", FakeNeb)
+        monkeypatch.setattr(ase.optimize, "MDMin", FakeMdMin)
+        monkeypatch.setattr(ase.mep.neb, "NEBOptimizer", FakeOde)
+        reactant, product = self._endpoints()
+
+        with pytest.raises(RuntimeError, match="climbing-image"):
+            from quarry.ts import neb_ts_guess
+
+            neb_ts_guess(
+                reactant,
+                product,
+                CHEAP,
+                n_images=3,
+                pre_relax_steps=4,
+                max_steps=5,
+                climb_optimizer="ode",
+            )
+
+        assert calls == [
+            ("mdmin", False, {"dt": 0.05, "maxstep": 0.05}),
+            ("ode", True, {"method": "ODE"}),
+            ("ode-run", 0.1, 5),
+        ]
+
 
 class TestConstraints:
     """These run real geomeTRIC constraint plumbing — the inline-text
