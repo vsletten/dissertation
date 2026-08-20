@@ -261,7 +261,7 @@ def relax_at_fixed_distances(
     pairs: list[tuple[int, int]] = []
     targets: list[float] = []
     seen: set[tuple[int, int]] = set()
-    frozen = set(cluster.frozen_indices)
+    frozen = set(cluster.frozen_indices or [])
     for atom_i, atom_j, target in fixed_distances:
         if atom_i == atom_j:
             raise ValueError("a fixed distance requires two distinct atoms")
