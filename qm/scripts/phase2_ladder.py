@@ -227,24 +227,38 @@ def proton_neb_guess(
         log(f"  driving H{h_idx} from r(Obr-H)={r0:.2f} A inward")
         first = max(1.05, round(r0 - 0.15, 2))
         distances = [round(float(x), 2) for x in np.arange(first, 1.04, -0.15)]
-        pscan = scan_to_maximum(
-            approach_seed,
-            settings,
-            atom_i=br_index,
-            atom_j=h_idx,
-            distances_a=distances or [first],
-            fixed_distances=[(m_index, ow_index, pin_a)],
-            extend_step_a=0.06,
-            min_distance_a=0.95,
-            progress=lambda r, e: (
-                log(f"  r(Obr-H)={r:.2f} A  E={e:.6f} Ha"),
-                trim_gpu_pool(),
-            )[0],
-        )
-        crest_idx = first_interior_maximum(pscan)
-        if crest_idx is None:
-            raise RuntimeError("proton scan produced no interior crest")
-        product_seed = pscan[min(crest_idx + 1, len(pscan) - 1)][2]
+        try:
+            pscan = scan_to_maximum(
+                approach_seed,
+                settings,
+                atom_i=br_index,
+                atom_j=h_idx,
+                distances_a=distances or [first],
+                fixed_distances=[(m_index, ow_index, pin_a)],
+                extend_step_a=0.06,
+                min_distance_a=0.95,
+                progress=lambda r, e: (
+                    log(f"  r(Obr-H)={r:.2f} A  E={e:.6f} Ha"),
+                    trim_gpu_pool(),
+                )[0],
+            )
+        except ScanNoMaximumError as exc:
+            # Embedded clusters: proton transfer can be coupled to bridge
+            # rupture, so no crest exists along the proton coordinate
+            # alone (seen live on oss-neutral-n4-s2). The floor endpoint
+            # has the proton delivered — a valid product seed; CI-NEB is
+            # pinned to both basins and finds the concerted col anyway.
+            log(
+                "  proton scan monotonic to floor — transfer is coupled "
+                "to bridge rupture; using delivered-proton endpoint"
+            )
+            pscan = exc.scan
+            product_seed = pscan[-1][2]
+        else:
+            crest_idx = first_interior_maximum(pscan)
+            if crest_idx is None:
+                raise RuntimeError("proton scan produced no interior crest")
+            product_seed = pscan[min(crest_idx + 1, len(pscan) - 1)][2]
 
     h_idx = min(
         h_candidates,
@@ -398,6 +412,7 @@ def main() -> int:
     log(f"stage 2: relaxed scan r({metal}-Ow), auto-extending to interior maximum")
     ts_guess_path = run_dir / "ts_guess.xyz"
     route_path = run_dir / "ts_guess.route"
+    approach_seed_path = run_dir / "approach_seed.xyz"
     route = route_path.read_text().strip() if route_path.exists() else "direct"
     if ts_guess_path.exists():
         ts_guess = load_xyz(ts_guess_path, complex_opt)
@@ -405,22 +420,31 @@ def main() -> int:
     else:
         route = "direct"
         route_path.unlink(missing_ok=True)
-        try:
-            scan = scan_to_maximum(
-                complex_opt,
-                settings,
-                atom_i=m_index,
-                atom_j=ow_index,
-                distances_a=approach["distances"],
-                progress=lambda r, e: (
-                    log(f"  r={r:.2f} A  E={e:.6f} Ha"),
-                    trim_gpu_pool(),
-                )[0],
-            )
-            ts_guess = scan_ts_guess(scan)
-        except ScanNoMaximumError as exc:
-            log("  approach coordinate alone does not cross the ridge;")
-            base = min(exc.scan, key=lambda p: abs(p[0] - approach["pin"]))[2]
+        base: Cluster | None = None
+        if approach_seed_path.exists():
+            # A crashed proton-route attempt already proved the direct
+            # route dead — skip the approach scan entirely.
+            log("  resume: approach_seed.xyz exists, skipping approach scan")
+            base = load_xyz(approach_seed_path, complex_opt)
+        else:
+            try:
+                scan = scan_to_maximum(
+                    complex_opt,
+                    settings,
+                    atom_i=m_index,
+                    atom_j=ow_index,
+                    distances_a=approach["distances"],
+                    progress=lambda r, e: (
+                        log(f"  r={r:.2f} A  E={e:.6f} Ha"),
+                        trim_gpu_pool(),
+                    )[0],
+                )
+                ts_guess = scan_ts_guess(scan)
+            except ScanNoMaximumError as exc:
+                log("  approach coordinate alone does not cross the ridge;")
+                base = min(exc.scan, key=lambda p: abs(p[0] - approach["pin"]))[2]
+                save_xyz(base, approach_seed_path)
+        if base is not None:
             ts_guess = proton_neb_guess(
                 base,
                 complex_opt,
