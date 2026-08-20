@@ -54,6 +54,6 @@ Verification on Rust 1.97.0:
 - Explicit `petra examples/kossel.toml --steps 1000 --paranoid`: completed 1000
   steps and wrote populations successfully.
 - `git diff --check`: clean.
-- Strict Clippy has no new finding from this change; both `origin/main` and this
+- Strict Clippy has no new findings from this change; both `origin/main` and this
   branch report the same three pre-existing `unnecessary_unwrap` findings in
   `petra-core/src/reaction.rs` under Rust 1.97.0.

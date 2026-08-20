@@ -315,7 +315,7 @@ fn extreme_fast_event_cannot_erase_surviving_slow_event() {
     let parsed: petra_deck::DeckFile =
         toml::from_str(EXTREME_RATE_CANCELLATION).expect("valid deck");
     let deck = petra_deck::compile(&parsed).expect("compiles");
-    let mut engine = deck.build_engine(Some(1998)).expect("engine builds");
+    let mut engine = deck.build_engine(None).expect("engine builds");
 
     let fast = engine.step().expect("fast event fires");
     assert_eq!(fast.site, 0);
