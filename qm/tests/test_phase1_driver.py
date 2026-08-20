@@ -37,6 +37,19 @@ def test_channel_escape_guard_is_absolute_and_relative():
     assert phase1.channel_escape_reason(guess, geometry("channel", 2.4), 2) is None
 
 
+def test_quick_irc_requires_reactant_and_hydrolyzed_basins():
+    reactant = geometry("reactant", 3.2, si_obr=1.6)
+    reactant.coords[3:] += np.array([0.0, 3.0, 0.0])
+    product = geometry("product", 1.7, si_obr=3.5)
+    product.coords[3] = np.array([3.5, 0.98, 0.0])
+    trapped = geometry("trapped", 1.8, si_obr=1.8)
+    trapped.coords[3] = np.array([1.8, 0.98, 0.0])
+
+    assert phase1.quick_irc_channel_reason(reactant, product, 2) is None
+    reason = phase1.quick_irc_channel_reason(trapped, trapped, 2)
+    assert reason is not None and "basin signatures" in reason
+
+
 def test_proton_neb_fallback_reconstructs_resumed_approach_seed(monkeypatch, tmp_path):
     direct_crest = geometry("direct-crest", 2.2)
     complex_opt = geometry("complex", 3.2)
@@ -68,8 +81,15 @@ def test_proton_neb_fallback_reconstructs_resumed_approach_seed(monkeypatch, tmp
 
     neb_inputs = []
 
-    def fake_neb(reactant, product, settings):
+    def fake_neb(reactant, product, settings, **kwargs):
         neb_inputs.append((reactant, product))
+        assert kwargs == {
+            "n_images": 5,
+            "fmax_ev_a": 0.2,
+            "max_steps": 240,
+            "pre_relax_fmax_ev_a": 1.5,
+            "pre_relax_steps": 120,
+        }
         return geometry("neb-guess", 2.0)
 
     monkeypatch.setattr(phase1, "constrained_scan", fake_constrained_scan)
@@ -115,7 +135,7 @@ def test_rolled_back_product_extends_cleavage_without_repeating_proton_scan(
     monkeypatch.setattr(
         phase1,
         "neb_ts_guess",
-        lambda reactant, product, settings: geometry("neb-guess", 2.0),
+        lambda reactant, product, settings, **kwargs: geometry("neb-guess", 2.0),
     )
 
     result = phase1.proton_neb_guess(direct_crest, complex_opt, CHEAP, tmp_path, 2)
@@ -123,3 +143,33 @@ def test_rolled_back_product_extends_cleavage_without_repeating_proton_scan(
     assert result.name == "neb-guess"
     assert break_targets == [2.3, 2.6, 3.0, 3.4, 3.6]
     assert (tmp_path / "product.rejected-rollback.xyz").exists()
+
+
+def test_completed_product_uses_full_aligned_neb_endpoint(monkeypatch, tmp_path):
+    approach = geometry("approach", 2.2)
+    complex_opt = geometry("complex", 3.2)
+    phase1.save_xyz(geometry("full-product", 1.66, 3.50), tmp_path / "product.xyz")
+    near = geometry("near-product", 1.67, 2.07)
+    near.coords[3] = np.array([2.07, 0.96, 0.0])
+    phase1.save_xyz(near, tmp_path / "product.rejected-rollback.xyz")
+    endpoints = []
+
+    def fake_neb(reactant, product, settings, **kwargs):
+        endpoints.append((product, kwargs))
+        return geometry("neb-guess", 2.0)
+
+    monkeypatch.setattr(phase1, "neb_ts_guess", fake_neb)
+
+    result = phase1.proton_neb_guess(approach, complex_opt, CHEAP, tmp_path, 2)
+
+    assert result.name == "neb-guess"
+    assert len(endpoints) == 1
+    product, kwargs = endpoints[0]
+    assert np.linalg.norm(product.coords[1] - product.coords[0]) == 3.50
+    assert kwargs == {
+        "n_images": 5,
+        "fmax_ev_a": 0.2,
+        "max_steps": 240,
+        "pre_relax_fmax_ev_a": 1.5,
+        "pre_relax_steps": 120,
+    }
