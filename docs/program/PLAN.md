@@ -28,6 +28,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [B1-schema-rfc](cards/B1-schema-rfc.md) | B | P0 | any | done | — |
 | [B2-engine-refactor](cards/B2-engine-refactor.md) | B | P0 | any | ready | B1 ✅ |
 | [QI1-driver-enforced-etiquette](cards/QI1-driver-enforced-etiquette.md) | A | P2 | any | ready | — |
+| [QI2-gpu-lease](cards/QI2-gpu-lease.md) | A | P1 | any | ready | — |
 | [E1-muscovite-deck](cards/E1-muscovite-deck.md) | E | P1 | any | ready | — (phase 1 isothermal) |
 | [A1b-acid-mechanisms](cards/A1b-acid-mechanisms.md) | A | P1 | workstation | ready | — |
 | [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | ready | — |
