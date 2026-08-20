@@ -27,7 +27,7 @@ on main). Priority P0 > P1 > P2 within READY.
 |---|---|---|---|---|---|
 | [B1-schema-rfc](cards/B1-schema-rfc.md) | B | P0 | any | done | — |
 | [B2-engine-refactor](cards/B2-engine-refactor.md) | B | P0 | any | ready | B1 ✅ |
-| [QI1-driver-enforced-etiquette](cards/QI1-driver-enforced-etiquette.md) | A | P2 | any | ready | — |
+| [QI1-driver-enforced-etiquette](cards/QI1-driver-enforced-etiquette.md) | A | P2 | any | done | — |
 | [QI2-gpu-lease](cards/QI2-gpu-lease.md) | A | P1 | any | ready | — |
 | [QI3-fenwick-total-cancellation](cards/QI3-fenwick-total-cancellation.md) | B | P1 | any | ready | — |
 | [E1-muscovite-deck](cards/E1-muscovite-deck.md) | E | P1 | any | done | — (phase 1 isothermal) |
@@ -43,7 +43,8 @@ on main). Priority P0 > P1 > P2 within READY.
 | [D3-ice-mantle-deck](cards/D3-ice-mantle-deck.md) | D | P2 | any | blocked: B3 + D2a | B3, D2a |
 | [A5p0-aging-observables](cards/A5p0-aging-observables.md) | A | P1 | any | blocked: B4 | B4 |
 
-**Done** (acceptance verified on main): B1-schema-rfc (PR #25),
+**Done** (acceptance verified on main): QI1-driver-enforced-etiquette,
+B1-schema-rfc (PR #25),
 D2a-astro-rate-reproduction (PR #31 — verdict: GO gas-phase /
 NO-GO surface-LH), A7-kinetics-database (PR #27 — 36 minerals, 74
 mechanisms, validator green). **Active**: A3-barrier-ladder
