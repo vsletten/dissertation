@@ -84,6 +84,23 @@ def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
+def trim_gpu_pool() -> None:
+    """Return CuPy pool blocks to the CUDA driver between stages.
+
+    Multi-hour campaigns otherwise fragment the pool into
+    cudaErrorMemoryAllocation (seen live: stage-2 DF-K gradient OOM
+    right after a 2 h stage-1 optimization on a 24 GB card with ~7 GB
+    resident). No-op without a GPU.
+    """
+    try:
+        import cupy
+
+        cupy.get_default_memory_pool().free_all_blocks()
+        cupy.get_default_pinned_memory_pool().free_all_blocks()
+    except Exception:
+        pass
+
+
 def save_xyz(cluster: Cluster, path: Path) -> None:
     path.write_text(cluster.to_xyz())
 
@@ -199,7 +216,10 @@ def proton_neb_guess(
             fixed_distances=[(m_index, ow_index, pin_a)],
             extend_step_a=0.06,
             min_distance_a=0.95,
-            progress=lambda r, e: log(f"  r(Obr-H)={r:.2f} A  E={e:.6f} Ha"),
+            progress=lambda r, e: (
+                log(f"  r(Obr-H)={r:.2f} A  E={e:.6f} Ha"),
+                trim_gpu_pool(),
+            )[0],
         )
         crest_idx = first_interior_maximum(pscan)
         if crest_idx is None:
@@ -349,6 +369,7 @@ def main() -> int:
     attacker_opt = checkpointed(
         run_dir / "attacker.xyz", attacker, lambda: optimize(attacker, settings)
     )
+    trim_gpu_pool()
 
     # Stage 2 — relaxed approach scan, then the concerted proton route
     # if the approach coordinate alone never crosses the ridge.
@@ -369,7 +390,10 @@ def main() -> int:
                 atom_i=m_index,
                 atom_j=ow_index,
                 distances_a=approach["distances"],
-                progress=lambda r, e: log(f"  r={r:.2f} A  E={e:.6f} Ha"),
+                progress=lambda r, e: (
+                    log(f"  r={r:.2f} A  E={e:.6f} Ha"),
+                    trim_gpu_pool(),
+                )[0],
             )
             ts_guess = scan_ts_guess(scan)
         except ScanNoMaximumError as exc:
@@ -391,6 +415,7 @@ def main() -> int:
             route_path.write_text(route)
 
     # Stage 3 — Sella saddle search with the escaped-channel gates.
+    trim_gpu_pool()
     log("stage 3: Sella saddle search")
     ts_path = run_dir / "ts.xyz"
     trajectory_path = run_dir / "sella.traj"
@@ -434,6 +459,7 @@ def main() -> int:
         return 1
 
     # Stage 4 — verify (PHVA-aware) + quick IRC.
+    trim_gpu_pool()
     log("stage 4: frequencies + quick-IRC")
     ts_freq = frequencies(ts, settings)
     imag = ts_freq.imaginary_cm
@@ -451,6 +477,7 @@ def main() -> int:
 
     # Stage 5 — thermochemistry (PHVA on frozen clusters; trans/rot
     # cancel between complex and TS of identical composition).
+    trim_gpu_pool()
     log("stage 5: thermochemistry")
     cx_freq = frequencies(complex_opt, settings)
     t = args.temperature
