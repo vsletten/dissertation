@@ -2,7 +2,7 @@
 //! a Fenwick tree of per-site rate sums, incremental event maintenance via
 //! the deck's maximum read distance, f64 time, seedable PCG64 RNG.
 
-use rand::{Rng as _, SeedableRng};
+use rand::{Rng as _, RngCore, SeedableRng};
 use rand_pcg::Pcg64Mcg;
 
 use crate::crystal::KindId;
@@ -135,6 +135,181 @@ pub enum Stop {
 /// Steps between full tree rebuilds (float-drift hygiene).
 const REBUILD_EVERY: u64 = 1 << 16;
 
+/// The result of one strategy step. CTMC fires exactly one transition;
+/// future synchronous strategies may return several.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StepOutcome {
+    pub fired: Vec<Fired>,
+    pub dt: f64,
+}
+
+#[derive(Debug)]
+struct PreparedTransition {
+    site: SiteId,
+    reaction: u16,
+    writes: Vec<(SiteId, crate::state::StateId)>,
+}
+
+/// Core-owned transition capability exposed to update strategies. Strategies
+/// may inspect the CTMC selection tables and schedule transitions, but only the
+/// engine commits writes, records changes, and refreshes dirty propensities.
+pub struct ApplyHandle<'a> {
+    lattice: &'a Lattice,
+    rules: &'a [Reaction],
+    kinds: &'a [KindId],
+    kind_state_ranges: &'a [(u16, u16)],
+    site_events: &'a [Vec<(u16, f64)>],
+    tree: &'a RateTree,
+    scratch: &'a mut Vec<SiteId>,
+    pending: &'a mut Vec<PreparedTransition>,
+}
+
+impl ApplyHandle<'_> {
+    /// Total enabled CTMC propensity.
+    pub fn total_rate(&self) -> f64 {
+        self.tree.total()
+    }
+
+    /// Whether any site has an enabled event, including zero-rate events.
+    pub fn has_events(&self) -> bool {
+        self.site_events.iter().any(|events| !events.is_empty())
+    }
+
+    /// Select one enabled event using the legacy coupled site/event draw.
+    /// Returning `None` means the positive tree total was only float drift.
+    pub fn select_event(&self, draw: f64) -> Option<(SiteId, u16)> {
+        let (site, mut residual) = self.tree.find(draw)?;
+        let events = &self.site_events[site];
+        debug_assert!(!events.is_empty(), "tree selected an event-less site");
+        let mut chosen = events.len() - 1;
+        for (i, &(_, rate)) in events.iter().enumerate() {
+            if residual < rate {
+                chosen = i;
+                break;
+            }
+            residual -= rate;
+        }
+        Some((site, events[chosen].0))
+    }
+
+    /// Resolve and queue a transition against the current pre-step state.
+    /// Branch and effect-selection randomness comes only from `rng`.
+    pub fn apply_transition(
+        &mut self,
+        site: SiteId,
+        reaction: u16,
+        rng: &mut dyn RngCore,
+    ) -> Result<(), Stop> {
+        let rxn = &self.rules[reaction as usize];
+        let branch = if rxn.branches.len() == 1 {
+            &rxn.branches[0]
+        } else {
+            let wsum: f64 = rxn.branches.iter().map(|branch| branch.weight).sum();
+            let mut draw = rng.gen::<f64>() * wsum;
+            let mut pick = rxn.branches.len() - 1;
+            for (index, branch) in rxn.branches.iter().enumerate() {
+                if draw < branch.weight {
+                    pick = index;
+                    break;
+                }
+                draw -= branch.weight;
+            }
+            &rxn.branches[pick]
+        };
+
+        let mut targets: Vec<(SiteId, &crate::reaction::EffectOp)> =
+            Vec::with_capacity(branch.effects.len());
+        let mut matched = Vec::new();
+        for effect in &branch.effects {
+            match &effect.target {
+                EffectTarget::Center | EffectTarget::Source => targets.push((site, &effect.op)),
+                EffectTarget::FirstMatch(selector) => {
+                    let target =
+                        first_match(self.lattice, self.kinds, site, selector, self.scratch)
+                            .ok_or(Stop::EffectTargetMissing { site, reaction })?;
+                    targets.push((target, &effect.op));
+                }
+                EffectTarget::RandomMatch(selector) => {
+                    all_matches(
+                        self.lattice,
+                        self.kinds,
+                        site,
+                        selector,
+                        self.scratch,
+                        &mut matched,
+                    );
+                    if matched.is_empty() {
+                        return Err(Stop::EffectTargetMissing { site, reaction });
+                    }
+                    matched.sort_unstable();
+                    let draw = rng.gen::<f64>();
+                    let index = ((draw * matched.len() as f64) as usize).min(matched.len() - 1);
+                    targets.push((matched[index], &effect.op));
+                }
+                EffectTarget::AllMatches(selector) => {
+                    all_matches(
+                        self.lattice,
+                        self.kinds,
+                        site,
+                        selector,
+                        self.scratch,
+                        &mut matched,
+                    );
+                    targets.extend(matched.iter().map(|&target| (target, &effect.op)));
+                }
+            }
+        }
+
+        let mut writes = Vec::with_capacity(targets.len());
+        for (target, op) in targets {
+            if self.lattice.frozen[target] {
+                return Err(Stop::EffectFailed {
+                    site,
+                    reaction,
+                    reason: "effect writes a frozen site",
+                });
+            }
+            let range = self.kind_state_ranges[self.kinds[target].0 as usize];
+            match op.resolve(self.lattice.states[target], range) {
+                Ok(Some(new_state)) => writes.push((target, new_state)),
+                Ok(None) => {}
+                Err(reason) => {
+                    return Err(Stop::EffectFailed {
+                        site,
+                        reaction,
+                        reason,
+                    });
+                }
+            }
+        }
+        self.pending.push(PreparedTransition {
+            site,
+            reaction,
+            writes,
+        });
+        Ok(())
+    }
+}
+
+/// What the core hands a strategy each step, matching RFC-001 §3. State and
+/// rules are read-only; all randomness and mutation use the public seams.
+pub struct StepCtx<'a> {
+    pub lattice: &'a Lattice,
+    pub rules: &'a [Reaction],
+    pub rng: &'a mut dyn RngCore,
+    pub apply: ApplyHandle<'a>,
+}
+
+/// A strategy decides which transition fires and how simulation time advances.
+pub trait UpdateStrategy {
+    fn step(&mut self, ctx: &mut StepCtx<'_>) -> Result<StepOutcome, Stop>;
+}
+
+/// Exact rejection-free CTMC: the pre-RFC Petra algorithm, moved intact
+/// behind [`UpdateStrategy`].
+#[derive(Debug, Default)]
+pub struct ExactCtmc;
+
 pub struct Engine {
     pub lattice: Lattice,
     pub reactions: Vec<Reaction>,
@@ -173,11 +348,34 @@ impl Engine {
         temperature: f64,
         seed: u64,
     ) -> Self {
-        let kinds: Vec<KindId> = lattice
+        let kinds = lattice
             .template_index
             .iter()
-            .map(|&t| kinds_per_template[t as usize])
+            .map(|&template| kinds_per_template[template as usize])
             .collect();
+        Self::new_with_site_kinds(
+            lattice,
+            kinds,
+            n_kinds,
+            kind_state_ranges,
+            reactions,
+            temperature,
+            seed,
+        )
+    }
+
+    /// Construct an engine with explicit per-site kinds after init passes.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_site_kinds(
+        lattice: Lattice,
+        kinds: Vec<KindId>,
+        n_kinds: usize,
+        kind_state_ranges: Vec<(u16, u16)>,
+        reactions: Vec<Reaction>,
+        temperature: f64,
+        seed: u64,
+    ) -> Self {
+        assert_eq!(lattice.len(), kinds.len(), "one kind per lattice site");
         let mut by_kind = vec![Vec::new(); n_kinds];
         for (i, r) in reactions.iter().enumerate() {
             by_kind[r.center_kind.0 as usize].push(i as u16);
@@ -242,177 +440,113 @@ impl Engine {
         self.site_events[s] = events;
     }
 
-    fn terminal_stop(&self) -> Stop {
-        if self.site_events.iter().any(|events| !events.is_empty()) {
-            Stop::ZeroRate
-        } else {
-            Stop::NoEvents
+    /// Advance with an explicitly supplied strategy. The strategy can only
+    /// schedule writes through [`ApplyHandle`]; the core commits and records
+    /// them after the strategy returns.
+    pub fn step_with(&mut self, strategy: &mut impl UpdateStrategy) -> Result<StepOutcome, Stop> {
+        // Guard against impossible zero totals caused by Fenwick cancellation:
+        // if there are positive-rate events but the tree reports zero, rebuild
+        // from the authoritative leaves before handing control to the strategy.
+        if self.tree.total() <= 0.0 && self.site_events.iter().any(|e| !e.is_empty()) {
+            self.tree.rebuild();
         }
-    }
+        let mut pending = Vec::new();
+        let result = {
+            let mut ctx = StepCtx {
+                lattice: &self.lattice,
+                rules: &self.reactions,
+                rng: &mut self.rng,
+                apply: ApplyHandle {
+                    lattice: &self.lattice,
+                    rules: &self.reactions,
+                    kinds: &self.kinds,
+                    kind_state_ranges: &self.kind_state_ranges,
+                    site_events: &self.site_events,
+                    tree: &self.tree,
+                    scratch: &mut self.scratch,
+                    pending: &mut pending,
+                },
+            };
+            strategy.step(&mut ctx)
+        };
 
-    /// One KMC step: select, apply, propagate, advance time.
-    pub fn step(&mut self) -> Result<Fired, Stop> {
-        let mut total = self.tree.total();
-        if total <= 0.0 {
-            let stop = self.terminal_stop();
-            if stop == Stop::ZeroRate {
-                // Removing an extreme rate can cancel much smaller surviving
-                // rates out of an incrementally maintained internal node.
-                // The leaves remain authoritative, so repair this impossible
-                // total before deciding that the simulation is terminal.
-                self.tree.rebuild();
-                total = self.tree.total();
-            }
-            if total <= 0.0 {
+        let mut outcome = match result {
+            Ok(outcome) => outcome,
+            Err(stop) => {
+                debug_assert!(pending.is_empty(), "strategy queued writes before stopping");
                 return Err(stop);
             }
-        }
-
-        // Site, then event within site. A `None` here means the positive
-        // `total` was pure accumulated drift over zero leaves — no events.
-        let Some((site, mut residual)) = self.tree.find(self.rng.gen::<f64>() * total) else {
-            return Err(self.terminal_stop());
         };
-        let events = &self.site_events[site];
-        debug_assert!(!events.is_empty(), "tree selected an event-less site");
-        let mut chosen = events.len() - 1; // clamp to last on float edge
-        for (i, &(_, rate)) in events.iter().enumerate() {
-            if residual < rate {
-                chosen = i;
-                break;
-            }
-            residual -= rate;
+        debug_assert_eq!(outcome.fired.len(), pending.len());
+        for (fired, transition) in outcome.fired.iter().zip(&pending) {
+            debug_assert_eq!(fired.site, transition.site);
+            debug_assert_eq!(fired.reaction, transition.reaction);
         }
-        let (ri, _) = events[chosen];
-
-        // Poisson waiting time; map u∈[0,1) to (0,1] so ln never sees 0.
-        let u: f64 = self.rng.gen();
-        let dt = -(1.0 - u).ln() / total;
-
-        let changed = self.apply(site, ri)?;
-
-        // Dirty propagation: changed sites plus everything within max_read.
-        let mut dirty: Vec<SiteId> = changed.clone();
-        let mut ring = Vec::new();
-        for &c in &changed {
-            for d in 1..=self.max_read {
-                // No label exclusion here: the dirty ring is the union of
-                // every selector's possible reach, so it walks the
-                // unfiltered graph (a superset is always safe).
-                sites_at_distance(&self.lattice, c, d, None, &mut ring);
-                for &s in &ring {
-                    if !dirty.contains(&s) {
-                        dirty.push(s);
-                    }
-                }
-            }
-        }
-        for s in dirty {
-            self.refresh_site(s);
-        }
-
-        self.time += dt;
+        self.commit_transitions(pending);
+        self.time += outcome.dt;
         self.step_count += 1;
         if self.step_count.is_multiple_of(REBUILD_EVERY) {
             self.tree.rebuild();
         }
-        Ok(Fired {
-            step: self.step_count,
-            time: self.time,
-            site,
-            reaction: ri,
-        })
+        for fired in &mut outcome.fired {
+            fired.step = self.step_count;
+            fired.time = self.time;
+        }
+        Ok(outcome)
     }
 
-    /// Apply the chosen reaction's effects (choosing a branch if several),
-    /// returning the sites whose state changed.
-    fn apply(&mut self, site: SiteId, ri: u16) -> Result<Vec<SiteId>, Stop> {
-        let rxn = &self.reactions[ri as usize];
-        let branch = if rxn.branches.len() == 1 {
-            &rxn.branches[0]
-        } else {
-            let wsum: f64 = rxn.branches.iter().map(|b| b.weight).sum();
-            let mut draw = self.rng.gen::<f64>() * wsum;
-            let mut pick = rxn.branches.len() - 1;
-            for (i, b) in rxn.branches.iter().enumerate() {
-                if draw < b.weight {
-                    pick = i;
-                    break;
-                }
-                draw -= b.weight;
-            }
-            &rxn.branches[pick]
-        };
+    /// Compatibility wrapper for the default exact-CTMC strategy.
+    pub fn step(&mut self) -> Result<Fired, Stop> {
+        let mut strategy = ExactCtmc;
+        let outcome = self.step_with(&mut strategy)?;
+        debug_assert_eq!(outcome.fired.len(), 1);
+        outcome.fired.into_iter().next().ok_or(Stop::NoEvents)
+    }
 
-        let mut changed = Vec::with_capacity(branch.effects.len());
-        // Resolve all targets against the *pre-effect* state, then write —
-        // an effect must not see a sibling effect's result.
-        let mut targets: Vec<(SiteId, &crate::reaction::EffectOp)> =
-            Vec::with_capacity(branch.effects.len());
-        let mut matched = Vec::new();
-        for eff in &branch.effects {
-            match &eff.target {
-                EffectTarget::Center => targets.push((site, &eff.op)),
-                EffectTarget::FirstMatch(sel) => {
-                    let target =
-                        first_match(&self.lattice, &self.kinds, site, sel, &mut self.scratch)
-                            .ok_or(Stop::EffectTargetMissing { site, reaction: ri })?;
-                    targets.push((target, &eff.op));
-                }
-                EffectTarget::AllMatches(sel) => {
-                    all_matches(
-                        &self.lattice,
-                        &self.kinds,
-                        site,
-                        sel,
-                        &mut self.scratch,
-                        &mut matched,
-                    );
-                    targets.extend(matched.iter().map(|&t| (t, &eff.op)));
-                }
-            }
-        }
-        // Resolve every op against the pre-effect states, then write.
-        let mut writes: Vec<(SiteId, crate::state::StateId)> = Vec::with_capacity(targets.len());
-        for (target, op) in targets {
-            if self.lattice.frozen[target] {
-                // A frozen site is immutable during dynamics (the legacy
-                // EDGE analog would abort here); decks exclude frozen
-                // sites from effect selectors explicitly.
-                return Err(Stop::EffectFailed {
-                    site,
-                    reaction: ri,
-                    reason: "effect writes a frozen site",
-                });
-            }
-            let range = self.kind_state_ranges[self.kinds[target].0 as usize];
-            match op.resolve(self.lattice.states[target], range) {
-                Ok(Some(new_state)) => writes.push((target, new_state)),
-                Ok(None) => {} // map miss with skip policy: leave unchanged
-                Err(reason) => {
-                    return Err(Stop::EffectFailed {
-                        site,
-                        reaction: ri,
-                        reason,
-                    })
-                }
-            }
-        }
+    /// Commit a strategy step's prepared transitions, record actual state
+    /// changes, and refresh the union of their dirty neighborhoods once.
+    fn commit_transitions(&mut self, transitions: Vec<PreparedTransition>) {
         self.last_changes.clear();
-        for (target, new_state) in writes {
-            let old = self.lattice.states[target];
-            if old != new_state {
-                self.lattice.states[target] = new_state;
-                changed.push(target);
-                self.last_changes.push((target, old, new_state));
+        // Marking array gives O(1) dedup while preserving insertion order, so
+        // refresh order (and thus RNG consumption) stays deterministic.
+        let mut seen = vec![false; self.lattice.len()];
+        let mut changed = Vec::new();
+        for transition in transitions {
+            let before = changed.len();
+            for (target, new_state) in transition.writes {
+                let old = self.lattice.states[target];
+                if old != new_state {
+                    self.lattice.states[target] = new_state;
+                    if !seen[target] {
+                        seen[target] = true;
+                        changed.push(target);
+                    }
+                    self.last_changes.push((target, old, new_state));
+                }
+            }
+            if changed.len() == before && !seen[transition.site] {
+                seen[transition.site] = true;
+                changed.push(transition.site);
             }
         }
-        if changed.is_empty() {
-            // Self-transition: nothing to dirty beyond the center itself
-            // (its own rate may depend on its state — refresh regardless).
-            changed.push(site);
+
+        let mut dirty = changed.clone();
+        let mut ring = Vec::new();
+        for &site in &changed {
+            for distance in 1..=self.max_read {
+                sites_at_distance(&self.lattice, site, distance, None, &mut ring);
+                for &neighbor in &ring {
+                    if !seen[neighbor] {
+                        seen[neighbor] = true;
+                        dirty.push(neighbor);
+                    }
+                }
+            }
         }
-        Ok(changed)
+        for site in dirty {
+            self.refresh_site(site);
+        }
+
     }
 
     /// The per-site state changes of the most recently applied event:
@@ -449,6 +583,44 @@ impl Engine {
             }
         }
         Ok(())
+    }
+}
+
+impl UpdateStrategy for ExactCtmc {
+    fn step(&mut self, ctx: &mut StepCtx<'_>) -> Result<StepOutcome, Stop> {
+        let total = ctx.apply.total_rate();
+        if total <= 0.0 {
+            return Err(if ctx.apply.has_events() {
+                Stop::ZeroRate
+            } else {
+                Stop::NoEvents
+            });
+        }
+
+        // Preserve the pre-refactor coupled site/event draw exactly.
+        let draw = ctx.rng.gen::<f64>() * total;
+        let Some((site, reaction)) = ctx.apply.select_event(draw) else {
+            return Err(if ctx.apply.has_events() {
+                Stop::ZeroRate
+            } else {
+                Stop::NoEvents
+            });
+        };
+
+        // Poisson waiting time; map u∈[0,1) to (0,1] so ln never sees 0.
+        let u: f64 = ctx.rng.gen();
+        let dt = -(1.0 - u).ln() / total;
+        ctx.apply.apply_transition(site, reaction, &mut *ctx.rng)?;
+
+        Ok(StepOutcome {
+            fired: vec![Fired {
+                step: 0,
+                time: 0.0,
+                site,
+                reaction,
+            }],
+            dt,
+        })
     }
 }
 

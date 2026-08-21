@@ -4,6 +4,11 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-20 — hermes x2 + fable — B2 DONE: petra engine behind the
+  UpdateStrategy trait, schema v2 complete, bitwise parity green on
+  three gates (incl. shipped-kossel full-lifetime). Two-worker relay +
+  supervision closeout; 7 self-review findings all dispositioned and
+  fixed. B3 unblocked.
 - 2026-08-20 — hermes-laptop — QI1 campaign-driver etiquette done: all QM
   entry points now cap inherited numerical-library threads before heavy imports,
   apply best-effort niceness, and self-tee durable logs; 162 tests, Ruff, direct
