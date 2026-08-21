@@ -342,7 +342,9 @@ pub trait UpdateStrategy {
 pub struct ExactCtmc;
 
 /// Deterministic, double-buffered cellular automaton. Every rule match reads
-/// the pre-step lattice; the engine commits all selected writes as one batch.
+/// the pre-step lattice; at most one rule fires per site, with the first
+/// enabled rule in rule-index (deck declaration) order taking priority. The
+/// engine commits all selected writes as one batch.
 #[derive(Debug, Default)]
 pub struct SynchronousCA;
 
@@ -729,6 +731,8 @@ impl UpdateStrategy for SynchronousCA {
     fn step(&mut self, ctx: &mut StepCtx<'_>) -> Result<StepOutcome, Stop> {
         let mut selected = Vec::new();
         for site in 0..ctx.lattice.len() {
+            // Same-site conflicts are intentionally draw-free: the first
+            // enabled rule in deck declaration order wins (RFC-001 §3).
             if let Some(&reaction) = ctx.apply.enabled_rules(site).first() {
                 selected.push((site, reaction));
             }

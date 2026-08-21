@@ -288,11 +288,19 @@ fn metropolis_strategy_compiles_in_b3() {
 fn every_rfc_strategy_parameter_block_parses() {
     let text = V2.replace(
         "[execution.stop]",
-        "[execution.ctmc]\n[execution.synchronous]\n[execution.metropolis]\ntemperature = 310.0\n[execution.pca]\n[execution.stop]",
+        "[execution.ctmc]\n[execution.synchronous]\nconflict_resolution = \"first_match\"\n[execution.metropolis]\ntemperature = 310.0\n[execution.pca]\n[execution.stop]",
     );
     let parsed: petra_deck::DeckFile = toml::from_str(&text).expect("all blocks parse");
     assert!(parsed.execution.ctmc.is_some());
-    assert!(parsed.execution.synchronous.is_some());
+    let synchronous = parsed
+        .execution
+        .synchronous
+        .as_ref()
+        .expect("synchronous block present");
+    assert_eq!(
+        synchronous.conflict_resolution,
+        petra_deck::schema::SynchronousConflictResolution::FirstMatch
+    );
     assert_eq!(
         parsed
             .execution
@@ -306,6 +314,14 @@ fn every_rfc_strategy_parameter_block_parses() {
 
 #[test]
 fn execution_parameter_blocks_validate_at_parse_time() {
+    let invalid_conflict_resolution = V2.replace(
+        "[execution.stop]",
+        "[execution.synchronous]\nconflict_resolution = \"last_match\"\n[execution.stop]",
+    );
+    let error = toml::from_str::<petra_deck::DeckFile>(&invalid_conflict_resolution)
+        .expect_err("unknown conflict resolution rejected");
+    assert!(error.to_string().contains("first_match"), "{error}");
+
     let bad_temperature = V2.replace(
         "[execution.stop]",
         "[execution.metropolis]\ntemperature = -1.0\n[execution.stop]",
@@ -324,7 +340,11 @@ fn execution_parameter_blocks_validate_at_parse_time() {
 fn b3_strategy_rate_surfaces_parse_and_compile() {
     let synchronous = V2
         .replace("strategy = \"ctmc\"", "strategy = \"synchronous\"")
-        .replace("rate = { constant = 2.0 }\n", "truth = \"and\"\n");
+        .replace("rate = { constant = 2.0 }\n", "truth = \"and\"\n")
+        .replace(
+            "[execution.stop]",
+            "[execution.synchronous]\nconflict_resolution = \"first_match\"\n[execution.stop]",
+        );
     let parsed: petra_deck::DeckFile =
         toml::from_str(&synchronous).expect("synchronous truth surface parses");
     assert!(petra_deck::compile(&parsed).is_ok());

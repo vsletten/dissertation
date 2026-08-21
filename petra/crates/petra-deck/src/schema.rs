@@ -63,9 +63,22 @@ pub struct ExecutionSpec {
 #[serde(deny_unknown_fields)]
 pub struct CtmcSpec {}
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SynchronousSpec {}
+/// Synchronous CA parameters. When multiple rules are enabled at one site,
+/// the first rule in deck declaration order wins (RFC-001 §3).
+pub struct SynchronousSpec {
+    /// Synchronous updates fire at most one rule per site according to this
+    /// deterministic priority policy.
+    pub conflict_resolution: SynchronousConflictResolution,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SynchronousConflictResolution {
+    /// Choose the first enabled rule in deck declaration order (RFC-001 §3).
+    FirstMatch,
+}
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -527,6 +540,13 @@ fn validate_execution(execution: &ExecutionSpec) -> Result<(), String> {
     match execution.strategy.as_str() {
         "ctmc" | "synchronous" | "metropolis" | "pca" => {}
         other => return Err(format!("unknown execution strategy '{other}'")),
+    }
+    if execution.strategy == "synchronous" && execution.synchronous.is_none() {
+        return Err(
+            "[execution.synchronous] conflict_resolution = 'first_match' is required; \
+             when multiple rules match one site, the first rule in definition order wins"
+                .to_string(),
+        );
     }
     if let Some(temperature) = execution
         .metropolis

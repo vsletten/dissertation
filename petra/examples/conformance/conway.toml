@@ -66,6 +66,9 @@ set = "alive"
 [execution]
 strategy = "synchronous"
 
+[execution.synchronous]
+conflict_resolution = "first_match"
+
 [execution.stop]
 steps = 8
 
