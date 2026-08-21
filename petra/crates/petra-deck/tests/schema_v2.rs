@@ -292,7 +292,15 @@ fn every_rfc_strategy_parameter_block_parses() {
     );
     let parsed: petra_deck::DeckFile = toml::from_str(&text).expect("all blocks parse");
     assert!(parsed.execution.ctmc.is_some());
-    assert!(parsed.execution.synchronous.is_some());
+    let synchronous = parsed
+        .execution
+        .synchronous
+        .as_ref()
+        .expect("synchronous block present");
+    assert_eq!(
+        synchronous.conflict_resolution,
+        petra_deck::schema::SynchronousConflictResolution::FirstMatch
+    );
     assert_eq!(
         parsed
             .execution
@@ -306,6 +314,14 @@ fn every_rfc_strategy_parameter_block_parses() {
 
 #[test]
 fn execution_parameter_blocks_validate_at_parse_time() {
+    let invalid_conflict_resolution = V2.replace(
+        "[execution.stop]",
+        "[execution.synchronous]\nconflict_resolution = \"last_match\"\n[execution.stop]",
+    );
+    let error = toml::from_str::<petra_deck::DeckFile>(&invalid_conflict_resolution)
+        .expect_err("unknown conflict resolution rejected");
+    assert!(error.to_string().contains("first_match"), "{error}");
+
     let bad_temperature = V2.replace(
         "[execution.stop]",
         "[execution.metropolis]\ntemperature = -1.0\n[execution.stop]",
