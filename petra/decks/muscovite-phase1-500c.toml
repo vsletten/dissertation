@@ -1,0 +1,280 @@
+# E1 phase-1 muscovite deck at 500 C (Sletten & Onstott 1998 isothermal run).
+# Barrier provenance and phase-1 modeling choices are documented inline and in
+# docs/program/results/E1-muscovite-phase1.md.
+[deck]
+name = "muscovite-phase1-500c"
+comment = "single-gallery 2M1 reduction; published barrier envelope"
+units = "kcal/mol"
+
+[cell]
+a = 5.19
+b = 9.02
+c = 20.05
+alpha = 90.0
+beta = 95.7
+gamma = 90.0
+
+[[cell.sites]]
+kind = "K_gallery_A"
+frac = [0.0, 0.0, 0.25]
+[[cell.sites]]
+kind = "K_gallery_B"
+frac = [0.0, 0.0, 0.75]
+[[cell.sites]]
+kind = "OH_donor"
+frac = [0.25, 0.25, 0.45]
+[[cell.sites]]
+kind = "OH_acceptor"
+frac = [0.75, 0.75, 0.45]
+
+# Alternating gallery chain. Distinct labels make +c/-c hops separate events,
+# avoiding the v1 first-match directional bias.
+[[cell.bonds]]
+i = 0
+j = 1
+dcell = [0, 0, 0]
+label = "gallery_intra"
+[[cell.bonds]]
+i = 0
+j = 1
+dcell = [0, 0, -1]
+label = "gallery_inter"
+
+# One paired-OH dehydroxylation actor per repeat.
+[[cell.bonds]]
+i = 2
+j = 3
+dcell = [0, 0, 0]
+label = "oh_pair"
+# Neighboring residual-O environments along c for Guggenheim steric slowdown.
+[[cell.bonds]]
+i = 2
+j = 3
+dcell = [0, 0, -1]
+label = "steric"
+[[cell.bonds]]
+i = 2
+j = 3
+dcell = [0, 0, 1]
+label = "steric"
+# Local structural gate: gallery motion/release starts only after the slab
+# represented by this repeat has dehydroxylated.
+[[cell.bonds]]
+i = 0
+j = 3
+dcell = [0, 0, 0]
+label = "local_structure"
+[[cell.bonds]]
+i = 1
+j = 3
+dcell = [0, 0, 0]
+label = "local_structure"
+
+[[species]]
+name = "K"
+charge = 1.0
+[[species]]
+name = "Ar40"
+mass = 39.962383
+[[species]]
+name = "OH"
+[[species]]
+name = "O"
+charge = -2.0
+
+[[kinds]]
+name = "K_gallery_A"
+initial = "K"
+[[kinds.states]]
+name = "K"
+occupant = "K"
+[[kinds.states]]
+name = "vacant"
+occupant = "vacant"
+[[kinds.states]]
+name = "Ar40"
+occupant = "Ar40"
+
+[[kinds]]
+name = "K_gallery_B"
+initial = "K"
+[[kinds.states]]
+name = "K"
+occupant = "K"
+[[kinds.states]]
+name = "vacant"
+occupant = "vacant"
+[[kinds.states]]
+name = "Ar40"
+occupant = "Ar40"
+
+[[kinds]]
+name = "OH_donor"
+initial = "OH"
+[[kinds.states]]
+name = "OH"
+occupant = "OH"
+[[kinds.states]]
+name = "water_removed"
+occupant = "vacant"
+
+[[kinds]]
+name = "OH_acceptor"
+initial = "OH"
+[[kinds.states]]
+name = "OH"
+occupant = "OH"
+[[kinds.states]]
+name = "O_residual"
+occupant = "O"
+
+[lattice]
+dims = [32, 32, 8]
+boundary = ["periodic", "periodic", "open"]
+
+[thermo]
+temperature = 773.15
+
+# Reproducible gallery population: about 94.5% vacancies, 5% Ar40, 0.5% K.
+# Phase 1 keeps K immobile rather than adding a not-yet-proven vacancy rate.
+[[init]]
+name = "vacancies_A"
+center = { kind = "K_gallery_A", state = ["K"] }
+probability = 0.945
+set = "vacant"
+[[init]]
+name = "vacancies_B"
+center = { kind = "K_gallery_B", state = ["K"] }
+probability = 0.945
+set = "vacant"
+[[init]]
+name = "argon_A"
+center = { kind = "K_gallery_A", state = ["K"] }
+probability = 0.9090909091
+set = "Ar40"
+[[init]]
+name = "argon_B"
+center = { kind = "K_gallery_B", state = ["K"] }
+probability = 0.9090909091
+set = "Ar40"
+
+# Paired dehydroxylation. 57 kcal/mol is the Kodama & Brydon bulk apparent
+# barrier used by Sletten & Onstott (1998). The +3/+12 kcal/mol table spans
+# the published 251-290 kJ/mol modern in-situ envelope rather than inventing
+# a fitted per-neighbor barrier: 57, 60, 69 kcal/mol for 0, 1, >=2 residuals.
+[[reactions]]
+name = "dehydroxylate_pair"
+center = { kind = "OH_donor", state = ["OH"] }
+guards = [{ kind = "OH_acceptor", label = "oh_pair", state = ["OH"], min = 1 }]
+rate = { eyring = { dh = 57.0, ds = 0.0 } }
+[[reactions.modifiers]]
+select = { kind = "OH_acceptor", label = "steric", state = ["O_residual"] }
+by_count = { dea = [0.0, 3.0, 12.0] }
+[[reactions.effects]]
+target = "center"
+set = "water_removed"
+[[reactions.effects]]
+target = "neighbor"
+select = { kind = "OH_acceptor", label = "oh_pair", state = ["OH"] }
+set = "O_residual"
+
+# Four symmetric divacancy hops: both adjacent gallery sites must be vacant.
+# Each edge carries the published Nteme et al. (2022) 66 kcal/mol enthalpy.
+[[reactions]]
+name = "hop_A_to_B_intra"
+center = { kind = "K_gallery_A", state = ["Ar40"] }
+guards = [
+  { kind = "K_gallery_B", label = "gallery_intra", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_B", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+]
+rate = { eyring = { dh = 66.0, ds = 0.0 } }
+[[reactions.effects]]
+target = "center"
+set = "vacant"
+[[reactions.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_B", label = "gallery_intra", state = ["vacant"] }
+set = "Ar40"
+
+[[reactions]]
+name = "hop_A_to_B_inter"
+center = { kind = "K_gallery_A", state = ["Ar40"] }
+guards = [
+  { kind = "K_gallery_B", label = "gallery_inter", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_B", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+]
+rate = { eyring = { dh = 66.0, ds = 0.0 } }
+[[reactions.effects]]
+target = "center"
+set = "vacant"
+[[reactions.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_B", label = "gallery_inter", state = ["vacant"] }
+set = "Ar40"
+
+[[reactions]]
+name = "hop_B_to_A_intra"
+center = { kind = "K_gallery_B", state = ["Ar40"] }
+guards = [
+  { kind = "K_gallery_A", label = "gallery_intra", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_A", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+]
+rate = { eyring = { dh = 66.0, ds = 0.0 } }
+[[reactions.effects]]
+target = "center"
+set = "vacant"
+[[reactions.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_A", label = "gallery_intra", state = ["vacant"] }
+set = "Ar40"
+
+[[reactions]]
+name = "hop_B_to_A_inter"
+center = { kind = "K_gallery_B", state = ["Ar40"] }
+guards = [
+  { kind = "K_gallery_A", label = "gallery_inter", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_A", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+]
+rate = { eyring = { dh = 66.0, ds = 0.0 } }
+[[reactions.effects]]
+target = "center"
+set = "vacant"
+[[reactions.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_A", label = "gallery_inter", state = ["vacant"] }
+set = "Ar40"
+
+# Open-c surface desorption. Degree <=1 identifies A at c=0 and B at c=max.
+# A small constant-time event makes desorption negligible beside migration.
+[[reactions]]
+name = "release_A_surface"
+center = { kind = "K_gallery_A", state = ["Ar40"] }
+guards = [
+  { kind = "K_gallery_B", state = ["*"], min = 0, max = 1 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+]
+rate = { constant = 1.0 }
+[[reactions.effects]]
+target = "center"
+set = "vacant"
+
+[[reactions]]
+name = "release_B_surface"
+center = { kind = "K_gallery_B", state = ["Ar40"] }
+guards = [
+  { kind = "K_gallery_A", state = ["*"], min = 0, max = 1 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+]
+rate = { constant = 1.0 }
+[[reactions.effects]]
+target = "center"
+set = "vacant"
+
+[simulation]
+steps = 2000000
+seed = 1998
+report_every = 5000

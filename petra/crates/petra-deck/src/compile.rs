@@ -1007,7 +1007,7 @@ fn state_in_kind(names: &Names, kind: u16, name: &str, ctx: &str) -> Result<Stat
 
 /// Compile the set/shift/map trio into an EffectOp. `kind` scopes state-name
 /// resolution and is required for `set`/`map`.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // Mirrors the deck's mutually exclusive op fields.
 fn compile_op(
     names: &Names,
     source_kind: Option<u16>,

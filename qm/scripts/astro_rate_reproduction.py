@@ -22,9 +22,20 @@ import json
 import os
 import platform
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+if __name__ == "__main__":
+    from quarry.etiquette import bootstrap_cli
+
+    bootstrap_cli(
+        "astro_rate_reproduction",
+        default_run_root=Path(__file__).resolve().parent.parent / "runs",
+    )
 
 import numpy as np
 
@@ -458,6 +469,11 @@ def provenance(reaction: Reaction, structures: list[Cluster]) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--threads", type=int, default=16, help="numerical thread cap")
+    parser.add_argument(
+        "--nice", type=int, default=10, help="process niceness increment"
+    )
+    parser.add_argument("--log", help="tee output to this path (default: qm/runs)")
     parser.add_argument(
         "--reaction", action="append", help="reaction key (repeatable; default all)"
     )
@@ -471,9 +487,6 @@ def main() -> int:
         "--force", action="store_true", help="recompute completed results"
     )
     args = parser.parse_args()
-    os.environ.setdefault("OMP_NUM_THREADS", "16")
-    if int(os.environ["OMP_NUM_THREADS"]) > 16:
-        raise SystemExit("OMP_NUM_THREADS must be <=16")
     all_reactions = reactions(gpu=args.gpu, basis=args.basis)
     selected = args.reaction or list(all_reactions)
     unknown = sorted(set(selected) - set(all_reactions))

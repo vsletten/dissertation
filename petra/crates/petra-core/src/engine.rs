@@ -444,6 +444,12 @@ impl Engine {
     /// schedule writes through [`ApplyHandle`]; the core commits and records
     /// them after the strategy returns.
     pub fn step_with(&mut self, strategy: &mut impl UpdateStrategy) -> Result<StepOutcome, Stop> {
+        // Guard against impossible zero totals caused by Fenwick cancellation:
+        // if there are positive-rate events but the tree reports zero, rebuild
+        // from the authoritative leaves before handing control to the strategy.
+        if self.tree.total() <= 0.0 && self.site_events.iter().any(|e| !e.is_empty()) {
+            self.tree.rebuild();
+        }
         let mut pending = Vec::new();
         let result = {
             let mut ctx = StepCtx {
@@ -540,6 +546,7 @@ impl Engine {
         for site in dirty {
             self.refresh_site(site);
         }
+
     }
 
     /// The per-site state changes of the most recently applied event:
