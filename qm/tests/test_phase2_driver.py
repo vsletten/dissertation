@@ -1,7 +1,10 @@
 """Fast orchestration gates for the Phase-2 ladder driver (no DFT)."""
 
+import ctypes
 import json
 import sys
+import sysconfig
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -12,6 +15,25 @@ from quarry.pipeline import DftSettings
 from scripts import phase2_ladder as phase2
 
 CHEAP = DftSettings(xc="hf", basis="sto-3g")
+
+
+def test_preload_cutensor_fails_loudly_when_core_library_cannot_load(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(sysconfig, "get_paths", lambda: {"purelib": str(tmp_path)})
+
+    attempted = []
+
+    def fail_load(path, *, mode):
+        attempted.append((Path(path).name, mode))
+        raise OSError("shared object not found")
+
+    monkeypatch.setattr(ctypes, "CDLL", fail_load)
+
+    with pytest.raises(RuntimeError, match="required cuTENSOR core library"):
+        phase2.preload_cutensor()
+
+    assert attempted[0] == ("libcutensor.so.2", ctypes.RTLD_GLOBAL)
 
 
 def geometry(name: str, m_ow: float, m_obr: float = 1.6) -> Cluster:

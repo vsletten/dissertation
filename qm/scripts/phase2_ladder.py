@@ -100,16 +100,25 @@ def preload_cutensor() -> None:
     contraction engine, which materializes temporaries that OOM a 24 GB
     card at ~60 atoms/def2-svp (seen live, twice). Preloading by
     absolute path makes cupy's dlopen find them regardless of
-    LD_LIBRARY_PATH. Harmless no-op when the wheel is absent (CPU runs).
+    LD_LIBRARY_PATH. The core library is mandatory for GPU runs; the
+    multi-GPU companion is optional.
     """
     import contextlib
     import ctypes
     import sysconfig
 
     libdir = Path(sysconfig.get_paths()["purelib"]) / "cutensor" / "lib"
-    for name in ("libcutensor.so.2", "libcutensorMg.so.2"):
-        with contextlib.suppress(OSError):
-            ctypes.CDLL(str(libdir / name), mode=ctypes.RTLD_GLOBAL)
+    core = libdir / "libcutensor.so.2"
+    try:
+        ctypes.CDLL(str(core), mode=ctypes.RTLD_GLOBAL)
+    except OSError as exc:
+        raise RuntimeError(
+            f"failed to load required cuTENSOR core library {core}: {exc}; "
+            "install cutensor-cu12 in the active environment before using --gpu"
+        ) from exc
+
+    with contextlib.suppress(OSError):
+        ctypes.CDLL(str(libdir / "libcutensorMg.so.2"), mode=ctypes.RTLD_GLOBAL)
 
 
 def trim_gpu_pool() -> None:
