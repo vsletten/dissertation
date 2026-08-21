@@ -444,6 +444,22 @@ def main() -> int:
     metadata["attacker"] = attacker.name
     metadata["charge_offset"] = charge_offset
     metadata["deck"] = str(deck)
+    metadata["method"] = f"{args.xc}/{args.basis}/df"
+    metadata["gpu"] = args.gpu
+    metadata["temperature_k"] = args.temperature
+    metadata["written_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    try:
+        import subprocess
+
+        metadata["driver_git_commit"] = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).parent,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except Exception:
+        metadata["driver_git_commit"] = None
     (run_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
     if args.dry_run:
         log("dry run: geometry + metadata written, no DFT")
