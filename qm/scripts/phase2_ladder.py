@@ -371,8 +371,16 @@ def crest_from_product(
 
 def _nearest_h(cluster: Cluster, br_index: int, ow_index: int) -> int:
     """The delivered proton: the water H closest to the bridge oxygen."""
+    water_h_indices = [
+        i
+        for i, symbol in enumerate(cluster.symbols)
+        if symbol == "H"
+        and np.linalg.norm(cluster.coords[i] - cluster.coords[ow_index]) <= 1.2
+    ]
+    if not water_h_indices:
+        raise ValueError(f"no hydrogen bonded to water oxygen at index {ow_index}")
     return min(
-        (ow_index + 1, ow_index + 2),
+        water_h_indices,
         key=lambda i: np.linalg.norm(cluster.coords[i] - cluster.coords[br_index]),
     )
 

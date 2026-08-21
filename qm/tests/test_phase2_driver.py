@@ -39,6 +39,26 @@ def test_channel_escape_guard_uses_metal_limit():
     assert rel is not None and "escaped" in rel
 
 
+def test_nearest_h_does_not_depend_on_water_atom_order():
+    cluster = Cluster(
+        name="reordered-water",
+        symbols=["O", "H", "Si", "H", "O", "C", "H"],
+        coords=np.array(
+            [
+                [0.0, 0.0, 0.0],  # bridge oxygen
+                [0.1, 0.0, 0.0],  # unrelated hydrogen, far from water oxygen
+                [3.0, 0.0, 0.0],
+                [1.1, 0.0, 0.0],  # delivered water hydrogen
+                [2.0, 0.0, 0.0],  # water oxygen
+                [0.2, 0.0, 0.0],  # non-H at the old positional candidate
+                [2.0, 0.9, 0.0],  # other water hydrogen
+            ]
+        ),
+    )
+
+    assert phase2._nearest_h(cluster, br_index=0, ow_index=4) == 3
+
+
 @pytest.mark.parametrize("family", ["oss", "osa", "oaa"])
 def test_dry_run_writes_geometry_and_metadata(family, tmp_path, monkeypatch):
     monkeypatch.setattr(
