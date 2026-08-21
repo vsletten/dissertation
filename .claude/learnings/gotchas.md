@@ -41,3 +41,16 @@ existed. Use a rate that is merely fast relative to the load-bearing process
 (e.g. `1 s^-1` here), keep the dynamic range bounded, and run `--paranoid`.
 An engine hardening follow-up should rebuild/compensate the total when this
 `events exist but all rates are zero` condition occurs.
+
+### The 4090 is contested: extraction LLM vs QM campaigns (2026-08-20)
+The email-poc extraction daemons keep gemma4-deriver (~14 GB) resident on
+the workstation GPU with a self-refreshing keep-alive. When it is loaded,
+gpu4pyscf spills the DF integral tensor to *pinned* host memory, which
+collides with the 7.7 GB memlock ulimit → cudaErrorInvalidValue at
+~60 atoms/def2-svp (raising the ulimit is the wrong fix on a box that
+swap-spiraled in July: 7 GB unswappable RAM). Arbitration recipe for
+long GPU campaigns: `systemctl --user stop ophir-email-pipeline.service
+ophir-email-pipeline-hotmail.service`, run with a trap that restarts
+them on exit + a `systemd-run --user --on-active=10h` dead-man restart,
+and a VRAM-below-threshold gate before launch (ingest daemons keep
+running; extraction catches up afterward).
