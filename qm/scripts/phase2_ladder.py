@@ -540,6 +540,8 @@ def main() -> int:
                 base = min(exc.scan, key=lambda p: abs(p[0] - approach["pin"]))[2]
                 save_xyz(base, approach_seed_path)
         if base is not None:
+            route = "proton-neb"
+            route_path.write_text(route)
             ts_guess = proton_neb_guess(
                 base,
                 complex_opt,
@@ -550,7 +552,6 @@ def main() -> int:
                 ow_index=ow_index,
                 pin_a=approach["pin"],
             )
-            route = "proton-neb"
         save_xyz(ts_guess, ts_guess_path)
         if route == "proton-neb":
             route_path.write_text(route)

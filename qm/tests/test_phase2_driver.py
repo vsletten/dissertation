@@ -2,6 +2,7 @@
 
 import json
 import sys
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -91,3 +92,48 @@ def test_approach_parameters_cover_both_metals():
     for p in phase2.APPROACH.values():
         assert p["limit"] > p["pin"]
         assert min(p["distances"]) >= p["pin"]
+
+
+def test_resume_persists_proton_route_before_reentering_proton_stage(
+    monkeypatch, tmp_path
+):
+    cluster = geometry("cluster", 3.0)
+    cc = SimpleNamespace(
+        cluster=cluster,
+        attacked_index=1,
+        bridge_index=0,
+        n_intact=4,
+        metal_shells=2,
+        termination_log=[],
+        metadata=lambda: {"charge": 0},
+    )
+    run_dir = tmp_path / "phase2" / "oss-neutral-n4-s2-b3lyp-def2-svp"
+    run_dir.mkdir(parents=True)
+    phase2.save_xyz(geometry("approach-seed", 1.9), run_dir / "approach_seed.xyz")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "phase2_ladder.py",
+            "--family",
+            "oss",
+            "--run-root",
+            str(tmp_path),
+        ],
+    )
+    monkeypatch.setattr(phase2, "from_deck_cell", lambda *args, **kwargs: cc)
+    monkeypatch.setattr(
+        phase2, "attack_complex", lambda cc, attacker: (geometry("complex", 3.0), 2)
+    )
+    monkeypatch.setattr(phase2, "optimize", lambda cluster, settings: cluster)
+    monkeypatch.setattr(phase2, "trim_gpu_pool", lambda: None)
+
+    def stop_after_route_checkpoint(*args, **kwargs):
+        assert (run_dir / "ts_guess.route").read_text() == "proton-neb"
+        raise RuntimeError("route checkpoint observed")
+
+    monkeypatch.setattr(phase2, "proton_neb_guess", stop_after_route_checkpoint)
+
+    with pytest.raises(RuntimeError, match="route checkpoint observed"):
+        phase2.main()
