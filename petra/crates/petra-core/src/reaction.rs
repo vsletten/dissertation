@@ -150,6 +150,17 @@ pub struct Branch {
     pub effects: Vec<Effect>,
 }
 
+/// Strategy-specific interpretation of a rule's declarative `rate` field.
+/// CTMC keeps its existing [`RateExpr`] in `Reaction::rate`; the other
+/// variants carry only the scalar their strategy consumes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RuleValue {
+    Ctmc,
+    Deterministic,
+    Energy(f64),
+    Probability(f64),
+}
+
 /// A fully compiled elementary reaction.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Reaction {
@@ -158,6 +169,7 @@ pub struct Reaction {
     pub center_states: StateSet,
     pub guards: Vec<Guard>,
     pub rate: RateExpr,
+    pub value: RuleValue,
     /// ln of the solution-coupling factor (activities, chemical potentials),
     /// folded once at compile time: k *= exp(ln_thermo).
     pub ln_thermo: f64,
@@ -235,10 +247,9 @@ pub fn count_matches(
     sel: &NeighborSelect,
     scratch: &mut Vec<SiteId>,
 ) -> u32 {
-    if sel.distance == 1 && sel.label.is_some() {
+    if let (1, Some(label)) = (sel.distance, sel.label) {
         // Label filters only make sense on direct bonds; walk the CSR row
         // with its parallel label array.
-        let label = sel.label.unwrap();
         let nbrs = lat.neighbors(center);
         let labels = lat.neighbor_labels(center);
         return nbrs
@@ -264,8 +275,7 @@ pub fn all_matches(
     out: &mut Vec<SiteId>,
 ) {
     out.clear();
-    if sel.distance == 1 && sel.label.is_some() {
-        let label = sel.label.unwrap();
+    if let (1, Some(label)) = (sel.distance, sel.label) {
         let nbrs = lat.neighbors(center);
         let labels = lat.neighbor_labels(center);
         out.extend(
@@ -293,8 +303,7 @@ pub fn first_match(
     sel: &NeighborSelect,
     scratch: &mut Vec<SiteId>,
 ) -> Option<SiteId> {
-    if sel.distance == 1 && sel.label.is_some() {
-        let label = sel.label.unwrap();
+    if let (1, Some(label)) = (sel.distance, sel.label) {
         let nbrs = lat.neighbors(center);
         let labels = lat.neighbor_labels(center);
         return nbrs
@@ -358,6 +367,35 @@ pub fn resolve_rate(
         }
     }
     rxn.rate.base_rate(temperature) * rxn.ln_thermo.exp() * (-extra_ea / rt).exp() * factor
+}
+
+/// Resolve a Metropolis proposal's local energy change. Energy modifiers use
+/// the same deterministic neighbor-count machinery as CTMC barrier modifiers,
+/// but contribute directly to ΔE.
+pub fn resolve_energy_delta(
+    lat: &Lattice,
+    kinds: &[KindId],
+    rxn: &Reaction,
+    center: SiteId,
+    scratch: &mut Vec<SiteId>,
+) -> f64 {
+    let RuleValue::Energy(mut delta) = rxn.value else {
+        panic!("resolve_energy_delta called for a non-Metropolis rule")
+    };
+    for modifier in &rxn.modifiers {
+        let count = count_matches(lat, kinds, center, &modifier.select, scratch);
+        match &modifier.kind {
+            ModifierKind::PerMatch { dea } => delta += dea * count as f64,
+            ModifierKind::ByCount { dea } => {
+                delta += dea[(count as usize).min(dea.len() - 1)];
+            }
+            ModifierKind::When { min, max, dea, .. } if count >= *min && count <= *max => {
+                delta += dea
+            }
+            ModifierKind::When { .. } => {}
+        }
+    }
+    delta
 }
 
 /// Do all guards of `rxn` pass at `center`? (Center kind/state are checked

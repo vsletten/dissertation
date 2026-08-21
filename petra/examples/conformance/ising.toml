@@ -1,0 +1,87 @@
+# Two-dimensional nearest-neighbor Ising conformance deck.
+# J is one gas constant (R = 0.001987 kcal mol^-1 K^-1), making the
+# dimensionless Onsager critical temperature numerically 2.269185314 K.
+# CI estimates the L=8/L=12 Binder-cumulant crossing within ±0.25.
+[deck]
+name = "ising-2d"
+schema = 2
+units = "kcal/mol"
+
+[structure]
+kind = "grid"
+grid = "square"
+neighborhood = "von_neumann"
+dims = [8, 8]
+boundary = ["periodic", "periodic"]
+default_kind = "spin"
+
+[[structure.species]]
+name = "plus"
+
+[[structure.species]]
+name = "minus"
+
+[[structure.kinds]]
+name = "spin"
+initial = "up"
+
+[[structure.kinds.states]]
+name = "up"
+occupant = "plus"
+
+[[structure.kinds.states]]
+name = "down"
+occupant = "minus"
+
+[[structure.init]]
+name = "random-spins"
+center = { kind = "spin", state = ["up"] }
+probability = 0.5
+set = "down"
+
+[dynamics.thermo]
+temperature = 2.269185314
+
+# For a square lattice, ΔE = -8J + 4J*n_same for a proposed spin flip.
+[[dynamics.rules]]
+name = "up-to-down"
+center = { kind = "spin", state = ["up"] }
+rate = { energy = { delta = -0.015896 } }
+
+[[dynamics.rules.modifiers]]
+select = { distance = 1, kind = "spin", state = ["up"] }
+per_match = { dea = 0.007948 }
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "down"
+
+[[dynamics.rules]]
+name = "down-to-up"
+center = { kind = "spin", state = ["down"] }
+rate = { energy = { delta = -0.015896 } }
+
+[[dynamics.rules.modifiers]]
+select = { distance = 1, kind = "spin", state = ["down"] }
+per_match = { dea = 0.007948 }
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "up"
+
+[execution]
+strategy = "metropolis"
+
+[execution.metropolis]
+temperature = 2.269185314
+
+[execution.stop]
+steps = 100000
+
+[execution.ensemble]
+seed = 42
+n_replicas = 10
+seed_policy = "hash"
+
+[observables]
+report_every = 1000

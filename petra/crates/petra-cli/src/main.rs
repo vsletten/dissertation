@@ -24,7 +24,7 @@ struct Args {
     seed: Option<u64>,
     out: String,
     paranoid: bool,
-    ensemble: u64,
+    ensemble: Option<u64>,
     xyz: bool,
     /// Write trajectory artifacts (snapshot.pgif.json + events.jsonl) for
     /// graph-viz playback.
@@ -38,7 +38,7 @@ fn parse_args() -> Result<Args, String> {
     let mut seed = None;
     let mut out = ".".to_string();
     let mut paranoid = false;
-    let mut ensemble = 1u64;
+    let mut ensemble = None;
     let mut xyz = false;
     let mut viz = false;
     while let Some(a) = args.next() {
@@ -46,14 +46,15 @@ fn parse_args() -> Result<Args, String> {
             "--xyz" => xyz = true,
             "--viz" => viz = true,
             "--ensemble" => {
-                ensemble = args
+                let value = args
                     .next()
                     .ok_or("--ensemble needs a value")?
                     .parse()
                     .map_err(|e| format!("--ensemble: {e}"))?;
-                if ensemble == 0 {
+                if value == 0 {
                     return Err("--ensemble must be at least 1".into());
                 }
+                ensemble = Some(value);
             }
             "--steps" => {
                 steps = Some(
@@ -104,8 +105,15 @@ fn main() -> ExitCode {
 fn run() -> Result<(), String> {
     let args = parse_args()?;
     let deck = petra_deck::load(&args.deck).map_err(|e| e.to_string())?;
-    if args.ensemble > 1 {
-        return run_ensemble(&args, &deck);
+    if args.viz && !matches!(deck.strategy, petra_deck::ExecutionStrategy::Ctmc) {
+        return Err(
+            "the current batch trajectory format supports only CTMC; discrete strategies fail closed"
+                .to_string(),
+        );
+    }
+    let ensemble = args.ensemble.unwrap_or(deck.n_replicas);
+    if ensemble > 1 {
+        return run_ensemble(&args, &deck, ensemble);
     }
     let mut engine = deck.build_engine(args.seed).map_err(|e| e.to_string())?;
     let steps = args.steps.unwrap_or(deck.steps);
@@ -156,21 +164,25 @@ fn run() -> Result<(), String> {
     };
 
     println!(
-        "deck '{}': {} sites, {} reactions, T = {} K, seed = {}",
+        "deck '{}': {} sites, {} reactions, T = {} K, seed = {}, strategy = {}",
         deck.name,
         engine.lattice.len(),
         engine.reactions.len(),
         deck.temperature,
         args.seed.unwrap_or(deck.seed),
+        deck.strategy.as_str(),
     );
     report(&engine, &mut csv)?;
 
     let mut stopped: Option<Stop> = None;
+    let mut strategy = deck.strategy();
     for i in 1..=steps {
-        match engine.step() {
-            Ok(fired) => {
+        match engine.step_with(&mut strategy) {
+            Ok(outcome) => {
                 if let Some(log) = &mut event_log {
-                    log.record(&fired, &engine).map_err(|e| e.to_string())?;
+                    for fired in &outcome.fired {
+                        log.record(fired, &engine).map_err(|e| e.to_string())?;
+                    }
                 }
             }
             Err(stop) => {
@@ -181,7 +193,9 @@ fn run() -> Result<(), String> {
         if i % report_every == 0 {
             report(&engine, &mut csv)?;
             if args.paranoid {
-                engine.paranoid_check().map_err(|e| format!("paranoid: {e}"))?;
+                engine
+                    .paranoid_check()
+                    .map_err(|e| format!("paranoid: {e}"))?;
             }
         }
     }
@@ -258,33 +272,29 @@ fn write_xyz(
     std::fs::write(path, text).map_err(|e| e.to_string())
 }
 
-fn run_ensemble(args: &Args, deck: &petra_deck::CompiledDeck) -> Result<(), String> {
+fn run_ensemble(args: &Args, deck: &petra_deck::CompiledDeck, ensemble: u64) -> Result<(), String> {
     let steps = args.steps.unwrap_or(deck.steps);
     let base_seed = args.seed.unwrap_or(deck.seed);
 
     std::fs::create_dir_all(&args.out).map_err(|e| e.to_string())?;
     let csv_path = format!("{}/ensemble.csv", args.out);
     let mut csv = std::fs::File::create(&csv_path).map_err(|e| e.to_string())?;
-    writeln!(csv, "seed,steps,time,{}", deck.state_names.join(","))
-        .map_err(|e| e.to_string())?;
+    writeln!(csv, "seed,steps,time,{}", deck.state_names.join(",")).map_err(|e| e.to_string())?;
 
     println!(
-        "deck '{}': ensemble of {} runs, seeds {}..={}, {} steps each",
-        deck.name,
-        args.ensemble,
-        base_seed,
-        base_seed + args.ensemble - 1,
-        steps
+        "deck '{}': ensemble of {} runs, seed policy {:?}, {} steps each",
+        deck.name, ensemble, deck.seed_policy, steps
     );
 
     // Per-state running sums for mean/std over ensemble members.
     let mut sum = vec![0.0f64; deck.n_states];
     let mut sumsq = vec![0.0f64; deck.n_states];
-    for k in 0..args.ensemble {
-        let seed = base_seed + k;
+    for k in 0..ensemble {
+        let seed = petra_deck::replica_seed(base_seed, k, deck.seed_policy);
         let mut engine = deck.build_engine(Some(seed)).expect("engine builds");
+        let mut strategy = deck.strategy();
         for _ in 0..steps {
-            if engine.step().is_err() {
+            if engine.step_with(&mut strategy).is_err() {
                 break;
             }
         }
@@ -304,8 +314,8 @@ fn run_ensemble(args: &Args, deck: &petra_deck::CompiledDeck) -> Result<(), Stri
         }
     }
 
-    let n = args.ensemble as f64;
-    println!("final populations, mean ± std over {} members:", args.ensemble);
+    let n = ensemble as f64;
+    println!("final populations, mean ± std over {} members:", ensemble);
     for (i, name) in deck.state_names.iter().enumerate() {
         let mean = sum[i] / n;
         let var = (sumsq[i] / n - mean * mean).max(0.0);

@@ -7,8 +7,10 @@ use rand_pcg::Pcg64Mcg;
 
 use crate::crystal::KindId;
 use crate::lattice::{Lattice, SiteId};
+use crate::rate::R_KCAL;
 use crate::reaction::{
-    all_matches, first_match, guards_pass, resolve_rate, sites_at_distance, EffectTarget, Reaction,
+    all_matches, first_match, guards_pass, resolve_energy_delta, resolve_rate, sites_at_distance,
+    EffectTarget, Reaction, RuleValue,
 };
 
 /// Fenwick (binary-indexed) tree over per-site total rates: O(log N) point
@@ -159,6 +161,8 @@ pub struct ApplyHandle<'a> {
     kinds: &'a [KindId],
     kind_state_ranges: &'a [(u16, u16)],
     site_events: &'a [Vec<(u16, f64)>],
+    enabled_rules: &'a [Vec<u16>],
+    live_sites: &'a [SiteId],
     tree: &'a RateTree,
     scratch: &'a mut Vec<SiteId>,
     pending: &'a mut Vec<PreparedTransition>,
@@ -173,6 +177,33 @@ impl ApplyHandle<'_> {
     /// Whether any site has an enabled event, including zero-rate events.
     pub fn has_events(&self) -> bool {
         self.site_events.iter().any(|events| !events.is_empty())
+    }
+
+    /// Enabled rules at `site`, in rule-index order, evaluated against the
+    /// immutable pre-step state.
+    pub fn enabled_rules(&self, site: SiteId) -> &[u16] {
+        &self.enabled_rules[site]
+    }
+
+    pub fn energy_delta(&mut self, site: SiteId, reaction: u16) -> f64 {
+        resolve_energy_delta(
+            self.lattice,
+            self.kinds,
+            &self.rules[reaction as usize],
+            site,
+            self.scratch,
+        )
+    }
+
+    pub fn probability(&self, reaction: u16) -> f64 {
+        let RuleValue::Probability(probability) = self.rules[reaction as usize].value else {
+            panic!("probability called for a non-PCA rule")
+        };
+        probability
+    }
+
+    pub fn live_sites(&self) -> &[SiteId] {
+        self.live_sites
     }
 
     /// Select one enabled event using the legacy coupled site/event draw.
@@ -310,6 +341,39 @@ pub trait UpdateStrategy {
 #[derive(Debug, Default)]
 pub struct ExactCtmc;
 
+/// Deterministic, double-buffered cellular automaton. Every rule match reads
+/// the pre-step lattice; the engine commits all selected writes as one batch.
+#[derive(Debug, Default)]
+pub struct SynchronousCA;
+
+/// Asynchronous single-site Metropolis updates. Temperature is Kelvin and
+/// rule energies are canonical kcal/mol, so acceptance uses exp(-ΔE/RT).
+#[derive(Debug)]
+pub struct AsyncMetropolis {
+    temperature: f64,
+}
+
+impl AsyncMetropolis {
+    pub fn new(temperature: f64) -> Self {
+        assert!(temperature.is_finite() && temperature > 0.0);
+        Self { temperature }
+    }
+}
+
+/// Per-site probabilistic cellular automaton with Bernoulli decisions made
+/// against one shared pre-step state and committed as one batch.
+#[derive(Debug, Default)]
+pub struct DiscreteTimePCA;
+
+/// A deck-selected strategy value suitable for library and CLI callers.
+#[derive(Debug)]
+pub enum Strategy {
+    ExactCtmc(ExactCtmc),
+    Synchronous(SynchronousCA),
+    Metropolis(AsyncMetropolis),
+    Pca(DiscreteTimePCA),
+}
+
 pub struct Engine {
     pub lattice: Lattice,
     pub reactions: Vec<Reaction>,
@@ -322,6 +386,10 @@ pub struct Engine {
     temperature: f64,
     /// Cached candidate events per site: (reaction id, resolved rate).
     site_events: Vec<Vec<(u16, f64)>>,
+    /// Center/guard-enabled rules in rule-index order, independent of rate.
+    enabled_rules: Vec<Vec<u16>>,
+    /// Live-site ids in ascending order, fixed for the lifetime of a lattice.
+    live_sites: Vec<SiteId>,
     tree: RateTree,
     /// Global maximum read distance over all reactions: after an event
     /// changes some sites, every site within this graph distance of a
@@ -386,6 +454,12 @@ impl Engine {
             .max()
             .unwrap_or(0);
         let n = lattice.len();
+        let live_sites = lattice
+            .frozen
+            .iter()
+            .enumerate()
+            .filter_map(|(site, &frozen)| (!frozen).then_some(site))
+            .collect();
         let mut engine = Engine {
             lattice,
             reactions,
@@ -394,6 +468,8 @@ impl Engine {
             kind_state_ranges,
             temperature,
             site_events: vec![Vec::new(); n],
+            enabled_rules: vec![Vec::new(); n],
+            live_sites,
             tree: RateTree::new(n),
             max_read,
             time: 0.0,
@@ -413,6 +489,8 @@ impl Engine {
     fn refresh_site(&mut self, s: SiteId) {
         let mut events = std::mem::take(&mut self.site_events[s]);
         events.clear();
+        let mut enabled = std::mem::take(&mut self.enabled_rules[s]);
+        enabled.clear();
         if !self.lattice.frozen[s] {
             let kind = self.kinds[s];
             let state = self.lattice.states[s];
@@ -421,16 +499,19 @@ impl Engine {
                 if rxn.center_states.contains(state)
                     && guards_pass(&self.lattice, &self.kinds, rxn, s, &mut self.scratch)
                 {
-                    let rate = resolve_rate(
-                        &self.lattice,
-                        &self.kinds,
-                        rxn,
-                        s,
-                        self.temperature,
-                        &mut self.scratch,
-                    );
-                    if rate > 0.0 {
-                        events.push((ri, rate));
+                    enabled.push(ri);
+                    if rxn.value == RuleValue::Ctmc {
+                        let rate = resolve_rate(
+                            &self.lattice,
+                            &self.kinds,
+                            rxn,
+                            s,
+                            self.temperature,
+                            &mut self.scratch,
+                        );
+                        if rate > 0.0 {
+                            events.push((ri, rate));
+                        }
                     }
                 }
             }
@@ -438,6 +519,7 @@ impl Engine {
         let total: f64 = events.iter().map(|&(_, r)| r).sum();
         self.tree.set(s, total);
         self.site_events[s] = events;
+        self.enabled_rules[s] = enabled;
     }
 
     /// Advance with an explicitly supplied strategy. The strategy can only
@@ -462,6 +544,8 @@ impl Engine {
                     kinds: &self.kinds,
                     kind_state_ranges: &self.kind_state_ranges,
                     site_events: &self.site_events,
+                    enabled_rules: &self.enabled_rules,
+                    live_sites: &self.live_sites,
                     tree: &self.tree,
                     scratch: &mut self.scratch,
                     pending: &mut pending,
@@ -481,6 +565,24 @@ impl Engine {
         for (fired, transition) in outcome.fired.iter().zip(&pending) {
             debug_assert_eq!(fired.site, transition.site);
             debug_assert_eq!(fired.reaction, transition.reaction);
+        }
+        if pending.len() > 1 {
+            // A batch is evaluated against one pre-step state. Conflicting
+            // writes cannot be made simultaneous by choosing an arbitrary
+            // iteration winner, so fail atomically before mutating anything.
+            let mut writes = vec![None; self.lattice.len()];
+            for transition in &pending {
+                for &(target, state) in &transition.writes {
+                    if writes[target].is_some_and(|prior| prior != state) {
+                        return Err(Stop::EffectFailed {
+                            site: transition.site,
+                            reaction: transition.reaction,
+                            reason: "conflicting simultaneous writes",
+                        });
+                    }
+                    writes[target] = Some(state);
+                }
+            }
         }
         self.commit_transitions(pending);
         self.time += outcome.dt;
@@ -546,7 +648,6 @@ impl Engine {
         for site in dirty {
             self.refresh_site(site);
         }
-
     }
 
     /// The per-site state changes of the most recently applied event:
@@ -621,6 +722,110 @@ impl UpdateStrategy for ExactCtmc {
             }],
             dt,
         })
+    }
+}
+
+impl UpdateStrategy for SynchronousCA {
+    fn step(&mut self, ctx: &mut StepCtx<'_>) -> Result<StepOutcome, Stop> {
+        let mut selected = Vec::new();
+        for site in 0..ctx.lattice.len() {
+            if let Some(&reaction) = ctx.apply.enabled_rules(site).first() {
+                selected.push((site, reaction));
+            }
+        }
+
+        let mut fired = Vec::with_capacity(selected.len());
+        for (site, reaction) in selected {
+            ctx.apply.apply_transition(site, reaction, &mut *ctx.rng)?;
+            fired.push(Fired {
+                step: 0,
+                time: 0.0,
+                site,
+                reaction,
+            });
+        }
+        Ok(StepOutcome { fired, dt: 1.0 })
+    }
+}
+
+impl UpdateStrategy for AsyncMetropolis {
+    fn step(&mut self, ctx: &mut StepCtx<'_>) -> Result<StepOutcome, Stop> {
+        let live_sites = ctx.apply.live_sites();
+        if live_sites.is_empty() {
+            return Err(Stop::NoEvents);
+        }
+        let site_draw = ctx.rng.gen::<f64>();
+        let site =
+            live_sites[((site_draw * live_sites.len() as f64) as usize).min(live_sites.len() - 1)];
+        let enabled = ctx.apply.enabled_rules(site);
+        let dt = 1.0 / live_sites.len() as f64;
+        if enabled.is_empty() {
+            return Ok(StepOutcome {
+                fired: Vec::new(),
+                dt,
+            });
+        }
+
+        let proposal_draw = ctx.rng.gen::<f64>();
+        let reaction =
+            enabled[((proposal_draw * enabled.len() as f64) as usize).min(enabled.len() - 1)];
+        let delta = ctx.apply.energy_delta(site, reaction);
+        let acceptance = (-delta / (R_KCAL * self.temperature)).exp().min(1.0);
+        let acceptance_draw = ctx.rng.gen::<f64>();
+        if acceptance_draw >= acceptance {
+            return Ok(StepOutcome {
+                fired: Vec::new(),
+                dt,
+            });
+        }
+
+        ctx.apply.apply_transition(site, reaction, &mut *ctx.rng)?;
+        Ok(StepOutcome {
+            fired: vec![Fired {
+                step: 0,
+                time: 0.0,
+                site,
+                reaction,
+            }],
+            dt,
+        })
+    }
+}
+
+impl UpdateStrategy for DiscreteTimePCA {
+    fn step(&mut self, ctx: &mut StepCtx<'_>) -> Result<StepOutcome, Stop> {
+        let mut selected = Vec::new();
+        for site in 0..ctx.lattice.len() {
+            for &reaction in ctx.apply.enabled_rules(site) {
+                let draw = ctx.rng.gen::<f64>();
+                if draw < ctx.apply.probability(reaction) {
+                    selected.push((site, reaction));
+                }
+            }
+        }
+
+        let mut fired = Vec::with_capacity(selected.len());
+        for (site, reaction) in selected {
+            ctx.apply.apply_transition(site, reaction, &mut *ctx.rng)?;
+            fired.push(Fired {
+                step: 0,
+                time: 0.0,
+                site,
+                reaction,
+            });
+        }
+        Ok(StepOutcome { fired, dt: 1.0 })
+    }
+}
+
+impl UpdateStrategy for Strategy {
+    fn step(&mut self, ctx: &mut StepCtx<'_>) -> Result<StepOutcome, Stop> {
+        match self {
+            Strategy::ExactCtmc(strategy) => strategy.step(ctx),
+            Strategy::Synchronous(strategy) => strategy.step(ctx),
+            Strategy::Metropolis(strategy) => strategy.step(ctx),
+            Strategy::Pca(strategy) => strategy.step(ctx),
+        }
     }
 }
 

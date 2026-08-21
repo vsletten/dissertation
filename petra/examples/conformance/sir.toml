@@ -1,0 +1,78 @@
+# Discrete-time SIR conformance deck on a square lattice.
+# gamma=0.2 and per-contact infection probability beta/z=0.05 at R0=1,
+# with z=4. CI brackets the one-step growth threshold within ±0.15 of
+# the mean-field prediction R0=beta/gamma=1.
+[deck]
+name = "sir-pca"
+schema = 2
+
+[structure]
+kind = "grid"
+grid = "square"
+neighborhood = "von_neumann"
+dims = [32, 32]
+boundary = ["periodic", "periodic"]
+default_kind = "person"
+
+[[structure.species]]
+name = "host"
+
+[[structure.kinds]]
+name = "person"
+initial = "susceptible"
+
+[[structure.kinds.states]]
+name = "susceptible"
+occupant = "host"
+
+[[structure.kinds.states]]
+name = "infected"
+occupant = "host"
+
+[[structure.kinds.states]]
+name = "recovered"
+occupant = "host"
+
+[[structure.init]]
+name = "seed-infections"
+center = { kind = "person", state = ["susceptible"] }
+probability = 0.01
+set = "infected"
+
+[dynamics.thermo]
+temperature = 1.0
+
+[[dynamics.rules]]
+name = "infection"
+center = { kind = "person", state = ["susceptible"] }
+guards = [{ distance = 1, kind = "person", state = ["infected"], min = 1 }]
+rate = { probability = 0.05 }
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "infected"
+
+[[dynamics.rules]]
+name = "recovery"
+center = { kind = "person", state = ["infected"] }
+rate = { probability = 0.2 }
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "recovered"
+
+[execution]
+strategy = "pca"
+
+[execution.pca]
+
+[execution.stop]
+steps = 100
+
+[execution.ensemble]
+seed = 42
+n_replicas = 128
+seed_policy = "hash"
+
+[observables]
+report_every = 1
