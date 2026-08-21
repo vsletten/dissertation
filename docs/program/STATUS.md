@@ -2,8 +2,10 @@
 
 *Newest first. One line per merged unit of work (or notable event),
 appended by the PR that did it: `date — actor — what + pointer`.
-Deviations get a `DEVIATION:` note; details live in the card.*
+*Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-21 — omnibus supervisor — reconciled merged-main board drift:
+  B2 and QI3 are done; B3, B4, and B5 are now ready after B2 PR #33.
 - 2026-08-20 — hermes x2 + fable — B2 DONE: petra engine behind the
   UpdateStrategy trait, schema v2 complete, bitwise parity green on
   three gates (incl. shipped-kossel full-lifetime). Two-worker relay +
