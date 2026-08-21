@@ -16,12 +16,68 @@ from quarry.pipeline import (
     build_mol,
     energy,
     frequencies,
+    frequency_geometry_fingerprint,
+    frequency_settings_fingerprint,
     gradient,
     optimize,
 )
 from quarry.rates import thermo_from_frequencies
 
 CHEAP = DftSettings(xc="hf", basis="sto-3g")
+
+
+def test_frequency_settings_fingerprint_ignores_execution_backend():
+    cpu = DftSettings(xc="b3lyp", basis="def2-svp", density_fit=True)
+    gpu = DftSettings(xc="b3lyp", basis="def2-svp", density_fit=True, use_gpu=True)
+
+    assert frequency_settings_fingerprint(cpu) == frequency_settings_fingerprint(gpu)
+
+
+def test_frequency_geometry_fingerprint_is_exact_identity():
+    """The geometry fingerprint is an exact cache key, not a descriptor.
+
+    It hashes the raw coordinate bytes (plus symbols/charge/spin) so a
+    reusable Hessian is only ever reused for the *identical* geometry.
+    Any coordinate change — including a rigid translation or rotation —
+    must therefore change the fingerprint; that is the point, not a bug.
+    """
+    from dataclasses import replace
+
+    base = water()
+    base_fp = frequency_geometry_fingerprint(base)
+
+    # Deterministic: an identical cluster yields the identical fingerprint.
+    assert frequency_geometry_fingerprint(water()) == base_fp
+
+    # A rigid translation changes the raw coordinates, so the exact-identity
+    # key changes (the cached Hessian is not reused for a shifted geometry).
+    translated = replace(base, coords=base.coords + np.array([1.0, 2.0, 3.0]))
+    assert frequency_geometry_fingerprint(translated) != base_fp
+
+    # Electronic-state changes also change the key.
+    charged = replace(base, charge=1)
+    assert frequency_geometry_fingerprint(charged) != base_fp
+
+
+def test_frequency_geometry_fingerprint_includes_frozen_indices():
+    """The frozen-atom set is part of the geometry identity.
+
+    PHVA (partial Hessian) and TS verification branch on ``frozen_indices``,
+    so a Hessian computed with a different frozen set must never be reused
+    for the same coordinates.
+    """
+    from dataclasses import replace
+
+    base = water()
+    frozen = replace(base, frozen_indices=[0])
+
+    assert frequency_geometry_fingerprint(frozen) != frequency_geometry_fingerprint(
+        base
+    )
+    # Order-independent: the frozen set is sorted before hashing.
+    assert frequency_geometry_fingerprint(
+        replace(base, frozen_indices=[0, 1])
+    ) == frequency_geometry_fingerprint(replace(base, frozen_indices=[1, 0]))
 
 
 def test_gpu_hessian_assertion_retries_only_hessian_on_cpu(monkeypatch):
@@ -161,6 +217,17 @@ class TestFrequencies:
         assert len(freq_water.rotational_temperatures_k) == 3
         # Water's rotational temperatures are tens of K.
         assert all(5.0 < t < 60.0 for t in freq_water.rotational_temperatures_k)
+
+    def test_result_carries_geometry_and_settings_fingerprints(
+        self, opt_water, freq_water
+    ):
+        # frequencies() must stamp the result with the same fingerprints the
+        # downstream reuse logic (quick_irc, PHVA) recomputes to detect stale
+        # or mismatched Hessians.
+        assert freq_water.geometry_fingerprint == frequency_geometry_fingerprint(
+            opt_water
+        )
+        assert freq_water.settings_fingerprint == frequency_settings_fingerprint(CHEAP)
 
 
 class TestThermoCrossCheck:

@@ -189,6 +189,25 @@ target = "center"
 set = { occupant = "vacant", config = "empty" }
 ```
 
+**Effect selection modes.** An effect with `target = "neighbors"` applies
+to **all** matching neighbors (`select_mode = "all"`, the v1 default and
+v1-compatible behavior). Diffusion hops and pair reactions need
+exactly-one semantics: `select_mode = "one"` applies the effect to a
+single matching neighbor chosen by **one uniform draw** over the matches,
+routed through the strategy's dynamics stream at the documented position
+in the draw order (§4.1). A rule whose physics is "move/react with one
+neighbor" and whose effects use `"all"` is almost certainly a bug; the
+compiler warns when a rule both removes its center occupant and applies an
+occupant-writing `"all"` effect to neighbors.
+
+```toml
+[[dynamics.rules.effects]]
+target = "neighbors"
+select = { distance = 1, state = ["empty"] }
+select_mode = "one"      # exactly one match receives the effect
+set = "H"
+```
+
 The `rate` field is **required on every rule** (it is the propensity for
 CTMC, the probability for PCA, the energy delta for Metropolis, the truth
 table for deterministic CA). A rule may additionally carry a
@@ -234,14 +253,19 @@ flux-driven source events. Two additions cover this without a schema break:
   *effect target*: `target = "source"` writes an occupant into a vacant site
   at a per-site rate `F·σ` with no center selector. See §7.2.
 
-**Quenched per-site disorder (Track D requirement).** The ice deck needs
-site-pair-dependent binding energies sampled from a distribution. This is
-expressed as an `[[init]]` pass that writes a per-site `config` (e.g.
-`E_bind = 0.12`) plus a rule whose `rate` reads that config via a
-`by_count`-style table keyed on the center's own config — no new rate law,
-just the existing `when`/`by_count` machinery pointed at a per-site state.
-The RFC commits to this mechanism; the exact table syntax is finalized in
-B2 (it is a deck-compiler detail, not a schema decision).
+**Quenched per-site disorder (Track D requirement) — binned kinds.** The
+ice deck needs site-dependent binding energies sampled from a distribution.
+The state model has no per-site scalar (sites carry discrete kind/state/
+occupant — deliberately), so disorder is represented as **binned discrete
+kinds**: the deck declares N site kinds (`site_b1..site_bN`, N ≈ 8 energy
+bins, each bin's nominal energy documented in the deck), a seeded
+`[[structure.init]]` pass assigns each grid site a kind by the declared bin
+probabilities (drawing from the init stream, §4.1), and rules carry
+per-bin rates via the existing `when` machinery keyed on the center's
+kind. This is expressible with today's machinery, deterministic, and
+honest about energy resolution; continuous per-site scalars would be a
+state-model change and are a *new RFC*, not a B2 detail. B2 finalizes only
+the table *syntax*, not the representation.
 
 ### 2.3 `[execution]` — strategy + parameters + stopping + ensemble
 
@@ -357,14 +381,28 @@ The four initial implementations:
 **SynchronousCA double-buffer contract.** All guard evaluations read the
 pre-step buffer; all writes land in the post-step buffer; the buffers swap at
 the end of the step. This is what makes Conway's glider deterministic and
-update-order-free. `dt` is `1.0` per step (discrete time); the trajectory
-record stores `step` as the time coordinate for discrete strategies.
+update-order-free. **Conflict resolution**: when multiple rules match the
+same center site in the same step, the **first matching rule in rule-index
+order wins** for that site — deterministic, draw-free, and documented as
+part of the contract (§4.1); Conway's disjoint guards never exercise this,
+which is exactly why it must be specified rather than discovered.
+Mechanically, the strategy evaluates every site against the pre-step
+buffer, collects `StepOutcome.fired`, and the core's `ApplyHandle`
+**batch-applies** the whole set at end-of-step followed by one
+dirty-propagation pass — the batch apply is what makes the double-buffer
+contract real (and is the same capability tau-leaping reserves, §3).
+`dt` is `1.0` per step (discrete time); the trajectory record stores
+`step` as the time coordinate for discrete strategies.
 
 **AsyncMetropolis selection.** Site selection is uniform over live sites
-(one draw), then a rule is proposed (one draw over the site's enabled rules,
-or a fixed proposal order — **fixed order is required** for determinism; see
-§4). Acceptance is `min(1, exp(-ΔE/kT))` with `ΔE` from `rate.energy.delta`.
-`dt = 1/N` (one Monte Carlo sweep = N site updates).
+(one draw), then a rule is proposed by **one uniform draw over the site's
+enabled rules** — a fixed proposal order was considered and rejected:
+always proposing the first enabled rule silently breaks ergodicity for any
+site with ≥2 enabled rules, and the single-rule Ising gate would never
+catch it. The proposal draw is routed through the dynamics stream like
+every other draw, so determinism is unaffected. Acceptance is
+`min(1, exp(-ΔE/kT))` with `ΔE` from `rate.energy.delta`. `dt = 1/N`
+(one Monte Carlo sweep = N site updates).
 
 **What tau-leaping needs later (named, not built).** Tau-leaping is a CTMC
 *acceleration*, not a new strategy: it needs (a) a bounded propensity-change
@@ -402,16 +440,21 @@ strategy:
 
 - **ExactCtmc** (unchanged from today): (1) site selection draw
   `u·R_total`, (2) within-site event draw, (3) Poisson wait draw, (4) branch
-  draws in effect order. This is the current `Engine::step` order — the
-  refactor must preserve it **exactly**, or the B2 parity gates fail.
+  draws in effect order, (5) `select_mode = "one"` draws in effect order
+  (one uniform draw per such effect, over its matches in site-index order).
+  Draws 1–4 are the current `Engine::step` order — the refactor must
+  preserve them **exactly**, or the B2 parity gates fail (v1 decks contain
+  no `select_mode = "one"` effects, so draw 5 cannot perturb parity).
 - **SynchronousCA**: no draws (deterministic). The double-buffer swap is
-  order-independent by construction.
-- **AsyncMetropolis**: (1) site draw, (2) proposal draw (fixed proposal
-  order — see below), (3) acceptance draw. **Fixed proposal order** (rule
-  index ascending) is required; a random proposal order would need an extra
-  draw and is rejected for v1 to keep the contract simple.
+  order-independent by construction; same-site multi-rule conflicts resolve
+  first-match in rule-index order (§3), draw-free.
+- **AsyncMetropolis**: (1) site draw, (2) proposal draw — one uniform draw
+  over the site’s enabled rules in rule-index order (§3; a fixed proposal
+  order was rejected as ergodicity-breaking for multi-rule sites),
+  (3) acceptance draw, (4) `select_mode = "one"` draws as in ExactCtmc.
 - **DiscreteTimePCA**: one Bernoulli draw per site per enabled rule, in
-  site-index order then rule-index order.
+  site-index order then rule-index order; then `select_mode = "one"` draws
+  for fired rules in the same order.
 
 **No hidden draws, no global RNG.** The seed-swallow lesson (DESIGN.md §3.4)
 is inverted and extended: every strategy's draw sequence is enumerable from
@@ -643,13 +686,15 @@ name = "CO";     occupant = "CO"
 [[structure.kinds.states]]
 name = "HCO";    occupant = "HCO"
 
-# quenched per-site binding-energy disorder (Track D requirement)
+# quenched binding-energy disorder via binned kinds (§2.2): two bins
+# shown for brevity; production decks use ~8. A seeded init pass assigns
+# each site a bin kind by probability, drawing from the init stream.
 [[structure.init]]
 name = "E_bind_disorder"
-center = { kind = "site", state = ["*"] }
-probability = 1.0
-map = { empty = "empty" }              # placeholder: writes a per-site config
-                                       # (final table syntax fixed in B2)
+center = { kind = "site", state = ["empty"] }
+probability = 0.5                      # half the sites become deep-bin sites
+map = { empty = "empty" }
+rekind = "site_deep"                   # bin kind; per-bin rates via `when`
 
 [dynamics]
 [dynamics.thermo]
@@ -669,8 +714,11 @@ name = "H_tunnel_hop"
 center = { kind = "site", state = ["H"] }
 rate = { constant = 1.0e-2 }            # tunneling floor rate
 [[dynamics.rules.effects]]
+target = "center"; set = "empty"
+[[dynamics.rules.effects]]
 target = "neighbors"
 select = { distance = 1, state = ["empty"] }
+select_mode = "one"                    # hop to exactly one empty neighbor
 set = "H"
 
 # Langmuir–Hinshelwood: neighbor pair (H, CO) → (empty, HCO)
@@ -684,6 +732,7 @@ target = "center"; set = "empty"
 [[dynamics.rules.effects]]
 target = "neighbors"
 select = { distance = 1, state = ["CO"] }
+select_mode = "one"                    # react with exactly one CO partner
 set = "HCO"
 
 [execution]
@@ -712,25 +761,40 @@ respectively.
 
 ---
 
-## 8. Open questions for Victor
+## 8. Resolved decisions (recommendations adopted in review; Victor may veto before merge)
 
-1. **`target = "source"` semantics.** A source event has no center site; it
-   writes into a *random vacant site* (or a site matching a selector). Should
-   the vacant-site draw be uniform over all vacant sites (one draw), or
-   per-site (each vacant site is its own event at rate `F·σ`)? The latter is
-   the physically standard flux model and is what the fragment assumes; the
-   former is cheaper. **Recommendation: per-site** (each vacant site is an
-   independent event) — it composes with the existing Fenwick machinery and
-   keeps the determinism contract simple.
-2. **`interface_roughness` axis.** The observable needs a declared surface
-   axis. Default to the first `open` boundary axis, or require an explicit
-   `axis`? **Recommendation: require explicit `axis`** — implicit defaults
-   are how decks silently change meaning.
-3. **Metropolis `dt` convention.** `1/N` per sweep vs. `1.0` per sweep. The
-   Ising gate only needs the *equilibrium* distribution, so either works;
-   `1/N` is the standard MC-sweep convention. **Recommendation: `1/N`.**
-4. **`seed_policy = "hash"` mix function.** Splitmix64 of `(seed, k)` is
-   proposed. Any objection to pinning splitmix64 as the canonical mix?
+1. **`target = "source"` semantics: per-site.** Each vacant site is an
+   independent source event at rate `F·σ` — the physically standard flux
+   model. It composes directly with the existing Fenwick machinery, keeps
+   the determinism contract simple, and makes total deposition rate
+   respond correctly to occupancy (as coverage grows, fewer vacant sites,
+   lower total flux — for free).
+2. **`interface_roughness` axis: explicit `axis` required.** Implicit
+   defaults are how decks silently change meaning.
+3. **Metropolis `dt` convention: `1/N`** (one MC sweep = N site updates,
+   the standard convention).
+4. **`seed_policy = "hash"` mix: splitmix64, pinned.** Definition:
+
+   ```
+   splitmix64(x): x += 0x9E3779B97F4A7C15  (wrapping)
+                  z = x
+                  z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9  (wrapping)
+                  z = (z ^ (z >> 27)) * 0x94D049BB133111EB  (wrapping)
+                  return z ^ (z >> 31)
+
+   replica_seed(seed, k) = splitmix64(splitmix64(seed) ^ k)
+   ```
+
+   **Test vectors** (any implementation must reproduce these exactly):
+
+   | seed | k | replica_seed |
+   |---|---|---|
+   | 42 | 0 | `0x57E1FABA65107204` |
+   | 42 | 1 | `0xF34FE9248C9342E5` |
+   | 42 | 2 | `0x725395388690AE46` |
+
+   The vectors go into the B2 test suite verbatim so implementations
+   cannot drift.
 
 ---
 

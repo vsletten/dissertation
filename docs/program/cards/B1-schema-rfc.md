@@ -61,6 +61,15 @@ enough detail that B2's implementer makes no design decisions:
 
 ## Progress
 
+- 2026-08-19 — fable — substantive review on PR #25: four gaps
+  (R1 quenched-disorder representation unspecified, R2 missing
+  exactly-one effect mode, R3 Metropolis fixed proposal order
+  breaks multi-rule ergodicity, R4 SynchronousCA conflict
+  resolution unspecified). Fixed directly on the claim branch by
+  agreement with Victor (worker had provider-infra trouble:
+  xai/grok-4.6 timeouts forced a mid-session model swap). §8
+  questions resolved per review recommendations, splitmix64 pinned
+  with test vectors. Awaiting Victor's read of §4 + merge.
 - 2026-08-18 — card created (fable).
 - 2026-08-19 — claimed by hermes cloud worker (agents/B1-schema-rfc).
 - 2026-08-19 — RFC written: `petra/docs/RFC-001-DECK-V2.md` (all five

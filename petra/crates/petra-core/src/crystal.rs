@@ -17,7 +17,7 @@ pub const NO_LABEL: u16 = u16::MAX;
 /// ([`Cell::from_params`]) or directly from a matrix ([`Cell::from_matrix`])
 /// — the latter admits nonstandard conventions like the legacy kaolinite
 /// shear cell, which conventional (a b c α β γ) cannot express verbatim.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Cell {
     m: [[f64; 3]; 3],
 }
@@ -105,7 +105,7 @@ pub struct TemplateBond {
 }
 
 /// A site position in the unit cell.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TemplateSite {
     pub kind: KindId,
     pub frac: [f64; 3],
@@ -113,7 +113,7 @@ pub struct TemplateSite {
 }
 
 /// The full template: cell geometry + sites with expanded bonds.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UnitCell {
     pub cell: Cell,
     pub sites: Vec<TemplateSite>,
