@@ -6,8 +6,10 @@ Runs one reaction end-to-end (HANDOFF.md §4, SURVEY.md §7.1):
     uv run python scripts/phase1_xiao_lasaga.py --reaction si-neutral
     uv run python scripts/phase1_xiao_lasaga.py --reaction si-acid --gpu
 
-Reactions: si-neutral / si-acid attack the (HO)3Si-O-Si(OH)3 dimer with
-H2O / H3O+; al-neutral / al-acid do the same to (HO)3Si-O-Al(OH)3^-.
+Reactions: si-neutral / al-neutral model water attack with concerted proton
+transfer.  si-acid / al-acid first model H3O+ protonation as a
+pre-equilibrated protonated bridge plus residual H2O, then compute only the
+water-attack / Si-Obr-cleavage barrier.
 Literature anchors: X&L 1994/96 got ~29 kcal/mol (neutral), ~24 (acid,
 H3O+), ~19 (base); modern AIMD puts Q1-ish Si-O-T hydrolysis at 54-71
 kJ/mol (SURVEY.md §7.2).
@@ -53,6 +55,7 @@ from quarry.clusters import (  # noqa: E402
     disilicate,
     hydrolysis_complex,
     hydronium,
+    protonated_bridge_complex,
     water,
 )
 from quarry.pipeline import (  # noqa: E402
@@ -98,6 +101,19 @@ BASIN_ENERGY_DELTA_MAX_KJ = 5.0
 REACTANT_BASIN = (False, True, False)
 ASSOCIATIVE_BASIN = (True, True, True)
 HYDROLYZED_BASIN = (True, False, True)
+ACID_REACTANT_BASIN = (False, True, True, True, 2)
+ACID_PRODUCT_BASIN = (True, False, True, True, 2)
+ACID_MECHANISM_VERSION = 1
+
+
+def reaction_run_slug(reaction: str, xc: str, basis: str, approach: str) -> str:
+    """Return a checkpoint namespace that cannot mix old and new acid mechanisms."""
+    reaction_slug = (
+        f"{reaction}-preprotonated-v{ACID_MECHANISM_VERSION}"
+        if reaction.endswith("-acid")
+        else reaction
+    )
+    return f"{reaction_slug}-{xc}-{basis}-{approach}"
 
 
 def log(msg: str) -> None:
@@ -143,10 +159,13 @@ def channel_escape_reason(ts_guess: Cluster, ts: Cluster, ow_index: int) -> str 
 
 
 def hydrolysis_basin_signature(
-    cluster: Cluster, ow_index: int
+    cluster: Cluster,
+    ow_index: int,
+    *,
+    proton_indices: tuple[int, ...] | None = None,
 ) -> tuple[bool, bool, bool]:
     """Return (Si-Ow bonded, Si-Obr bonded, proton on Obr) for IRC gating."""
-    h_candidates = [ow_index + 1, ow_index + 2]
+    h_candidates = proton_indices or (ow_index + 1, ow_index + 2)
     return (
         float(np.linalg.norm(cluster.coords[SI_INDEX] - cluster.coords[ow_index]))
         < 2.3,
@@ -160,13 +179,91 @@ def hydrolysis_basin_signature(
     )
 
 
-def quick_irc_channel_reason(back: Cluster, fwd: Cluster, ow_index: int) -> str | None:
+def acid_basin_signature(
+    cluster: Cluster,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+) -> tuple[bool, bool, bool, bool, int]:
+    """Return the full acid speciation/connectivity state for fail-closed gates."""
+    water_h_count = sum(
+        float(np.linalg.norm(cluster.coords[ow_index] - cluster.coords[index])) < 1.25
+        for index in proton_indices
+    )
+    return (
+        float(np.linalg.norm(cluster.coords[SI_INDEX] - cluster.coords[ow_index]))
+        < 2.3,
+        float(np.linalg.norm(cluster.coords[SI_INDEX] - cluster.coords[BR_INDEX]))
+        < 2.3,
+        float(np.linalg.norm(cluster.coords[AL_INDEX] - cluster.coords[BR_INDEX]))
+        < 2.3,
+        any(
+            float(np.linalg.norm(cluster.coords[BR_INDEX] - cluster.coords[index]))
+            < 1.25
+            for index in proton_indices
+        ),
+        water_h_count,
+    )
+
+
+def protonated_bridge_reason(
+    cluster: Cluster,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+) -> str | None:
+    """Explain why an optimized acid reactant left its pre-equilibrium basin."""
+    signature = acid_basin_signature(cluster, ow_index, proton_indices)
+    if signature != ACID_REACTANT_BASIN:
+        return (
+            f"acid reactant basin {signature} != {ACID_REACTANT_BASIN} "
+            "(protonated intact bridge + H2O attacker)"
+        )
+    return None
+
+
+def acid_product_reason(
+    cluster: Cluster,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+) -> str | None:
+    """Explain why a putative acid product has wrong bonding/speciation."""
+    signature = acid_basin_signature(cluster, ow_index, proton_indices)
+    if signature != ACID_PRODUCT_BASIN:
+        return f"acid product basin {signature} != {ACID_PRODUCT_BASIN}"
+    return None
+
+
+def acid_quick_irc_channel_reason(
+    back: Cluster,
+    fwd: Cluster,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+) -> str | None:
+    """Require protonated reactant ↔ protonated hydrolysis product connectivity."""
+    actual = {
+        acid_basin_signature(back, ow_index, proton_indices),
+        acid_basin_signature(fwd, ow_index, proton_indices),
+    }
+    expected = {ACID_REACTANT_BASIN, ACID_PRODUCT_BASIN}
+    if actual != expected:
+        return f"acid quick-IRC basin signatures {sorted(actual)} != {sorted(expected)}"
+    return None
+
+
+def quick_irc_channel_reason(
+    back: Cluster,
+    fwd: Cluster,
+    ow_index: int,
+    *,
+    proton_indices: tuple[int, ...] | None = None,
+    reactant_basin: tuple[bool, bool, bool] = REACTANT_BASIN,
+) -> str | None:
     """Explain why quick-IRC did not connect reactant and hydrolyzed basins."""
     return quick_irc_basin_reason(
         back,
         fwd,
         ow_index,
-        expected={REACTANT_BASIN, HYDROLYZED_BASIN},
+        expected={reactant_basin, HYDROLYZED_BASIN},
+        proton_indices=proton_indices,
     )
 
 
@@ -176,11 +273,12 @@ def quick_irc_basin_reason(
     ow_index: int,
     *,
     expected: set[tuple[bool, bool, bool]],
+    proton_indices: tuple[int, ...] | None = None,
 ) -> str | None:
     """Explain why two quick-IRC endpoints missed the expected basins."""
     actual = {
-        hydrolysis_basin_signature(back, ow_index),
-        hydrolysis_basin_signature(fwd, ow_index),
+        hydrolysis_basin_signature(back, ow_index, proton_indices=proton_indices),
+        hydrolysis_basin_signature(fwd, ow_index, proton_indices=proton_indices),
     }
     if actual != expected:
         return f"quick-IRC basin signatures {sorted(actual)} != {sorted(expected)}"
@@ -497,6 +595,131 @@ def proton_neb_guess(
     )
 
 
+def acid_neb_guess(
+    approach_seed: Cluster,
+    complex_opt: Cluster,
+    settings: DftSettings,
+    run_dir: Path,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+) -> Cluster:
+    """Build the protonated-bridge water-attack product and CI-NEB guess.
+
+    The acid reactant is already the post-H3O+ pre-equilibrium: one hydronium
+    proton sits on the bridge and its residual water attacks silicon.  Therefore
+    this path must never repeat the neutral mechanism's water-to-bridge proton
+    scan; it only approaches Si, cleaves Si-Obr, and refines that elementary
+    hydrolysis step.
+    """
+    product_path = run_dir / "product.xyz"
+    if product_path.exists():
+        product = load_xyz(product_path, approach_seed)
+        r_prod_ow = float(
+            np.linalg.norm(product.coords[SI_INDEX] - product.coords[ow_index])
+        )
+        r_prod_br = float(
+            np.linalg.norm(product.coords[SI_INDEX] - product.coords[BR_INDEX])
+        )
+        log(
+            "  resume: acid product.xyz exists; "
+            f"r(Si-Ow)={r_prod_ow:.2f} A, r(Si-Obr)={r_prod_br:.2f} A"
+        )
+        product_failure = acid_product_reason(product, ow_index, proton_indices)
+        if product_failure is None:
+            return neb_ts_guess(
+                complex_opt,
+                product,
+                settings,
+                n_images=5,
+                fmax_ev_a=0.2,
+                max_steps=240,
+                pre_relax_fmax_ev_a=1.5,
+                pre_relax_steps=120,
+            )
+        log(f"  saved acid product rejected: {product_failure}")
+        product_path.replace(run_dir / "product.rejected-acid-rollback.xyz")
+        approach_seed = product
+
+    seed_r = float(
+        np.linalg.norm(approach_seed.coords[SI_INDEX] - approach_seed.coords[ow_index])
+    )
+    if abs(seed_r - 1.90) > 0.02:
+        log(f"  pinning acid approach seed: r(Si-Ow) {seed_r:.2f} -> 1.90 A")
+        approach_seed = constrained_scan(
+            approach_seed,
+            settings,
+            atom_i=SI_INDEX,
+            atom_j=ow_index,
+            distances_a=[1.90],
+        )[0][2]
+
+    bridge_proton = min(
+        proton_indices,
+        key=lambda index: np.linalg.norm(
+            approach_seed.coords[index] - approach_seed.coords[BR_INDEX]
+        ),
+    )
+    proton_distance = float(
+        np.linalg.norm(
+            approach_seed.coords[bridge_proton] - approach_seed.coords[BR_INDEX]
+        )
+    )
+    if proton_distance > 1.25:
+        raise RuntimeError(
+            "acid path lost the pre-equilibrated bridge proton "
+            "before product construction"
+        )
+
+    current_br = float(
+        np.linalg.norm(approach_seed.coords[SI_INDEX] - approach_seed.coords[BR_INDEX])
+    )
+    break_targets = [
+        distance
+        for distance in [1.85, 2.05, 2.30, 2.60, 3.00, 3.40, 3.60]
+        if distance > current_br + 0.05
+    ]
+    if not break_targets:
+        break_targets = [round(current_br + 0.30, 2)]
+
+    log("  acid stage 2b: break Si-Obr with Si-Ow and Obr-H held")
+    broken = constrained_scan(
+        approach_seed,
+        settings,
+        atom_i=SI_INDEX,
+        atom_j=BR_INDEX,
+        distances_a=break_targets,
+        fixed_distances=[
+            (SI_INDEX, ow_index, 1.70),
+            (BR_INDEX, bridge_proton, round(proton_distance, 2)),
+        ],
+    )
+    for distance, electronic, _ in broken:
+        log(f"  r(Si-Obr)={distance:.2f} A  E={electronic:.6f} Ha")
+    product = optimize(broken[-1][2], settings)
+    save_xyz(product, product_path)
+
+    r_prod_ow = float(
+        np.linalg.norm(product.coords[SI_INDEX] - product.coords[ow_index])
+    )
+    r_prod_br = float(
+        np.linalg.norm(product.coords[SI_INDEX] - product.coords[BR_INDEX])
+    )
+    log(f"  acid product r(Si-Ow)={r_prod_ow:.2f} A, r(Si-Obr)={r_prod_br:.2f} A")
+    product_failure = acid_product_reason(product, ow_index, proton_indices)
+    if product_failure:
+        raise RuntimeError(product_failure)
+    return neb_ts_guess(
+        complex_opt,
+        product,
+        settings,
+        n_images=5,
+        fmax_ev_a=0.2,
+        max_steps=240,
+        pre_relax_fmax_ev_a=1.5,
+        pre_relax_steps=120,
+    )
+
+
 def finish_al_neutral_sequential(
     *,
     complex_opt: Cluster,
@@ -563,8 +786,7 @@ def finish_al_neutral_sequential(
             ow_index,
             float(
                 np.linalg.norm(
-                    addition_guess.coords[SI_INDEX]
-                    - addition_guess.coords[ow_index]
+                    addition_guess.coords[SI_INDEX] - addition_guess.coords[ow_index]
                 )
             ),
         ),
@@ -870,7 +1092,7 @@ def main() -> int:
         Path(__file__).resolve().parent.parent
         / "runs"
         / "phase1"
-        / (f"{args.reaction}-{args.xc}-{args.basis}-{args.approach}")
+        / reaction_run_slug(args.reaction, args.xc, args.basis, args.approach)
     )
     run_dir.mkdir(parents=True, exist_ok=True)
     log(f"run dir: {run_dir}")
@@ -878,8 +1100,26 @@ def main() -> int:
 
     dimer_factory, attacker_factory = REACTIONS[args.reaction]
     dimer, attacker = dimer_factory(), attacker_factory()
-    complex_guess = hydrolysis_complex(dimer, attacker, mode=args.approach)
+    acid_path = args.reaction.endswith("-acid")
+    if acid_path:
+        complex_guess = protonated_bridge_complex(dimer, mode=args.approach)
+    else:
+        complex_guess = hydrolysis_complex(dimer, attacker, mode=args.approach)
     ow_index = len(dimer.symbols)  # attacker O
+    proton_indices = tuple(range(ow_index + 1, ow_index + (4 if acid_path else 3)))
+    product_route = "acid-neb" if acid_path else "proton-neb"
+
+    def build_product_neb(seed: Cluster) -> Cluster:
+        if acid_path:
+            return acid_neb_guess(
+                seed,
+                complex_opt,
+                settings,
+                run_dir,
+                ow_index,
+                proton_indices,
+            )
+        return proton_neb_guess(seed, complex_opt, settings, run_dir, ow_index)
 
     # Stage 0 — cheap, robust pre-optimization of the hand-built guess.
     # HF/STO-3G converges where a hybrid at a strained guess may not;
@@ -899,6 +1139,14 @@ def main() -> int:
         complex_pre,
         lambda: optimize(complex_pre, settings),
     )
+    if acid_path:
+        pre_equilibrium_failure = protonated_bridge_reason(
+            complex_opt,
+            ow_index,
+            proton_indices,
+        )
+        if pre_equilibrium_failure:
+            raise RuntimeError(pre_equilibrium_failure)
     dimer_opt = checkpointed(
         run_dir / "dimer.xyz", dimer, lambda: optimize(dimer, settings)
     )
@@ -921,7 +1169,7 @@ def main() -> int:
     if ts_guess_path.exists():
         ts_guess = load_xyz(ts_guess_path, complex_opt)
         log(f"  resume: ts_guess.xyz exists ({route} route)")
-        if route == "proton-neb" and channel_escape_reason(
+        if route == product_route and channel_escape_reason(
             ts_guess, ts_guess, ow_index
         ):
             r_bad = float(
@@ -935,18 +1183,13 @@ def main() -> int:
             stale_traj = run_dir / "sella.traj"
             if stale_traj.exists():
                 stale_traj.replace(run_dir / "sella.rejected-neb-escape.traj")
-            ts_guess = proton_neb_guess(
-                ts_guess, complex_opt, settings, run_dir, ow_index
-            )
+            ts_guess = build_product_neb(ts_guess)
             save_xyz(ts_guess, ts_guess_path)
-    elif route == "proton-neb" and (run_dir / "product.xyz").exists():
+    elif route == product_route and (run_dir / "product.xyz").exists():
         # A failed bounded NEB leaves the route and validated product durable
-        # but no ts_guess.xyz.  Resume that exact stage instead of repeating
-        # the already-completed direct/proton scans.
-        log("  resume: proton-NEB route/product exist; rebuilding only the band")
-        ts_guess = proton_neb_guess(
-            complex_opt, complex_opt, settings, run_dir, ow_index
-        )
+        # but no ts_guess.xyz. Resume that exact stage without repeating prior scans.
+        log(f"  resume: {product_route} route/product exist; rebuilding only the band")
+        ts_guess = build_product_neb(complex_opt)
         save_xyz(ts_guess, ts_guess_path)
     else:
         # No reusable product exists. Reconstruct from the direct route.
@@ -961,14 +1204,21 @@ def main() -> int:
                 distances_a=[2.8, 2.6, 2.4, 2.2, 2.1, 2.0, 1.9],
                 progress=lambda r, e: log(f"  r={r:.2f} A  E={e:.6f} Ha"),
             )
-            ts_guess = scan_ts_guess(scan)
+            if acid_path:
+                base = min(scan, key=lambda point: abs(point[0] - 1.90))[2]
+                route = product_route
+                route_path.write_text(route)
+                ts_guess = build_product_neb(base)
+            else:
+                ts_guess = scan_ts_guess(scan)
         except ScanNoMaximumError as exc:
             log("  approach coordinate alone does not cross the ridge;")
             base = min(exc.scan, key=lambda p: abs(p[0] - 1.90))[2]
-            ts_guess = proton_neb_guess(base, complex_opt, settings, run_dir, ow_index)
-            route = "proton-neb"
+            route = product_route
+            route_path.write_text(route)
+            ts_guess = build_product_neb(base)
         save_xyz(ts_guess, ts_guess_path)
-        if route == "proton-neb":
+        if route == product_route:
             route_path.write_text(route)
 
     # Stage 3 — saddle search. A direct approach crest gets one bounded
@@ -990,21 +1240,24 @@ def main() -> int:
     log(f"  r(Si-Ow): guess {r_guess:.2f} A -> saddle {r_ts:.2f} A")
     escape = channel_escape_reason(ts_guess, ts, ow_index)
     if escape and route == "direct":
-        log(f"  !! {escape}; pivoting once to proton-drive + product + CI-NEB")
-        neb_guess = proton_neb_guess(ts_guess, complex_opt, settings, run_dir, ow_index)
+        log(f"  !! {escape}; pivoting once to {product_route} product + CI-NEB")
+        direct_seed = ts_guess
 
-        # Preserve the rejected direct-search receipt, then replace all
-        # resumable checkpoints with the new route before refining again.
+        # Preserve the rejected direct-search receipts and publish the new route
+        # before product/NEB work, so a failed band resumes from product.xyz.
+        rejected_guess = run_dir / "ts_guess.rejected-direct.xyz"
+        if ts_guess_path.exists():
+            ts_guess_path.replace(rejected_guess)
         rejected_ts = run_dir / "ts.rejected-direct.xyz"
         if ts_path.exists():
             ts_path.replace(rejected_ts)
         rejected_traj = run_dir / "sella.rejected-direct.traj"
         if trajectory_path.exists():
             trajectory_path.replace(rejected_traj)
-        ts_guess = neb_guess
-        save_xyz(ts_guess, ts_guess_path)
-        route = "proton-neb"
+        route = product_route
         route_path.write_text(route)
+        ts_guess = build_product_neb(direct_seed)
+        save_xyz(ts_guess, ts_guess_path)
 
         log("stage 3b: Sella saddle search from CI-NEB guess")
         ts = checkpointed(
@@ -1037,7 +1290,15 @@ def main() -> int:
     )
     save_xyz(back, run_dir / "irc_back.xyz")
     save_xyz(fwd, run_dir / "irc_fwd.xyz")
-    irc_failure = quick_irc_channel_reason(back, fwd, ow_index)
+    if acid_path:
+        irc_failure = acid_quick_irc_channel_reason(
+            back,
+            fwd,
+            ow_index,
+            proton_indices,
+        )
+    else:
+        irc_failure = quick_irc_channel_reason(back, fwd, ow_index)
     if args.reaction == "al-neutral":
         cleavage_failure = quick_irc_cleavage_reason(back, fwd, ow_index)
         if cleavage_failure:
@@ -1101,6 +1362,12 @@ def main() -> int:
     ) * HARTREE_TO_KJ
     results = {
         "reaction": args.reaction,
+        "mechanism": (
+            "pre-equilibrated-protonated-bridge-water-attack"
+            if acid_path
+            else "concerted-neutral-hydrolysis"
+        ),
+        "mechanism_version": ACID_MECHANISM_VERSION if acid_path else 1,
         "method": f"{args.xc}/{args.basis}/df",
         "temperature_k": t,
         "dE_elec_vs_complex_kj": de_kj,
@@ -1118,6 +1385,12 @@ def main() -> int:
         },
     }
     results["dE_elec_vs_fragments_kj"] = frag_e
+    if acid_path:
+        results["comparison"] = {
+            "si_neutral_dG_kj": SI_NEUTRAL_DG_KJ,
+            "si_neutral_dG_kcal": SI_NEUTRAL_DG_KCAL,
+            "acid_lower_than_si_neutral": rate.dg_kj < SI_NEUTRAL_DG_KJ,
+        }
 
     (run_dir / "results.json").write_text(json.dumps(results, indent=2))
 

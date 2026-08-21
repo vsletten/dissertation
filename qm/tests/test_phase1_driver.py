@@ -1,11 +1,18 @@
 """Fast orchestration gates for the Xiao & Lasaga Phase-1 driver."""
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+import pytest
 
-from quarry.clusters import Cluster
+from quarry.clusters import (
+    Cluster,
+    aluminosilicate_dimer,
+    disilicate,
+    protonated_bridge_complex,
+)
 from quarry.pipeline import DftSettings, FrequencyResult
 from quarry.rates import Thermo
 from scripts import phase1_xiao_lasaga as phase1
@@ -27,6 +34,42 @@ def geometry(name: str, si_ow: float, si_obr: float = 1.6) -> Cluster:
             ]
         ),
     )
+
+
+def _place_attacking_water(cluster: Cluster, ow_index: int, distance: float) -> Cluster:
+    """Move the residual water as a rigid group without moving the bridge proton."""
+    coords = cluster.coords.copy()
+    direction = coords[ow_index] - coords[phase1.SI_INDEX]
+    direction /= np.linalg.norm(direction)
+    target = coords[phase1.SI_INDEX] + distance * direction
+    delta = target - coords[ow_index]
+    for index in (ow_index, ow_index + 2, ow_index + 3):
+        coords[index] += delta
+    return replace(cluster, coords=coords)
+
+
+def acid_geometries(
+    dimer_factory=disilicate,
+) -> tuple[Cluster, Cluster, int, tuple[int, ...]]:
+    """Full benchmark acid reactant/product with the opposite bridge intact."""
+    dimer = dimer_factory()
+    reactant = protonated_bridge_complex(dimer)
+    ow_index = len(dimer.symbols)
+    proton_indices = (ow_index + 1, ow_index + 2, ow_index + 3)
+    product = _place_attacking_water(reactant, ow_index, 1.70)
+    coords = product.coords.copy()
+
+    bridge = coords[phase1.BR_INDEX]
+    silicon = coords[phase1.SI_INDEX]
+    direction = bridge - silicon
+    direction /= np.linalg.norm(direction)
+    target_bridge = silicon + 3.50 * direction
+    leaving_delta = target_bridge - bridge
+    # Atom 2 is the center across the bridge; 9:15 are its three OH groups.
+    for index in (phase1.BR_INDEX, phase1.AL_INDEX, *range(9, 15), ow_index + 1):
+        coords[index] += leaving_delta
+    product = replace(product, name="acid-product", coords=coords)
+    return reactant, product, ow_index, proton_indices
 
 
 def test_channel_escape_guard_is_absolute_and_relative():
@@ -52,6 +95,52 @@ def test_quick_irc_requires_reactant_and_hydrolyzed_basins():
     assert phase1.quick_irc_channel_reason(reactant, product, 2) is None
     reason = phase1.quick_irc_channel_reason(trapped, trapped, 2)
     assert reason is not None and "basin signatures" in reason
+
+
+@pytest.mark.parametrize("dimer_factory", [disilicate, aluminosilicate_dimer])
+def test_acid_quick_irc_requires_full_pre_equilibrium_and_product_speciation(
+    dimer_factory,
+):
+    reactant, product, ow_index, proton_indices = acid_geometries(dimer_factory)
+
+    assert (
+        phase1.acid_basin_signature(reactant, ow_index, proton_indices)
+        == phase1.ACID_REACTANT_BASIN
+    )
+    assert (
+        phase1.acid_basin_signature(product, ow_index, proton_indices)
+        == phase1.ACID_PRODUCT_BASIN
+    )
+    assert (
+        phase1.acid_quick_irc_channel_reason(
+            reactant,
+            product,
+            ow_index,
+            proton_indices,
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize("dimer_factory", [disilicate, aluminosilicate_dimer])
+def test_acid_speciation_guards_reject_lost_proton_bridge_or_water(dimer_factory):
+    reactant, product, ow_index, proton_indices = acid_geometries(dimer_factory)
+
+    lost_proton = replace(reactant, coords=reactant.coords.copy())
+    lost_proton.coords[proton_indices[0]] += np.array([0.0, 2.0, 0.0])
+    assert phase1.protonated_bridge_reason(lost_proton, ow_index, proton_indices)
+
+    broken_opposite = replace(reactant, coords=reactant.coords.copy())
+    broken_opposite.coords[phase1.AL_INDEX] += np.array([3.0, 0.0, 0.0])
+    assert phase1.protonated_bridge_reason(broken_opposite, ow_index, proton_indices)
+
+    hydroxide_attacker = replace(reactant, coords=reactant.coords.copy())
+    hydroxide_attacker.coords[ow_index + 3] += np.array([0.0, 0.0, 2.0])
+    assert phase1.protonated_bridge_reason(hydroxide_attacker, ow_index, proton_indices)
+
+    deprotonated_product = replace(product, coords=product.coords.copy())
+    deprotonated_product.coords[proton_indices[0]] += np.array([0.0, 2.0, 0.0])
+    assert phase1.acid_product_reason(deprotonated_product, ow_index, proton_indices)
 
 
 def test_sequential_quick_irc_gates_each_elementary_step():
@@ -386,3 +475,106 @@ def test_completed_product_uses_full_aligned_neb_endpoint(monkeypatch, tmp_path)
         "pre_relax_fmax_ev_a": 1.5,
         "pre_relax_steps": 120,
     }
+
+
+def test_acid_neb_builds_product_without_repeating_proton_transfer(
+    monkeypatch, tmp_path
+):
+    reactant, product, ow_index, proton_indices = acid_geometries()
+    approach = _place_attacking_water(reactant, ow_index, 1.90)
+    break_targets = []
+    fixed = []
+
+    def fake_break_scan(
+        cluster, settings, *, distances_a, fixed_distances=(), **kwargs
+    ):
+        break_targets.extend(distances_a)
+        fixed.extend(fixed_distances)
+        return [(distance, -2.0, product) for distance in distances_a]
+
+    endpoints = []
+
+    def fake_neb(reactant_endpoint, product_endpoint, settings, **kwargs):
+        endpoints.append((reactant_endpoint, product_endpoint, kwargs))
+        return replace(approach, name="acid-neb-guess")
+
+    monkeypatch.setattr(phase1, "constrained_scan", fake_break_scan)
+    monkeypatch.setattr(phase1, "optimize", lambda cluster, settings: cluster)
+    monkeypatch.setattr(phase1, "neb_ts_guess", fake_neb)
+    monkeypatch.setattr(
+        phase1,
+        "scan_to_maximum",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("pre-equilibrated acid path must not scan proton transfer")
+        ),
+    )
+
+    result = phase1.acid_neb_guess(
+        approach,
+        reactant,
+        CHEAP,
+        tmp_path,
+        ow_index=ow_index,
+        proton_indices=proton_indices,
+    )
+
+    assert result.name == "acid-neb-guess"
+    assert break_targets == [1.85, 2.05, 2.3, 2.6, 3.0, 3.4, 3.6]
+    assert (phase1.SI_INDEX, ow_index, 1.70) in fixed
+    assert (phase1.BR_INDEX, proton_indices[0], 0.96) in fixed
+    assert (tmp_path / "product.xyz").exists()
+    assert len(endpoints) == 1
+    assert endpoints[0][0] is reactant
+
+
+def test_acid_neb_resumes_saved_product_after_band_failure(monkeypatch, tmp_path):
+    reactant, product, ow_index, proton_indices = acid_geometries()
+    approach = _place_attacking_water(reactant, ow_index, 1.90)
+    break_calls = []
+    neb_calls = []
+
+    def fake_break_scan(cluster, settings, *, distances_a, **kwargs):
+        break_calls.append(tuple(distances_a))
+        return [(distance, -2.0, product) for distance in distances_a]
+
+    def flaky_neb(reactant_endpoint, product_endpoint, settings, **kwargs):
+        neb_calls.append(product_endpoint)
+        if len(neb_calls) == 1:
+            raise RuntimeError("bounded CI-NEB failed")
+        return replace(approach, name="resumed-acid-neb")
+
+    monkeypatch.setattr(phase1, "constrained_scan", fake_break_scan)
+    monkeypatch.setattr(phase1, "optimize", lambda cluster, settings: cluster)
+    monkeypatch.setattr(phase1, "neb_ts_guess", flaky_neb)
+
+    with pytest.raises(RuntimeError, match="CI-NEB failed"):
+        phase1.acid_neb_guess(
+            approach,
+            reactant,
+            CHEAP,
+            tmp_path,
+            ow_index,
+            proton_indices,
+        )
+    assert (tmp_path / "product.xyz").exists()
+
+    resumed = phase1.acid_neb_guess(
+        reactant,
+        reactant,
+        CHEAP,
+        tmp_path,
+        ow_index,
+        proton_indices,
+    )
+    assert resumed.name == "resumed-acid-neb"
+    assert len(break_calls) == 1
+    assert len(neb_calls) == 2
+
+
+def test_acid_checkpoint_namespace_is_mechanism_qualified():
+    assert phase1.reaction_run_slug("si-neutral", "b3lyp", "def2-svp", "flank") == (
+        "si-neutral-b3lyp-def2-svp-flank"
+    )
+    assert phase1.reaction_run_slug("si-acid", "b3lyp", "def2-svp", "flank") == (
+        "si-acid-preprotonated-v1-b3lyp-def2-svp-flank"
+    )

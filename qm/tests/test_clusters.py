@@ -10,6 +10,7 @@ from quarry.clusters import (
     aluminosilicate_dimer,
     disilicate,
     hydronium,
+    protonated_bridge_complex,
     silicic_acid,
     silicic_acid_hydrate,
     water,
@@ -56,6 +57,39 @@ class TestBasics:
         assert d.formula == "AlH6O7Si"
         assert d.charge == -1
         assert d.site_family is SiteFamily.SI_O_AL2
+
+    @pytest.mark.parametrize(
+        ("dimer_factory", "formula", "charge", "family"),
+        [
+            (disilicate, "H9O8Si2", 1, SiteFamily.SI_O_SI),
+            (aluminosilicate_dimer, "AlH9O8Si", 0, SiteFamily.SI_O_AL2),
+        ],
+    )
+    def test_protonated_bridge_complex_is_pre_equilibrated_water_attack(
+        self, dimer_factory, formula, charge, family
+    ):
+        dimer = dimer_factory()
+        complex_ = protonated_bridge_complex(dimer)
+        ow_index = len(dimer.symbols)
+        bridge_proton = ow_index + 1
+
+        assert complex_.formula == formula
+        assert complex_.charge == charge
+        assert complex_.site_family is family
+        assert complex_.symbols[ow_index : ow_index + 4] == ["O", "H", "H", "H"]
+        assert np.linalg.norm(
+            complex_.coords[0] - complex_.coords[bridge_proton]
+        ) == pytest.approx(0.96, abs=0.01)
+        assert (
+            np.linalg.norm(complex_.coords[ow_index] - complex_.coords[bridge_proton])
+            > 1.25
+        )
+        assert all(
+            np.linalg.norm(complex_.coords[ow_index] - complex_.coords[index])
+            == pytest.approx(0.96, abs=0.01)
+            for index in (ow_index + 2, ow_index + 3)
+        )
+        assert _min_interatomic(complex_) > 0.85
 
     def test_no_atom_collisions_in_any_benchmark(self):
         for factory in BENCHMARKS.values():

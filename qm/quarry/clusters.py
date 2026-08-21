@@ -353,6 +353,49 @@ def hydrolysis_complex(
     return merge(dimer, moved, name=f"{dimer.name}+{attacker.name}")
 
 
+def protonated_bridge_complex(
+    dimer: Cluster,
+    *,
+    approach_a: float = 3.2,
+    mode: str = "flank",
+) -> Cluster:
+    """Pre-equilibrated acid complex: protonated bridge + attacking water.
+
+    Acid hydrolysis is not neutral hydrolysis with hydronium used as the
+    nucleophile.  H3O+ first transfers one proton to the bridging oxygen; the
+    water left behind then attacks the weakened Si-O(bridge) bond.  Preserve the
+    hydronium atom order (attacker O followed by three H atoms) so the Phase-1
+    driver can track both the water and transferred proton without an index map.
+    """
+    complex_ = hydrolysis_complex(
+        dimer,
+        hydronium(),
+        approach_a=approach_a,
+        mode=mode,
+    )
+    ow_index = len(dimer.symbols)
+    bridge_proton = ow_index + 1
+    coords = complex_.coords.copy()
+    coords[bridge_proton] = coords[0] + R_O_H * _unit(coords[ow_index] - coords[0])
+    for water_h in (ow_index + 2, ow_index + 3):
+        coords[water_h] = coords[ow_index] + R_O_H * _unit(
+            coords[water_h] - coords[ow_index]
+        )
+    return Cluster(
+        name=f"{dimer.name}+protonated-bridge+water",
+        symbols=list(complex_.symbols),
+        coords=coords,
+        charge=complex_.charge,
+        spin=complex_.spin,
+        frozen_indices=list(complex_.frozen_indices),
+        site_family=complex_.site_family,
+        note=(
+            "H3O+ pre-equilibrated to a protonated bridging oxygen; "
+            "the residual H2O is the attacker"
+        ),
+    )
+
+
 BENCHMARKS = {
     "water": water,
     "hydronium": hydronium,
