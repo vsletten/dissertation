@@ -162,14 +162,18 @@ fn explicit_v2_from_v1(text: &str) -> String {
     );
     execution.insert("stop".to_string(), toml::Value::Table(stop));
     execution.insert("ensemble".to_string(), toml::Value::Table(ensemble));
-    let mut observables = toml::map::Map::new();
-    observables.insert(
-        "report_every".to_string(),
-        simulation
-            .get("report_every")
-            .cloned()
-            .unwrap_or(toml::Value::Integer(0)),
-    );
+    let mut observables = root
+        .remove("observables")
+        .and_then(|value| value.as_table().cloned())
+        .unwrap_or_default();
+    observables
+        .entry("report_every".to_string())
+        .or_insert_with(|| {
+            simulation
+                .get("report_every")
+                .cloned()
+                .unwrap_or(toml::Value::Integer(0))
+        });
 
     root.insert("structure".to_string(), toml::Value::Table(structure));
     root.insert("dynamics".to_string(), toml::Value::Table(dynamics));
@@ -569,4 +573,19 @@ fn splitmix64_replica_seed_matches_rfc_vectors() {
     assert_eq!(replica_seed(42, 1, SeedPolicy::Hash), 0xF34F_E924_8C93_42E5);
     assert_eq!(replica_seed(42, 2, SeedPolicy::Hash), 0x7253_9538_8690_AE46);
     assert_eq!(replica_seed(42, 3, SeedPolicy::Increment), 45);
+}
+
+#[test]
+fn v1_compat_decks_may_opt_in_to_declarative_observables() {
+    let path = format!(
+        "{}/../../examples/kossel-etchpit.toml",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("v1 fixture");
+    let parsed: petra_deck::DeckFile = toml::from_str(&text).expect("extended v1 deck parses");
+    let compiled = petra_deck::compile(&parsed).expect("extended v1 deck compiles");
+    assert_eq!(compiled.report_every, 200);
+    assert!(compiled
+        .observables
+        .contains(&petra_deck::CompiledObservable::RateSpectra));
 }

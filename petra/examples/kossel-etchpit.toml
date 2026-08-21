@@ -108,3 +108,24 @@ set = "occupied"
 steps = 8000
 seed = 42
 report_every = 1000
+
+[observables]
+report_every = 200
+
+[[observables.series]]
+kind = "state_counts"
+
+[[observables.series]]
+kind = "event_rates"
+
+[[observables.series]]
+kind = "rate_spectra"
+
+[[observables.series]]
+kind = "cluster_sizes"
+state = "M_site.empty"
+
+[[observables.series]]
+kind = "surface_area"
+state = "M_site.occupied"
+axis = 2

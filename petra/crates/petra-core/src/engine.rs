@@ -668,6 +668,13 @@ impl Engine {
         counts
     }
 
+    /// Cached positive CTMC propensities by site, in deterministic site and
+    /// rule order. Reporting code may inspect this at sample cadence; it must
+    /// never mutate or reorder the engine's selection tables.
+    pub fn site_event_rates(&self) -> &[Vec<(u16, f64)>] {
+        &self.site_events
+    }
+
     /// Differential-testing oracle (design doc §5.2 `--paranoid`):
     /// re-enumerate every site from scratch and compare totals with the
     /// incrementally maintained tree.

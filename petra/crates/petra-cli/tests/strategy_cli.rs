@@ -48,3 +48,44 @@ fn cli_rejects_batch_trajectory_output_for_discrete_strategies() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("batch trajectory format"), "{stderr}");
 }
+
+#[test]
+fn cli_parallel_ensemble_writes_distribution_ci_and_declared_observables() {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let source = repo.join("petra/examples/conformance/ising.toml");
+    let root = std::env::temp_dir().join(format!("petra-cli-ensemble-{}", std::process::id()));
+    let deck = root.join("ising.toml");
+    let out = root.join("out");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("temp dir");
+    let text = std::fs::read_to_string(source).expect("fixture");
+    std::fs::write(&deck, text).expect("temp deck");
+    let output = Command::new(env!("CARGO_BIN_EXE_petra"))
+        .arg(&deck)
+        .arg("--steps")
+        .arg("20")
+        .arg("--ensemble")
+        .arg("4")
+        .arg("--out")
+        .arg(&out)
+        .output()
+        .expect("petra CLI runs");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary = std::fs::read_to_string(out.join("ensemble-summary.csv"))
+        .expect("distribution summary exists");
+    assert!(
+        summary.starts_with("state,mean,ci95_low,ci95_high,distribution\n"),
+        "{summary}"
+    );
+    let observables = std::fs::read_to_string(out.join("observables.csv"))
+        .expect("declarative observable output exists");
+    assert!(
+        observables.starts_with("replica,seed,step,time,kind,index,value\n"),
+        "{observables}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
