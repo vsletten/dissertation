@@ -110,3 +110,9 @@ Deviations get a `DEVIATION:` note; details live in the card.*
   commit `a2edf91`: `factory/hermes/cron/queue-drain.md` now points to
   POLICY v7, and service activation moved to
   `factory/services/activate.sh` for cloud-safe installation.
+- 2026-08-20 — fable — Victor recovered his complete 1999 dissertation
+  archive from the NAS (thesis LaTeX, the original C-language model,
+  88 timestamped MC campaign runs, 86 Gaussian B3LYP logs incl.
+  oxalate/ligand systems). New card A8-thesis-archive-intake (READY,
+  workstation): catalog, curate golden data into legacy/, build the
+  1999-vs-2026 DFT barrier ledger.
