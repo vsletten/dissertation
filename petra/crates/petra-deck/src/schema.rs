@@ -367,6 +367,16 @@ fn validate_v2_surfaces(deck: &DeckV2) -> Result<(), String> {
             .iter()
             .chain(rule.branches.iter().flat_map(|branch| &branch.effects))
             .collect();
+        if deck.execution.strategy == "synchronous"
+            && (rule.branches.len() > 1
+                || effects
+                    .iter()
+                    .any(|effect| effect.select_mode.as_deref() == Some("one")))
+        {
+            return Err(format!(
+                "{ctx}: synchronous rules are draw-free and cannot use weighted branches or select_mode = 'one'"
+            ));
+        }
         let source = rule.center.is_none();
         if source && effects.iter().any(|effect| effect.target != "source") {
             return Err(format!(

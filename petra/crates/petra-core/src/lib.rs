@@ -13,7 +13,8 @@ pub mod reaction;
 pub mod state;
 
 pub use engine::{
-    ApplyHandle, Engine, ExactCtmc, Fired, StepCtx, StepOutcome, Stop, UpdateStrategy,
+    ApplyHandle, AsyncMetropolis, DiscreteTimePCA, Engine, ExactCtmc, Fired, StepCtx, StepOutcome,
+    Stop, Strategy, SynchronousCA, UpdateStrategy,
 };
 pub use lattice::{Boundary, Lattice, SiteId};
 pub use state::{StateId, StateSet};

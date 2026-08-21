@@ -11,9 +11,9 @@ updated through the same PRs that do the work.*
 | M0 — scoping + in-flight landed | ✅ done 2026-08-18 | Omnibus + 3 scoping docs merged; Phase-1 si-neutral barrier landed (ΔG‡ 27.0 kcal/mol vs X&L ~29) |
 | M1 — B1 schema RFC reviewed | ✅ done 2026-08-19 | RFC-001 merged (PR #25); B2 unblocked |
 | M2 — B2 refactor, parity green | ✅ done 2026-08-20 | B2 merged in PR #33; schema v2 + bitwise-parity gates green |
-| M3 — B3 conformance decks green | ready | B2 done; Conway / Ising / SIR with analytic gates |
+| M3 — B3 conformance decks green | ✅ done 2026-08-21 | Conway / Ising / SIR analytic gates green; all four update strategies executable |
 | M4 — B4 ensembles + observables | ready | B2 done; design against A5-Phase-0 needs |
-| M5 — first science on new platform | blocked (M3/M4) | A5 aging study ∥ C2 corrosion deck ∥ D2 rates campaign |
+| M5 — first science on new platform | blocked (M4) | M3 done; A5 aging study ∥ C2 corrosion deck ∥ D2 rates campaign |
 | M6 — first external deliverables | blocked (M5) | tool paper, corrosion statistics, KIDA submissions, field-lab mechanism paper |
 
 ## Cards
@@ -37,14 +37,15 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | ready | — |
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
 | [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: ORCA install (Victor) + A1b | A1b |
-| [B3-conformance-decks](cards/B3-conformance-decks.md) | B | P1 | any | ready | B2 ✅ |
+| [B3-conformance-decks](cards/B3-conformance-decks.md) | B | P1 | any | done | B2 ✅ |
 | [B4-ensembles-observables](cards/B4-ensembles-observables.md) | B | P1 | any | ready | B2 ✅ |
 | [B5-execution-schedule](cards/B5-execution-schedule.md) | B | P1 | any | ready | B2 ✅ |
-| [C2-corrosion-deck](cards/C2-corrosion-deck.md) | C | P2 | any | blocked: B3 | B3 |
-| [D3-ice-mantle-deck](cards/D3-ice-mantle-deck.md) | D | P2 | any | blocked: B3 + D2a | B3, D2a |
+| [C2-corrosion-deck](cards/C2-corrosion-deck.md) | C | P2 | any | ready | B3 ✅ |
+| [D3-ice-mantle-deck](cards/D3-ice-mantle-deck.md) | D | P2 | any | ready | B3 ✅, D2a ✅ |
 | [A5p0-aging-observables](cards/A5p0-aging-observables.md) | A | P1 | any | blocked: B4 | B4 |
 
-**Done** (acceptance verified on main): QI1-driver-enforced-etiquette,
+**Done** (acceptance verified on main): B3-conformance-decks,
+QI1-driver-enforced-etiquette,
 QI3-fenwick-total-cancellation (PR #52), B1-schema-rfc (PR #25),
 B2-engine-refactor (PR #33),
 D2a-astro-rate-reproduction (PR #31 — verdict: GO gas-phase /

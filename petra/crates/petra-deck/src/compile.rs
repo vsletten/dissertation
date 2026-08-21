@@ -9,7 +9,7 @@ use petra_core::lattice::{Boundary, Lattice};
 use petra_core::rate::{RateExpr, R_KCAL};
 use petra_core::reaction::{
     count_matches, Branch, Effect, EffectOp, EffectTarget, Guard, Modifier, ModifierKind,
-    NeighborSelect, Reaction,
+    NeighborSelect, Reaction, RuleValue,
 };
 use petra_core::state::{StateId, StateSet};
 use petra_core::Engine;
@@ -32,6 +32,7 @@ fn err<T>(msg: impl Into<String>) -> Result<T, CompileError> {
 pub struct CompiledDeck {
     pub name: String,
     pub unit_cell: UnitCell,
+    simple_grid: bool,
     pub kinds_per_template: Vec<KindId>,
     pub kind_names: Vec<String>,
     /// `"Kind.state"`, indexed by `StateId`.
@@ -53,7 +54,29 @@ pub struct CompiledDeck {
     pub boundary: [Boundary; 3],
     pub steps: u64,
     pub seed: u64,
+    pub n_replicas: u64,
+    pub seed_policy: SeedPolicy,
     pub report_every: u64,
+    pub strategy: ExecutionStrategy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ExecutionStrategy {
+    Ctmc,
+    Synchronous,
+    Metropolis { temperature: f64 },
+    Pca,
+}
+
+impl ExecutionStrategy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ctmc => "ctmc",
+            Self::Synchronous => "synchronous",
+            Self::Metropolis { .. } => "metropolis",
+            Self::Pca => "pca",
+        }
+    }
 }
 
 /// One compiled build-time pass (design doc §3.1 fill rules): sweep all
@@ -92,13 +115,53 @@ pub struct CompiledDefect {
     pub cap: Option<f64>,
 }
 
+fn simplify_grid_adjacency(lattice: &mut Lattice) {
+    let mut offsets = Vec::with_capacity(lattice.len() + 1);
+    let mut adjacency = Vec::new();
+    let mut labels = Vec::new();
+    offsets.push(0);
+    for site in 0..lattice.len() {
+        let start = lattice.adj_off[site] as usize;
+        let end = lattice.adj_off[site + 1] as usize;
+        for index in start..end {
+            let neighbor = lattice.adj[index];
+            if neighbor == site as u32 || adjacency[offsets[site] as usize..].contains(&neighbor) {
+                continue;
+            }
+            adjacency.push(neighbor);
+            labels.push(lattice.adj_label[index]);
+        }
+        offsets.push(adjacency.len() as u32);
+    }
+    lattice.adj_off = offsets;
+    lattice.adj = adjacency;
+    lattice.adj_label = labels;
+}
+
 impl CompiledDeck {
+    /// Construct the update strategy declared by `[execution]`.
+    pub fn strategy(&self) -> petra_core::Strategy {
+        match self.strategy {
+            ExecutionStrategy::Ctmc => petra_core::Strategy::ExactCtmc(petra_core::ExactCtmc),
+            ExecutionStrategy::Synchronous => {
+                petra_core::Strategy::Synchronous(petra_core::SynchronousCA)
+            }
+            ExecutionStrategy::Metropolis { temperature } => {
+                petra_core::Strategy::Metropolis(petra_core::AsyncMetropolis::new(temperature))
+            }
+            ExecutionStrategy::Pca => petra_core::Strategy::Pca(petra_core::DiscreteTimePCA),
+        }
+    }
+
     /// Instantiate the lattice (uniform per-kind fill), run the init
     /// passes, compute defect strain fields, and build the engine.
     pub fn build_engine(&self, seed_override: Option<u64>) -> Result<Engine, CompileError> {
         let seed = seed_override.unwrap_or(self.seed);
         let initial = self.initial_per_template.clone();
         let mut lattice = Lattice::build(&self.unit_cell, self.dims, self.boundary, |t| initial[t]);
+        if self.simple_grid {
+            simplify_grid_adjacency(&mut lattice);
+        }
         let mut kinds: Vec<KindId> = lattice
             .template_index
             .iter()
@@ -363,15 +426,59 @@ fn splitmix64(mut x: u64) -> u64 {
     z ^ (z >> 31)
 }
 
-pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
-    if deck.structure_kind != StructureKind::Cell {
-        return err(
-            "grid structures parse in schema v2 but compile with B3's conformance strategies",
-        );
+fn compile_boundary(values: &[String]) -> Result<[Boundary; 3], CompileError> {
+    let mut boundary = [Boundary::Periodic; 3];
+    for (axis, value) in values.iter().enumerate() {
+        boundary[axis] = match value.as_str() {
+            "periodic" => Boundary::Periodic,
+            "open" => Boundary::Open,
+            "fixed" => Boundary::Fixed,
+            other => return err(format!("unknown boundary '{other}'")),
+        };
     }
-    if deck.execution.strategy != "ctmc" {
+    Ok(boundary)
+}
+
+fn grid_offsets(family: &str, neighborhood: Option<&str>) -> Vec<[i32; 3]> {
+    match (family, neighborhood) {
+        ("square", Some("von_neumann")) => {
+            vec![[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]]
+        }
+        ("square", Some("moore")) => (-1..=1)
+            .flat_map(|a| (-1..=1).map(move |b| [a, b, 0]))
+            .filter(|offset| *offset != [0, 0, 0])
+            .collect(),
+        ("hex", None) => vec![
+            [1, 0, 0],
+            [-1, 0, 0],
+            [0, 1, 0],
+            [0, -1, 0],
+            [1, -1, 0],
+            [-1, 1, 0],
+        ],
+        ("cubic", Some("von_neumann")) => vec![
+            [1, 0, 0],
+            [-1, 0, 0],
+            [0, 1, 0],
+            [0, -1, 0],
+            [0, 0, 1],
+            [0, 0, -1],
+        ],
+        ("cubic", Some("moore")) => (-1..=1)
+            .flat_map(|a| (-1..=1).flat_map(move |b| (-1..=1).map(move |c| [a, b, c])))
+            .filter(|offset| *offset != [0, 0, 0])
+            .collect(),
+        _ => unreachable!("grid family and neighborhood validated during deserialization"),
+    }
+}
+
+pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
+    if !matches!(
+        deck.execution.strategy.as_str(),
+        "ctmc" | "synchronous" | "metropolis" | "pca"
+    ) {
         return err(format!(
-            "strategy '{}' is not implemented in B2 (only 'ctmc' is available)",
+            "strategy '{}' is not implemented",
             deck.execution.strategy
         ));
     }
@@ -457,82 +564,129 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
     }
     names.n_states = state_names.len();
 
-    // --- unit cell: geometry, sites, then bonds expanded onto both endpoints ---
-    let params = (
-        deck.cell.a,
-        deck.cell.b,
-        deck.cell.c,
-        deck.cell.alpha,
-        deck.cell.beta,
-        deck.cell.gamma,
-    );
-    let cell =
-        match (deck.cell.matrix, params) {
-            (Some(m), (None, None, None, None, None, None)) => Cell::from_matrix(m),
-            (None, (Some(a), Some(b), Some(c), Some(al), Some(be), Some(ga))) => {
-                Cell::from_params(a, b, c, al, be, ga)
+    // --- topology: explicit cells and grid sugar both lower to one UnitCell ---
+    let (unit_cell, kinds_per_template, initial_per_template, dims, boundary) = match deck
+        .structure_kind
+    {
+        StructureKind::Cell => {
+            let params = (
+                deck.cell.a,
+                deck.cell.b,
+                deck.cell.c,
+                deck.cell.alpha,
+                deck.cell.beta,
+                deck.cell.gamma,
+            );
+            let cell = match (deck.cell.matrix, params) {
+                    (Some(m), (None, None, None, None, None, None)) => Cell::from_matrix(m),
+                    (None, (Some(a), Some(b), Some(c), Some(al), Some(be), Some(ga))) => {
+                        Cell::from_params(a, b, c, al, be, ga)
+                    }
+                    _ => return err(
+                        "cell geometry must be either all of a,b,c,alpha,beta,gamma or a matrix, not a mix",
+                    ),
+                };
+            let mut tsites = Vec::new();
+            let mut kinds_per_template = Vec::new();
+            let mut initial_per_template = Vec::new();
+            for (si, s) in deck.cell.sites.iter().enumerate() {
+                let ki = *names.kind_ids.get(&s.kind).ok_or_else(|| {
+                    CompileError(format!("cell site has unknown kind '{}'", s.kind))
+                })?;
+                kinds_per_template.push(KindId(ki));
+                initial_per_template.push(initial_by_kind[ki as usize]);
+                let frac = match (s.frac, s.cart) {
+                    (Some(f), None) => f,
+                    (None, Some(c)) => cell
+                        .to_fractional(c)
+                        .map_err(|e| CompileError(format!("cell site {si}: {e}")))?,
+                    _ => return err(format!("cell site {si}: exactly one of frac/cart")),
+                };
+                tsites.push(TemplateSite {
+                    kind: KindId(ki),
+                    frac,
+                    bonds: Vec::new(),
+                });
             }
-            _ => return err(
-                "cell geometry must be either all of a,b,c,alpha,beta,gamma or a matrix, not a mix",
-            ),
-        };
-    let mut tsites = Vec::new();
-    let mut kinds_per_template = Vec::new();
-    let mut initial_per_template = Vec::new();
-    for (si, s) in deck.cell.sites.iter().enumerate() {
-        let ki = *names
-            .kind_ids
-            .get(&s.kind)
-            .ok_or_else(|| CompileError(format!("cell site has unknown kind '{}'", s.kind)))?;
-        kinds_per_template.push(KindId(ki));
-        initial_per_template.push(initial_by_kind[ki as usize]);
-        let frac = match (s.frac, s.cart) {
-            (Some(f), None) => f,
-            (None, Some(c)) => cell
-                .to_fractional(c)
-                .map_err(|e| CompileError(format!("cell site {si}: {e}")))?,
-            _ => return err(format!("cell site {si}: exactly one of frac/cart")),
-        };
-        tsites.push(TemplateSite {
-            kind: KindId(ki),
-            frac,
-            bonds: Vec::new(),
-        });
-    }
-    for b in &deck.cell.bonds {
-        if b.i >= tsites.len() || b.j >= tsites.len() {
-            return err(format!("bond ({}, {}) references a missing site", b.i, b.j));
-        }
-        if b.i == b.j && b.dcell == [0, 0, 0] {
-            return err(format!("site {} bonded to itself in the same cell", b.i));
-        }
-        let label = match &b.label {
-            None => NO_LABEL,
-            Some(l) => {
-                let next = names.labels.len() as u16;
-                *names.labels.entry(l.clone()).or_insert(next)
+            for b in &deck.cell.bonds {
+                if b.i >= tsites.len() || b.j >= tsites.len() {
+                    return err(format!("bond ({}, {}) references a missing site", b.i, b.j));
+                }
+                if b.i == b.j && b.dcell == [0, 0, 0] {
+                    return err(format!("site {} bonded to itself in the same cell", b.i));
+                }
+                let label = match &b.label {
+                    None => NO_LABEL,
+                    Some(l) => {
+                        let next = names.labels.len() as u16;
+                        *names.labels.entry(l.clone()).or_insert(next)
+                    }
+                };
+                let fwd = TemplateBond {
+                    to: b.j,
+                    dcell: b.dcell,
+                    label,
+                };
+                let rev = TemplateBond {
+                    to: b.i,
+                    dcell: [-b.dcell[0], -b.dcell[1], -b.dcell[2]],
+                    label,
+                };
+                if !tsites[b.i].bonds.contains(&fwd) {
+                    tsites[b.i].bonds.push(fwd);
+                }
+                if !tsites[b.j].bonds.contains(&rev) {
+                    tsites[b.j].bonds.push(rev);
+                }
             }
-        };
-        let fwd = TemplateBond {
-            to: b.j,
-            dcell: b.dcell,
-            label,
-        };
-        let rev = TemplateBond {
-            to: b.i,
-            dcell: [-b.dcell[0], -b.dcell[1], -b.dcell[2]],
-            label,
-        };
-        if !tsites[b.i].bonds.contains(&fwd) {
-            tsites[b.i].bonds.push(fwd);
+            (
+                UnitCell {
+                    cell,
+                    sites: tsites,
+                },
+                kinds_per_template,
+                initial_per_template,
+                deck.lattice.dims,
+                compile_boundary(&deck.lattice.boundary)?,
+            )
         }
-        if !tsites[b.j].bonds.contains(&rev) {
-            tsites[b.j].bonds.push(rev);
+        StructureKind::Grid => {
+            let grid = deck.grid.as_ref().expect("validated grid structure");
+            let kind = *names.kind_ids.get(&grid.default_kind).ok_or_else(|| {
+                CompileError(format!(
+                    "grid default_kind names unknown kind '{}'",
+                    grid.default_kind
+                ))
+            })?;
+            let mut dims = [1, 1, 1];
+            dims[..grid.dims.len()].copy_from_slice(&grid.dims);
+            let mut boundary_names = vec!["periodic".to_string(); 3];
+            boundary_names[..grid.boundary.len()].clone_from_slice(&grid.boundary);
+
+            let offsets = grid_offsets(&grid.family, grid.neighborhood.as_deref());
+            let bonds = offsets
+                .into_iter()
+                .map(|dcell| TemplateBond {
+                    to: 0,
+                    dcell,
+                    label: NO_LABEL,
+                })
+                .collect();
+            (
+                UnitCell {
+                    cell: Cell::from_params(1.0, 1.0, 1.0, 90.0, 90.0, 90.0),
+                    sites: vec![TemplateSite {
+                        kind: KindId(kind),
+                        frac: [0.0; 3],
+                        bonds,
+                    }],
+                },
+                vec![KindId(kind)],
+                vec![initial_by_kind[kind as usize]],
+                dims,
+                compile_boundary(&boundary_names)?,
+            )
         }
-    }
-    let unit_cell = UnitCell {
-        cell,
-        sites: tsites,
     };
     unit_cell
         .check_reciprocity()
@@ -544,17 +698,6 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         return err("temperature must be positive");
     }
     let rt = R_KCAL * temperature;
-
-    // --- boundary ---
-    let mut boundary = [Boundary::Periodic; 3];
-    for (i, b) in deck.lattice.boundary.iter().enumerate() {
-        boundary[i] = match b.as_str() {
-            "periodic" => Boundary::Periodic,
-            "open" => Boundary::Open,
-            "fixed" => Boundary::Fixed,
-            other => return err(format!("unknown boundary '{other}'")),
-        };
-    }
 
     // --- reactions ---
     let mut reactions = Vec::new();
@@ -580,13 +723,7 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
             });
         }
 
-        let rate = compile_rate(
-            r.rate
-                .as_ref()
-                .ok_or_else(|| CompileError(format!("{ctx}: CTMC rule requires rate")))?,
-            eunit,
-            &ctx,
-        )?;
+        let (rate, value) = compile_rate(r.rate.as_ref(), &deck.execution.strategy, eunit, &ctx)?;
 
         // Fold solution coupling into ln_thermo (design doc §4):
         // each consumed species contributes ln(activity) + Δμ/RT.
@@ -663,6 +800,7 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
             center_states,
             guards,
             rate,
+            value,
             ln_thermo,
             strain_scale: r.strain.as_ref().map(|s| s.scale).unwrap_or(0.0),
             modifiers,
@@ -723,7 +861,6 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         });
     }
 
-    let dims = deck.lattice.dims;
     if dims.contains(&0) {
         return err("lattice dims must be nonzero");
     }
@@ -834,6 +971,7 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
     Ok(CompiledDeck {
         name: deck.deck.name.clone(),
         unit_cell,
+        simple_grid: deck.structure_kind == StructureKind::Grid,
         kinds_per_template,
         kind_names,
         state_names,
@@ -850,7 +988,23 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         boundary,
         steps: deck.execution.stop.steps.unwrap_or(0),
         seed: deck.execution.ensemble.seed,
+        n_replicas: deck.execution.ensemble.n_replicas,
+        seed_policy: deck.execution.ensemble.seed_policy,
         report_every: deck.observables.report_every,
+        strategy: match deck.execution.strategy.as_str() {
+            "ctmc" => ExecutionStrategy::Ctmc,
+            "synchronous" => ExecutionStrategy::Synchronous,
+            "metropolis" => ExecutionStrategy::Metropolis {
+                temperature: deck
+                    .execution
+                    .metropolis
+                    .as_ref()
+                    .and_then(|spec| spec.temperature)
+                    .unwrap_or(temperature),
+            },
+            "pca" => ExecutionStrategy::Pca,
+            _ => unreachable!("strategy checked before compilation"),
+        },
     })
 }
 
@@ -963,27 +1117,56 @@ fn compile_selector(
     })
 }
 
-fn compile_rate(r: &RateSpec, eunit: f64, ctx: &str) -> Result<RateExpr, CompileError> {
-    match (
+fn compile_rate(
+    rate: Option<&RateSpec>,
+    strategy: &str,
+    eunit: f64,
+    ctx: &str,
+) -> Result<(RateExpr, RuleValue), CompileError> {
+    if strategy == "synchronous" {
+        return Ok((RateExpr::Constant { k: 0.0 }, RuleValue::Deterministic));
+    }
+    if strategy == "metropolis" {
+        let delta = rate
+            .and_then(|rate| rate.energy.as_ref())
+            .ok_or_else(|| CompileError(format!("{ctx}: Metropolis rule requires energy.delta")))?
+            .delta
+            * eunit;
+        return Ok((RateExpr::Constant { k: 0.0 }, RuleValue::Energy(delta)));
+    }
+    if strategy == "pca" {
+        let probability = rate
+            .and_then(|rate| rate.probability)
+            .ok_or_else(|| CompileError(format!("{ctx}: PCA rule requires probability")))?;
+        return Ok((
+            RateExpr::Constant { k: 0.0 },
+            RuleValue::Probability(probability),
+        ));
+    }
+    let r = rate.ok_or_else(|| CompileError(format!("{ctx}: CTMC rule requires rate")))?;
+    let rate = match (
         r.constant,
         &r.arrhenius,
         &r.eyring,
         &r.energy,
         r.probability,
     ) {
-        (Some(k), None, None, None, None) => Ok(RateExpr::Constant { k }),
-        (None, Some(a), None, None, None) => Ok(RateExpr::Arrhenius {
+        (Some(k), None, None, None, None) => RateExpr::Constant { k },
+        (None, Some(a), None, None, None) => RateExpr::Arrhenius {
             prefactor: a.prefactor,
             ea: a.ea * eunit,
-        }),
-        (None, None, Some(e), None, None) => Ok(RateExpr::Eyring {
+        },
+        (None, None, Some(e), None, None) => RateExpr::Eyring {
             dh: e.dh * eunit,
             ds: e.ds * eunit,
-        }),
-        _ => err(format!(
-            "{ctx}: CTMC rate needs exactly one of constant/arrhenius/eyring"
-        )),
-    }
+        },
+        _ => {
+            return err(format!(
+                "{ctx}: CTMC rate needs exactly one of constant/arrhenius/eyring"
+            ))
+        }
+    };
+    Ok((rate, RuleValue::Ctmc))
 }
 
 /// Resolve one state name within a specific kind (plain or "Kind."-prefixed).

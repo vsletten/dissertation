@@ -269,7 +269,7 @@ fn unknown_schema_version_is_rejected() {
 }
 
 #[test]
-fn non_ctmc_strategy_is_rejected_in_b2() {
+fn metropolis_strategy_compiles_in_b3() {
     let text = V2
         .replace("strategy = \"ctmc\"", "strategy = \"metropolis\"")
         .replace(
@@ -277,11 +277,11 @@ fn non_ctmc_strategy_is_rejected_in_b2() {
             "rate = { energy = { delta = 2.0 } }",
         );
     let parsed: petra_deck::DeckFile = toml::from_str(&text).expect("future strategy parses");
-    let error = petra_deck::compile(&parsed).expect_err("B2 implements only CTMC");
-    assert!(
-        error.to_string().contains("not implemented in B2"),
-        "{error}"
-    );
+    let deck = petra_deck::compile(&parsed).expect("Metropolis compiles");
+    assert!(matches!(
+        deck.strategy,
+        petra_deck::ExecutionStrategy::Metropolis { temperature: 300.0 }
+    ));
 }
 
 #[test]
@@ -321,19 +321,19 @@ fn execution_parameter_blocks_validate_at_parse_time() {
 }
 
 #[test]
-fn future_strategy_rate_surfaces_parse_then_compile_reject() {
+fn b3_strategy_rate_surfaces_parse_and_compile() {
     let synchronous = V2
         .replace("strategy = \"ctmc\"", "strategy = \"synchronous\"")
         .replace("rate = { constant = 2.0 }\n", "truth = \"and\"\n");
     let parsed: petra_deck::DeckFile =
         toml::from_str(&synchronous).expect("synchronous truth surface parses");
-    assert!(petra_deck::compile(&parsed).is_err());
+    assert!(petra_deck::compile(&parsed).is_ok());
 
     let pca = V2
         .replace("strategy = \"ctmc\"", "strategy = \"pca\"")
         .replace("rate = { constant = 2.0 }", "rate = { probability = 0.25 }");
     let parsed: petra_deck::DeckFile = toml::from_str(&pca).expect("PCA probability parses");
-    assert!(petra_deck::compile(&parsed).is_err());
+    assert!(petra_deck::compile(&parsed).is_ok());
 }
 
 #[test]
@@ -357,7 +357,7 @@ fn rfc_surfaces_fail_closed_at_parse_time() {
 }
 
 #[test]
-fn grid_v2_parses_but_waits_for_b3_compilation() {
+fn grid_v2_compiles_to_the_shared_lattice_representation() {
     let text = r#"
 [deck]
 name = "grid-parse"
@@ -385,8 +385,14 @@ steps = 10
 "#;
     let parsed: petra_deck::DeckFile = toml::from_str(text).expect("grid schema parses");
     assert_eq!(parsed.structure_kind, StructureKind::Grid);
-    let error = petra_deck::compile(&parsed).expect_err("grid compile is B3");
-    assert!(error.to_string().contains("B3"), "{error}");
+    let deck = petra_deck::compile(&parsed).expect("grid compiles in B3");
+    let engine = deck.build_engine(Some(1)).expect("grid lattice builds");
+    assert_eq!(engine.lattice.dims, [8, 8, 1]);
+    assert!(engine
+        .lattice
+        .adj_off
+        .windows(2)
+        .all(|offset| offset[1] - offset[0] == 8));
 }
 
 struct PublicSeamCtmc;

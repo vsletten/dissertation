@@ -24,7 +24,12 @@ pub struct EventLogWriter<W: Write> {
 
 impl<W: Write> EventLogWriter<W> {
     /// Write the header line and return the writer.
-    pub fn new(mut out: W, deck: &CompiledDeck, seed: u64, n_sites: usize) -> std::io::Result<Self> {
+    pub fn new(
+        mut out: W,
+        deck: &CompiledDeck,
+        seed: u64,
+        n_sites: usize,
+    ) -> std::io::Result<Self> {
         let state_types: Vec<String> = deck
             .state_occupants
             .iter()
@@ -45,11 +50,7 @@ impl<W: Write> EventLogWriter<W> {
 
     /// Append the event the engine just applied (call after each
     /// successful `step`, before the next one).
-    pub fn record(
-        &mut self,
-        fired: &petra_core::Fired,
-        engine: &Engine,
-    ) -> std::io::Result<()> {
+    pub fn record(&mut self, fired: &petra_core::Fired, engine: &Engine) -> std::io::Result<()> {
         // Hand-formatted compact row — [step, time, rxn, [[site,old,new],..]]
         // — to keep 10^5-event logs cheap to write and parse.
         let mut line = format!("[{},{:.9e},{}", fired.step, fired.time, fired.reaction);
@@ -134,7 +135,7 @@ seed = 1
     /// Run the mini deck to exhaustion, log it, and verify the log replays
     /// forward to the final state and backward to the initial state.
     #[test]
-    fn log_replays_forward_and_backward()  {
+    fn log_replays_forward_and_backward() {
         let parsed: petra_deck::DeckFile = toml::from_str(MINI).unwrap();
         let deck = petra_deck::compile(&parsed).unwrap();
         let mut engine = deck.build_engine(Some(3)).unwrap();
@@ -158,8 +159,7 @@ seed = 1
         let mut replay = initial.clone();
         let mut events = Vec::new();
         for line in lines {
-            let row: (u64, f64, u16, Vec<(usize, u16, u16)>) =
-                serde_json::from_str(line).unwrap();
+            let row: (u64, f64, u16, Vec<(usize, u16, u16)>) = serde_json::from_str(line).unwrap();
             for &(site, old, new) in &row.3 {
                 assert_eq!(replay[site], old, "forward replay consistency");
                 replay[site] = new;

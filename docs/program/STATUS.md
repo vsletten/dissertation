@@ -4,6 +4,10 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-21 — hermes-laptop — B3 DONE: Petra now runs synchronous CA,
+  asynchronous Metropolis, and discrete-time PCA on schema-v2 grids; Conway,
+  Ising (`Tc=2.273230` vs `2.269185`), and SIR (`R0*=1.017094`) analytic gates
+  are green with CTMC bitwise parity preserved.
 - 2026-08-21 — omnibus supervisor — reconciled merged-main board drift:
   B2 and QI3 are done; B3, B4, and B5 are now ready after B2 PR #33.
 - 2026-08-20 — hermes x2 + fable — B2 DONE: petra engine behind the
