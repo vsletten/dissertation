@@ -208,6 +208,8 @@ set = "alive"
 
 [execution]
 strategy = "synchronous"
+[execution.synchronous]
+conflict_resolution = "first_match"
 [execution.stop]
 steps = 8
 "#;
@@ -294,6 +296,22 @@ fn synchronous_rules_reject_hidden_random_draws() {
     let error = toml::from_str::<petra_deck::DeckFile>(&random_branches)
         .expect_err("synchronous CA must remain draw-free");
     assert!(error.to_string().contains("draw-free"), "{error}");
+}
+
+#[test]
+fn synchronous_strategy_requires_explicit_first_match_conflict_resolution() {
+    let implicit = CONWAY.replace(
+        "[execution.synchronous]\nconflict_resolution = \"first_match\"\n",
+        "",
+    );
+    let error = toml::from_str::<petra_deck::DeckFile>(&implicit)
+        .expect_err("synchronous CA rule priority must be explicit");
+    assert!(
+        error
+            .to_string()
+            .contains("conflict_resolution = 'first_match'"),
+        "{error}"
+    );
 }
 
 const ISING: &str = r#"

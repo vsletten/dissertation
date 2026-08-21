@@ -276,6 +276,7 @@ strategy = "ctmc" | "synchronous" | "metropolis" | "pca"
 # strategy parameters (per-strategy; see §3)
 [execution.ctmc]        # nothing required — defaults are the current engine
 [execution.synchronous]
+conflict_resolution = "first_match" # required: first rule in definition order wins per site
 [execution.metropolis]
 temperature = 298.15   # defaults to [dynamics.thermo].temperature
 [execution.pca]
