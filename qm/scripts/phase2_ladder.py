@@ -49,7 +49,6 @@ from quarry.ts import (  # noqa: E402
     constrained_scan,
     find_ts,
     first_interior_maximum,
-    neb_ts_guess,
     quick_irc,
     scan_to_maximum,
     scan_ts_guess,
@@ -189,8 +188,14 @@ def proton_neb_guess(
             f"r(M-Ow)={r_prod_ow:.2f} A, r(M-Obr)={r_prod_br:.2f} A"
         )
         if r_prod_ow <= pin_a and r_prod_br >= 2.2:
-            log("  stage 2d: CI-NEB complex -> product (7 images)")
-            return neb_ts_guess(complex_opt, product, settings)
+            return crest_from_product(
+                product,
+                settings,
+                m_index=m_index,
+                br_index=br_index,
+                ow_index=ow_index,
+                pin_a=pin_a,
+            )
         log("  saved product is not hydrolyzed; extending M-Obr cleavage")
         product_path.replace(run_dir / "product.rejected-rollback.xyz")
         product_seed = product
@@ -304,8 +309,64 @@ def proton_neb_guess(
             "product rolled back toward reactants; expected M-Ow bonded "
             "and M-Obr broken"
         )
-    log("  stage 2d: CI-NEB complex -> product (7 images)")
-    return neb_ts_guess(complex_opt, product, settings)
+    return crest_from_product(
+        product,
+        settings,
+        m_index=m_index,
+        br_index=br_index,
+        ow_index=ow_index,
+        pin_a=pin_a,
+    )
+
+
+def crest_from_product(
+    product: Cluster,
+    settings: DftSettings,
+    *,
+    m_index: int,
+    br_index: int,
+    ow_index: int,
+    pin_a: float,
+) -> Cluster:
+    """TS guess: drive the broken bridge back inward to the interior crest.
+
+    A CI-NEB on a 60+-atom embedded cluster costs ~5 min per band step
+    (measured live: 80 MDMin steps = 7 h, still 0.43 eV/A) — but the
+    stage-2c rupture scan already proves an interior maximum exists
+    along r(M-Obr) with the new bonds held. Re-cross the col from the
+    product side with the same constrained-scan machinery; Sella and
+    the in-channel/verify gates then judge the crest exactly as they
+    would a NEB peak. neb_ts_guess remains the escaped-saddle fallback.
+    """
+    r_br = float(np.linalg.norm(product.coords[m_index] - product.coords[br_index]))
+    distances = [round(r, 2) for r in np.arange(r_br - 0.20, 1.99, -0.15)]
+    log("  stage 2d: reverse crest scan r(M-Obr) from the product side")
+    scan = scan_to_maximum(
+        product,
+        settings,
+        atom_i=m_index,
+        atom_j=br_index,
+        distances_a=distances,
+        fixed_distances=[
+            (m_index, ow_index, pin_a - 0.20),
+            (br_index, _nearest_h(product, br_index, ow_index), 0.98),
+        ],
+        extend_step_a=0.10,
+        min_distance_a=1.70,
+        progress=lambda r, e: (
+            log(f"  r(M-Obr)={r:.2f} A  E={e:.6f} Ha"),
+            trim_gpu_pool(),
+        )[0],
+    )
+    return scan_ts_guess(scan)
+
+
+def _nearest_h(cluster: Cluster, br_index: int, ow_index: int) -> int:
+    """The delivered proton: the water H closest to the bridge oxygen."""
+    return min(
+        (ow_index + 1, ow_index + 2),
+        key=lambda i: np.linalg.norm(cluster.coords[i] - cluster.coords[br_index]),
+    )
 
 
 def main() -> int:
