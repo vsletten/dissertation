@@ -8,7 +8,10 @@ import numpy as np
 import pytest
 
 from quarry.clusters import Cluster
+from quarry.pipeline import DftSettings
 from scripts import phase2_ladder as phase2
+
+CHEAP = DftSettings(xc="hf", basis="sto-3g")
 
 
 def geometry(name: str, m_ow: float, m_obr: float = 1.6) -> Cluster:
@@ -40,24 +43,33 @@ def test_channel_escape_guard_uses_metal_limit():
     assert rel is not None and "escaped" in rel
 
 
-def test_nearest_h_does_not_depend_on_water_atom_order():
+def test_nearest_h_tracks_transferred_attacker_proton():
     cluster = Cluster(
-        name="reordered-water",
-        symbols=["O", "H", "Si", "H", "O", "C", "H"],
+        name="transferred-proton",
+        symbols=["O", "H", "Si", "O", "H", "H"],
         coords=np.array(
             [
                 [0.0, 0.0, 0.0],  # bridge oxygen
-                [0.1, 0.0, 0.0],  # unrelated hydrogen, far from water oxygen
+                [0.1, 0.0, 0.0],  # unrelated cluster hydrogen
                 [3.0, 0.0, 0.0],
-                [1.1, 0.0, 0.0],  # delivered water hydrogen
-                [2.0, 0.0, 0.0],  # water oxygen
-                [0.2, 0.0, 0.0],  # non-H at the old positional candidate
-                [2.0, 0.9, 0.0],  # other water hydrogen
+                [2.0, 0.0, 0.0],  # appended attacker oxygen
+                [0.98, 0.0, 0.0],  # delivered attacker H, no longer O-H bonded
+                [2.0, 0.9, 0.0],  # other attacker H
             ]
         ),
     )
 
-    assert phase2._nearest_h(cluster, br_index=0, ow_index=4) == 3
+    assert phase2._nearest_h(cluster, br_index=0, ow_index=3) == 4
+
+
+def test_attacker_h_indices_fail_fast_if_builder_order_changes():
+    reordered = Cluster(
+        "reordered",
+        ["O", "Si", "O", "H", "O", "H"],
+        np.zeros((6, 3)),
+    )
+    with pytest.raises(ValueError, match="ordering changed"):
+        phase2._attacker_h_indices(reordered, 2)
 
 
 @pytest.mark.parametrize("family", ["oss", "osa", "oaa"])
@@ -94,6 +106,48 @@ def test_approach_parameters_cover_both_metals():
         assert min(p["distances"]) >= p["pin"]
 
 
+def test_reverse_crest_scan_has_a_target_for_short_product_bond(monkeypatch):
+    product = geometry("short-product", 1.8, m_obr=2.1)
+    captured = {}
+
+    def fake_scan(cluster, settings, *, distances_a, **kwargs):
+        captured["distances"] = distances_a
+        return [(distances_a[0], 0.0, cluster)]
+
+    monkeypatch.setattr(phase2, "scan_to_maximum", fake_scan)
+    monkeypatch.setattr(phase2, "scan_ts_guess", lambda scan: scan[0][2])
+
+    assert (
+        phase2.crest_from_product(
+            product,
+            CHEAP,
+            m_index=1,
+            br_index=0,
+            ow_index=2,
+            pin_a=1.9,
+        )
+        is product
+    )
+    assert captured["distances"] == [1.9]
+
+
+def test_approach_seed_requires_matching_signature(tmp_path):
+    seed = geometry("seed", 1.9)
+    template = geometry("template", 3.2)
+    signature = phase2.approach_seed_signature(
+        template, m_index=1, br_index=0, ow_index=2, pin_a=1.9
+    )
+    path = tmp_path / "approach_seed.xyz"
+    phase2.save_approach_seed(seed, path, signature)
+
+    loaded = phase2.load_compatible_approach_seed(path, template, signature)
+    assert loaded is not None
+    assert np.array_equal(loaded.coords, seed.coords)
+
+    incompatible = {**signature, "pin_a": 2.0}
+    assert phase2.load_compatible_approach_seed(path, template, incompatible) is None
+
+
 def test_resume_persists_proton_route_before_reentering_proton_stage(
     monkeypatch, tmp_path
 ):
@@ -109,7 +163,14 @@ def test_resume_persists_proton_route_before_reentering_proton_stage(
     )
     run_dir = tmp_path / "phase2" / "oss-neutral-n4-s2-b3lyp-def2-svp"
     run_dir.mkdir(parents=True)
-    phase2.save_xyz(geometry("approach-seed", 1.9), run_dir / "approach_seed.xyz")
+    complex_guess = geometry("complex", 3.0)
+    phase2.save_approach_seed(
+        geometry("approach-seed", 1.9),
+        run_dir / "approach_seed.xyz",
+        phase2.approach_seed_signature(
+            complex_guess, m_index=1, br_index=0, ow_index=2, pin_a=1.9
+        ),
+    )
 
     monkeypatch.setattr(
         sys,
@@ -124,7 +185,7 @@ def test_resume_persists_proton_route_before_reentering_proton_stage(
     )
     monkeypatch.setattr(phase2, "from_deck_cell", lambda *args, **kwargs: cc)
     monkeypatch.setattr(
-        phase2, "attack_complex", lambda cc, attacker: (geometry("complex", 3.0), 2)
+        phase2, "attack_complex", lambda cc, attacker: (complex_guess, 2)
     )
     monkeypatch.setattr(phase2, "optimize", lambda cluster, settings: cluster)
     monkeypatch.setattr(phase2, "trim_gpu_pool", lambda: None)
