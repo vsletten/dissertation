@@ -1,11 +1,11 @@
 # A1b-acid-mechanisms — si-acid / al-acid hydrolysis barriers
 
-- status: ready
+- status: active
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaign)
 - depends: — (TASK-164's scan-smoothness repair helps but is not required)
-- claimed-by: (see agents/A1b-acid-mechanisms branch)
+- claimed-by: hermes-workstation (see agents/A1b-acid-mechanisms branch)
 
 ## Objective
 Extend scripts/phase1_xiao_lasaga.py with the acid mechanism: H3O+ first
@@ -31,4 +31,5 @@ and the si-neutral 27.0 kcal/mol (acid must come out LOWER).
 - New clusters/driver code unit-tested; suite green; PR merged.
 
 ## Progress
+- 2026-08-21 00:07 PDT — Claimed atomically by `hermes-workstation`; pushed branch `agents/A1b-acid-mechanisms` from current `origin/main` `bd8af3b8b60d5b0df1e80498443090aa208316a9` and created the congruent dedicated worktree. GPU/resource preflight and code archaeology are next.
 - 2026-08-18 — card created (fable).
