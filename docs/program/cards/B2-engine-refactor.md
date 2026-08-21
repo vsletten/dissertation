@@ -1,6 +1,6 @@
 # B2-engine-refactor — petra core behind the UpdateStrategy trait
 
-- status: in-progress
+- status: done
 - track: B (platform)
 - priority: P0
 - machine: any
@@ -21,6 +21,9 @@ strategies in this card (that's B3) — this card is pure refactor.
 
 ## Progress
 
+- 2026-08-21 — omnibus supervisor — reconciled merged-main bookkeeping:
+  PR #33 merged the verified implementation on 2026-08-20; marked B2
+  done and unblocked B3, B4, and B5.
 - 2026-08-20 — hermes worker 1 (sol) — claimed; goldens captured BEFORE
   refactor; ExactCtmc behind the UpdateStrategy trait; v2 shim;
   splitmix64 vectors; 20k byte-identical parity; then adversarial

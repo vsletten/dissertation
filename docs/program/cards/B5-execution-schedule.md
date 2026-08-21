@@ -1,6 +1,6 @@
 # B5-execution-schedule — piecewise-isothermal T(t) schedules
 
-- status: blocked (B2)
+- status: ready
 - track: B (platform)
 - priority: P1
 - machine: any
@@ -31,5 +31,6 @@ unchanged within segments) plus implementation plus tests.
   (compat gate).
 
 ## Progress
+- 2026-08-21 — omnibus supervisor — unblocked after B2 merged in PR #33.
 - 2026-08-19 — card created (fable), motivated by the Ar-muscovite
   scoping doc.

@@ -1,6 +1,6 @@
 # B4-ensembles-observables — replicas + declarative observables
 
-- status: blocked (B2)
+- status: ready
 - track: B (platform)
 - priority: P1
 - machine: any
@@ -23,4 +23,5 @@ tracking will attach.
   (spectrum broadens as pits nucleate — qualitative gate + golden file).
 
 ## Progress
+- 2026-08-21 — omnibus supervisor — unblocked after B2 merged in PR #33.
 - 2026-08-18 — card created (fable).

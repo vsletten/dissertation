@@ -1,6 +1,6 @@
 # B3-conformance-decks — Conway, Ising, SIR with analytic gates
 
-- status: blocked (B2)
+- status: ready
 - track: B (platform)
 - priority: P1
 - machine: any
@@ -20,4 +20,5 @@ threshold vs mean-field. This is the "petra is general now" milestone.
   test, CTMC parity gates still green.
 
 ## Progress
+- 2026-08-21 — omnibus supervisor — unblocked after B2 merged in PR #33.
 - 2026-08-18 — card created (fable).
