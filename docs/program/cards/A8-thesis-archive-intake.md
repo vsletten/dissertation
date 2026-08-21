@@ -59,6 +59,12 @@ repo:
    energy. `energy_treatment` must state `electronic` or
    `electronic+ZPE`, and a row must not mix treatments. The Markdown
    ledger explains triplet assignments and every non-`ok` parse status.
+   Encode imaginary frequencies as semicolon-delimited numeric values
+   in ascending order, without unit suffixes (the column unit is cm⁻¹).
+   An empty field means no imaginary mode was found; `parse_status` is
+   one of `ok`, `unmatched`, `truncated`, `ambiguous`, or `parse_error`
+   and distinguishes a clean empty result from incomplete parsing.
+   Encode `normal_termination` as `true` or `false`.
    This is the 1999-vs-2026 comparison base for A3/A7 — same author,
    same reactions, 27 years of method development apart. Flag the
    oxalate/ligand systems distinctly: they are a candidate future track
@@ -85,14 +91,20 @@ repo:
     LC_ALL=C sort > /tmp/thesis-archive.after
   diff -u /tmp/thesis-archive.before /tmp/thesis-archive.after
   ```
+  The `SRC` value is the normative source on this workstation; the
+  `/tmp` output names are examples but must remain outside the archive.
+  Run both manifests on that workstation with GNU `find`, preserve the
+  raw `%T@` precision (no rounding), and compare them byte-for-byte;
+  cross-platform manifest equality is not an acceptance requirement.
   Store the manifest SHA-256 values and clean-diff result in
   `CATALOG.md`. Do not store snapshots under `$SRC`.
 - Repo big-output policy applies: nothing bulky/binary into git
   (no .chk, no .ps, no full 88-run trees). Curate hard.
 - Make parsing reproducible: commit the parser, record its invocation
-  and `python3 --version` in `CATALOG.md`, process each Gaussian Link1
-  section independently, select only normally terminated final jobs,
-  and report truncated/ambiguous logs instead of guessing assignments.
+  and the output of `python3 --version` and `find --version` in
+  `CATALOG.md`, process each Gaussian Link1 section independently,
+  select only normally terminated final jobs, and report
+  truncated/ambiguous logs instead of guessing assignments.
 - Record the successful thesis build command and versions of the TeX
   engine and `latexmk` in `CATALOG.md`. Prefer `latexmk -pdf` with the
   archive's existing engine assumptions; document any compatibility
