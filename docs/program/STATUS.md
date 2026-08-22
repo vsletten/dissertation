@@ -4,6 +4,13 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-22 — hermes-workstation — A1b partial closeout: validated one-water
+  al-acid sequential hydrolysis at ΔG‡(298) = 82.193 kJ/mol (19.645 kcal/mol),
+  with exact one-mode/quick-IRC gates for addition and cleavage. DEVIATION:
+  one-water si-acid is not an unconstrained protonated-bridge minimum in gas
+  phase or PCM, so the card is blocked on 3–6-water microsolvation rather than
+  publishing a constrained fake barrier. `qm/ACID_MECHANISMS.md`.
+
 - 2026-08-22 — omnibus supervisor — reconciled board metadata after merged
   work: C2 is ready after B3, A3 is ready for its remaining family campaigns,
   and the completed D2a card now has its missing PLAN.md row.
