@@ -41,6 +41,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [B4-ensembles-observables](cards/B4-ensembles-observables.md) | B | P1 | any | done | B2 ✅ |
 | [B5-execution-schedule](cards/B5-execution-schedule.md) | B | P1 | any | done | B2 ✅ |
 | [C2-corrosion-deck](cards/C2-corrosion-deck.md) | C | P2 | any | ready | B3 ✅ |
+| [D2a-astro-rate-reproduction](cards/D2a-astro-rate-reproduction.md) | D | P1 | workstation | done | — |
 | [D2b-explicit-surface-rates](cards/D2b-explicit-surface-rates.md) | D | P1 | workstation | ready | D2a ✅ |
 | [D3-ice-mantle-deck](cards/D3-ice-mantle-deck.md) | D | P2 | any | done | B3 ✅, D2a ✅ |
 | [D3b-co-hydrogenation-deck](cards/D3b-co-hydrogenation-deck.md) | D | P2 | any | blocked: D2b | D3 ✅, D2b |
@@ -58,8 +59,8 @@ B2-engine-refactor (PR #33),
 D2a-astro-rate-reproduction (PR #31 — verdict: GO gas-phase /
 NO-GO surface-LH), A7-kinetics-database (PR #27 — 36 minerals, 74
 mechanisms, validator green). **Active claim**: A1b-acid-mechanisms.
-A3-barrier-ladder remains `in-progress` in its card after platform PR
-#37; that merged PR auto-deleted its remote claim branch.
+A3-barrier-ladder is ready for its remaining family campaigns after its
+pilot result merged in PR #67.
 
 **Tracked elsewhere**: TASK-164 (scan-smoothness repair + al-neutral
 barrier) predates this board and lives in the mission-control queue —

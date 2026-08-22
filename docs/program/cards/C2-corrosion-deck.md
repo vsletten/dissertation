@@ -1,6 +1,6 @@
 # C2-corrosion-deck — minimal viable pitting-corrosion model
 
-- status: blocked (B3)
+- status: ready
 - track: C (corrosion)
 - priority: P2
 - machine: any (ensembles are CPU; big sweeps prefer workstation)
@@ -23,4 +23,6 @@ showcase proves the ORIGINAL strategy in a new domain).
   results doc in docs/program/results/.
 
 ## Progress
+- 2026-08-22 — omnibus supervisor — unblocked after B3 merged in PR #60;
+  PLAN.md already listed C2 as ready, so this reconciles the card metadata.
 - 2026-08-18 — card created (fable).
