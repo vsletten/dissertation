@@ -6,8 +6,10 @@ Runs one reaction end-to-end (HANDOFF.md §4, SURVEY.md §7.1):
     uv run python scripts/phase1_xiao_lasaga.py --reaction si-neutral
     uv run python scripts/phase1_xiao_lasaga.py --reaction si-acid --gpu
 
-Reactions: si-neutral / si-acid attack the (HO)3Si-O-Si(OH)3 dimer with
-H2O / H3O+; al-neutral / al-acid do the same to (HO)3Si-O-Al(OH)3^-.
+Reactions: si-neutral / al-neutral model water attack with concerted proton
+transfer.  si-acid / al-acid first model H3O+ protonation as a
+pre-equilibrated protonated bridge plus residual H2O, then compute only the
+water-attack / Si-Obr-cleavage barrier.
 Literature anchors: X&L 1994/96 got ~29 kcal/mol (neutral), ~24 (acid,
 H3O+), ~19 (base); modern AIMD puts Q1-ish Si-O-T hydrolysis at 54-71
 kJ/mol (SURVEY.md §7.2).
@@ -53,6 +55,7 @@ from quarry.clusters import (  # noqa: E402
     disilicate,
     hydrolysis_complex,
     hydronium,
+    protonated_bridge_complex,
     water,
 )
 from quarry.pipeline import (  # noqa: E402
@@ -98,6 +101,24 @@ BASIN_ENERGY_DELTA_MAX_KJ = 5.0
 REACTANT_BASIN = (False, True, False)
 ASSOCIATIVE_BASIN = (True, True, True)
 HYDROLYZED_BASIN = (True, False, True)
+ACID_REACTANT_BASIN = (False, True, True, 1, 2, 0)
+ACID_ASSOCIATIVE_BASIN = (True, True, True, 1, 2, 0)
+ACID_PRODUCT_BASIN = (True, False, True, 2, 1, 0)
+ACID_HYDROLYZED_BASINS = {
+    ACID_PRODUCT_BASIN,
+    (True, False, True, 1, 1, 1),
+}
+ACID_MECHANISM_VERSION = 2
+
+
+def reaction_run_slug(reaction: str, xc: str, basis: str, approach: str) -> str:
+    """Return a checkpoint namespace that cannot mix old and new acid mechanisms."""
+    reaction_slug = (
+        f"{reaction}-preprotonated-v{ACID_MECHANISM_VERSION}"
+        if reaction.endswith("-acid")
+        else reaction
+    )
+    return f"{reaction_slug}-{xc}-{basis}-{approach}"
 
 
 def log(msg: str) -> None:
@@ -117,6 +138,17 @@ def load_xyz(path: Path, template: Cluster) -> Cluster:
         [[float(x) for x in line.split()[1:4]] for line in lines[2 : 2 + n]]
     )
     return replace(template, coords=coords)
+
+
+def trim_gpu_pool() -> None:
+    """Return cached CuPy blocks between long campaign stages."""
+    try:
+        import cupy
+
+        cupy.get_default_memory_pool().free_all_blocks()
+        cupy.get_default_pinned_memory_pool().free_all_blocks()
+    except Exception:
+        pass
 
 
 def checkpointed(path: Path, template: Cluster, compute) -> Cluster:
@@ -142,11 +174,35 @@ def channel_escape_reason(ts_guess: Cluster, ts: Cluster, ow_index: int) -> str 
     return None
 
 
+def addition_channel_escape_reason(
+    ts_guess: Cluster,
+    ts: Cluster,
+    ow_index: int,
+    *,
+    acid_path: bool,
+) -> str | None:
+    """Gate addition saddles, allowing the measured loose acid-association crest."""
+    if not acid_path:
+        return channel_escape_reason(ts_guess, ts, ow_index)
+    r_guess = float(
+        np.linalg.norm(ts_guess.coords[SI_INDEX] - ts_guess.coords[ow_index])
+    )
+    r_ts = float(np.linalg.norm(ts.coords[SI_INDEX] - ts.coords[ow_index]))
+    if r_ts > 4.2:
+        return f"acid addition saddle r(Si-Ow)={r_ts:.2f} A is outside association"
+    if r_ts > r_guess + 0.5:
+        return f"acid addition saddle escaped by {r_ts - r_guess:.2f} A"
+    return None
+
+
 def hydrolysis_basin_signature(
-    cluster: Cluster, ow_index: int
+    cluster: Cluster,
+    ow_index: int,
+    *,
+    proton_indices: tuple[int, ...] | None = None,
 ) -> tuple[bool, bool, bool]:
     """Return (Si-Ow bonded, Si-Obr bonded, proton on Obr) for IRC gating."""
-    h_candidates = [ow_index + 1, ow_index + 2]
+    h_candidates = proton_indices or (ow_index + 1, ow_index + 2)
     return (
         float(np.linalg.norm(cluster.coords[SI_INDEX] - cluster.coords[ow_index]))
         < 2.3,
@@ -160,13 +216,170 @@ def hydrolysis_basin_signature(
     )
 
 
-def quick_irc_channel_reason(back: Cluster, fwd: Cluster, ow_index: int) -> str | None:
+def acid_basin_signature(
+    cluster: Cluster,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+) -> tuple[bool, bool, bool, int, int, int]:
+    """Return acid connectivity and unique proton assignments.
+
+    Each tracked acid proton is assigned to its nearest oxygen. Explicit
+    bridge, attacker, and terminal-framework counts prevent a missing or
+    dissociated proton from masquerading as a valid hydrolysis rotamer.
+    """
+    oxygen_indices = [
+        index for index, symbol in enumerate(cluster.symbols) if symbol == "O"
+    ]
+    assignments: list[int | None] = []
+    for proton_index in proton_indices:
+        nearest_oxygen = min(
+            oxygen_indices,
+            key=lambda oxygen_index: np.linalg.norm(
+                cluster.coords[oxygen_index] - cluster.coords[proton_index]
+            ),
+        )
+        distance = float(
+            np.linalg.norm(
+                cluster.coords[nearest_oxygen] - cluster.coords[proton_index]
+            )
+        )
+        assignments.append(nearest_oxygen if distance < 1.25 else None)
+    bridge_h_count = assignments.count(BR_INDEX)
+    water_h_count = assignments.count(ow_index)
+    framework_h_count = sum(
+        oxygen_index not in {None, BR_INDEX, ow_index} for oxygen_index in assignments
+    )
+    return (
+        float(np.linalg.norm(cluster.coords[SI_INDEX] - cluster.coords[ow_index]))
+        < 2.3,
+        float(np.linalg.norm(cluster.coords[SI_INDEX] - cluster.coords[BR_INDEX]))
+        < 2.3,
+        float(np.linalg.norm(cluster.coords[AL_INDEX] - cluster.coords[BR_INDEX]))
+        < 2.3,
+        bridge_h_count,
+        water_h_count,
+        framework_h_count,
+    )
+
+
+def protonated_bridge_reason(
+    cluster: Cluster,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+) -> str | None:
+    """Explain why an optimized acid reactant left its pre-equilibrium basin."""
+    signature = acid_basin_signature(cluster, ow_index, proton_indices)
+    if signature != ACID_REACTANT_BASIN:
+        return (
+            f"acid reactant basin {signature} != {ACID_REACTANT_BASIN} "
+            "(protonated intact bridge + H2O attacker)"
+        )
+    return None
+
+
+def acid_product_reason(
+    cluster: Cluster,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+) -> str | None:
+    """Explain why a putative acid product has wrong bonding/speciation."""
+    signature = acid_basin_signature(cluster, ow_index, proton_indices)
+    if signature != ACID_PRODUCT_BASIN:
+        return f"acid product basin {signature} != {ACID_PRODUCT_BASIN}"
+    return None
+
+
+def acid_quick_irc_channel_reason(
+    back: Cluster,
+    fwd: Cluster,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+) -> str | None:
+    """Require protonated reactant ↔ protonated hydrolysis product connectivity."""
+    actual = {
+        acid_basin_signature(back, ow_index, proton_indices),
+        acid_basin_signature(fwd, ow_index, proton_indices),
+    }
+    expected = {ACID_REACTANT_BASIN, ACID_PRODUCT_BASIN}
+    if actual != expected:
+        return f"acid quick-IRC basin signatures {sorted(actual)} != {sorted(expected)}"
+    return None
+
+
+def acid_quick_irc_addition_reason(
+    back: Cluster,
+    fwd: Cluster,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+) -> str | None:
+    """Require pre-protonated reactant ↔ associative-intermediate connectivity."""
+    actual = {
+        acid_basin_signature(back, ow_index, proton_indices),
+        acid_basin_signature(fwd, ow_index, proton_indices),
+    }
+    expected = {ACID_REACTANT_BASIN, ACID_ASSOCIATIVE_BASIN}
+    if actual != expected:
+        return (
+            f"acid addition IRC basin signatures {sorted(actual)} != {sorted(expected)}"
+        )
+    return None
+
+
+def acid_quick_irc_cleavage_reason(
+    back: Cluster,
+    fwd: Cluster,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+) -> str | None:
+    """Require associative intermediate ↔ protonated hydrolysis product."""
+    actual = [
+        acid_basin_signature(back, ow_index, proton_indices),
+        acid_basin_signature(fwd, ow_index, proton_indices),
+    ]
+    if actual.count(ACID_ASSOCIATIVE_BASIN) != 1:
+        return f"acid cleavage IRC lacks one associative endpoint: {sorted(actual)}"
+    hydrolyzed = [
+        signature for signature in actual if signature in ACID_HYDROLYZED_BASINS
+    ]
+    if len(hydrolyzed) != 1:
+        return f"acid cleavage IRC lacks one hydrolyzed endpoint: {sorted(actual)}"
+    return None
+
+
+def acid_endpoint_in_basins(
+    back: Cluster,
+    fwd: Cluster,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+    signatures: set[tuple[bool, bool, bool, int, int, int]],
+) -> Cluster:
+    """Return the unique acid quick-IRC endpoint in one accepted basin."""
+    matches = [
+        endpoint
+        for endpoint in (back, fwd)
+        if acid_basin_signature(endpoint, ow_index, proton_indices) in signatures
+    ]
+    if len(matches) != 1:
+        detail = f"acid basins {sorted(signatures)}, found {len(matches)}"
+        raise RuntimeError(f"expected one quick-IRC endpoint in {detail}")
+    return matches[0]
+
+
+def quick_irc_channel_reason(
+    back: Cluster,
+    fwd: Cluster,
+    ow_index: int,
+    *,
+    proton_indices: tuple[int, ...] | None = None,
+    reactant_basin: tuple[bool, bool, bool] = REACTANT_BASIN,
+) -> str | None:
     """Explain why quick-IRC did not connect reactant and hydrolyzed basins."""
     return quick_irc_basin_reason(
         back,
         fwd,
         ow_index,
-        expected={REACTANT_BASIN, HYDROLYZED_BASIN},
+        expected={reactant_basin, HYDROLYZED_BASIN},
+        proton_indices=proton_indices,
     )
 
 
@@ -176,11 +389,12 @@ def quick_irc_basin_reason(
     ow_index: int,
     *,
     expected: set[tuple[bool, bool, bool]],
+    proton_indices: tuple[int, ...] | None = None,
 ) -> str | None:
     """Explain why two quick-IRC endpoints missed the expected basins."""
     actual = {
-        hydrolysis_basin_signature(back, ow_index),
-        hydrolysis_basin_signature(fwd, ow_index),
+        hydrolysis_basin_signature(back, ow_index, proton_indices=proton_indices),
+        hydrolysis_basin_signature(fwd, ow_index, proton_indices=proton_indices),
     }
     if actual != expected:
         return f"quick-IRC basin signatures {sorted(actual)} != {sorted(expected)}"
@@ -232,6 +446,8 @@ def basin_equivalence_reason(
     *,
     candidate_energy_hartree: float,
     canonical_energy_hartree: float,
+    rmsd_max_a: float = BASIN_CORE_RMSD_MAX_A,
+    energy_delta_max_kj: float = BASIN_ENERGY_DELTA_MAX_KJ,
 ) -> str | None:
     """Require the same reactive-core conformer and near-identical energy."""
     from ase import Atoms
@@ -245,14 +461,14 @@ def basin_equivalence_reason(
     minimize_rotation_and_translation(candidate_core, canonical_core)
     delta = canonical_core.positions - candidate_core.positions
     rmsd = float(np.sqrt(np.mean(np.sum(delta**2, axis=1))))
-    if rmsd > BASIN_CORE_RMSD_MAX_A:
-        return f"reactive-core RMSD {rmsd:.3f} A exceeds {BASIN_CORE_RMSD_MAX_A:.3f} A"
+    if rmsd > rmsd_max_a:
+        return f"reactive-core RMSD {rmsd:.3f} A exceeds {rmsd_max_a:.3f} A"
     energy_delta = abs(candidate_energy_hartree - canonical_energy_hartree)
     energy_delta *= HARTREE_TO_KJ
-    if energy_delta > BASIN_ENERGY_DELTA_MAX_KJ:
+    if energy_delta > energy_delta_max_kj:
         return (
             f"energy delta {energy_delta:.3f} kJ/mol exceeds "
-            f"{BASIN_ENERGY_DELTA_MAX_KJ:.3f} kJ/mol"
+            f"{energy_delta_max_kj:.3f} kJ/mol"
         )
     return None
 
@@ -308,6 +524,37 @@ def thermo_result(freq: FrequencyResult, temperature: float) -> Thermo:
     )
 
 
+def minimum_frequency_reason(label: str, freq: FrequencyResult) -> str | None:
+    """Reject a thermochemistry reference that is not a true minimum."""
+    if freq.n_imaginary:
+        return f"{label} minimum has {freq.n_imaginary} imaginary modes"
+    return None
+
+
+def comparison_against_si_neutral(
+    reaction: str,
+    *,
+    acid_path: bool,
+    barrier_kj: float,
+) -> dict[str, float | bool]:
+    """Return only comparison claims supported by the available baseline."""
+    if reaction == "al-neutral":
+        al_easier = barrier_kj < SI_NEUTRAL_DG_KJ
+        return {
+            "si_neutral_dG_kj": SI_NEUTRAL_DG_KJ,
+            "si_neutral_dG_kcal": SI_NEUTRAL_DG_KCAL,
+            "al_easier_than_si": al_easier,
+            "xiao_lasaga_easier_si_o_al_ordering_confirmed": al_easier,
+        }
+    if acid_path:
+        return {
+            "si_neutral_dG_kj": SI_NEUTRAL_DG_KJ,
+            "si_neutral_dG_kcal": SI_NEUTRAL_DG_KCAL,
+            "acid_lower_than_si_neutral": barrier_kj < SI_NEUTRAL_DG_KJ,
+        }
+    return {}
+
+
 def write_sequential_run_status(
     run_dir: Path,
     status: str,
@@ -327,14 +574,30 @@ def write_sequential_run_status(
     temporary.replace(path)
 
 
-def begin_sequential_run(run_dir: Path) -> None:
-    """Quarantine prior final outputs before a new gated attempt starts."""
+def quarantine_final_outputs(run_dir: Path, *, reason: str) -> None:
+    """Move canonical outputs aside before a new or blocked gated attempt."""
     stamp = f"{time.strftime('%Y%m%dT%H%M%S')}-{time.time_ns()}"
     for path in (run_dir / "results.json", run_dir / "store.sqlite"):
         if path.exists():
-            quarantined = path.with_name(f"{path.stem}.superseded-{stamp}{path.suffix}")
+            quarantined = path.with_name(f"{path.stem}.{reason}-{stamp}{path.suffix}")
             path.replace(quarantined)
+
+
+def begin_gated_run(run_dir: Path) -> None:
+    """Quarantine prior final outputs before a new gated attempt starts."""
+    quarantine_final_outputs(run_dir, reason="superseded")
     write_sequential_run_status(run_dir, "running")
+
+
+def begin_sequential_run(run_dir: Path) -> None:
+    """Backward-compatible name for sequential closeout initialization."""
+    begin_gated_run(run_dir)
+
+
+def block_run(run_dir: Path, detail: str) -> None:
+    """Fail closed without leaving stale canonical success artifacts."""
+    quarantine_final_outputs(run_dir, reason="blocked")
+    write_sequential_run_status(run_dir, "blocked", detail=detail)
 
 
 def proton_neb_guess(
@@ -497,6 +760,203 @@ def proton_neb_guess(
     )
 
 
+def acid_neb_guess(
+    approach_seed: Cluster,
+    complex_opt: Cluster,
+    settings: DftSettings,
+    run_dir: Path,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+) -> Cluster:
+    """Build the protonated-bridge water-attack product and CI-NEB guess.
+
+    The acid reactant is already the post-H3O+ pre-equilibrium: one hydronium
+    proton sits on the bridge and its residual water attacks silicon.  Therefore
+    this path must never repeat the neutral mechanism's water-to-bridge proton
+    scan; it only approaches Si, cleaves Si-Obr, and refines that elementary
+    hydrolysis step.
+    """
+    product_path = run_dir / "product.xyz"
+    if product_path.exists():
+        product = load_xyz(product_path, approach_seed)
+        r_prod_ow = float(
+            np.linalg.norm(product.coords[SI_INDEX] - product.coords[ow_index])
+        )
+        r_prod_br = float(
+            np.linalg.norm(product.coords[SI_INDEX] - product.coords[BR_INDEX])
+        )
+        log(
+            "  resume: acid product.xyz exists; "
+            f"r(Si-Ow)={r_prod_ow:.2f} A, r(Si-Obr)={r_prod_br:.2f} A"
+        )
+        product_failure = acid_product_reason(product, ow_index, proton_indices)
+        if product_failure is None:
+            return neb_ts_guess(
+                complex_opt,
+                product,
+                settings,
+                n_images=5,
+                fmax_ev_a=0.2,
+                max_steps=240,
+                pre_relax_fmax_ev_a=1.5,
+                pre_relax_steps=120,
+                climb_optimizer="ode",
+            )
+        log(f"  saved acid product rejected: {product_failure}")
+        product_path.replace(
+            run_dir / f"product.rejected-acid-rollback-{time.time_ns()}.xyz"
+        )
+
+    seed_r = float(
+        np.linalg.norm(approach_seed.coords[SI_INDEX] - approach_seed.coords[ow_index])
+    )
+    if abs(seed_r - 1.90) > 0.02:
+        log(f"  pinning acid approach seed: r(Si-Ow) {seed_r:.2f} -> 1.90 A")
+        approach_seed = constrained_scan(
+            approach_seed,
+            settings,
+            atom_i=SI_INDEX,
+            atom_j=ow_index,
+            distances_a=[1.90],
+        )[0][2]
+
+    bridge_proton = min(
+        proton_indices,
+        key=lambda index: np.linalg.norm(
+            approach_seed.coords[index] - approach_seed.coords[BR_INDEX]
+        ),
+    )
+    proton_distance = float(
+        np.linalg.norm(
+            approach_seed.coords[bridge_proton] - approach_seed.coords[BR_INDEX]
+        )
+    )
+    if proton_distance > 1.25:
+        raise RuntimeError(
+            "acid path lost the pre-equilibrated bridge proton "
+            "before product construction"
+        )
+
+    current_br = float(
+        np.linalg.norm(approach_seed.coords[SI_INDEX] - approach_seed.coords[BR_INDEX])
+    )
+    break_targets = [
+        distance
+        for distance in [1.85, 2.05, 2.30, 2.60, 3.00, 3.40, 3.60]
+        if distance > current_br + 0.05
+    ]
+    if not break_targets:
+        break_targets = [round(current_br + 0.30, 2)]
+
+    log("  acid stage 2b: break Si-Obr with Si-Ow and Obr-H held")
+    broken = constrained_scan(
+        approach_seed,
+        settings,
+        atom_i=SI_INDEX,
+        atom_j=BR_INDEX,
+        distances_a=break_targets,
+        fixed_distances=[
+            (SI_INDEX, ow_index, 1.70),
+            (BR_INDEX, bridge_proton, round(proton_distance, 2)),
+        ],
+    )
+    for distance, electronic, _ in broken:
+        log(f"  r(Si-Obr)={distance:.2f} A  E={electronic:.6f} Ha")
+    product = optimize(broken[-1][2], settings)
+    save_xyz(product, product_path)
+
+    r_prod_ow = float(
+        np.linalg.norm(product.coords[SI_INDEX] - product.coords[ow_index])
+    )
+    r_prod_br = float(
+        np.linalg.norm(product.coords[SI_INDEX] - product.coords[BR_INDEX])
+    )
+    log(f"  acid product r(Si-Ow)={r_prod_ow:.2f} A, r(Si-Obr)={r_prod_br:.2f} A")
+    product_failure = acid_product_reason(product, ow_index, proton_indices)
+    if product_failure:
+        raise RuntimeError(product_failure)
+    return neb_ts_guess(
+        complex_opt,
+        product,
+        settings,
+        n_images=5,
+        fmax_ev_a=0.2,
+        max_steps=240,
+        pre_relax_fmax_ev_a=1.5,
+        pre_relax_steps=120,
+        climb_optimizer="ode",
+    )
+
+
+def refine_phase1_saddle(
+    ts_guess: Cluster,
+    complex_opt: Cluster,
+    settings: DftSettings,
+    *,
+    trajectory_path: Path,
+    acid_path: bool,
+    route: str,
+    run_dir: Path,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+) -> Cluster:
+    """Refine a crest, directing acid Sella along the complete hydrolysis path."""
+    if acid_path and route == "acid-neb":
+        product_path = run_dir / "product.xyz"
+        if not product_path.exists():
+            raise RuntimeError("acid-neb saddle refinement requires product.xyz")
+        product = load_xyz(product_path, complex_opt)
+        reactive_core = sorted(
+            {BR_INDEX, SI_INDEX, AL_INDEX, ow_index, *proton_indices}
+        )
+        mode = reaction_path_vector(
+            complex_opt,
+            product,
+            active_indices=reactive_core,
+        )
+        log("  directing Cartesian Sella along the acid reactant→product path")
+        return find_ts(
+            ts_guess,
+            settings,
+            trajectory=str(trajectory_path),
+            initial_mode=mode,
+            internal=False,
+        )
+    return find_ts(ts_guess, settings, trajectory=str(trajectory_path))
+
+
+def acid_addition_scan_guess(
+    complex_opt: Cluster,
+    settings: DftSettings,
+    run_dir: Path,
+    ow_index: int,
+) -> Cluster:
+    """Locate the acid water-addition crest without endpoint conformer mixing."""
+    scan = scan_to_maximum(
+        complex_opt,
+        settings,
+        atom_i=SI_INDEX,
+        atom_j=ow_index,
+        distances_a=[2.8, 2.6, 2.4, 2.2, 2.1, 2.0, 1.9],
+        progress=lambda r, e: log(f"  acid addition r={r:.2f} A  E={e:.6f} Ha"),
+    )
+    scan_dir = run_dir / "addition_scan"
+    scan_dir.mkdir(exist_ok=True)
+    manifest = []
+    for distance, electronic, cluster in scan:
+        filename = f"r-{distance:.2f}.xyz"
+        save_xyz(cluster, scan_dir / filename)
+        manifest.append(
+            {
+                "distance_a": distance,
+                "electronic_hartree": electronic,
+                "structure": filename,
+            }
+        )
+    (scan_dir / "scan.json").write_text(json.dumps(manifest, indent=2))
+    return scan_ts_guess(scan)
+
+
 def finish_al_neutral_sequential(
     *,
     complex_opt: Cluster,
@@ -510,8 +970,11 @@ def finish_al_neutral_sequential(
     temperature: float,
     dimer_opt: Cluster,
     attacker_opt: Cluster,
+    reaction: str = "al-neutral",
+    acid_path: bool = False,
+    proton_indices: tuple[int, ...] = (),
 ) -> int:
-    """Close the proven R → associative I → hydrolyzed P mechanism."""
+    """Close a proven R → associative I → hydrolyzed P mechanism."""
     begin_sequential_run(run_dir)
 
     def fail(detail: str) -> int:
@@ -519,16 +982,42 @@ def finish_al_neutral_sequential(
         write_sequential_run_status(run_dir, "failed", detail=detail)
         return 1
 
-    cleavage_failure = quick_irc_cleavage_reason(cleavage_back, cleavage_fwd, ow_index)
+    if acid_path:
+        cleavage_failure = acid_quick_irc_cleavage_reason(
+            cleavage_back,
+            cleavage_fwd,
+            ow_index,
+            proton_indices,
+        )
+    else:
+        cleavage_failure = quick_irc_cleavage_reason(
+            cleavage_back, cleavage_fwd, ow_index
+        )
     if cleavage_failure:
         return fail(f"invalid cleavage handoff: {cleavage_failure}")
 
-    intermediate = endpoint_in_basin(
-        cleavage_back, cleavage_fwd, ow_index, ASSOCIATIVE_BASIN
-    )
-    hydrolyzed = endpoint_in_basin(
-        cleavage_back, cleavage_fwd, ow_index, HYDROLYZED_BASIN
-    )
+    if acid_path:
+        intermediate = acid_endpoint_in_basins(
+            cleavage_back,
+            cleavage_fwd,
+            ow_index,
+            proton_indices,
+            {ACID_ASSOCIATIVE_BASIN},
+        )
+        hydrolyzed = acid_endpoint_in_basins(
+            cleavage_back,
+            cleavage_fwd,
+            ow_index,
+            proton_indices,
+            ACID_HYDROLYZED_BASINS,
+        )
+    else:
+        intermediate = endpoint_in_basin(
+            cleavage_back, cleavage_fwd, ow_index, ASSOCIATIVE_BASIN
+        )
+        hydrolyzed = endpoint_in_basin(
+            cleavage_back, cleavage_fwd, ow_index, HYDROLYZED_BASIN
+        )
     save_xyz(intermediate, run_dir / "intermediate.xyz")
     save_xyz(hydrolyzed, run_dir / "hydrolyzed_product.xyz")
     save_xyz(cleavage_ts, run_dir / "cleavage_ts.xyz")
@@ -536,73 +1025,90 @@ def finish_al_neutral_sequential(
     save_xyz(cleavage_fwd, run_dir / "cleavage_irc_fwd.xyz")
 
     log("stage 4b: directed reactant -> associative-intermediate saddle")
-    addition_guess = checkpointed(
-        run_dir / "addition_ts_guess.xyz",
-        complex_opt,
-        lambda: neb_ts_guess(
+    if acid_path:
+        addition_guess = checkpointed(
+            run_dir / "addition_scan_ts_guess.xyz",
             complex_opt,
-            intermediate,
-            settings,
-            n_images=5,
-            fmax_ev_a=0.20,
-            max_steps=240,
-            pre_relax_fmax_ev_a=1.0,
-            pre_relax_steps=120,
-            climb_optimizer="ode",
-        ),
-    )
-    transfer_h = min(
-        (ow_index + 1, ow_index + 2),
-        key=lambda i: np.linalg.norm(
-            addition_guess.coords[i] - addition_guess.coords[BR_INDEX]
-        ),
-    )
-    pinned_distances = [
-        (
-            SI_INDEX,
-            ow_index,
-            float(
-                np.linalg.norm(
-                    addition_guess.coords[SI_INDEX]
-                    - addition_guess.coords[ow_index]
-                )
+            lambda: acid_addition_scan_guess(
+                complex_opt,
+                settings,
+                run_dir,
+                ow_index,
             ),
-        ),
-        (
-            BR_INDEX,
-            transfer_h,
-            float(
-                np.linalg.norm(
-                    addition_guess.coords[BR_INDEX] - addition_guess.coords[transfer_h]
-                )
+        )
+        addition_relaxed_guess = addition_guess
+        addition_ts_path = run_dir / "addition_scan_directed_ts.xyz"
+        addition_trajectory_path = run_dir / "addition_scan_directed_sella.traj"
+    else:
+        addition_guess = checkpointed(
+            run_dir / "addition_ts_guess.xyz",
+            complex_opt,
+            lambda: neb_ts_guess(
+                complex_opt,
+                intermediate,
+                settings,
+                n_images=5,
+                fmax_ev_a=0.20,
+                max_steps=240,
+                pre_relax_fmax_ev_a=1.0,
+                pre_relax_steps=120,
+                climb_optimizer="ode",
             ),
-        ),
-    ]
-    log("stage 4c: exact two-coordinate relaxation of addition-peak spectators")
-    addition_relaxed_guess = checkpointed(
-        run_dir / "addition_pinned_relaxed.xyz",
-        addition_guess,
-        lambda: relax_at_fixed_distances(
+        )
+        transfer_h = min(
+            (ow_index + 1, ow_index + 2),
+            key=lambda i: np.linalg.norm(
+                addition_guess.coords[i] - addition_guess.coords[BR_INDEX]
+            ),
+        )
+        pinned_distances = [
+            (
+                SI_INDEX,
+                ow_index,
+                float(
+                    np.linalg.norm(
+                        addition_guess.coords[SI_INDEX]
+                        - addition_guess.coords[ow_index]
+                    )
+                ),
+            ),
+            (
+                BR_INDEX,
+                transfer_h,
+                float(
+                    np.linalg.norm(
+                        addition_guess.coords[BR_INDEX]
+                        - addition_guess.coords[transfer_h]
+                    )
+                ),
+            ),
+        ]
+        log("stage 4c: exact two-coordinate relaxation of addition-peak spectators")
+        addition_relaxed_guess = checkpointed(
+            run_dir / "addition_pinned_relaxed.xyz",
             addition_guess,
-            settings,
-            fixed_distances=pinned_distances,
-            fmax_ev_a=0.02,
-            max_steps=120,
-            optimizer_maxstep=0.05,
-            trajectory=str(run_dir / "addition_pinned_relax.traj"),
-        ),
-    )
-    reactive_core = sorted(
-        {BR_INDEX, SI_INDEX, AL_INDEX, ow_index, ow_index + 1, ow_index + 2}
-    )
-    addition_ts_path = run_dir / "addition_directed_ts.xyz"
+            lambda: relax_at_fixed_distances(
+                addition_guess,
+                settings,
+                fixed_distances=pinned_distances,
+                fmax_ev_a=0.02,
+                max_steps=120,
+                optimizer_maxstep=0.05,
+                trajectory=str(run_dir / "addition_pinned_relax.traj"),
+            ),
+        )
+        addition_ts_path = run_dir / "addition_directed_ts.xyz"
+        addition_trajectory_path = run_dir / "addition_directed_sella.traj"
+    core_protons = proton_indices if acid_path else (ow_index + 1, ow_index + 2)
+    reactive_core = sorted({BR_INDEX, SI_INDEX, AL_INDEX, ow_index, *core_protons})
+    trim_gpu_pool()
     addition_ts = checkpointed(
         addition_ts_path,
         addition_relaxed_guess,
         lambda: find_ts(
             addition_relaxed_guess,
             settings,
-            trajectory=str(run_dir / "addition_directed_sella.traj"),
+            trajectory=str(addition_trajectory_path),
             initial_mode=reaction_path_vector(
                 complex_opt,
                 intermediate,
@@ -611,15 +1117,19 @@ def finish_al_neutral_sequential(
             internal=False,
         ),
     )
-    addition_escape = channel_escape_reason(
-        addition_relaxed_guess, addition_ts, ow_index
+    addition_escape = addition_channel_escape_reason(
+        addition_relaxed_guess,
+        addition_ts,
+        ow_index,
+        acid_path=acid_path,
     )
     if addition_escape:
         rejected = run_dir / (
-            f"addition_directed_ts.rejected-channel-escape-{time.time_ns()}.xyz"
+            f"{addition_ts_path.stem}.rejected-channel-escape-{time.time_ns()}.xyz"
         )
         addition_ts_path.replace(rejected)
         return fail(f"{addition_escape}; rejected directed addition saddle")
+    trim_gpu_pool()
     addition_freq = frequencies(addition_ts, settings)
     log(
         "  addition TS imaginary modes: "
@@ -630,6 +1140,7 @@ def finish_al_neutral_sequential(
 
     accepted_addition_irc = None
     for displacement in (0.50, 1.00):
+        trim_gpu_pool()
         back, fwd = quick_irc(
             addition_ts,
             settings,
@@ -639,7 +1150,12 @@ def finish_al_neutral_sequential(
         tag = f"{displacement:.2f}".replace(".", "p")
         save_xyz(back, run_dir / f"addition_irc_back_{tag}.xyz")
         save_xyz(fwd, run_dir / f"addition_irc_fwd_{tag}.xyz")
-        failure = quick_irc_addition_reason(back, fwd, ow_index)
+        if acid_path:
+            failure = acid_quick_irc_addition_reason(
+                back, fwd, ow_index, proton_indices
+            )
+        else:
+            failure = quick_irc_addition_reason(back, fwd, ow_index)
         if failure is None:
             accepted_addition_irc = (back, fwd, displacement)
             break
@@ -650,6 +1166,7 @@ def finish_al_neutral_sequential(
     save_xyz(addition_back, run_dir / "addition_irc_back.xyz")
     save_xyz(addition_fwd, run_dir / "addition_irc_fwd.xyz")
 
+    trim_gpu_pool()
     log("stage 5: sequential thermochemistry")
     complex_freq = frequencies(complex_opt, settings)
     intermediate_freq = frequencies(intermediate, settings)
@@ -657,16 +1174,39 @@ def finish_al_neutral_sequential(
         ("reactant", complex_freq),
         ("intermediate", intermediate_freq),
     ):
-        if freq.n_imaginary:
-            return fail(f"{label} minimum has {freq.n_imaginary} imaginary modes")
+        if minimum_failure := minimum_frequency_reason(label, freq):
+            return fail(minimum_failure)
 
-    addition_reactant = endpoint_in_basin(
-        addition_back, addition_fwd, ow_index, REACTANT_BASIN
+    if acid_path:
+        addition_reactant = acid_endpoint_in_basins(
+            addition_back,
+            addition_fwd,
+            ow_index,
+            proton_indices,
+            {ACID_REACTANT_BASIN},
+        )
+        addition_intermediate = acid_endpoint_in_basins(
+            addition_back,
+            addition_fwd,
+            ow_index,
+            proton_indices,
+            {ACID_ASSOCIATIVE_BASIN},
+        )
+    else:
+        addition_reactant = endpoint_in_basin(
+            addition_back, addition_fwd, ow_index, REACTANT_BASIN
+        )
+        addition_intermediate = endpoint_in_basin(
+            addition_back, addition_fwd, ow_index, ASSOCIATIVE_BASIN
+        )
+    # Acid IRC endpoints can differ only by residual-water/proton rotamers.
+    # Connectivity gates already prove their speciation, so compare the heavy
+    # reaction center and allow the measured <10 kJ/mol rotamer spread.
+    reactive_core = (
+        [BR_INDEX, SI_INDEX, ow_index]
+        if acid_path
+        else sorted({BR_INDEX, SI_INDEX, ow_index, *core_protons})
     )
-    addition_intermediate = endpoint_in_basin(
-        addition_back, addition_fwd, ow_index, ASSOCIATIVE_BASIN
-    )
-    reactive_core = [BR_INDEX, SI_INDEX, ow_index, ow_index + 1, ow_index + 2]
     equivalence_checks = (
         (
             "reactant",
@@ -688,6 +1228,7 @@ def finish_al_neutral_sequential(
             reactive_core,
             candidate_energy_hartree=energy(candidate, settings),
             canonical_energy_hartree=canonical_energy,
+            energy_delta_max_kj=10.0 if acid_path else BASIN_ENERGY_DELTA_MAX_KJ,
         )
         if failure:
             return fail(f"addition IRC {label} differs from canonical basin: {failure}")
@@ -721,8 +1262,11 @@ def finish_al_neutral_sequential(
         tunneling="wigner",
     )
     overall_dg = float(metrics["overall_profile_dG_dagger_kj"])
-    si_neutral_dg = SI_NEUTRAL_DG_KJ
-    al_easier = overall_dg < si_neutral_dg
+    comparison = comparison_against_si_neutral(
+        reaction,
+        acid_path=acid_path,
+        barrier_kj=overall_dg,
+    )
     de_kj = (
         highest_freq.electronic_hartree - complex_freq.electronic_hartree
     ) * HARTREE_TO_KJ
@@ -733,8 +1277,11 @@ def finish_al_neutral_sequential(
     ) * HARTREE_TO_KJ
 
     results = {
-        "reaction": "al-neutral",
-        "mechanism": "sequential-associative",
+        "reaction": reaction,
+        "mechanism": (
+            "sequential-associative-acid" if acid_path else "sequential-associative"
+        ),
+        "mechanism_version": ACID_MECHANISM_VERSION if acid_path else 1,
         "method": f"{settings.xc}/{settings.basis}/df",
         "temperature_k": temperature,
         "dE_elec_vs_complex_kj": de_kj,
@@ -766,12 +1313,7 @@ def finish_al_neutral_sequential(
                 "accepted_quick_irc_displacement_a": 0.50,
             },
         },
-        "comparison": {
-            "si_neutral_dG_kj": si_neutral_dg,
-            "si_neutral_dG_kcal": SI_NEUTRAL_DG_KCAL,
-            "al_easier_than_si": al_easier,
-            "xiao_lasaga_easier_si_o_al_ordering_confirmed": al_easier,
-        },
+        "comparison": comparison,
         "literature": {
             "xiao_lasaga_acid_kcal": 24.0,
             "xiao_lasaga_base_kcal": 19.0,
@@ -792,7 +1334,7 @@ def finish_al_neutral_sequential(
             ("cleavage-ts", cleavage_ts, cleavage_freq),
         ):
             sid = store.add_structure(
-                f"al-neutral-{name}",
+                f"{reaction}-{name}",
                 cluster.formula,
                 cluster.to_xyz(),
                 charge=cluster.charge,
@@ -815,7 +1357,7 @@ def finish_al_neutral_sequential(
     )
 
     log("")
-    log(f"=== al-neutral sequential @ {results['method']} ===")
+    log(f"=== {reaction} sequential @ {results['method']} ===")
     log(
         f"  addition dG‡(298) = {addition_rate.dg_kj:8.3f} kJ/mol "
         f"({addition_rate.dg_kj / KCAL:.3f} kcal/mol)"
@@ -828,8 +1370,12 @@ def finish_al_neutral_sequential(
         f"  overall profile dG‡(298) = {overall_dg:8.3f} kJ/mol "
         f"({overall_dg / KCAL:.3f} kcal/mol)"
     )
-    ordering = "CONFIRMED" if al_easier else "NOT CONFIRMED"
-    log(f"  X&L easier Si-O-Al ordering: {ordering} vs si-neutral {si_neutral_dg:.3f}")
+    if reaction == "al-neutral":
+        ordering = "CONFIRMED" if comparison["al_easier_than_si"] else "NOT CONFIRMED"
+        log(
+            "  X&L easier Si-O-Al ordering: "
+            f"{ordering} vs si-neutral {SI_NEUTRAL_DG_KJ:.3f}"
+        )
     log(f"results.json + store.sqlite written to {run_dir}")
     return 0
 
@@ -870,7 +1416,7 @@ def main() -> int:
         Path(__file__).resolve().parent.parent
         / "runs"
         / "phase1"
-        / (f"{args.reaction}-{args.xc}-{args.basis}-{args.approach}")
+        / reaction_run_slug(args.reaction, args.xc, args.basis, args.approach)
     )
     run_dir.mkdir(parents=True, exist_ok=True)
     log(f"run dir: {run_dir}")
@@ -878,8 +1424,33 @@ def main() -> int:
 
     dimer_factory, attacker_factory = REACTIONS[args.reaction]
     dimer, attacker = dimer_factory(), attacker_factory()
-    complex_guess = hydrolysis_complex(dimer, attacker, mode=args.approach)
+    acid_path = args.reaction.endswith("-acid")
+    if acid_path:
+        begin_gated_run(run_dir)
+        complex_guess = protonated_bridge_complex(dimer, mode=args.approach)
+    else:
+        complex_guess = hydrolysis_complex(dimer, attacker, mode=args.approach)
     ow_index = len(dimer.symbols)  # attacker O
+    proton_indices = tuple(range(ow_index + 1, ow_index + (4 if acid_path else 3)))
+    product_route = "acid-neb" if acid_path else "proton-neb"
+
+    def abort_campaign(detail: str) -> int:
+        log(f"  !! {detail}")
+        if acid_path:
+            block_run(run_dir, detail)
+        return 1
+
+    def build_product_neb(seed: Cluster) -> Cluster:
+        if acid_path:
+            return acid_neb_guess(
+                seed,
+                complex_opt,
+                settings,
+                run_dir,
+                ow_index,
+                proton_indices,
+            )
+        return proton_neb_guess(seed, complex_opt, settings, run_dir, ow_index)
 
     # Stage 0 — cheap, robust pre-optimization of the hand-built guess.
     # HF/STO-3G converges where a hybrid at a strained guess may not;
@@ -899,6 +1470,15 @@ def main() -> int:
         complex_pre,
         lambda: optimize(complex_pre, settings),
     )
+    if acid_path:
+        pre_equilibrium_failure = protonated_bridge_reason(
+            complex_opt,
+            ow_index,
+            proton_indices,
+        )
+        if pre_equilibrium_failure:
+            block_run(run_dir, pre_equilibrium_failure)
+            raise RuntimeError(pre_equilibrium_failure)
     dimer_opt = checkpointed(
         run_dir / "dimer.xyz", dimer, lambda: optimize(dimer, settings)
     )
@@ -907,6 +1487,7 @@ def main() -> int:
         attacker,
         lambda: optimize(attacker, settings),
     )
+    trim_gpu_pool()
 
     # Stage 2 — relaxed scan pulling the attacker O onto Si, extended
     # until the energy maximum is interior (ridge actually crossed).
@@ -921,12 +1502,11 @@ def main() -> int:
     if ts_guess_path.exists():
         ts_guess = load_xyz(ts_guess_path, complex_opt)
         log(f"  resume: ts_guess.xyz exists ({route} route)")
-        if route == "proton-neb" and channel_escape_reason(
-            ts_guess, ts_guess, ow_index
-        ):
-            r_bad = float(
-                np.linalg.norm(ts_guess.coords[SI_INDEX] - ts_guess.coords[ow_index])
-            )
+        r_bad = float(
+            np.linalg.norm(ts_guess.coords[SI_INDEX] - ts_guess.coords[ow_index])
+        )
+        guess_channel_limit = 2.8 if acid_path else 2.6
+        if route == product_route and r_bad > guess_channel_limit:
             log(
                 "  saved NEB peak is outside the channel "
                 f"(r(Si-Ow)={r_bad:.2f} A); rebuilding from the closer endpoint"
@@ -935,18 +1515,13 @@ def main() -> int:
             stale_traj = run_dir / "sella.traj"
             if stale_traj.exists():
                 stale_traj.replace(run_dir / "sella.rejected-neb-escape.traj")
-            ts_guess = proton_neb_guess(
-                ts_guess, complex_opt, settings, run_dir, ow_index
-            )
+            ts_guess = build_product_neb(ts_guess)
             save_xyz(ts_guess, ts_guess_path)
-    elif route == "proton-neb" and (run_dir / "product.xyz").exists():
+    elif route == product_route and (run_dir / "product.xyz").exists():
         # A failed bounded NEB leaves the route and validated product durable
-        # but no ts_guess.xyz.  Resume that exact stage instead of repeating
-        # the already-completed direct/proton scans.
-        log("  resume: proton-NEB route/product exist; rebuilding only the band")
-        ts_guess = proton_neb_guess(
-            complex_opt, complex_opt, settings, run_dir, ow_index
-        )
+        # but no ts_guess.xyz. Resume that exact stage without repeating prior scans.
+        log(f"  resume: {product_route} route/product exist; rebuilding only the band")
+        ts_guess = build_product_neb(complex_opt)
         save_xyz(ts_guess, ts_guess_path)
     else:
         # No reusable product exists. Reconstruct from the direct route.
@@ -961,26 +1536,55 @@ def main() -> int:
                 distances_a=[2.8, 2.6, 2.4, 2.2, 2.1, 2.0, 1.9],
                 progress=lambda r, e: log(f"  r={r:.2f} A  E={e:.6f} Ha"),
             )
-            ts_guess = scan_ts_guess(scan)
+            if acid_path:
+                base = min(scan, key=lambda point: abs(point[0] - 1.90))[2]
+                route = product_route
+                route_path.write_text(route)
+                ts_guess = build_product_neb(base)
+            else:
+                ts_guess = scan_ts_guess(scan)
         except ScanNoMaximumError as exc:
             log("  approach coordinate alone does not cross the ridge;")
             base = min(exc.scan, key=lambda p: abs(p[0] - 1.90))[2]
-            ts_guess = proton_neb_guess(base, complex_opt, settings, run_dir, ow_index)
-            route = "proton-neb"
+            route = product_route
+            route_path.write_text(route)
+            ts_guess = build_product_neb(base)
         save_xyz(ts_guess, ts_guess_path)
-        if route == "proton-neb":
+        if route == product_route:
             route_path.write_text(route)
 
     # Stage 3 — saddle search. A direct approach crest gets one bounded
     # fallback through the concerted proton/product/CI-NEB route if Sella
     # escapes. A proton-NEB saddle that escapes is terminal.
+    trim_gpu_pool()
     log("stage 3: Sella saddle search")
     ts_path = run_dir / "ts.xyz"
     trajectory_path = run_dir / "sella.traj"
+    if acid_path and route == product_route and ts_path.exists():
+        saved_ts = load_xyz(ts_path, ts_guess)
+        saved_escape = channel_escape_reason(ts_guess, saved_ts, ow_index)
+        if saved_escape:
+            suffix = time.time_ns()
+            ts_path.replace(run_dir / f"ts.rejected-channel-escape-{suffix}.xyz")
+            if trajectory_path.exists():
+                trajectory_path.replace(
+                    run_dir / f"sella.rejected-channel-escape-{suffix}.traj"
+                )
+            log(f"  quarantined escaped acid saddle checkpoint: {saved_escape}")
     ts = checkpointed(
         ts_path,
         ts_guess,
-        lambda: find_ts(ts_guess, settings, trajectory=str(trajectory_path)),
+        lambda: refine_phase1_saddle(
+            ts_guess,
+            complex_opt,
+            settings,
+            trajectory_path=trajectory_path,
+            acid_path=acid_path,
+            route=route,
+            run_dir=run_dir,
+            ow_index=ow_index,
+            proton_indices=proton_indices,
+        ),
     )
 
     r_guess = float(
@@ -990,27 +1594,40 @@ def main() -> int:
     log(f"  r(Si-Ow): guess {r_guess:.2f} A -> saddle {r_ts:.2f} A")
     escape = channel_escape_reason(ts_guess, ts, ow_index)
     if escape and route == "direct":
-        log(f"  !! {escape}; pivoting once to proton-drive + product + CI-NEB")
-        neb_guess = proton_neb_guess(ts_guess, complex_opt, settings, run_dir, ow_index)
+        log(f"  !! {escape}; pivoting once to {product_route} product + CI-NEB")
+        direct_seed = ts_guess
 
-        # Preserve the rejected direct-search receipt, then replace all
-        # resumable checkpoints with the new route before refining again.
+        # Preserve the rejected direct-search receipts and publish the new route
+        # before product/NEB work, so a failed band resumes from product.xyz.
+        rejected_guess = run_dir / "ts_guess.rejected-direct.xyz"
+        if ts_guess_path.exists():
+            ts_guess_path.replace(rejected_guess)
         rejected_ts = run_dir / "ts.rejected-direct.xyz"
         if ts_path.exists():
             ts_path.replace(rejected_ts)
         rejected_traj = run_dir / "sella.rejected-direct.traj"
         if trajectory_path.exists():
             trajectory_path.replace(rejected_traj)
-        ts_guess = neb_guess
-        save_xyz(ts_guess, ts_guess_path)
-        route = "proton-neb"
+        route = product_route
         route_path.write_text(route)
+        ts_guess = build_product_neb(direct_seed)
+        save_xyz(ts_guess, ts_guess_path)
 
         log("stage 3b: Sella saddle search from CI-NEB guess")
         ts = checkpointed(
             ts_path,
             ts_guess,
-            lambda: find_ts(ts_guess, settings, trajectory=str(trajectory_path)),
+            lambda: refine_phase1_saddle(
+                ts_guess,
+                complex_opt,
+                settings,
+                trajectory_path=trajectory_path,
+                acid_path=acid_path,
+                route=route,
+                run_dir=run_dir,
+                ow_index=ow_index,
+                proton_indices=proton_indices,
+            ),
         )
         r_guess = float(
             np.linalg.norm(ts_guess.coords[SI_INDEX] - ts_guess.coords[ow_index])
@@ -1019,16 +1636,17 @@ def main() -> int:
         log(f"  r(Si-Ow): NEB guess {r_guess:.2f} A -> saddle {r_ts:.2f} A")
         escape = channel_escape_reason(ts_guess, ts, ow_index)
     if escape:
-        log(f"  !! {escape}; {route} route exhausted — aborting before thermochemistry")
-        return 1
+        return abort_campaign(
+            f"{escape}; {route} route exhausted before thermochemistry"
+        )
 
     # Stage 4 — verify + quick IRC.
+    trim_gpu_pool()
     log("stage 4: frequencies + quick-IRC")
     ts_freq = frequencies(ts, settings)
     log(f"  TS imaginary modes: {np.round(ts_freq.imaginary_cm, 1).tolist()}")
     if ts_freq.n_imaginary != 1:
-        log("  !! not a clean first-order saddle — inspect ts.xyz; aborting")
-        return 1
+        return abort_campaign("not a clean first-order saddle — inspect ts.xyz")
     back, fwd = quick_irc(
         ts,
         settings,
@@ -1037,15 +1655,27 @@ def main() -> int:
     )
     save_xyz(back, run_dir / "irc_back.xyz")
     save_xyz(fwd, run_dir / "irc_fwd.xyz")
-    irc_failure = quick_irc_channel_reason(back, fwd, ow_index)
-    if args.reaction == "al-neutral":
+    if acid_path:
+        irc_failure = acid_quick_irc_channel_reason(
+            back,
+            fwd,
+            ow_index,
+            proton_indices,
+        )
+    else:
+        irc_failure = quick_irc_channel_reason(back, fwd, ow_index)
+    cleavage_failure = None
+    if acid_path:
+        cleavage_failure = acid_quick_irc_cleavage_reason(
+            back,
+            fwd,
+            ow_index,
+            proton_indices,
+        )
+    elif args.reaction == "al-neutral":
         cleavage_failure = quick_irc_cleavage_reason(back, fwd, ow_index)
-        if cleavage_failure:
-            log(
-                "  !! al-neutral requires the proven associative-intermediate "
-                f"mechanism; {cleavage_failure}"
-            )
-            return 1
+
+    if cleavage_failure is None and (acid_path or args.reaction == "al-neutral"):
         log("  full path resolved as sequential associative hydrolysis")
         return finish_al_neutral_sequential(
             complex_opt=complex_opt,
@@ -1059,14 +1689,25 @@ def main() -> int:
             temperature=args.temperature,
             dimer_opt=dimer_opt,
             attacker_opt=attacker_opt,
+            reaction=args.reaction,
+            acid_path=acid_path,
+            proton_indices=proton_indices,
         )
+    if args.reaction == "al-neutral":
+        assert cleavage_failure is not None
+        if cleavage_failure:
+            return abort_campaign(
+                "al-neutral requires the proven associative-intermediate "
+                f"mechanism; {cleavage_failure}"
+            )
     if irc_failure:
-        log(f"  !! {irc_failure}; aborting before thermochemistry")
-        return 1
+        return abort_campaign(f"{irc_failure}; aborting before thermochemistry")
 
     # Stage 5 — thermochemistry.
     log("stage 5: thermochemistry")
     cx_freq = frequencies(complex_opt, settings)
+    if detail := minimum_frequency_reason("reactant", cx_freq):
+        return abort_campaign(f"{detail}; aborting before thermochemistry")
     t = args.temperature
 
     def thermo(freq):
@@ -1101,6 +1742,12 @@ def main() -> int:
     ) * HARTREE_TO_KJ
     results = {
         "reaction": args.reaction,
+        "mechanism": (
+            "pre-equilibrated-protonated-bridge-water-attack"
+            if acid_path
+            else "concerted-neutral-hydrolysis"
+        ),
+        "mechanism_version": ACID_MECHANISM_VERSION if acid_path else 1,
         "method": f"{args.xc}/{args.basis}/df",
         "temperature_k": t,
         "dE_elec_vs_complex_kj": de_kj,
@@ -1118,6 +1765,12 @@ def main() -> int:
         },
     }
     results["dE_elec_vs_fragments_kj"] = frag_e
+    if acid_path:
+        results["comparison"] = comparison_against_si_neutral(
+            args.reaction,
+            acid_path=True,
+            barrier_kj=rate.dg_kj,
+        )
 
     (run_dir / "results.json").write_text(json.dumps(results, indent=2))
 
@@ -1144,6 +1797,13 @@ def main() -> int:
             attacker_opt.to_xyz(),
             charge=attacker_opt.charge,
             spin=attacker_opt.spin,
+        )
+
+    if acid_path:
+        write_sequential_run_status(
+            run_dir,
+            "completed",
+            detail="results.json and store.sqlite passed saddle/IRC/minimum gates",
         )
 
     log("")

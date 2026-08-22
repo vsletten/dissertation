@@ -43,9 +43,12 @@ reaction the same number).
   wins) — see TASK-168 in mission-control queue and dissertation PR #29.
   Do not duplicate; the mechanism lesson matters for the ladder though:
   **Si–O–Al chemistry may be stepwise where Si–O–Si is concerted.**
-- Parallel cards on the board: `A1b-acid-mechanisms` (protonated-bridge
-  path for si-acid/al-acid — READY, may be claimed by someone else) and
-  `A2-production-energetics` (r²SCAN-3c / ωB97M-V/def2-TZVPD + SMD +
+- Parallel cards on the board: `A1b-acid-mechanisms` closed the one-water
+  al-acid path at 19.645 kcal/mol as a validated sequential mechanism, but
+  the one-water si-acid protonated bridge is not an unconstrained minimum;
+  it is BLOCKED on 3–6-water microsolvation (`qm/ACID_MECHANISMS.md`).
+  `A2-production-energetics` remains
+  (r²SCAN-3c / ωB97M-V/def2-TZVPD + SMD +
   DLPNO calibration — BLOCKED on Victor's ORCA install). Phase 2 runs at
   the validated b3lyp/def2-svp/df tier; A2 re-tiers the ladder later.
   Design every result file so re-tiering is a settings swap, not a redo.
