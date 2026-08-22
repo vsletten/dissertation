@@ -281,6 +281,14 @@ conflict_resolution = "first_match" # required: first rule in definition order w
 temperature = 298.15   # defaults to [dynamics.thermo].temperature
 [execution.pca]
 
+# optional piecewise-isothermal CTMC schedule, in declaration order
+[[execution.schedule]]
+temperature = 773.15  # K
+duration = 3600.0     # simulated time
+[[execution.schedule]]
+temperature = 973.15
+duration = 900.0
+
 # stopping conditions (any combination; first hit wins)
 [execution.stop]
 steps = 20000          # max steps (all strategies)
@@ -296,6 +304,35 @@ seed_policy = "increment" | "hash"   # see §4.2
 `strategy` is the single source of truth for which `UpdateStrategy`
 implementation runs. The `[execution.stop]` block replaces today's
 `[simulation] steps`/`report_every` (see §5 for the shim).
+
+**Amendment — piecewise-isothermal CTMC schedules (B5, 2026-08-22).**
+`[[execution.schedule]]` is an ordered, non-empty-when-present list of
+positive finite `(temperature, duration)` segments and is valid only with
+`strategy = "ctmc"`. The first segment starts at simulated time zero. A
+segment boundary is a **wall-time event in simulated time**, not a reaction:
+if the next sampled waiting time would cross the boundary, that selection and
+waiting-time draw is consumed, the reaction is not applied, time advances
+exactly to the boundary, and every temperature-dependent rate (including
+solution chemical-potential coupling) plus the full Fenwick event tree is
+rebuilt at the next segment's temperature. The next waiting time is then drawn
+fresh, as required by the memoryless CTMC law. A zero-rate segment advances to
+its boundary without firing and may become live after the rebuild.
+
+The determinism contract extends without qualification: within each segment,
+site/event selection, waiting-time, branch, and effect draws retain the exact
+`ExactCtmc` order from §4.1. Therefore a scheduled run is bitwise-identical to
+an isothermal run at `T1` for every event strictly before the first boundary;
+boundaries do not increment the reaction step counter. The dynamics RNG stream
+continues across segments (it is never reseeded), so the whole schedule remains
+bitwise reproducible for the same deck and seed. Cumulative deadlines must stay
+finite and each segment must advance representable `f64` wall time; decks that
+overflow or whose duration rounds away are rejected during schema validation.
+`[execution.stop].steps` and a CLI `--steps` override are event-count safety
+caps (an explicit zero means zero events); exhausting the schedule's total
+duration is its normal wall-time stop. With `report_every = 0`/absent, native
+runs and ensembles record boundaries plus the final state rather than every
+event. Scheduled `--viz` and WASM execution fail closed until trajectory
+artifacts encode temperature-boundary records.
 
 ### 2.4 `[observables]` — declarative outputs
 

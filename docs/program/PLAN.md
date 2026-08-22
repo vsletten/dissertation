@@ -31,7 +31,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [QI2-gpu-lease](cards/QI2-gpu-lease.md) | A | P1 | any | ready | — |
 | [QI3-fenwick-total-cancellation](cards/QI3-fenwick-total-cancellation.md) | B | P1 | any | done | — |
 | [E1-muscovite-deck](cards/E1-muscovite-deck.md) | E | P1 | any | done | — (phase 1 isothermal) |
-| [E2-muscovite-full-mechanism](cards/E2-muscovite-full-mechanism.md) | E | P1 | any | blocked: B5 | B5 |
+| [E2-muscovite-full-mechanism](cards/E2-muscovite-full-mechanism.md) | E | P1 | any | ready | B5 ✅ |
 | [A8-thesis-archive-intake](cards/A8-thesis-archive-intake.md) | A | P1 | workstation | ready | — |
 | [A1b-acid-mechanisms](cards/A1b-acid-mechanisms.md) | A | P1 | workstation | ready | — |
 | [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | ready | — |
@@ -39,12 +39,13 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: ORCA install (Victor) + A1b | A1b |
 | [B3-conformance-decks](cards/B3-conformance-decks.md) | B | P1 | any | done | B2 ✅ |
 | [B4-ensembles-observables](cards/B4-ensembles-observables.md) | B | P1 | any | done | B2 ✅ |
-| [B5-execution-schedule](cards/B5-execution-schedule.md) | B | P1 | any | ready | B2 ✅ |
+| [B5-execution-schedule](cards/B5-execution-schedule.md) | B | P1 | any | done | B2 ✅ |
 | [C2-corrosion-deck](cards/C2-corrosion-deck.md) | C | P2 | any | ready | B3 ✅ |
 | [D3-ice-mantle-deck](cards/D3-ice-mantle-deck.md) | D | P2 | any | ready | B3 ✅, D2a ✅ |
 | [A5p0-aging-observables](cards/A5p0-aging-observables.md) | A | P1 | any | done | B4 ✅ |
 
-**Done** (acceptance verified on main): A5p0-aging-observables,
+**Done** (acceptance verified on main): B5-execution-schedule,
+A5p0-aging-observables,
 B4-ensembles-observables,
 B3-conformance-decks,
 QI1-driver-enforced-etiquette,

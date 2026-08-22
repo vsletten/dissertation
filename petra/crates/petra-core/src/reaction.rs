@@ -170,8 +170,14 @@ pub struct Reaction {
     pub guards: Vec<Guard>,
     pub rate: RateExpr,
     pub value: RuleValue,
-    /// ln of the solution-coupling factor (activities, chemical potentials),
-    /// folded once at compile time: k *= exp(ln_thermo).
+    /// Temperature-independent ln(activity) contribution.
+    pub ln_activity: f64,
+    /// Sum of consumed-species chemical potentials in kcal/mol.
+    pub mu_energy: f64,
+    /// ln of the solution-coupling factor at the current temperature:
+    /// `ln_activity + mu_energy / RT`. Kept materialized so the ordinary
+    /// isothermal hot path and its historical floating-point order stay
+    /// unchanged.
     pub ln_thermo: f64,
     /// Multiplier on the center site's stored strain energy, added to the
     /// activation energy: `Ea_eff = Ea + strain_scale · u_center`
@@ -183,6 +189,11 @@ pub struct Reaction {
 }
 
 impl Reaction {
+    /// Recompile the temperature-dependent solution-coupling factor.
+    pub fn set_temperature(&mut self, temperature: f64) {
+        self.ln_thermo = self.ln_activity + self.mu_energy / (R_KCAL * temperature);
+    }
+
     /// Largest guard/modifier/effect-selector distance this reaction reads.
     pub fn max_read_distance(&self) -> u8 {
         let g = self.guards.iter().map(|g| g.select.distance).max();

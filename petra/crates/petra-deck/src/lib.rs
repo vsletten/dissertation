@@ -9,8 +9,9 @@ use std::path::Path;
 
 pub use compile::{
     compile, replica_seed, CompileError, CompiledDeck, CompiledObservable, ExecutionStrategy,
+    ScheduleAdvance, ScheduleRun,
 };
-pub use schema::{DeckFile, SeedPolicy, StructureKind};
+pub use schema::{DeckFile, ScheduleSegment, SeedPolicy, StructureKind};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LoadError {

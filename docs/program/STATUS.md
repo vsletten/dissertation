@@ -4,6 +4,11 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-22 — hermes-laptop — B5 DONE: ordered piecewise-isothermal CTMC
+  schedules now advance through exact wall-time boundaries, recompile full
+  thermo/propensity tables + Fenwick trees, and run through native CLI and
+  deterministic ensembles. Exact T1 replay, seeded T2 statistics, v1 20k-step
+  parity, workspace tests, format, Clippy, and independent review are green.
 - 2026-08-22 — hermes-laptop — A5 Phase 0 DONE: long-time rate spectra,
   projected-geometric versus BET-like surface accounting, and core-owned
   per-site exposure ages landed with deterministic alias-aware tracking. The
