@@ -436,7 +436,7 @@ fn validate_v2_surfaces(deck: &DeckV2) -> Result<(), String> {
     for observable in &deck.observables.series {
         match observable.kind.as_str() {
             "state_counts" | "event_rates" | "rate_spectra" | "cluster_sizes" | "surface_area"
-            | "snapshot" => {}
+            | "exposure_age" | "snapshot" => {}
             "interface_roughness" => {
                 let axis = observable
                     .parameters

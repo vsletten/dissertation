@@ -129,3 +129,8 @@ state = "M_site.empty"
 kind = "surface_area"
 state = "M_site.occupied"
 axis = 2
+
+[[observables.series]]
+kind = "exposure_age"
+state = "M_site.occupied"
+axis = 2

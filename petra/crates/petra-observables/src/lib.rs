@@ -28,6 +28,7 @@ pub enum ObservableValue {
     RateSpectrum(Vec<f64>),
     ClusterSizes(Vec<u64>),
     SurfaceArea(SurfaceArea),
+    ExposureAge(Vec<f64>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -135,12 +136,19 @@ fn face_area(deck: &CompiledDeck, axis: usize) -> f64 {
 fn surface_area(engine: &Engine, deck: &CompiledDeck, states: &[StateId], axis: u8) -> SurfaceArea {
     let lattice = &engine.lattice;
     let axis = axis as usize;
+    let other: Vec<_> = (0..3).filter(|&candidate| candidate != axis).collect();
+    let mut projected =
+        vec![false; lattice.dims[other[0]] * lattice.dims[other[1]] * lattice.n_template];
     let mut exposed_sites = 0u64;
     for site in 0..lattice.len() {
         if !selected(lattice.states[site], states) {
             continue;
         }
-        let (cell, _) = lattice.coords(site);
+        let (cell, template) = lattice.coords(site);
+        let column = (cell[other[0]] * lattice.dims[other[1]] + cell[other[1]])
+            * lattice.n_template
+            + template;
+        projected[column] = true;
         let declared_face = lattice.boundary[axis] == petra_core::Boundary::Open
             && (cell[axis] == 0 || cell[axis] + 1 == lattice.dims[axis]);
         let internal_face = lattice
@@ -153,7 +161,8 @@ fn surface_area(engine: &Engine, deck: &CompiledDeck, states: &[StateId], axis: 
     }
     SurfaceArea {
         exposed_sites,
-        geometric: exposed_sites as f64 * face_area(deck, axis),
+        geometric: projected.iter().filter(|&&occupied| occupied).count() as f64
+            * face_area(deck, axis),
         bet_site_proxy: exposed_sites,
     }
 }
@@ -189,6 +198,9 @@ pub fn observe(engine: &Engine, deck: &CompiledDeck) -> Sample {
             }
             CompiledObservable::SurfaceArea { states, axis } => Some(ObservableValue::SurfaceArea(
                 surface_area(engine, deck, states, *axis),
+            )),
+            CompiledObservable::ExposureAge { states, axis } => Some(ObservableValue::ExposureAge(
+                engine.exposure_ages(states, *axis),
             )),
             // Existing exporters own snapshot output. It remains an accepted
             // schema declaration but does not produce scalar ensemble values.

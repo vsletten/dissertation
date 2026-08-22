@@ -50,12 +50,17 @@ axis = 2
 - `rate_spectra`: the distribution of positive instantaneous total
   propensities over sites (the Fischer/Luttge observable).
 - `cluster_sizes`: connected-component sizes for a required state filter.
-- `surface_area`: two deliberately separate measures: projected geometric
-  area from exposed sites and the BET-like exposed-site count proxy. A site is
-  exposed when it lies on the declared open-axis face or touches a site outside
-  the selected solid state.
+- `surface_area`: two deliberately separate measures. Projected geometric
+  area counts occupied surface-normal columns once; the BET-like proxy counts
+  every exposed solid site, including internal pit/roughness surfaces. A site
+  is exposed when it lies on the declared open-axis face or touches a site
+  outside the selected solid-state set.
+- `exposure_age`: one value per currently exposed solid site, in deterministic
+  site order. The value is physical/strategy time since that site most recently
+  became exposed.
 
-State filters compile to dense IDs before execution. Observation is read-only,
+State filters compile to dense IDs before execution and may name either one
+qualified `Kind.state` or a multi-state `@alias`. Observation is read-only,
 uses deterministic site/adjacency order, and never draws from an RNG.
 
 ## Validation gates
@@ -65,25 +70,27 @@ and declarative `state_counts` framework. The Kossel etch-pit deck declares the
 first full observable set; its rate-spectrum log-width broadens from the
 pinned initial golden value as the pit nucleates. Both are CI tests.
 
-## A5 exposure-age attachment
+## A5 exposure-age implementation
 
 A5 Phase 0 needs the age distribution of *currently exposed* sites, not merely
-a timestamp in a reporter. It should attach in two layers:
+a timestamp inferred by a reporter. Petra implements that in two layers:
 
-1. **Core-owned transition metadata.** Add a per-site `exposed_since: Option<f64>`
-   (or strategy-time equivalent) beside lattice state. During the same
-   deterministic commit that applies state changes and refreshes dirty sites,
-   recompute exposure for the changed neighborhood: set the timestamp on a
-   newly exposed site, preserve it while continuously exposed, and clear it on
-   burial/removal. This makes exposure history part of replayable trajectory
-   state rather than observer-local inference.
-2. **A read-only observable.** Add `kind = "exposure_age"` with the same solid
-   `state` and `axis` parameters as `surface_area`. At cadence it exports
-   `current_time - exposed_since` for exposed sites. Ensemble aggregation then
-   uses the existing distribution/mean/bootstrap machinery unchanged.
+1. **Core-owned transition metadata.** `Lattice::exposed_since` stores a
+   per-site optional timestamp. During the same deterministic commit that
+   applies state changes and refreshes dirty sites, the engine recomputes
+   exposure for the changed site and its immediate neighbors: it timestamps a
+   newly exposed site at the committing event's time, preserves the timestamp
+   while continuously exposed, and clears it on burial/removal. Exposure
+   history is therefore replayable trajectory state, not observer-local state.
+2. **A read-only observable.** `kind = "exposure_age"` accepts the same solid
+   `state`/alias and `axis` parameters as `surface_area`. At cadence it exports
+   `current_time - exposed_since` for every currently exposed site. Existing
+   ensemble aggregation can consume that distribution without touching the
+   simulation RNG.
 
-No extra RNG stream is needed. The update must preserve the engine's current
-changed-site insertion order and expand the deterministic dirty neighborhood;
-using an unordered set would violate the trajectory contract. CTMC reports
-physical time, while discrete strategies report their RFC-defined strategy
-time (`1`, `1/N`, etc.).
+The update preserves changed-site and adjacency insertion order and uses
+marking arrays for deterministic deduplication. CTMC reports physical time;
+discrete strategies report their RFC-defined strategy time (`1`, `1/N`, etc.).
+The Kossel and production kaolinite examples both declare the observable; the
+finite-inventory smoke and plot are documented in
+`docs/program/results/A5p0-aging-observables.md`.

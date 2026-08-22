@@ -4,6 +4,12 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-22 — hermes-laptop — A5 Phase 0 DONE: long-time rate spectra,
+  projected-geometric versus BET-like surface accounting, and core-owned
+  per-site exposure ages landed with deterministic alias-aware tracking. The
+  finite-defect kaolinite smoke exhausts 33 fast sites by step 40 and cuts bulk
+  propensity 286.96×; 96 tests, bitwise parity, Clippy, and paranoid replay are
+  green. `docs/program/results/A5p0-aging-observables.md`.
 - 2026-08-22 — hermes-laptop — B4 DONE: Rayon-parallel deterministic replicas,
   full distributions/means/bootstrap CIs, and declarative state-count, event-rate,
   rate-spectrum, cluster-size, and geometric/BET-like area outputs; Ising Binder
