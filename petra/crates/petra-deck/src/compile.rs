@@ -1011,13 +1011,15 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
                 ));
             }
             let mut seen = vec![false; names.n_states];
-            Ok(refs
+            let mut states: Vec<_> = refs
                 .into_iter()
                 .filter_map(|(_, state)| {
                     let index = state.0 as usize;
                     (!std::mem::replace(&mut seen[index], true)).then_some(state)
                 })
-                .collect())
+                .collect();
+            states.sort_unstable();
+            Ok(states)
         };
         let axis = || -> Result<u8, CompileError> {
             let value = observable
