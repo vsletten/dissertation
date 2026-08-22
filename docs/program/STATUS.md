@@ -4,6 +4,10 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-22 — omnibus supervisor — reconciled board metadata after merged
+  work: C2 is ready after B3, A3 is ready for its remaining family campaigns,
+  and the completed D2a card now has its missing PLAN.md row.
+
 - 2026-08-22 — hermes-laptop — D3 DONE: a 24×24 open-system H₂ grain deck
   now exercises source deposition, thermal+tunneling diffusion, LH reaction,
   H/H₂ desorption, and seeded 20% quenched deep sites. The 16-replica sweep

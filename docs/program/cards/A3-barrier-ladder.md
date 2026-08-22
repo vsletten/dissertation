@@ -1,13 +1,13 @@
 # A3-barrier-ladder — connectivity × protonation barrier ladder (Phase 2)
 
-- status: in-progress
+- status: ready
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaigns; cluster-builder code is machine-any)
 - depends: — (runs at the validated b3lyp/def2-svp/df tier; A2 re-tiers
   the finished ladder later; acid-state variants may reuse A1b's
   protonated-bridge machinery when it lands but are not blocked by it)
-- claimed-by: fable (agents/A3-barrier-ladder, 2026-08-19)
+- claimed-by:
 
 ## Objective
 Execute qm/HANDOFF.md (Phase 2 edition — the full build plan lives
@@ -74,6 +74,8 @@ all scripted in the run log and learnings. ~10 h GPU per cell realistic
 including one saddle retry.
 
 ## Progress
+- 2026-08-22 — omnibus supervisor — restored `ready` after the pilot PR #67
+  merged and released the claim; remaining family campaigns are unclaimed.
 - 2026-08-21 — PILOT CELL DONE: ΔG‡ 205.7 kJ/mol, verified two-step
   mechanism, +92.7 lattice shift (see Result). Acceptance items 1–2 met
   (builder gates green; pilot reproduced modulo the logged shift, with
