@@ -376,7 +376,17 @@ def protonated_bridge_complex(
     ow_index = len(dimer.symbols)
     bridge_proton = ow_index + 1
     coords = complex_.coords.copy()
-    coords[bridge_proton] = coords[0] + R_O_H * _unit(coords[ow_index] - coords[0])
+    bridge_to_si = _unit(coords[1] - coords[0])
+    toward_attacker = coords[ow_index] - coords[0]
+    proton_direction = (
+        toward_attacker - np.dot(toward_attacker, bridge_to_si) * bridge_to_si
+    )
+    if np.linalg.norm(proton_direction) < 1.0e-8:
+        reference = np.array([1.0, 0.0, 0.0])
+        if abs(np.dot(reference, bridge_to_si)) > 0.9:
+            reference = np.array([0.0, 1.0, 0.0])
+        proton_direction = np.cross(bridge_to_si, reference)
+    coords[bridge_proton] = coords[0] + R_O_H * _unit(proton_direction)
     for water_h in (ow_index + 2, ow_index + 3):
         coords[water_h] = coords[ow_index] + R_O_H * _unit(
             coords[water_h] - coords[ow_index]

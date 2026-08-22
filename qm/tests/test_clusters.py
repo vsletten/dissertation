@@ -65,11 +65,12 @@ class TestBasics:
             (aluminosilicate_dimer, "AlH9O8Si", 0, SiteFamily.SI_O_AL2),
         ],
     )
+    @pytest.mark.parametrize("mode", ["flank", "backside"])
     def test_protonated_bridge_complex_is_pre_equilibrated_water_attack(
-        self, dimer_factory, formula, charge, family
+        self, dimer_factory, formula, charge, family, mode
     ):
         dimer = dimer_factory()
-        complex_ = protonated_bridge_complex(dimer)
+        complex_ = protonated_bridge_complex(dimer, mode=mode)
         ow_index = len(dimer.symbols)
         bridge_proton = ow_index + 1
 

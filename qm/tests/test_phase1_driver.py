@@ -167,6 +167,18 @@ def test_acid_quick_irc_requires_full_pre_equilibrium_and_product_speciation(
         is terminal_product
     )
 
+    dissociated_product = replace(
+        terminal_product, coords=terminal_product.coords.copy()
+    )
+    dissociated_product.coords[ow_index + 2] = np.array([100.0, 100.0, 100.0])
+    assert (
+        phase1.acid_basin_signature(dissociated_product, ow_index, proton_indices)
+        not in phase1.ACID_HYDROLYZED_BASINS
+    )
+    assert phase1.acid_quick_irc_cleavage_reason(
+        intermediate, dissociated_product, ow_index, proton_indices
+    )
+
 
 @pytest.mark.parametrize("dimer_factory", [disilicate, aluminosilicate_dimer])
 def test_acid_speciation_guards_reject_lost_proton_bridge_or_water(dimer_factory):
@@ -246,6 +258,26 @@ def test_sequential_barrier_metrics_separate_local_and_profile_barriers():
     assert metrics["highest_profile_ts"] == "cleavage"
 
 
+def test_minimum_and_comparison_helpers_fail_closed():
+    minimum = FrequencyResult(
+        frequencies_cm=np.array([300.0]),
+        imaginary_cm=np.array([]),
+        electronic_hartree=-1.0,
+        molar_mass_kg=0.1,
+        rotational_temperatures_k=(1.0, 2.0, 3.0),
+        linear=False,
+    )
+    unstable = replace(minimum, imaginary_cm=np.array([50.0]))
+
+    assert phase1.minimum_frequency_reason("reactant", minimum) is None
+    reason = phase1.minimum_frequency_reason("reactant", unstable)
+    assert reason is not None and "1 imaginary" in reason
+    comparison = phase1.comparison_against_si_neutral(
+        "al-acid", acid_path=True, barrier_kj=82.193
+    )
+    assert comparison["acid_lower_than_si_neutral"] is True
+
+
 def test_basin_equivalence_rejects_same_signature_different_conformer():
     from dataclasses import replace
 
@@ -278,6 +310,24 @@ def test_begin_sequential_run_quarantines_stale_final_outputs(tmp_path):
     assert len(list(tmp_path.glob("store.superseded-*.sqlite"))) == 1
     status = json.loads((tmp_path / "run_status.json").read_text())
     assert status["status"] == "running"
+
+
+def test_block_run_quarantines_stale_success_and_records_reason(tmp_path):
+    (tmp_path / "results.json").write_text("stale")
+    (tmp_path / "store.sqlite").write_text("stale")
+
+    phase1.block_run(tmp_path, "reactant is not a minimum")
+
+    assert not (tmp_path / "results.json").exists()
+    assert not (tmp_path / "store.sqlite").exists()
+    assert len(list(tmp_path.glob("results.blocked-*.json"))) == 1
+    assert len(list(tmp_path.glob("store.blocked-*.sqlite"))) == 1
+    status = json.loads((tmp_path / "run_status.json").read_text())
+    assert status == {
+        "status": "blocked",
+        "updated_at": status["updated_at"],
+        "detail": "reactant is not a minimum",
+    }
 
 
 def test_sequential_closeout_writes_gated_profile(monkeypatch, tmp_path):
@@ -618,6 +668,44 @@ def test_acid_neb_resumes_saved_product_after_band_failure(monkeypatch, tmp_path
     assert len(neb_calls) == 2
 
 
+def test_acid_neb_rejects_cached_product_without_reusing_it_as_seed(
+    monkeypatch, tmp_path
+):
+    reactant, product, ow_index, proton_indices = acid_geometries()
+    approach = _place_attacking_water(reactant, ow_index, 1.90)
+    invalid_cached = replace(approach, coords=approach.coords.copy())
+    invalid_cached.coords[proton_indices[0]] = np.array([100.0, 100.0, 100.0])
+    phase1.save_xyz(invalid_cached, tmp_path / "product.xyz")
+    seen_seeds = []
+
+    def fake_break_scan(cluster, settings, *, distances_a, **kwargs):
+        seen_seeds.append(cluster)
+        return [(distance, -2.0, product) for distance in distances_a]
+
+    monkeypatch.setattr(phase1, "constrained_scan", fake_break_scan)
+    monkeypatch.setattr(phase1, "optimize", lambda cluster, settings: cluster)
+    monkeypatch.setattr(
+        phase1,
+        "neb_ts_guess",
+        lambda *args, **kwargs: replace(approach, name="recovered-acid-neb"),
+    )
+
+    result = phase1.acid_neb_guess(
+        approach,
+        reactant,
+        CHEAP,
+        tmp_path,
+        ow_index,
+        proton_indices,
+    )
+
+    assert result.name == "recovered-acid-neb"
+    assert seen_seeds[0] is approach
+    rebuilt = phase1.load_xyz(tmp_path / "product.xyz", product)
+    assert phase1.acid_product_reason(rebuilt, ow_index, proton_indices) is None
+    assert list(tmp_path.glob("product.rejected-acid-rollback-*.xyz"))
+
+
 def test_acid_saddle_refinement_uses_endpoint_directed_cartesian_mode(
     monkeypatch, tmp_path
 ):
@@ -677,5 +765,5 @@ def test_acid_checkpoint_namespace_is_mechanism_qualified():
         "si-neutral-b3lyp-def2-svp-flank"
     )
     assert phase1.reaction_run_slug("si-acid", "b3lyp", "def2-svp", "flank") == (
-        "si-acid-preprotonated-v1-b3lyp-def2-svp-flank"
+        "si-acid-preprotonated-v2-b3lyp-def2-svp-flank"
     )

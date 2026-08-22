@@ -101,14 +101,14 @@ BASIN_ENERGY_DELTA_MAX_KJ = 5.0
 REACTANT_BASIN = (False, True, False)
 ASSOCIATIVE_BASIN = (True, True, True)
 HYDROLYZED_BASIN = (True, False, True)
-ACID_REACTANT_BASIN = (False, True, True, 1, 2)
-ACID_ASSOCIATIVE_BASIN = (True, True, True, 1, 2)
-ACID_PRODUCT_BASIN = (True, False, True, 2, 1)
+ACID_REACTANT_BASIN = (False, True, True, 1, 2, 0)
+ACID_ASSOCIATIVE_BASIN = (True, True, True, 1, 2, 0)
+ACID_PRODUCT_BASIN = (True, False, True, 2, 1, 0)
 ACID_HYDROLYZED_BASINS = {
     ACID_PRODUCT_BASIN,
-    (True, False, True, 1, 1),
+    (True, False, True, 1, 1, 1),
 }
-ACID_MECHANISM_VERSION = 1
+ACID_MECHANISM_VERSION = 2
 
 
 def reaction_run_slug(reaction: str, xc: str, basis: str, approach: str) -> str:
@@ -220,22 +220,34 @@ def acid_basin_signature(
     cluster: Cluster,
     ow_index: int,
     proton_indices: tuple[int, ...],
-) -> tuple[bool, bool, bool, int, int]:
-    """Return acid connectivity plus bridge/attacker proton counts.
+) -> tuple[bool, bool, bool, int, int, int]:
+    """Return acid connectivity and unique proton assignments.
 
-    Water attack on the pre-protonated bridge is ordinary hydrolysis: the
-    attacking H2O becomes Si-OH while its second proton leaves with the bridge
-    oxygen.  Counting only "any proton on the bridge" falsely rejected that
-    chemically correct product as hydroxide while accepting under-protonated
-    leaving groups.
+    Each tracked acid proton is assigned to its nearest oxygen. Explicit
+    bridge, attacker, and terminal-framework counts prevent a missing or
+    dissociated proton from masquerading as a valid hydrolysis rotamer.
     """
-    bridge_h_count = sum(
-        float(np.linalg.norm(cluster.coords[BR_INDEX] - cluster.coords[index])) < 1.25
-        for index in proton_indices
-    )
-    water_h_count = sum(
-        float(np.linalg.norm(cluster.coords[ow_index] - cluster.coords[index])) < 1.25
-        for index in proton_indices
+    oxygen_indices = [
+        index for index, symbol in enumerate(cluster.symbols) if symbol == "O"
+    ]
+    assignments: list[int | None] = []
+    for proton_index in proton_indices:
+        nearest_oxygen = min(
+            oxygen_indices,
+            key=lambda oxygen_index: np.linalg.norm(
+                cluster.coords[oxygen_index] - cluster.coords[proton_index]
+            ),
+        )
+        distance = float(
+            np.linalg.norm(
+                cluster.coords[nearest_oxygen] - cluster.coords[proton_index]
+            )
+        )
+        assignments.append(nearest_oxygen if distance < 1.25 else None)
+    bridge_h_count = assignments.count(BR_INDEX)
+    water_h_count = assignments.count(ow_index)
+    framework_h_count = sum(
+        oxygen_index not in {None, BR_INDEX, ow_index} for oxygen_index in assignments
     )
     return (
         float(np.linalg.norm(cluster.coords[SI_INDEX] - cluster.coords[ow_index]))
@@ -246,6 +258,7 @@ def acid_basin_signature(
         < 2.3,
         bridge_h_count,
         water_h_count,
+        framework_h_count,
     )
 
 
@@ -338,7 +351,7 @@ def acid_endpoint_in_basins(
     fwd: Cluster,
     ow_index: int,
     proton_indices: tuple[int, ...],
-    signatures: set[tuple[bool, bool, bool, int, int]],
+    signatures: set[tuple[bool, bool, bool, int, int, int]],
 ) -> Cluster:
     """Return the unique acid quick-IRC endpoint in one accepted basin."""
     matches = [
@@ -511,6 +524,37 @@ def thermo_result(freq: FrequencyResult, temperature: float) -> Thermo:
     )
 
 
+def minimum_frequency_reason(label: str, freq: FrequencyResult) -> str | None:
+    """Reject a thermochemistry reference that is not a true minimum."""
+    if freq.n_imaginary:
+        return f"{label} minimum has {freq.n_imaginary} imaginary modes"
+    return None
+
+
+def comparison_against_si_neutral(
+    reaction: str,
+    *,
+    acid_path: bool,
+    barrier_kj: float,
+) -> dict[str, float | bool]:
+    """Return only comparison claims supported by the available baseline."""
+    if reaction == "al-neutral":
+        al_easier = barrier_kj < SI_NEUTRAL_DG_KJ
+        return {
+            "si_neutral_dG_kj": SI_NEUTRAL_DG_KJ,
+            "si_neutral_dG_kcal": SI_NEUTRAL_DG_KCAL,
+            "al_easier_than_si": al_easier,
+            "xiao_lasaga_easier_si_o_al_ordering_confirmed": al_easier,
+        }
+    if acid_path:
+        return {
+            "si_neutral_dG_kj": SI_NEUTRAL_DG_KJ,
+            "si_neutral_dG_kcal": SI_NEUTRAL_DG_KCAL,
+            "acid_lower_than_si_neutral": barrier_kj < SI_NEUTRAL_DG_KJ,
+        }
+    return {}
+
+
 def write_sequential_run_status(
     run_dir: Path,
     status: str,
@@ -530,14 +574,25 @@ def write_sequential_run_status(
     temporary.replace(path)
 
 
-def begin_sequential_run(run_dir: Path) -> None:
-    """Quarantine prior final outputs before a new gated attempt starts."""
+def quarantine_final_outputs(run_dir: Path, *, reason: str) -> None:
+    """Move canonical outputs aside before a new or blocked gated attempt."""
     stamp = f"{time.strftime('%Y%m%dT%H%M%S')}-{time.time_ns()}"
     for path in (run_dir / "results.json", run_dir / "store.sqlite"):
         if path.exists():
-            quarantined = path.with_name(f"{path.stem}.superseded-{stamp}{path.suffix}")
+            quarantined = path.with_name(f"{path.stem}.{reason}-{stamp}{path.suffix}")
             path.replace(quarantined)
+
+
+def begin_sequential_run(run_dir: Path) -> None:
+    """Quarantine prior final outputs before a new gated attempt starts."""
+    quarantine_final_outputs(run_dir, reason="superseded")
     write_sequential_run_status(run_dir, "running")
+
+
+def block_run(run_dir: Path, detail: str) -> None:
+    """Fail closed without leaving stale canonical success artifacts."""
+    quarantine_final_outputs(run_dir, reason="blocked")
+    write_sequential_run_status(run_dir, "blocked", detail=detail)
 
 
 def proton_neb_guess(
@@ -743,8 +798,9 @@ def acid_neb_guess(
                 climb_optimizer="ode",
             )
         log(f"  saved acid product rejected: {product_failure}")
-        product_path.replace(run_dir / "product.rejected-acid-rollback.xyz")
-        approach_seed = product
+        product_path.replace(
+            run_dir / f"product.rejected-acid-rollback-{time.time_ns()}.xyz"
+        )
 
     seed_r = float(
         np.linalg.norm(approach_seed.coords[SI_INDEX] - approach_seed.coords[ow_index])
@@ -1113,8 +1169,8 @@ def finish_al_neutral_sequential(
         ("reactant", complex_freq),
         ("intermediate", intermediate_freq),
     ):
-        if freq.n_imaginary:
-            return fail(f"{label} minimum has {freq.n_imaginary} imaginary modes")
+        if minimum_failure := minimum_frequency_reason(label, freq):
+            return fail(minimum_failure)
 
     if acid_path:
         addition_reactant = acid_endpoint_in_basins(
@@ -1201,15 +1257,11 @@ def finish_al_neutral_sequential(
         tunneling="wigner",
     )
     overall_dg = float(metrics["overall_profile_dG_dagger_kj"])
-    comparison: dict[str, float | bool] = {}
-    if reaction == "al-neutral":
-        al_easier = overall_dg < SI_NEUTRAL_DG_KJ
-        comparison = {
-            "si_neutral_dG_kj": SI_NEUTRAL_DG_KJ,
-            "si_neutral_dG_kcal": SI_NEUTRAL_DG_KCAL,
-            "al_easier_than_si": al_easier,
-            "xiao_lasaga_easier_si_o_al_ordering_confirmed": al_easier,
-        }
+    comparison = comparison_against_si_neutral(
+        reaction,
+        acid_path=acid_path,
+        barrier_kj=overall_dg,
+    )
     de_kj = (
         highest_freq.electronic_hartree - complex_freq.electronic_hartree
     ) * HARTREE_TO_KJ
@@ -1224,6 +1276,7 @@ def finish_al_neutral_sequential(
         "mechanism": (
             "sequential-associative-acid" if acid_path else "sequential-associative"
         ),
+        "mechanism_version": ACID_MECHANISM_VERSION if acid_path else 1,
         "method": f"{settings.xc}/{settings.basis}/df",
         "temperature_k": temperature,
         "dE_elec_vs_complex_kj": de_kj,
@@ -1412,6 +1465,7 @@ def main() -> int:
             proton_indices,
         )
         if pre_equilibrium_failure:
+            block_run(run_dir, pre_equilibrium_failure)
             raise RuntimeError(pre_equilibrium_failure)
     dimer_opt = checkpointed(
         run_dir / "dimer.xyz", dimer, lambda: optimize(dimer, settings)
@@ -1642,6 +1696,11 @@ def main() -> int:
     # Stage 5 — thermochemistry.
     log("stage 5: thermochemistry")
     cx_freq = frequencies(complex_opt, settings)
+    if detail := minimum_frequency_reason("reactant", cx_freq):
+        log(f"  !! {detail}; aborting before thermochemistry")
+        if acid_path:
+            block_run(run_dir, detail)
+        return 1
     t = args.temperature
 
     def thermo(freq):
@@ -1700,11 +1759,11 @@ def main() -> int:
     }
     results["dE_elec_vs_fragments_kj"] = frag_e
     if acid_path:
-        results["comparison"] = {
-            "si_neutral_dG_kj": SI_NEUTRAL_DG_KJ,
-            "si_neutral_dG_kcal": SI_NEUTRAL_DG_KCAL,
-            "acid_lower_than_si_neutral": rate.dg_kj < SI_NEUTRAL_DG_KJ,
-        }
+        results["comparison"] = comparison_against_si_neutral(
+            args.reaction,
+            acid_path=True,
+            barrier_kj=rate.dg_kj,
+        )
 
     (run_dir / "results.json").write_text(json.dumps(results, indent=2))
 
