@@ -182,7 +182,8 @@ function bindTrajectory(traj: Trajectory, autoplay: boolean): void {
 }
 
 function attachTrajectoryText(eventsText: string): void {
-  if (!scene?.getGraph()) throw new Error('load the matching PGIF snapshot first');
+  if (!scene) throw new Error(WEBGL_DISABLED);
+  if (!scene.getGraph()) throw new Error('load the matching PGIF snapshot first');
   const traj = parseTrajectory(eventsText);
   bindTrajectory(traj, false);
   showToast(`trajectory: ${traj.events.length.toLocaleString()} events (${traj.header.deck})`);
