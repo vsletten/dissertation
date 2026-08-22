@@ -60,4 +60,3 @@ live) — raise it for the campaign process only, bounded:
 `sudo prlimit --pid $$ --memlock=17179869184:17179869184` before exec,
 never unlimited and never system-wide (this box swap-spiraled in July;
 a bounded cap keeps a runaway pin from wedging it again).
-running; extraction catches up afterward).
