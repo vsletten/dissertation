@@ -75,7 +75,7 @@ minimum. The anionic Si-O-Al cluster *does* stabilize this state and closes as
 a sequential addition/cleavage mechanism; receipts are in
 `qm/ACID_MECHANISMS.md`.
 
-### WebGL2 loss kills module-top-level boot silently (2026-08-22)
+### WebGL2 unavailable at boot kills module-top-level wiring silently (2026-08-22)
 A Chrome with a pending update can keep running with a dead GPU process, so
 `canvas.getContext('webgl2')` returns null on an otherwise healthy box (same
 symptom as hardware acceleration disabled). Any throw at module top level —
