@@ -7,7 +7,9 @@ pub mod schema;
 
 use std::path::Path;
 
-pub use compile::{compile, replica_seed, CompileError, CompiledDeck, ExecutionStrategy};
+pub use compile::{
+    compile, replica_seed, CompileError, CompiledDeck, CompiledObservable, ExecutionStrategy,
+};
 pub use schema::{DeckFile, SeedPolicy, StructureKind};
 
 #[derive(Debug, thiserror::Error)]

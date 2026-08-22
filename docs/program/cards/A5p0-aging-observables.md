@@ -1,6 +1,6 @@
 # A5p0-aging-observables — field-lab flagship Phase 0
 
-- status: blocked (B4)
+- status: ready
 - track: A (geochemistry flagship)
 - priority: P1
 - machine: any
@@ -21,4 +21,5 @@ inventory depletes — the qualitative H1 signature.
   defect depletion, written up in docs/program/results/ with plots.
 
 ## Progress
+- 2026-08-22 — hermes-laptop — unblocked by B4's ensemble/observables framework; exposure-age core attachment contract is in `petra/docs/OBSERVABLES.md`.
 - 2026-08-18 — card created (fable).

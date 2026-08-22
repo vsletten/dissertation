@@ -57,7 +57,18 @@ pub struct CompiledDeck {
     pub n_replicas: u64,
     pub seed_policy: SeedPolicy,
     pub report_every: u64,
+    pub observables: Vec<CompiledObservable>,
     pub strategy: ExecutionStrategy,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CompiledObservable {
+    StateCounts,
+    EventRates,
+    RateSpectra,
+    ClusterSizes { states: Vec<StateId> },
+    SurfaceArea { states: Vec<StateId>, axis: u8 },
+    Snapshot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -968,6 +979,71 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         label_names[id as usize] = name.clone();
     }
 
+    let mut observables = Vec::with_capacity(deck.observables.series.len());
+    for observable in &deck.observables.series {
+        let state_filter = || -> Result<Vec<StateId>, CompileError> {
+            let state = observable
+                .parameters
+                .get("state")
+                .and_then(toml::Value::as_str)
+                .ok_or_else(|| {
+                    CompileError(format!(
+                        "{} observable requires string state",
+                        observable.kind
+                    ))
+                })?;
+            let refs = names.state_refs.get(state).ok_or_else(|| {
+                CompileError(format!(
+                    "{} observable names unknown state '{state}'",
+                    observable.kind
+                ))
+            })?;
+            if refs.len() != 1 {
+                return err(format!(
+                    "{} observable state '{state}' is ambiguous; qualify it as Kind.state",
+                    observable.kind
+                ));
+            }
+            Ok(vec![refs[0].1])
+        };
+        let axis = || -> Result<u8, CompileError> {
+            let value = observable
+                .parameters
+                .get("axis")
+                .and_then(toml::Value::as_integer)
+                .ok_or_else(|| {
+                    CompileError(format!(
+                        "{} observable requires integer axis",
+                        observable.kind
+                    ))
+                })?;
+            if !(0..=2).contains(&value) {
+                return err(format!(
+                    "{} observable axis must be 0, 1, or 2",
+                    observable.kind
+                ));
+            }
+            Ok(value as u8)
+        };
+        observables.push(match observable.kind.as_str() {
+            "state_counts" => CompiledObservable::StateCounts,
+            "event_rates" => CompiledObservable::EventRates,
+            "rate_spectra" => CompiledObservable::RateSpectra,
+            "cluster_sizes" => CompiledObservable::ClusterSizes {
+                states: state_filter()?,
+            },
+            "surface_area" => CompiledObservable::SurfaceArea {
+                states: state_filter()?,
+                axis: axis()?,
+            },
+            "snapshot" => CompiledObservable::Snapshot,
+            "interface_roughness" => {
+                return err("interface_roughness is not implemented");
+            }
+            _ => unreachable!("observable kind validated before compilation"),
+        });
+    }
+
     Ok(CompiledDeck {
         name: deck.deck.name.clone(),
         unit_cell,
@@ -991,6 +1067,7 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         n_replicas: deck.execution.ensemble.n_replicas,
         seed_policy: deck.execution.ensemble.seed_policy,
         report_every: deck.observables.report_every,
+        observables,
         strategy: match deck.execution.strategy.as_str() {
             "ctmc" => ExecutionStrategy::Ctmc,
             "synchronous" => ExecutionStrategy::Synchronous,

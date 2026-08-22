@@ -174,6 +174,8 @@ struct DeckV1 {
     #[serde(default)]
     reactions: Vec<ReactionSpec>,
     simulation: SimSpec,
+    #[serde(default)]
+    observables: Option<ObservablesSpec>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -245,10 +247,10 @@ impl DeckFile {
                 seed_policy: SeedPolicy::Increment,
             },
         };
-        let observables = ObservablesSpec {
-            report_every: v1.simulation.report_every.unwrap_or(0),
-            series: Vec::new(),
-        };
+        let mut observables = v1.observables.unwrap_or_default();
+        if observables.report_every == 0 {
+            observables.report_every = v1.simulation.report_every.unwrap_or(0);
+        }
         Self {
             deck: v1.deck,
             structure_kind: StructureKind::Cell,
@@ -433,7 +435,8 @@ fn validate_v2_surfaces(deck: &DeckV2) -> Result<(), String> {
 
     for observable in &deck.observables.series {
         match observable.kind.as_str() {
-            "state_counts" | "event_rates" | "rate_spectra" | "cluster_sizes" | "snapshot" => {}
+            "state_counts" | "event_rates" | "rate_spectra" | "cluster_sizes" | "surface_area"
+            | "snapshot" => {}
             "interface_roughness" => {
                 let axis = observable
                     .parameters

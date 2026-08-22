@@ -85,3 +85,6 @@ seed_policy = "hash"
 
 [observables]
 report_every = 1000
+
+[[observables.series]]
+kind = "state_counts"

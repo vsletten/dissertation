@@ -115,7 +115,8 @@ fn run() -> Result<(), String> {
     if ensemble > 1 {
         return run_ensemble(&args, &deck, ensemble);
     }
-    let mut engine = deck.build_engine(args.seed).map_err(|e| e.to_string())?;
+    let seed = petra_deck::replica_seed(args.seed.unwrap_or(deck.seed), 0, deck.seed_policy);
+    let mut engine = deck.build_engine(Some(seed)).map_err(|e| e.to_string())?;
     let steps = args.steps.unwrap_or(deck.steps);
     let report_every = if deck.report_every == 0 {
         steps.max(1)
@@ -127,6 +128,14 @@ fn run() -> Result<(), String> {
     let csv_path = format!("{}/populations.csv", args.out);
     let mut csv = std::fs::File::create(&csv_path).map_err(|e| e.to_string())?;
     writeln!(csv, "step,time,{}", deck.state_names.join(",")).map_err(|e| e.to_string())?;
+    let observables_path = format!("{}/observables.csv", args.out);
+    let mut observables = if deck.observables.is_empty() {
+        None
+    } else {
+        let mut file = std::fs::File::create(&observables_path).map_err(|e| e.to_string())?;
+        writeln!(file, "replica,seed,step,time,kind,index,value").map_err(|e| e.to_string())?;
+        Some(file)
+    };
 
     // Trajectory artifacts: initial snapshot now, events as they fire.
     let mut event_log = if args.viz {
@@ -138,19 +147,17 @@ fn run() -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         let writer = std::io::BufWriter::new(file);
         Some(
-            petra_io::EventLogWriter::new(
-                writer,
-                &deck,
-                args.seed.unwrap_or(deck.seed),
-                engine.lattice.len(),
-            )
-            .map_err(|e| e.to_string())?,
+            petra_io::EventLogWriter::new(writer, &deck, seed, engine.lattice.len())
+                .map_err(|e| e.to_string())?,
         )
     } else {
         None
     };
 
-    let report = |engine: &petra_core::Engine, csv: &mut std::fs::File| -> Result<(), String> {
+    let report = |engine: &petra_core::Engine,
+                  csv: &mut std::fs::File,
+                  observables: Option<&mut std::fs::File>|
+     -> Result<(), String> {
         let counts = engine.state_counts(deck.n_states);
         let row: Vec<String> = counts.iter().map(|c| c.to_string()).collect();
         writeln!(
@@ -160,7 +167,11 @@ fn run() -> Result<(), String> {
             engine.time,
             row.join(",")
         )
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+        if let Some(writer) = observables {
+            write_observable_rows(writer, 0, seed, &petra_observables::observe(engine, &deck))?;
+        }
+        Ok(())
     };
 
     println!(
@@ -169,10 +180,10 @@ fn run() -> Result<(), String> {
         engine.lattice.len(),
         engine.reactions.len(),
         deck.temperature,
-        args.seed.unwrap_or(deck.seed),
+        seed,
         deck.strategy.as_str(),
     );
-    report(&engine, &mut csv)?;
+    report(&engine, &mut csv, observables.as_mut())?;
 
     let mut stopped: Option<Stop> = None;
     let mut strategy = deck.strategy();
@@ -191,7 +202,7 @@ fn run() -> Result<(), String> {
             }
         }
         if i % report_every == 0 {
-            report(&engine, &mut csv)?;
+            report(&engine, &mut csv, observables.as_mut())?;
             if args.paranoid {
                 engine
                     .paranoid_check()
@@ -199,7 +210,9 @@ fn run() -> Result<(), String> {
             }
         }
     }
-    report(&engine, &mut csv)?;
+    if engine.step_count % report_every != 0 {
+        report(&engine, &mut csv, observables.as_mut())?;
+    }
 
     match stopped {
         Some(stop) => println!(
@@ -216,6 +229,9 @@ fn run() -> Result<(), String> {
         println!("  {name}: {count}");
     }
     println!("wrote {csv_path}");
+    if observables.is_some() {
+        println!("wrote {observables_path}");
+    }
     if let Some(log) = event_log {
         let events = log.events_written();
         let mut writer = log.into_inner();
@@ -272,11 +288,72 @@ fn write_xyz(
     std::fs::write(path, text).map_err(|e| e.to_string())
 }
 
+fn write_observable_rows(
+    writer: &mut std::fs::File,
+    replica: u64,
+    seed: u64,
+    sample: &petra_observables::Sample,
+) -> Result<(), String> {
+    for value in &sample.values {
+        let (kind, values): (&str, Vec<f64>) = match value {
+            petra_observables::ObservableValue::StateCounts(values) => (
+                "state_counts",
+                values.iter().map(|&value| value as f64).collect(),
+            ),
+            petra_observables::ObservableValue::EventRates(values) => {
+                ("event_rates", values.clone())
+            }
+            petra_observables::ObservableValue::RateSpectrum(values) => {
+                ("rate_spectra", values.clone())
+            }
+            petra_observables::ObservableValue::ClusterSizes(values) => (
+                "cluster_sizes",
+                values.iter().map(|&value| value as f64).collect(),
+            ),
+            petra_observables::ObservableValue::SurfaceArea(area) => (
+                "surface_area",
+                vec![
+                    area.geometric,
+                    area.bet_site_proxy as f64,
+                    area.exposed_sites as f64,
+                ],
+            ),
+        };
+        for (index, value) in values.iter().enumerate() {
+            writeln!(
+                writer,
+                "{replica},{seed},{},{:.9e},{kind},{index},{value:.9e}",
+                sample.step, sample.time
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 fn run_ensemble(args: &Args, deck: &petra_deck::CompiledDeck, ensemble: u64) -> Result<(), String> {
     let steps = args.steps.unwrap_or(deck.steps);
     let base_seed = args.seed.unwrap_or(deck.seed);
-
     std::fs::create_dir_all(&args.out).map_err(|e| e.to_string())?;
+
+    let sample_every = if deck.report_every == 0 {
+        steps.max(1)
+    } else {
+        deck.report_every
+    };
+    let run = petra_observables::run_ensemble(
+        deck,
+        &petra_observables::EnsembleConfig {
+            replicas: ensemble,
+            base_seed,
+            steps,
+            burn_in: 0,
+            sample_every,
+            bootstrap_resamples: 2_000,
+            bootstrap_seed: base_seed ^ 0xA076_1D64_78BD_642F,
+        },
+    )?;
+
     let csv_path = format!("{}/ensemble.csv", args.out);
     let mut csv = std::fs::File::create(&csv_path).map_err(|e| e.to_string())?;
     writeln!(csv, "seed,steps,time,{}", deck.state_names.join(",")).map_err(|e| e.to_string())?;
@@ -286,41 +363,57 @@ fn run_ensemble(args: &Args, deck: &petra_deck::CompiledDeck, ensemble: u64) -> 
         deck.name, ensemble, deck.seed_policy, steps
     );
 
-    // Per-state running sums for mean/std over ensemble members.
-    let mut sum = vec![0.0f64; deck.n_states];
-    let mut sumsq = vec![0.0f64; deck.n_states];
-    for k in 0..ensemble {
-        let seed = petra_deck::replica_seed(base_seed, k, deck.seed_policy);
-        let mut engine = deck.build_engine(Some(seed)).expect("engine builds");
-        let mut strategy = deck.strategy();
-        for _ in 0..steps {
-            if engine.step_with(&mut strategy).is_err() {
-                break;
-            }
-        }
-        let counts = engine.state_counts(deck.n_states);
-        let row: Vec<String> = counts.iter().map(|c| c.to_string()).collect();
+    for replica in &run.replicas {
+        let row: Vec<String> = replica
+            .final_state_counts
+            .iter()
+            .map(|count| count.to_string())
+            .collect();
+        let final_sample = replica.samples.last().expect("at least initial sample");
         writeln!(
             csv,
             "{seed},{},{:.6e},{}",
-            engine.step_count,
-            engine.time,
-            row.join(",")
+            final_sample.step,
+            final_sample.time,
+            row.join(","),
+            seed = replica.seed,
         )
         .map_err(|e| e.to_string())?;
-        for (i, &c) in counts.iter().enumerate() {
-            sum[i] += c as f64;
-            sumsq[i] += (c as f64) * (c as f64);
-        }
     }
 
-    let n = ensemble as f64;
-    println!("final populations, mean ± std over {} members:", ensemble);
-    for (i, name) in deck.state_names.iter().enumerate() {
-        let mean = sum[i] / n;
-        let var = (sumsq[i] / n - mean * mean).max(0.0);
-        println!("  {name}: {mean:.2} ± {:.2}", var.sqrt());
+    let summary_path = format!("{}/ensemble-summary.csv", args.out);
+    let mut summary = std::fs::File::create(&summary_path).map_err(|e| e.to_string())?;
+    writeln!(summary, "state,mean,ci95_low,ci95_high,distribution").map_err(|e| e.to_string())?;
+    println!("final populations, mean and bootstrap 95% CI over {ensemble} members:");
+    for (name, distribution) in deck.state_names.iter().zip(&run.final_state_counts) {
+        let values = distribution
+            .values
+            .iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>()
+            .join(";");
+        writeln!(
+            summary,
+            "{name},{:.6},{:.6},{:.6},{values}",
+            distribution.mean, distribution.ci95.0, distribution.ci95.1
+        )
+        .map_err(|e| e.to_string())?;
+        println!(
+            "  {name}: {:.2} [{:.2}, {:.2}]",
+            distribution.mean, distribution.ci95.0, distribution.ci95.1
+        );
+    }
+
+    let observables_path = format!("{}/observables.csv", args.out);
+    let mut observables = std::fs::File::create(&observables_path).map_err(|e| e.to_string())?;
+    writeln!(observables, "replica,seed,step,time,kind,index,value").map_err(|e| e.to_string())?;
+    for replica in &run.replicas {
+        for sample in &replica.samples {
+            write_observable_rows(&mut observables, replica.replica, replica.seed, sample)?;
+        }
     }
     println!("wrote {csv_path}");
+    println!("wrote {summary_path}");
+    println!("wrote {observables_path}");
     Ok(())
 }
