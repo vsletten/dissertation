@@ -4,6 +4,14 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-21 — fable — A3 pilot cell DONE: embedded Si–O–Si neutral
+  hydrolysis ΔG‡ = 205.7 kJ/mol (free dimer 113.0; +92.7 lattice shift,
+  matching Pelmenschikov's ~205 embedded first-rupture) via a verified
+  two-step mechanism (pentacoordinate-Si intermediate, rate-limiting
+  bridge rupture, 128i, IRC-connected). CALC-002 neutral computed.
+  Campaign recipe + workstation ops prerequisites in the card Result;
+  family ladders are factory work per the 2026-08-20 handoff.
+
 - 2026-08-22 — hermes-laptop — E2 DONE: scheduled full muscovite mechanism
   now distinguishes pristine/extended galleries, explicit locally driven
   delamination, ⁴⁰Ar/³⁹Ar/³⁶Ar, and octahedral recoil traps; deterministic
