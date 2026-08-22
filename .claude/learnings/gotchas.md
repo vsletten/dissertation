@@ -74,3 +74,13 @@ Use 3–6 explicit waters and first prove an unconstrained protonated-bridge
 minimum. The anionic Si-O-Al cluster *does* stabilize this state and closes as
 a sequential addition/cleavage mechanism; receipts are in
 `qm/ACID_MECHANISMS.md`.
+
+### WebGL2 unavailable at boot kills module-top-level wiring silently (2026-08-22)
+A Chrome with a pending update can keep running with a dead GPU process, so
+`canvas.getContext('webgl2')` returns null on an otherwise healthy box (same
+symptom as hardware acceleration disabled). Any throw at module top level —
+e.g. constructing the three.js renderer — then silently kills every statement
+after it: the static HTML renders but no handlers ever attach, with only a
+console error as evidence. graph-viz boot now probes WebGL2, shows a banner,
+and wires the non-GPU UI regardless (PR #74); guard renderer construction the
+same way in any future web frontend.
