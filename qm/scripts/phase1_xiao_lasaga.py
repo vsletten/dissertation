@@ -642,6 +642,7 @@ def acid_neb_guess(
                 max_steps=240,
                 pre_relax_fmax_ev_a=1.5,
                 pre_relax_steps=120,
+                climb_optimizer="ode",
             )
         log(f"  saved acid product rejected: {product_failure}")
         product_path.replace(run_dir / "product.rejected-acid-rollback.xyz")
@@ -724,6 +725,7 @@ def acid_neb_guess(
         max_steps=240,
         pre_relax_fmax_ev_a=1.5,
         pre_relax_steps=120,
+        climb_optimizer="ode",
     )
 
 

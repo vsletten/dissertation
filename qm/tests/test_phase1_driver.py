@@ -528,6 +528,7 @@ def test_acid_neb_builds_product_without_repeating_proton_transfer(
     assert (tmp_path / "product.xyz").exists()
     assert len(endpoints) == 1
     assert endpoints[0][0] is reactant
+    assert endpoints[0][2]["climb_optimizer"] == "ode"
 
 
 def test_acid_neb_resumes_saved_product_after_band_failure(monkeypatch, tmp_path):
