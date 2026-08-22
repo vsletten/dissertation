@@ -330,9 +330,32 @@ def test_block_run_quarantines_stale_success_and_records_reason(tmp_path):
     }
 
 
-@pytest.mark.parametrize("terminal_failure", ["channel-escape", "saddle", "quick-irc"])
+@pytest.mark.parametrize(
+    ("terminal_failure", "expected_detail", "expected_gate_calls"),
+    [
+        pytest.param(
+            "channel-escape",
+            "saddle r(Si-Ow)=3.00 A is outside the bonding channel; "
+            "acid-neb route exhausted before thermochemistry",
+            (0, 0),
+            id="channel-escape",
+        ),
+        pytest.param(
+            "saddle",
+            "not a clean first-order saddle — inspect ts.xyz",
+            (1, 0),
+            id="non-first-order-saddle",
+        ),
+        pytest.param(
+            "quick-irc",
+            "quick IRC missed the product basin; aborting before thermochemistry",
+            (1, 1),
+            id="quick-irc",
+        ),
+    ],
+)
 def test_acid_main_records_terminal_stage_failures(
-    monkeypatch, tmp_path, terminal_failure
+    monkeypatch, tmp_path, terminal_failure, expected_detail, expected_gate_calls
 ):
     dimer = disilicate()
     reactant = protonated_bridge_complex(dimer)
@@ -372,12 +395,18 @@ def test_acid_main_records_terminal_stage_failures(
             np.ones_like(saddle.coords) if terminal_failure == "quick-irc" else None
         ),
     )
-    monkeypatch.setattr(phase1, "frequencies", lambda cluster, settings: frequency)
-    monkeypatch.setattr(
-        phase1,
-        "quick_irc",
-        lambda *args, **kwargs: (reactant, reactant),
-    )
+    gate_calls = {"frequencies": 0, "quick_irc": 0}
+
+    def mocked_frequencies(cluster, settings):
+        gate_calls["frequencies"] += 1
+        return frequency
+
+    def mocked_quick_irc(*args, **kwargs):
+        gate_calls["quick_irc"] += 1
+        return reactant, reactant
+
+    monkeypatch.setattr(phase1, "frequencies", mocked_frequencies)
+    monkeypatch.setattr(phase1, "quick_irc", mocked_quick_irc)
     monkeypatch.setattr(
         phase1,
         "acid_quick_irc_channel_reason",
@@ -392,7 +421,8 @@ def test_acid_main_records_terminal_stage_failures(
     assert phase1.main() == 1
     status = json.loads((tmp_path / "run_status.json").read_text())
     assert status["status"] == "blocked"
-    assert status["detail"]
+    assert status["detail"] == expected_detail
+    assert (gate_calls["frequencies"], gate_calls["quick_irc"]) == expected_gate_calls
 
 
 def test_sequential_closeout_writes_gated_profile(monkeypatch, tmp_path):
