@@ -729,6 +729,43 @@ def acid_neb_guess(
     )
 
 
+def refine_phase1_saddle(
+    ts_guess: Cluster,
+    complex_opt: Cluster,
+    settings: DftSettings,
+    *,
+    trajectory_path: Path,
+    acid_path: bool,
+    route: str,
+    run_dir: Path,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+) -> Cluster:
+    """Refine a crest, directing acid Sella along the complete hydrolysis path."""
+    if acid_path and route == "acid-neb":
+        product_path = run_dir / "product.xyz"
+        if not product_path.exists():
+            raise RuntimeError("acid-neb saddle refinement requires product.xyz")
+        product = load_xyz(product_path, complex_opt)
+        reactive_core = sorted(
+            {BR_INDEX, SI_INDEX, AL_INDEX, ow_index, *proton_indices}
+        )
+        mode = reaction_path_vector(
+            complex_opt,
+            product,
+            active_indices=reactive_core,
+        )
+        log("  directing Cartesian Sella along the acid reactant→product path")
+        return find_ts(
+            ts_guess,
+            settings,
+            trajectory=str(trajectory_path),
+            initial_mode=mode,
+            internal=False,
+        )
+    return find_ts(ts_guess, settings, trajectory=str(trajectory_path))
+
+
 def finish_al_neutral_sequential(
     *,
     complex_opt: Cluster,
@@ -1236,10 +1273,31 @@ def main() -> int:
     log("stage 3: Sella saddle search")
     ts_path = run_dir / "ts.xyz"
     trajectory_path = run_dir / "sella.traj"
+    if acid_path and route == product_route and ts_path.exists():
+        saved_ts = load_xyz(ts_path, ts_guess)
+        saved_escape = channel_escape_reason(ts_guess, saved_ts, ow_index)
+        if saved_escape:
+            suffix = time.time_ns()
+            ts_path.replace(run_dir / f"ts.rejected-channel-escape-{suffix}.xyz")
+            if trajectory_path.exists():
+                trajectory_path.replace(
+                    run_dir / f"sella.rejected-channel-escape-{suffix}.traj"
+                )
+            log(f"  quarantined escaped acid saddle checkpoint: {saved_escape}")
     ts = checkpointed(
         ts_path,
         ts_guess,
-        lambda: find_ts(ts_guess, settings, trajectory=str(trajectory_path)),
+        lambda: refine_phase1_saddle(
+            ts_guess,
+            complex_opt,
+            settings,
+            trajectory_path=trajectory_path,
+            acid_path=acid_path,
+            route=route,
+            run_dir=run_dir,
+            ow_index=ow_index,
+            proton_indices=proton_indices,
+        ),
     )
 
     r_guess = float(
@@ -1272,7 +1330,17 @@ def main() -> int:
         ts = checkpointed(
             ts_path,
             ts_guess,
-            lambda: find_ts(ts_guess, settings, trajectory=str(trajectory_path)),
+            lambda: refine_phase1_saddle(
+                ts_guess,
+                complex_opt,
+                settings,
+                trajectory_path=trajectory_path,
+                acid_path=acid_path,
+                route=route,
+                run_dir=run_dir,
+                ow_index=ow_index,
+                proton_indices=proton_indices,
+            ),
         )
         r_guess = float(
             np.linalg.norm(ts_guess.coords[SI_INDEX] - ts_guess.coords[ow_index])

@@ -575,6 +575,39 @@ def test_acid_neb_resumes_saved_product_after_band_failure(monkeypatch, tmp_path
     assert len(neb_calls) == 2
 
 
+def test_acid_saddle_refinement_uses_endpoint_directed_cartesian_mode(
+    monkeypatch, tmp_path
+):
+    reactant, product, ow_index, proton_indices = acid_geometries()
+    guess = _place_attacking_water(reactant, ow_index, 2.0)
+    phase1.save_xyz(product, tmp_path / "product.xyz")
+    calls = []
+
+    def fake_find_ts(cluster, settings, **kwargs):
+        calls.append(kwargs)
+        return cluster
+
+    monkeypatch.setattr(phase1, "find_ts", fake_find_ts)
+    result = phase1.refine_phase1_saddle(
+        guess,
+        reactant,
+        CHEAP,
+        trajectory_path=tmp_path / "sella.traj",
+        acid_path=True,
+        route="acid-neb",
+        run_dir=tmp_path,
+        ow_index=ow_index,
+        proton_indices=proton_indices,
+    )
+
+    assert result is guess
+    assert len(calls) == 1
+    assert calls[0]["internal"] is False
+    assert calls[0]["initial_mode"].shape == reactant.coords.shape
+    assert np.linalg.norm(calls[0]["initial_mode"]) == pytest.approx(1.0)
+    assert calls[0]["trajectory"] == str(tmp_path / "sella.traj")
+
+
 def test_acid_checkpoint_namespace_is_mechanism_qualified():
     assert phase1.reaction_run_slug("si-neutral", "b3lyp", "def2-svp", "flank") == (
         "si-neutral-b3lyp-def2-svp-flank"
