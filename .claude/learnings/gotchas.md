@@ -54,3 +54,17 @@ ophir-email-pipeline-hotmail.service`, run with a trap that restarts
 them on exit + a `systemd-run --user --on-active=10h` dead-man restart,
 and a VRAM-below-threshold gate before launch (ingest daemons keep
 running; extraction catches up afterward).
+
+Honcho's `honcho-deriver-1` and `honcho-api-1` containers also call local
+Ollama (`gemma4-deriver` + `bge-m3`) and can reload ~19 GB immediately after
+`ollama stop`. Stop those two containers for Hessian campaigns, unload both
+models, verify `ollama ps` is empty, and restart the containers at exfil.
+
+### One-water Si-acid is not a protonated-bridge minimum (2026-08-22)
+At B3LYP/def2-SVP/DF, the neutral disilicate + one H3O+ model returns the
+bridge proton to residual water in gas phase, with water moved to 4.5 A, and
+under aqueous PCM. Do not hold Obr-H and publish constrained thermochemistry.
+Use 3–6 explicit waters and first prove an unconstrained protonated-bridge
+minimum. The anionic Si-O-Al cluster *does* stabilize this state and closes as
+a sequential addition/cleavage mechanism; receipts are in
+`qm/ACID_MECHANISMS.md`.

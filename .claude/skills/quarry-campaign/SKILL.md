@@ -18,9 +18,19 @@ authority `qm/SURVEY.md`; traps in `.claude/learnings/`.
 4. Long jobs run backgrounded/detached with a completion signal —
    never hold a terminal open as the only record.
 5. No multi-hour full-CPU jobs without Victor's explicit go.
+6. **Clear inherited Python state**: prefix project commands with
+   `env -u PYTHONPATH -u VIRTUAL_ENV`; an outer Hermes venv otherwise imports
+   the wrong NumPy/PySCF stack.
+7. **Own the GPU before Hessians**: stop both email extraction services and
+   Honcho's `honcho-deriver-1` / `honcho-api-1` containers, then unload
+   `gemma4-deriver` and `bge-m3`. Honcho will immediately reload ~19 GB after
+   `ollama stop` if its callers remain alive. Verify `ollama ps` is empty and
+   establish a bounded dead-man restart before launching. Restart all four
+   workloads at exfil.
 
 ```bash
-cd qm && OMP_NUM_THREADS=16 uv run python scripts/phase1_xiao_lasaga.py \
+cd qm && env -u PYTHONPATH -u VIRTUAL_ENV OMP_NUM_THREADS=16 \
+  uv run --frozen --extra gpu --extra dev python scripts/phase1_xiao_lasaga.py \
   --reaction si-neutral --gpu 2>&1 | tee /path/to/run.log
 ```
 
