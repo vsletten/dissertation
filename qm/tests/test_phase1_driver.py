@@ -68,6 +68,9 @@ def acid_geometries(
     # Atom 2 is the center across the bridge; 9:15 are its three OH groups.
     for index in (phase1.BR_INDEX, phase1.AL_INDEX, *range(9, 15), ow_index + 1):
         coords[index] += leaving_delta
+    # Hydrolysis leaves Si-OH plus a doubly protonated bridge oxygen.  Move one
+    # of the attacker's two hydrogens onto the departing bridge group.
+    coords[ow_index + 2] = coords[phase1.BR_INDEX] + np.array([0.0, 0.98, 0.0])
     product = replace(product, name="acid-product", coords=coords)
     return reactant, product, ow_index, proton_indices
 

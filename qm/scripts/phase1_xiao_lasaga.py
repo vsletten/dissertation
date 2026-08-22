@@ -101,8 +101,8 @@ BASIN_ENERGY_DELTA_MAX_KJ = 5.0
 REACTANT_BASIN = (False, True, False)
 ASSOCIATIVE_BASIN = (True, True, True)
 HYDROLYZED_BASIN = (True, False, True)
-ACID_REACTANT_BASIN = (False, True, True, True, 2)
-ACID_PRODUCT_BASIN = (True, False, True, True, 2)
+ACID_REACTANT_BASIN = (False, True, True, 1, 2)
+ACID_PRODUCT_BASIN = (True, False, True, 2, 1)
 ACID_MECHANISM_VERSION = 1
 
 
@@ -183,8 +183,19 @@ def acid_basin_signature(
     cluster: Cluster,
     ow_index: int,
     proton_indices: tuple[int, ...],
-) -> tuple[bool, bool, bool, bool, int]:
-    """Return the full acid speciation/connectivity state for fail-closed gates."""
+) -> tuple[bool, bool, bool, int, int]:
+    """Return acid connectivity plus bridge/attacker proton counts.
+
+    Water attack on the pre-protonated bridge is ordinary hydrolysis: the
+    attacking H2O becomes Si-OH while its second proton leaves with the bridge
+    oxygen.  Counting only "any proton on the bridge" falsely rejected that
+    chemically correct product as hydroxide while accepting under-protonated
+    leaving groups.
+    """
+    bridge_h_count = sum(
+        float(np.linalg.norm(cluster.coords[BR_INDEX] - cluster.coords[index])) < 1.25
+        for index in proton_indices
+    )
     water_h_count = sum(
         float(np.linalg.norm(cluster.coords[ow_index] - cluster.coords[index])) < 1.25
         for index in proton_indices
@@ -196,11 +207,7 @@ def acid_basin_signature(
         < 2.3,
         float(np.linalg.norm(cluster.coords[AL_INDEX] - cluster.coords[BR_INDEX]))
         < 2.3,
-        any(
-            float(np.linalg.norm(cluster.coords[BR_INDEX] - cluster.coords[index]))
-            < 1.25
-            for index in proton_indices
-        ),
+        bridge_h_count,
         water_h_count,
     )
 
