@@ -265,13 +265,14 @@ def relax_at_fixed_distances(
     for atom_i, atom_j, target in fixed_distances:
         if atom_i == atom_j:
             raise ValueError("a fixed distance requires two distinct atoms")
-        if atom_i < 0 or atom_j < 0 or atom_i >= len(cluster.symbols) or atom_j >= len(
-            cluster.symbols
+        if (
+            atom_i < 0
+            or atom_j < 0
+            or atom_i >= len(cluster.symbols)
+            or atom_j >= len(cluster.symbols)
         ):
             raise ValueError("fixed_distances contains an out-of-range atom")
-        pair_key = (
-            (atom_i, atom_j) if atom_i < atom_j else (atom_j, atom_i)
-        )
+        pair_key = (atom_i, atom_j) if atom_i < atom_j else (atom_j, atom_i)
         if pair_key in seen:
             raise ValueError("fixed_distances contains a duplicate atom pair")
         if atom_i in frozen or atom_j in frozen:

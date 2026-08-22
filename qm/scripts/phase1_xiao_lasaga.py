@@ -563,8 +563,7 @@ def finish_al_neutral_sequential(
             ow_index,
             float(
                 np.linalg.norm(
-                    addition_guess.coords[SI_INDEX]
-                    - addition_guess.coords[ow_index]
+                    addition_guess.coords[SI_INDEX] - addition_guess.coords[ow_index]
                 )
             ),
         ),
