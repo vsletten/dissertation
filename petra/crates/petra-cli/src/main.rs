@@ -127,6 +127,14 @@ fn run() -> Result<(), String> {
     let csv_path = format!("{}/populations.csv", args.out);
     let mut csv = std::fs::File::create(&csv_path).map_err(|e| e.to_string())?;
     writeln!(csv, "step,time,{}", deck.state_names.join(",")).map_err(|e| e.to_string())?;
+    let observables_path = format!("{}/observables.csv", args.out);
+    let mut observables = if deck.observables.is_empty() {
+        None
+    } else {
+        let mut file = std::fs::File::create(&observables_path).map_err(|e| e.to_string())?;
+        writeln!(file, "replica,seed,step,time,kind,index,value").map_err(|e| e.to_string())?;
+        Some(file)
+    };
 
     // Trajectory artifacts: initial snapshot now, events as they fire.
     let mut event_log = if args.viz {
@@ -150,7 +158,10 @@ fn run() -> Result<(), String> {
         None
     };
 
-    let report = |engine: &petra_core::Engine, csv: &mut std::fs::File| -> Result<(), String> {
+    let report = |engine: &petra_core::Engine,
+                  csv: &mut std::fs::File,
+                  observables: Option<&mut std::fs::File>|
+     -> Result<(), String> {
         let counts = engine.state_counts(deck.n_states);
         let row: Vec<String> = counts.iter().map(|c| c.to_string()).collect();
         writeln!(
@@ -160,7 +171,16 @@ fn run() -> Result<(), String> {
             engine.time,
             row.join(",")
         )
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+        if let Some(writer) = observables {
+            write_observable_rows(
+                writer,
+                0,
+                args.seed.unwrap_or(deck.seed),
+                &petra_observables::observe(engine, &deck),
+            )?;
+        }
+        Ok(())
     };
 
     println!(
@@ -172,7 +192,7 @@ fn run() -> Result<(), String> {
         args.seed.unwrap_or(deck.seed),
         deck.strategy.as_str(),
     );
-    report(&engine, &mut csv)?;
+    report(&engine, &mut csv, observables.as_mut())?;
 
     let mut stopped: Option<Stop> = None;
     let mut strategy = deck.strategy();
@@ -191,7 +211,7 @@ fn run() -> Result<(), String> {
             }
         }
         if i % report_every == 0 {
-            report(&engine, &mut csv)?;
+            report(&engine, &mut csv, observables.as_mut())?;
             if args.paranoid {
                 engine
                     .paranoid_check()
@@ -199,7 +219,9 @@ fn run() -> Result<(), String> {
             }
         }
     }
-    report(&engine, &mut csv)?;
+    if engine.step_count % report_every != 0 {
+        report(&engine, &mut csv, observables.as_mut())?;
+    }
 
     match stopped {
         Some(stop) => println!(
@@ -216,6 +238,9 @@ fn run() -> Result<(), String> {
         println!("  {name}: {count}");
     }
     println!("wrote {csv_path}");
+    if observables.is_some() {
+        println!("wrote {observables_path}");
+    }
     if let Some(log) = event_log {
         let events = log.events_written();
         let mut writer = log.into_inner();
@@ -270,6 +295,49 @@ fn write_xyz(
         text.push('\n');
     }
     std::fs::write(path, text).map_err(|e| e.to_string())
+}
+
+fn write_observable_rows(
+    writer: &mut std::fs::File,
+    replica: u64,
+    seed: u64,
+    sample: &petra_observables::Sample,
+) -> Result<(), String> {
+    for value in &sample.values {
+        let (kind, values): (&str, Vec<f64>) = match value {
+            petra_observables::ObservableValue::StateCounts(values) => (
+                "state_counts",
+                values.iter().map(|&value| value as f64).collect(),
+            ),
+            petra_observables::ObservableValue::EventRates(values) => {
+                ("event_rates", values.clone())
+            }
+            petra_observables::ObservableValue::RateSpectrum(values) => {
+                ("rate_spectra", values.clone())
+            }
+            petra_observables::ObservableValue::ClusterSizes(values) => (
+                "cluster_sizes",
+                values.iter().map(|&value| value as f64).collect(),
+            ),
+            petra_observables::ObservableValue::SurfaceArea(area) => (
+                "surface_area",
+                vec![
+                    area.geometric,
+                    area.bet_site_proxy as f64,
+                    area.exposed_sites as f64,
+                ],
+            ),
+        };
+        for (index, value) in values.iter().enumerate() {
+            writeln!(
+                writer,
+                "{replica},{seed},{},{:.9e},{kind},{index},{value:.9e}",
+                sample.step, sample.time
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 fn run_ensemble(args: &Args, deck: &petra_deck::CompiledDeck, ensemble: u64) -> Result<(), String> {
@@ -350,40 +418,7 @@ fn run_ensemble(args: &Args, deck: &petra_deck::CompiledDeck, ensemble: u64) -> 
     writeln!(observables, "replica,seed,step,time,kind,index,value").map_err(|e| e.to_string())?;
     for replica in &run.replicas {
         for sample in &replica.samples {
-            for value in &sample.values {
-                let (kind, values): (&str, Vec<f64>) = match value {
-                    petra_observables::ObservableValue::StateCounts(values) => (
-                        "state_counts",
-                        values.iter().map(|&value| value as f64).collect(),
-                    ),
-                    petra_observables::ObservableValue::EventRates(values) => {
-                        ("event_rates", values.clone())
-                    }
-                    petra_observables::ObservableValue::RateSpectrum(values) => {
-                        ("rate_spectra", values.clone())
-                    }
-                    petra_observables::ObservableValue::ClusterSizes(values) => (
-                        "cluster_sizes",
-                        values.iter().map(|&value| value as f64).collect(),
-                    ),
-                    petra_observables::ObservableValue::SurfaceArea(area) => (
-                        "surface_area",
-                        vec![
-                            area.geometric,
-                            area.bet_site_proxy as f64,
-                            area.exposed_sites as f64,
-                        ],
-                    ),
-                };
-                for (index, value) in values.iter().enumerate() {
-                    writeln!(
-                        observables,
-                        "{},{},{},{:.9e},{kind},{index},{value:.9e}",
-                        replica.replica, replica.seed, sample.step, sample.time
-                    )
-                    .map_err(|e| e.to_string())?;
-                }
-            }
+            write_observable_rows(&mut observables, replica.replica, replica.seed, sample)?;
         }
     }
     println!("wrote {csv_path}");

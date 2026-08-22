@@ -89,3 +89,39 @@ fn cli_parallel_ensemble_writes_distribution_ci_and_declared_observables() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn cli_single_run_writes_all_declared_kossel_observables() {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let deck = repo.join("petra/examples/kossel-etchpit.toml");
+    let root = std::env::temp_dir().join(format!("petra-cli-observables-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let output = Command::new(env!("CARGO_BIN_EXE_petra"))
+        .arg(deck)
+        .arg("--steps")
+        .arg("200")
+        .arg("--out")
+        .arg(&root)
+        .output()
+        .expect("petra CLI runs");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let observables = std::fs::read_to_string(root.join("observables.csv"))
+        .expect("single-run declarative observable output exists");
+    for kind in [
+        "state_counts",
+        "event_rates",
+        "rate_spectra",
+        "cluster_sizes",
+        "surface_area",
+    ] {
+        assert!(
+            observables.contains(&format!(",{kind},")),
+            "missing {kind}: {observables}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}

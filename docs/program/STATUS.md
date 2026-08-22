@@ -4,6 +4,11 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-22 — hermes-laptop — B4 DONE: Rayon-parallel deterministic replicas,
+  full distributions/means/bootstrap CIs, and declarative state-count, event-rate,
+  rate-spectrum, cluster-size, and geometric/BET-like area outputs; Ising Binder
+  dogfood + Kossel spectrum-broadening golden green, with all 88 Petra tests and
+  Clippy clean. `petra/docs/OBSERVABLES.md` records the A5 exposure-age seam.
 - 2026-08-21 — hermes-laptop — B3 DONE: Petra now runs synchronous CA,
   asynchronous Metropolis, and discrete-time PCA on schema-v2 grids; Conway,
   Ising (`Tc=2.273230` vs `2.269185`), and SIR (`R0*=1.017094`) analytic gates
