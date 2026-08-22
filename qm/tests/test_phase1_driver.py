@@ -87,6 +87,17 @@ def test_channel_escape_guard_is_absolute_and_relative():
     assert phase1.channel_escape_reason(guess, geometry("channel", 2.4), 2) is None
 
 
+def test_acid_addition_guard_allows_loose_association_crest():
+    guess = geometry("acid-addition-guess", 3.43)
+    loose = geometry("acid-addition-ts", 3.63)
+    escaped = geometry("escaped", 4.30)
+
+    assert (
+        phase1.addition_channel_escape_reason(guess, loose, 2, acid_path=True) is None
+    )
+    assert phase1.addition_channel_escape_reason(guess, escaped, 2, acid_path=True)
+
+
 def test_quick_irc_requires_reactant_and_hydrolyzed_basins():
     reactant = geometry("reactant", 3.2, si_obr=1.6)
     reactant.coords[3:] += np.array([0.0, 3.0, 0.0])

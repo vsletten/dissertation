@@ -174,6 +174,27 @@ def channel_escape_reason(ts_guess: Cluster, ts: Cluster, ow_index: int) -> str 
     return None
 
 
+def addition_channel_escape_reason(
+    ts_guess: Cluster,
+    ts: Cluster,
+    ow_index: int,
+    *,
+    acid_path: bool,
+) -> str | None:
+    """Gate addition saddles, allowing the measured loose acid-association crest."""
+    if not acid_path:
+        return channel_escape_reason(ts_guess, ts, ow_index)
+    r_guess = float(
+        np.linalg.norm(ts_guess.coords[SI_INDEX] - ts_guess.coords[ow_index])
+    )
+    r_ts = float(np.linalg.norm(ts.coords[SI_INDEX] - ts.coords[ow_index]))
+    if r_ts > 4.2:
+        return f"acid addition saddle r(Si-Ow)={r_ts:.2f} A is outside association"
+    if r_ts > r_guess + 0.5:
+        return f"acid addition saddle escaped by {r_ts - r_guess:.2f} A"
+    return None
+
+
 def hydrolysis_basin_signature(
     cluster: Cluster,
     ow_index: int,
@@ -984,8 +1005,11 @@ def finish_al_neutral_sequential(
             internal=False,
         ),
     )
-    addition_escape = channel_escape_reason(
-        addition_relaxed_guess, addition_ts, ow_index
+    addition_escape = addition_channel_escape_reason(
+        addition_relaxed_guess,
+        addition_ts,
+        ow_index,
+        acid_path=acid_path,
     )
     if addition_escape:
         rejected = run_dir / (
