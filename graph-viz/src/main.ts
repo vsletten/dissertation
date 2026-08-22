@@ -13,7 +13,7 @@ import { loadMsi } from './loaders/msi';
 import { encodeBinary, encodeJson } from './pgif/encode';
 import { loadPgif } from './pgif/decode';
 import { pickNode } from './render/picking';
-import { GraphScene } from './render/scene';
+import { GraphScene, type SceneStats } from './render/scene';
 import { LiveSim } from './live';
 import { parseTrajectory, prepareGraphForTrajectory, TrajectoryPlayer } from './traj';
 import type { Trajectory } from './traj';
@@ -66,7 +66,52 @@ const liveDeck = $<HTMLTextAreaElement>('#live-deck');
 const liveSeed = $<HTMLInputElement>('#live-seed');
 const liveRun = $<HTMLButtonElement>('#live-run');
 
-const scene = new GraphScene(viewport);
+/**
+ * WebGL2 can be missing even on a healthy machine (hardware acceleration
+ * off, GPU process dead after a pending browser update). The renderer must
+ * not take the rest of the UI down with it: every non-GPU control below is
+ * wired regardless, and the viewport shows a banner instead of staying
+ * silently black.
+ */
+function showWebglBanner(detail: string): void {
+  const banner = document.createElement('div');
+  banner.id = 'webgl-banner';
+  const title = document.createElement('h2');
+  title.textContent = 'WebGL2 is unavailable — 3D view disabled';
+  const msg = document.createElement('p');
+  msg.className = 'detail';
+  msg.textContent = detail;
+  const tips = document.createElement('ul');
+  for (const tip of [
+    'Check chrome://gpu (Firefox: about:support) for GPU process status.',
+    'Make sure hardware acceleration is enabled in the browser settings.',
+    'If the browser has a pending update, relaunch it — a half-updated browser can run with a dead GPU process.',
+  ]) {
+    const li = document.createElement('li');
+    li.textContent = tip;
+    tips.appendChild(li);
+  }
+  banner.append(title, msg, tips);
+  viewport.appendChild(banner);
+}
+
+const WEBGL_DISABLED = 'rendering disabled — WebGL2 unavailable (see banner)';
+
+function initScene(container: HTMLElement): GraphScene | null {
+  try {
+    // capability probe: three's WebGLRenderer throws on the same condition,
+    // but probing first gives a precise message for the common case
+    if (document.createElement('canvas').getContext('webgl2') === null) {
+      throw new Error('canvas.getContext("webgl2") returned null');
+    }
+    return new GraphScene(container);
+  } catch (err) {
+    showWebglBanner(err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
+const scene = initScene(viewport);
 let currentName = '';
 let pickedNode: number | null = null;
 const pickedWorld = new Vector3();
@@ -106,7 +151,7 @@ function seekTo(position: number): void {
   if (live && position > player.length) live.ensure(position);
   touched.clear();
   player.seek(position, touched);
-  if (touched.size > 0) scene.updateNodeStates(touched);
+  if (touched.size > 0) scene?.updateNodeStates(touched);
   if (pickedNode !== null && touched.has(pickedNode)) renderInspector();
   updatePlaybackUi();
 }
@@ -120,6 +165,7 @@ function detachTrajectory(): void {
 
 /** Bind a trajectory (replay file or live sim) to the loaded graph. */
 function bindTrajectory(traj: Trajectory, autoplay: boolean): void {
+  if (!scene) throw new Error(WEBGL_DISABLED);
   const g = scene.getGraph();
   if (!g) throw new Error('no graph loaded');
   const typeOfState = prepareGraphForTrajectory(g, traj.header);
@@ -136,6 +182,7 @@ function bindTrajectory(traj: Trajectory, autoplay: boolean): void {
 }
 
 function attachTrajectoryText(eventsText: string): void {
+  if (!scene) throw new Error(WEBGL_DISABLED);
   if (!scene.getGraph()) throw new Error('load the matching PGIF snapshot first');
   const traj = parseTrajectory(eventsText);
   bindTrajectory(traj, false);
@@ -144,6 +191,10 @@ function attachTrajectoryText(eventsText: string): void {
 
 /** Boot an in-page wasm simulation from deck TOML and bind it, playing. */
 async function startLive(deckToml: string, seed: number): Promise<void> {
+  if (!scene) {
+    showToast(WEBGL_DISABLED, true);
+    return;
+  }
   try {
     showToast('live sim: compiling deck + building lattice…', false, true);
     const { live: sim, snapshotText } = await LiveSim.create(deckToml, seed);
@@ -169,6 +220,10 @@ function showToast(msg: string, isError = false, sticky = false): void {
 
 // ---------- loading ----------
 async function setGraph(name: string, graph: Graph): Promise<void> {
+  if (!scene) {
+    showToast(WEBGL_DISABLED, true);
+    return;
+  }
   if (!graph.positions) {
     graph = await layoutGraph(graph);
   }
@@ -331,6 +386,7 @@ function renderMeta(g: Graph): void {
 }
 
 function renderLegend(g: Graph): void {
+  if (!scene) return;
   legendEl.innerHTML = '';
   const counts = typeCounts(g);
   scene.getStyles().forEach((style, t) => {
@@ -359,7 +415,7 @@ function renderLegend(g: Graph): void {
 }
 
 function renderInspector(): void {
-  const g = scene.getGraph();
+  const g = scene?.getGraph() ?? null;
   inspectorEl.innerHTML = '';
   if (!g || pickedNode === null) {
     const p = document.createElement('p');
@@ -398,7 +454,7 @@ function renderInspector(): void {
 
 // project the picked node's label every frame (cheap: one node, not N)
 function updateLabelPosition(): void {
-  if (pickedNode === null) return;
+  if (pickedNode === null || !scene) return;
   const v = pickedWorld.clone().project(scene.camera);
   if (v.z > 1) {
     nodeLabel.classList.add('hidden');
@@ -410,7 +466,7 @@ function updateLabelPosition(): void {
 }
 
 // ---------- HUD + playback drive ----------
-scene.onFrame = stats => {
+function driveFrame(stats: SceneStats): void {
   // advance the trajectory at the chosen events/sec, frame-rate independent
   if (player && playing) {
     playAccum += speedFromSlider() * Math.min(stats.frameMs, 100) / 1000;
@@ -445,28 +501,32 @@ scene.onFrame = stats => {
     hud.appendChild(div);
   }
   updateLabelPosition();
-};
+}
+if (scene) scene.onFrame = driveFrame;
 
 // ---------- picking ----------
 let downAt: [number, number] | null = null;
-scene.renderer.domElement.addEventListener('pointerdown', e => {
-  downAt = [e.clientX, e.clientY];
-});
-scene.renderer.domElement.addEventListener('pointerup', e => {
-  if (!downAt) return;
-  const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
-  downAt = null;
-  if (moved > 4) return; // it was a drag, not a click
-  const g = scene.getGraph();
-  if (!g) return;
-  const rect = scene.renderer.domElement.getBoundingClientRect();
-  const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-  const ndcY = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
-  pickedNode = pickNode(ndcX, ndcY, scene.camera, g, scene.getStyles(), scene.getRadiusScale(), t =>
-    scene.isTypeHidden(t),
-  );
-  renderInspector();
-});
+if (scene) {
+  const canvas = scene.renderer.domElement;
+  canvas.addEventListener('pointerdown', e => {
+    downAt = [e.clientX, e.clientY];
+  });
+  canvas.addEventListener('pointerup', e => {
+    if (!downAt) return;
+    const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
+    downAt = null;
+    if (moved > 4) return; // it was a drag, not a click
+    const g = scene.getGraph();
+    if (!g) return;
+    const rect = canvas.getBoundingClientRect();
+    const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+    pickedNode = pickNode(ndcX, ndcY, scene.camera, g, scene.getStyles(), scene.getRadiusScale(), t =>
+      scene.isTypeHidden(t),
+    );
+    renderInspector();
+  });
+}
 
 // ---------- file input wiring ----------
 dropzone.addEventListener('click', () => fileInput.click());
@@ -504,17 +564,17 @@ function download(name: string, blob: Blob): void {
   URL.revokeObjectURL(a.href);
 }
 $('#export-json').addEventListener('click', () => {
-  const g = scene.getGraph();
+  const g = scene?.getGraph();
   if (!g) return;
   download(`${currentName.replace(/\.[^.]*$/, '') || 'graph'}.pgif.json`, new Blob([encodeJson(g)], { type: 'application/json' }));
 });
 $('#export-bin').addEventListener('click', () => {
-  const g = scene.getGraph();
+  const g = scene?.getGraph();
   if (!g) return;
   const bytes = encodeBinary(g);
   download(`${currentName.replace(/\.[^.]*$/, '') || 'graph'}.pgif.bin`, new Blob([bytes.buffer as ArrayBuffer], { type: 'application/octet-stream' }));
 });
-$('#reframe').addEventListener('click', () => scene.frameCamera());
+$('#reframe').addEventListener('click', () => scene?.frameCamera());
 
 // ---------- playback controls ----------
 pbPlay.addEventListener('click', () => {
@@ -553,9 +613,12 @@ document.addEventListener('keydown', e => {
 // ---------- automation hooks (verification + headless benchmarking) ----------
 window.__graphviz = {
   ready: false,
-  stats: () => scene.getStats(),
+  stats: () => {
+    if (!scene) throw new Error(WEBGL_DISABLED);
+    return scene.getStats();
+  },
   graph: () => {
-    const g = scene.getGraph();
+    const g = scene?.getGraph();
     return g ? { nodes: g.count, edges: g.edgeCount, types: g.typeDict } : null;
   },
   loadDemo,
@@ -571,6 +634,7 @@ window.__graphviz = {
       : null,
   seekTrajectory: (position: number) => seekTo(position),
   pickAtNdc: (x, y) => {
+    if (!scene) return null;
     const g = scene.getGraph();
     if (!g) return null;
     const hit = pickNode(x, y, scene.camera, g, scene.getStyles(), scene.getRadiusScale(), t =>
@@ -582,6 +646,7 @@ window.__graphviz = {
     return nodeProperties(g, hit);
   },
   projectNode: i => {
+    if (!scene) return null;
     const g = scene.getGraph();
     if (!g || !g.positions || i >= g.count) return null;
     const v = new Vector3(g.positions[i * 3], g.positions[i * 3 + 1], g.positions[i * 3 + 2]).project(
