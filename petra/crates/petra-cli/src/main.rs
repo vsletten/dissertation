@@ -115,7 +115,8 @@ fn run() -> Result<(), String> {
     if ensemble > 1 {
         return run_ensemble(&args, &deck, ensemble);
     }
-    let mut engine = deck.build_engine(args.seed).map_err(|e| e.to_string())?;
+    let seed = petra_deck::replica_seed(args.seed.unwrap_or(deck.seed), 0, deck.seed_policy);
+    let mut engine = deck.build_engine(Some(seed)).map_err(|e| e.to_string())?;
     let steps = args.steps.unwrap_or(deck.steps);
     let report_every = if deck.report_every == 0 {
         steps.max(1)
@@ -146,13 +147,8 @@ fn run() -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         let writer = std::io::BufWriter::new(file);
         Some(
-            petra_io::EventLogWriter::new(
-                writer,
-                &deck,
-                args.seed.unwrap_or(deck.seed),
-                engine.lattice.len(),
-            )
-            .map_err(|e| e.to_string())?,
+            petra_io::EventLogWriter::new(writer, &deck, seed, engine.lattice.len())
+                .map_err(|e| e.to_string())?,
         )
     } else {
         None
@@ -173,12 +169,7 @@ fn run() -> Result<(), String> {
         )
         .map_err(|e| e.to_string())?;
         if let Some(writer) = observables {
-            write_observable_rows(
-                writer,
-                0,
-                args.seed.unwrap_or(deck.seed),
-                &petra_observables::observe(engine, &deck),
-            )?;
+            write_observable_rows(writer, 0, seed, &petra_observables::observe(engine, &deck))?;
         }
         Ok(())
     };
@@ -189,7 +180,7 @@ fn run() -> Result<(), String> {
         engine.lattice.len(),
         engine.reactions.len(),
         deck.temperature,
-        args.seed.unwrap_or(deck.seed),
+        seed,
         deck.strategy.as_str(),
     );
     report(&engine, &mut csv, observables.as_mut())?;

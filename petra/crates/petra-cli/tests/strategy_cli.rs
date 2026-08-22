@@ -125,3 +125,77 @@ fn cli_single_run_writes_all_declared_kossel_observables() {
     }
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn cli_replica_zero_is_invariant_when_hash_ensemble_cardinality_changes() {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let deck = repo.join("petra/examples/conformance/ising.toml");
+    let root = std::env::temp_dir().join(format!("petra-cli-seed-policy-{}", std::process::id()));
+    let single_out = root.join("single");
+    let ensemble_out = root.join("ensemble");
+    let _ = std::fs::remove_dir_all(&root);
+
+    let run = |replicas: &str, out: &std::path::Path| {
+        Command::new(env!("CARGO_BIN_EXE_petra"))
+            .arg(&deck)
+            .arg("--seed")
+            .arg("99")
+            .arg("--steps")
+            .arg("20")
+            .arg("--ensemble")
+            .arg(replicas)
+            .arg("--out")
+            .arg(out)
+            .output()
+            .expect("petra CLI runs")
+    };
+    let single = run("1", &single_out);
+    let ensemble = run("2", &ensemble_out);
+    assert!(
+        single.status.success(),
+        "single stderr: {}",
+        String::from_utf8_lossy(&single.stderr)
+    );
+    assert!(
+        ensemble.status.success(),
+        "ensemble stderr: {}",
+        String::from_utf8_lossy(&ensemble.stderr)
+    );
+
+    let populations = std::fs::read_to_string(single_out.join("populations.csv"))
+        .expect("single populations exist");
+    let single_fields: Vec<_> = populations
+        .lines()
+        .last()
+        .expect("final row")
+        .split(',')
+        .collect();
+    let ensemble_csv = std::fs::read_to_string(ensemble_out.join("ensemble.csv"))
+        .expect("ensemble populations exist");
+    let replica_zero_fields: Vec<_> = ensemble_csv
+        .lines()
+        .nth(1)
+        .expect("replica zero row")
+        .split(',')
+        .collect();
+    assert_eq!(
+        &single_fields[2..],
+        &replica_zero_fields[3..],
+        "replica zero trajectory must not depend on ensemble cardinality"
+    );
+
+    let expected_seed = petra_deck::replica_seed(99, 0, petra_deck::SeedPolicy::Hash).to_string();
+    assert_eq!(replica_zero_fields[0], expected_seed);
+    let observables = std::fs::read_to_string(single_out.join("observables.csv"))
+        .expect("single observables exist");
+    let reported_seed = observables
+        .lines()
+        .nth(1)
+        .expect("observable data row")
+        .split(',')
+        .nth(1)
+        .expect("seed field");
+    assert_eq!(reported_seed, expected_seed);
+
+    let _ = std::fs::remove_dir_all(&root);
+}
