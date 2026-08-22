@@ -4,6 +4,14 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-22 — hermes-laptop — D3 DONE: a 24×24 open-system H₂ grain deck
+  now exercises source deposition, thermal+tunneling diffusion, LH reaction,
+  H/H₂ desorption, and seeded 20% quenched deep sites. The 16-replica sweep
+  has the published finite window (efficiency 0.310 at 6 K, ~0.96 at 12–14 K,
+  0.559 at 20 K, 0.055 at 26 K). DEVIATION: D2a surface rates are explicit
+  NO-GO; D2b + blocked D3b cards preserve the CO follow-through honestly.
+  `docs/program/results/D3-ice-mantle-deck.md`.
+
 - 2026-08-21 — fable — A3 pilot cell DONE: embedded Si–O–Si neutral
   hydrolysis ΔG‡ = 205.7 kJ/mol (free dimer 113.0; +92.7 lattice shift,
   matching Pelmenschikov's ~205 embedded first-rupture) via a verified
