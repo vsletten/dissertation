@@ -10,7 +10,7 @@ use crate::state::{StateId, StateSet};
 /// Selects neighbors of a center site: sites at exact graph `distance`
 /// (1 or 2), optionally restricted by kind, bond label (distance 1 only),
 /// and a state set.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct NeighborSelect {
     pub distance: u8,
     pub kind: Option<KindId>,
@@ -30,7 +30,7 @@ pub struct NeighborSelect {
 }
 
 /// "Between `min` and `max` neighbors match the selector."
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Guard {
     pub select: NeighborSelect,
     pub min: u32,
@@ -38,7 +38,7 @@ pub struct Guard {
 }
 
 /// Environment-dependent rate adjustment (design doc §4).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ModifierKind {
     /// Each matching neighbor adds `dea` (kcal/mol) to the activation
     /// energy — bond-counting / BEP-style. The *linear* convenience case
@@ -60,19 +60,23 @@ pub enum ModifierKind {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Modifier {
     pub select: NeighborSelect,
     pub kind: ModifierKind,
 }
 
 /// Where an effect lands.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum EffectTarget {
     Center,
+    /// Per-site source/bath event. Compilation treats each eligible vacant
+    /// site as the event center; the explicit variant preserves the schema.
+    Source,
     /// The first neighbor (ascending site id) matching the selector.
-    /// v0 semantics; a random-match option is planned (design doc §3.3).
     FirstMatch(NeighborSelect),
+    /// One uniformly selected matching neighbor.
+    RandomMatch(NeighborSelect),
     /// Every neighbor matching the selector — the "update both Al
     /// neighbors of this bridging oxygen" pattern. Matching zero sites is
     /// legal (unlike `FirstMatch`, which is an error).
@@ -80,7 +84,7 @@ pub enum EffectTarget {
 }
 
 /// What an effect does to its target site's state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum EffectOp {
     /// Set to a fixed state.
     Set(StateId),
@@ -100,7 +104,7 @@ pub enum EffectOp {
 }
 
 /// One state rewrite.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Effect {
     pub target: EffectTarget,
     pub op: EffectOp,
@@ -140,22 +144,40 @@ impl EffectOp {
 
 /// A weighted alternative outcome (generalizes the legacy R4/R9 proton
 /// coin flip). A deterministic reaction has exactly one branch.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Branch {
     pub weight: f64,
     pub effects: Vec<Effect>,
 }
 
+/// Strategy-specific interpretation of a rule's declarative `rate` field.
+/// CTMC keeps its existing [`RateExpr`] in `Reaction::rate`; the other
+/// variants carry only the scalar their strategy consumes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RuleValue {
+    Ctmc,
+    Deterministic,
+    Energy(f64),
+    Probability(f64),
+}
+
 /// A fully compiled elementary reaction.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Reaction {
     pub name: String,
     pub center_kind: KindId,
     pub center_states: StateSet,
     pub guards: Vec<Guard>,
     pub rate: RateExpr,
-    /// ln of the solution-coupling factor (activities, chemical potentials),
-    /// folded once at compile time: k *= exp(ln_thermo).
+    pub value: RuleValue,
+    /// Temperature-independent ln(activity) contribution.
+    pub ln_activity: f64,
+    /// Sum of consumed-species chemical potentials in kcal/mol.
+    pub mu_energy: f64,
+    /// ln of the solution-coupling factor at the current temperature:
+    /// `ln_activity + mu_energy / RT`. Kept materialized so the ordinary
+    /// isothermal hot path and its historical floating-point order stay
+    /// unchanged.
     pub ln_thermo: f64,
     /// Multiplier on the center site's stored strain energy, added to the
     /// activation energy: `Ea_eff = Ea + strain_scale · u_center`
@@ -167,6 +189,11 @@ pub struct Reaction {
 }
 
 impl Reaction {
+    /// Recompile the temperature-dependent solution-coupling factor.
+    pub fn set_temperature(&mut self, temperature: f64) {
+        self.ln_thermo = self.ln_activity + self.mu_energy / (R_KCAL * temperature);
+    }
+
     /// Largest guard/modifier/effect-selector distance this reaction reads.
     pub fn max_read_distance(&self) -> u8 {
         let g = self.guards.iter().map(|g| g.select.distance).max();
@@ -176,8 +203,10 @@ impl Reaction {
             .iter()
             .flat_map(|b| &b.effects)
             .filter_map(|e| match &e.target {
-                EffectTarget::Center => None,
-                EffectTarget::FirstMatch(s) | EffectTarget::AllMatches(s) => Some(s.distance),
+                EffectTarget::Center | EffectTarget::Source => None,
+                EffectTarget::FirstMatch(s)
+                | EffectTarget::RandomMatch(s)
+                | EffectTarget::AllMatches(s) => Some(s.distance),
             })
             .max();
         g.max(m).max(e).unwrap_or(0)
@@ -229,18 +258,15 @@ pub fn count_matches(
     sel: &NeighborSelect,
     scratch: &mut Vec<SiteId>,
 ) -> u32 {
-    if sel.distance == 1 && sel.label.is_some() {
+    if let (1, Some(label)) = (sel.distance, sel.label) {
         // Label filters only make sense on direct bonds; walk the CSR row
         // with its parallel label array.
-        let label = sel.label.unwrap();
         let nbrs = lat.neighbors(center);
         let labels = lat.neighbor_labels(center);
         return nbrs
             .iter()
             .zip(labels)
-            .filter(|&(&n, &l)| {
-                l == label && site_matches(lat, kinds, n as SiteId, sel)
-            })
+            .filter(|&(&n, &l)| l == label && site_matches(lat, kinds, n as SiteId, sel))
             .count() as u32;
     }
     sites_at_distance(lat, center, sel.distance, sel.exclude_label, scratch);
@@ -260,8 +286,7 @@ pub fn all_matches(
     out: &mut Vec<SiteId>,
 ) {
     out.clear();
-    if sel.distance == 1 && sel.label.is_some() {
-        let label = sel.label.unwrap();
+    if let (1, Some(label)) = (sel.distance, sel.label) {
         let nbrs = lat.neighbors(center);
         let labels = lat.neighbor_labels(center);
         out.extend(
@@ -289,8 +314,7 @@ pub fn first_match(
     sel: &NeighborSelect,
     scratch: &mut Vec<SiteId>,
 ) -> Option<SiteId> {
-    if sel.distance == 1 && sel.label.is_some() {
-        let label = sel.label.unwrap();
+    if let (1, Some(label)) = (sel.distance, sel.label) {
         let nbrs = lat.neighbors(center);
         let labels = lat.neighbor_labels(center);
         return nbrs
@@ -356,6 +380,35 @@ pub fn resolve_rate(
     rxn.rate.base_rate(temperature) * rxn.ln_thermo.exp() * (-extra_ea / rt).exp() * factor
 }
 
+/// Resolve a Metropolis proposal's local energy change. Energy modifiers use
+/// the same deterministic neighbor-count machinery as CTMC barrier modifiers,
+/// but contribute directly to ΔE.
+pub fn resolve_energy_delta(
+    lat: &Lattice,
+    kinds: &[KindId],
+    rxn: &Reaction,
+    center: SiteId,
+    scratch: &mut Vec<SiteId>,
+) -> f64 {
+    let RuleValue::Energy(mut delta) = rxn.value else {
+        panic!("resolve_energy_delta called for a non-Metropolis rule")
+    };
+    for modifier in &rxn.modifiers {
+        let count = count_matches(lat, kinds, center, &modifier.select, scratch);
+        match &modifier.kind {
+            ModifierKind::PerMatch { dea } => delta += dea * count as f64,
+            ModifierKind::ByCount { dea } => {
+                delta += dea[(count as usize).min(dea.len() - 1)];
+            }
+            ModifierKind::When { min, max, dea, .. } if count >= *min && count <= *max => {
+                delta += dea
+            }
+            ModifierKind::When { .. } => {}
+        }
+    }
+    delta
+}
+
 /// Do all guards of `rxn` pass at `center`? (Center kind/state are checked
 /// by the caller against its per-kind tables.)
 pub fn guards_pass(
@@ -387,24 +440,35 @@ mod tests {
                     kind: KindId(0),
                     frac: [0.0; 3],
                     bonds: vec![
-                        TemplateBond { to: 0, dcell: [1, 0, 0], label: NO_LABEL },
-                        TemplateBond { to: 0, dcell: [-1, 0, 0], label: NO_LABEL },
-                        TemplateBond { to: 1, dcell: [0, 0, 0], label: 0 },
+                        TemplateBond {
+                            to: 0,
+                            dcell: [1, 0, 0],
+                            label: NO_LABEL,
+                        },
+                        TemplateBond {
+                            to: 0,
+                            dcell: [-1, 0, 0],
+                            label: NO_LABEL,
+                        },
+                        TemplateBond {
+                            to: 1,
+                            dcell: [0, 0, 0],
+                            label: 0,
+                        },
                     ],
                 },
                 TemplateSite {
                     kind: KindId(1),
                     frac: [0.5, 0.0, 0.0],
-                    bonds: vec![TemplateBond { to: 0, dcell: [0, 0, 0], label: 0 }],
+                    bonds: vec![TemplateBond {
+                        to: 0,
+                        dcell: [0, 0, 0],
+                        label: 0,
+                    }],
                 },
             ],
         };
-        Lattice::build(
-            &cell,
-            [5, 1, 1],
-            [Boundary::Periodic; 3],
-            |_| StateId(0),
-        )
+        Lattice::build(&cell, [5, 1, 1], [Boundary::Periodic; 3], |_| StateId(0))
     }
 
     #[test]

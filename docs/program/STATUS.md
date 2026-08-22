@@ -2,8 +2,75 @@
 
 *Newest first. One line per merged unit of work (or notable event),
 appended by the PR that did it: `date — actor — what + pointer`.
-Deviations get a `DEVIATION:` note; details live in the card.*
+*Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-21 — fable — A3 pilot cell DONE: embedded Si–O–Si neutral
+  hydrolysis ΔG‡ = 205.7 kJ/mol (free dimer 113.0; +92.7 lattice shift,
+  matching Pelmenschikov's ~205 embedded first-rupture) via a verified
+  two-step mechanism (pentacoordinate-Si intermediate, rate-limiting
+  bridge rupture, 128i, IRC-connected). CALC-002 neutral computed.
+  Campaign recipe + workstation ops prerequisites in the card Result;
+  family ladders are factory work per the 2026-08-20 handoff.
+
+- 2026-08-22 — hermes-laptop — E2 DONE: scheduled full muscovite mechanism
+  now distinguishes pristine/extended galleries, explicit locally driven
+  delamination, ⁴⁰Ar/³⁹Ar/³⁶Ar, and octahedral recoil traps; deterministic
+  release/age/contamination products and honest ±5 kcal proxy bands land at
+  `docs/program/results/E2-muscovite-full-mechanism.md`. E1's 500/700 °C gates
+  remain green.
+- 2026-08-22 — hermes-laptop — B5 DONE: ordered piecewise-isothermal CTMC
+  schedules now advance through exact wall-time boundaries, recompile full
+  thermo/propensity tables + Fenwick trees, and run through native CLI and
+  deterministic ensembles. Exact T1 replay, seeded T2 statistics, v1 20k-step
+  parity, workspace tests, format, Clippy, and independent review are green.
+- 2026-08-22 — hermes-laptop — A5 Phase 0 DONE: long-time rate spectra,
+  projected-geometric versus BET-like surface accounting, and core-owned
+  per-site exposure ages landed with deterministic alias-aware tracking. The
+  finite-defect kaolinite smoke exhausts 33 fast sites by step 40 and cuts bulk
+  propensity 286.96×; 96 tests, bitwise parity, Clippy, and paranoid replay are
+  green. `docs/program/results/A5p0-aging-observables.md`.
+- 2026-08-22 — hermes-laptop — B4 DONE: Rayon-parallel deterministic replicas,
+  full distributions/means/bootstrap CIs, and declarative state-count, event-rate,
+  rate-spectrum, cluster-size, and geometric/BET-like area outputs; Ising Binder
+  dogfood + Kossel spectrum-broadening golden green, with all 88 Petra tests and
+  Clippy clean. `petra/docs/OBSERVABLES.md` records the A5 exposure-age seam.
+- 2026-08-21 — hermes-laptop — B3 DONE: Petra now runs synchronous CA,
+  asynchronous Metropolis, and discrete-time PCA on schema-v2 grids; Conway,
+  Ising (`Tc=2.273230` vs `2.269185`), and SIR (`R0*=1.017094`) analytic gates
+  are green with CTMC bitwise parity preserved.
+- 2026-08-21 — omnibus supervisor — reconciled merged-main board drift:
+  B2 and QI3 are done; B3, B4, and B5 are now ready after B2 PR #33.
+- 2026-08-20 — hermes x2 + fable — B2 DONE: petra engine behind the
+  UpdateStrategy trait, schema v2 complete, bitwise parity green on
+  three gates (incl. shipped-kossel full-lifetime). Two-worker relay +
+  supervision closeout; 7 self-review findings all dispositioned and
+  fixed. B3 unblocked.
+- 2026-08-20 — hermes-laptop — QI1 campaign-driver etiquette done: all QM
+  entry points now cap inherited numerical-library threads before heavy imports,
+  apply best-effort niceness, and self-tee durable logs; 162 tests, Ruff, direct
+  CLI smoke checks, and an unset-environment Phase-2 dry run are green.
+- 2026-08-20 — hermes-cloud-default — QI3 Fenwick cancellation hardening:
+  impossible zero totals now rebuild from authoritative positive leaves; a
+  deterministic `1e12`/`1e-6 s⁻¹` regression, all 43 Petra tests, and an
+  explicit 1000-step Kossel `--paranoid` run are green.
+
+- 2026-08-20 — hermes-workstation — E1 exact-main lint closeout: restored the
+  one-line `strain_gates.rs` identity-op fix that the prior squash merge omitted;
+  all Rust/Python/lint gates plus both full trajectories and generated-product
+  equivalence are green.
+- 2026-08-20 — hermes-workstation — E1 Ruff-format closeout: reformatted the
+  cloud review-fix commit's long SVG `sy()` expression so merged-main Ruff
+  0.15.1 check/format gates are clean; no simulation semantics changed.
+- 2026-08-20 — hermes-workstation — E1 merged-main closeout: removed four
+  default-Ruff E731 violations from the muscovite SVG post-processor with
+  typed local helpers, cleared current Clippy findings, and reverified both
+  full trajectories plus byte-identical CSV/SVG/JSON products.
+- 2026-08-20 — hermes-workstation — E1-muscovite-deck done: schema-v1
+  500/700 °C paired-OH + divacancy decks, Hames–Bowring cylinder `D/a²`
+  inversion, reproducible CSV/SVG/JSON products, and qualitative gates green
+  (rise 2.13×/13.55×; fall 275×/32.3×). Result:
+  `docs/program/results/E1-muscovite-phase1.md`. Added executable E2 and QI3
+  cards for the full mechanism and Fenwick dynamic-range hardening.
 - 2026-08-20 — fable — A3-barrier-ladder claimed + platform half landed:
   crystallographic cluster builder (`qm/quarry/crystal.py`, deck-cell
   parser + bond-valence termination/charge + n_intact pruning + frozen
@@ -61,3 +128,27 @@ Deviations get a `DEVIATION:` note; details live in the card.*
   arbitration). New cards: E1-muscovite-deck (READY, published numbers
   only) and B5-execution-schedule (blocked: B2 — piecewise-isothermal
   T(t), the one engine feature the flagship needs).
+- 2026-08-20 — Fable — Autopilot engaged: board_feeder.py (mission-
+  control, hourly) auto-enqueues READY/unblocked cards as queue pointer
+  tasks; omnibus-supervisor Hermes cron (daily 07:50) does bookkeeping
+  + stale claims + Telegram digest. PROTOCOL.md amended. Humans and
+  Fable are now exception handlers, not schedulers.
+- 2026-08-20 — fable — card QI2-gpu-lease (READY, P1): explicit
+  single-lane GPU lease + 16 GB cupy cap + shared worker preflight,
+  after reviewing overnight A3-pilot/ollama cohabitation (22 ollama
+  loads, all-GPU, zero errors — but pilot peaked 21.7 GB; luck, not
+  design) and TASK-168's per-tick hand-rolled preflights.
+- 2026-08-20 — fable — PROTOCOL.md merge-doctrine paragraph aligned to
+  POLICY v7 (open PR and STOP; watcher owns lifecycle; human-merge
+  label) — the stale auto-merge/Sourcery wording was flagged by the
+  cloud Hermes worker during its enrollment (it correctly refused to
+  follow it). Companion fixes landed in `vsletten/mission-control`
+  commit `a2edf91`: `factory/hermes/cron/queue-drain.md` now points to
+  POLICY v7, and service activation moved to
+  `factory/services/activate.sh` for cloud-safe installation.
+- 2026-08-20 — fable — Victor recovered his complete 1999 dissertation
+  archive from the NAS (thesis LaTeX, the original C-language model,
+  88 timestamped MC campaign runs, 86 Gaussian B3LYP logs incl.
+  oxalate/ligand systems). New card A8-thesis-archive-intake (READY,
+  workstation): catalog, curate golden data into legacy/, build the
+  1999-vs-2026 DFT barrier ledger.

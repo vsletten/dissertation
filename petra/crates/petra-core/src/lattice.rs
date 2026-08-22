@@ -50,6 +50,9 @@ pub struct Lattice {
     /// the deck declares defects (docs/STRAIN.md §2). Static in v1 — a
     /// future relaxation provider mutates it and dirties the sites.
     pub strain: Vec<f64>,
+    /// Physical/strategy time when a tracked solid site most recently became
+    /// exposed. `None` means untracked or currently buried/non-solid.
+    pub exposed_since: Vec<Option<f64>>,
 }
 
 impl Lattice {
@@ -112,6 +115,7 @@ impl Lattice {
             adj_label: Vec::new(),
             states: Vec::with_capacity(n),
             strain: vec![0.0; n],
+            exposed_since: vec![None; n],
         };
 
         lat.adj_off.push(0);
@@ -151,8 +155,7 @@ impl Lattice {
                                 }
                             }
                             if in_range {
-                                let to = ((target[0] * dims[1] + target[1]) * dims[2]
-                                    + target[2])
+                                let to = ((target[0] * dims[1] + target[1]) * dims[2] + target[2])
                                     * n_template
                                     + bond.to;
                                 lat.adj.push(to as u32);
@@ -207,12 +210,9 @@ mod tests {
 
     #[test]
     fn periodic_cube_every_site_has_six_neighbors() {
-        let lat = Lattice::build(
-            &sc_cell(),
-            [3, 3, 3],
-            [Boundary::Periodic; 3],
-            |_| StateId(0),
-        );
+        let lat = Lattice::build(&sc_cell(), [3, 3, 3], [Boundary::Periodic; 3], |_| {
+            StateId(0)
+        });
         assert_eq!(lat.len(), 27);
         for s in 0..lat.len() {
             assert_eq!(lat.neighbors(s).len(), 6, "site {s}");
@@ -254,18 +254,42 @@ mod tests {
                     kind: KindId(0),
                     frac: [0.0; 3],
                     bonds: vec![
-                        TemplateBond { to: 0, dcell: [0, 0, 1], label: NO_LABEL },
-                        TemplateBond { to: 0, dcell: [0, 0, -1], label: NO_LABEL },
-                        TemplateBond { to: 1, dcell: [0, 0, 0], label: NO_LABEL },
+                        TemplateBond {
+                            to: 0,
+                            dcell: [0, 0, 1],
+                            label: NO_LABEL,
+                        },
+                        TemplateBond {
+                            to: 0,
+                            dcell: [0, 0, -1],
+                            label: NO_LABEL,
+                        },
+                        TemplateBond {
+                            to: 1,
+                            dcell: [0, 0, 0],
+                            label: NO_LABEL,
+                        },
                     ],
                 },
                 TemplateSite {
                     kind: KindId(0),
                     frac: [0.5, 0.0, 0.0],
                     bonds: vec![
-                        TemplateBond { to: 1, dcell: [1, 0, 0], label: NO_LABEL },
-                        TemplateBond { to: 1, dcell: [-1, 0, 0], label: NO_LABEL },
-                        TemplateBond { to: 0, dcell: [0, 0, 0], label: NO_LABEL },
+                        TemplateBond {
+                            to: 1,
+                            dcell: [1, 0, 0],
+                            label: NO_LABEL,
+                        },
+                        TemplateBond {
+                            to: 1,
+                            dcell: [-1, 0, 0],
+                            label: NO_LABEL,
+                        },
+                        TemplateBond {
+                            to: 0,
+                            dcell: [0, 0, 0],
+                            label: NO_LABEL,
+                        },
                     ],
                 },
             ],
@@ -279,10 +303,7 @@ mod tests {
         for s in 0..lat.len() {
             let ([a, _, c], t) = lat.coords(s);
             let expect = t == 0 && (c == 0 || c == 2);
-            assert_eq!(
-                lat.frozen[s], expect,
-                "site {s} (a={a}, c={c}, t={t})"
-            );
+            assert_eq!(lat.frozen[s], expect, "site {s} (a={a}, c={c}, t={t})");
         }
     }
 

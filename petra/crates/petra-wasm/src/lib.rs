@@ -31,6 +31,16 @@ impl WasmSim {
         let parsed: petra_deck::DeckFile =
             toml::from_str(deck_toml).map_err(|e| JsError::new(&format!("deck parse: {e}")))?;
         let deck = petra_deck::compile(&parsed).map_err(|e| JsError::new(&e.to_string()))?;
+        if !matches!(deck.strategy, petra_deck::ExecutionStrategy::Ctmc) {
+            return Err(JsError::new(
+                "the WASM batch trajectory format currently supports only CTMC",
+            ));
+        }
+        if !deck.schedule.is_empty() {
+            return Err(JsError::new(
+                "piecewise-isothermal schedules currently require the native CLI or ScheduleRun API",
+            ));
+        }
         let seed_override = if seed >= 0.0 { Some(seed as u64) } else { None };
         let engine = deck
             .build_engine(seed_override)
@@ -51,9 +61,17 @@ impl WasmSim {
     pub fn header_json(&self) -> String {
         let mut buf = Vec::new();
         // The header writer needs a seed for the record; report the deck's.
-        petra_io::EventLogWriter::new(&mut buf, &self.deck, self.deck.seed, self.engine.lattice.len())
-            .expect("writing to a Vec cannot fail");
-        String::from_utf8(buf).expect("header is UTF-8").trim_end().to_string()
+        petra_io::EventLogWriter::new(
+            &mut buf,
+            &self.deck,
+            self.deck.seed,
+            self.engine.lattice.len(),
+        )
+        .expect("writing to a Vec cannot fail");
+        String::from_utf8(buf)
+            .expect("header is UTF-8")
+            .trim_end()
+            .to_string()
     }
 
     /// Run up to `n` events, returning them as a JSON array of §6a rows:

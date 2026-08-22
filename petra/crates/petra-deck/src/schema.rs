@@ -6,33 +6,641 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// Canonical in-memory deck. Both v1 and v2 TOML deserialize to this shape;
+/// v1 is upgraded by the custom deserializer before compilation.
+#[derive(Debug)]
 pub struct DeckFile {
     pub deck: Meta,
+    pub structure_kind: StructureKind,
+    pub grid: Option<GridSpec>,
     pub cell: CellSpec,
-    #[serde(default)]
     pub species: Vec<SpeciesSpec>,
     pub kinds: Vec<KindSpec>,
-    /// Named state-set aliases, referenced as `"@name"` in selectors.
-    #[serde(default)]
     pub aliases: BTreeMap<String, Vec<String>>,
     pub lattice: LatticeSpec,
-    /// Crystallographic line defects: each contributes an analytic elastic
-    /// strain-energy field u(r) = A/max(r, r_core)² over the lattice
-    /// (docs/STRAIN.md §5). Fields superpose.
-    #[serde(default)]
     pub defects: Vec<DefectSpec>,
     pub thermo: ThermoSpec,
-    /// Ordered build-time passes applied after the uniform per-kind fill
-    /// and before dynamics: surface termination, region clearing, defect
-    /// seeding. Each pass sweeps all sites in index order with writes
-    /// immediately visible (the legacy TerminateSurface convention).
-    #[serde(default)]
     pub init: Vec<InitPassSpec>,
-    #[serde(default)]
     pub reactions: Vec<ReactionSpec>,
-    pub simulation: SimSpec,
+    pub execution: ExecutionSpec,
+    pub observables: ObservablesSpec,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StructureKind {
+    Cell,
+    Grid,
+}
+
+#[derive(Debug)]
+pub struct GridSpec {
+    pub family: String,
+    pub neighborhood: Option<String>,
+    pub dims: Vec<usize>,
+    pub boundary: Vec<String>,
+    pub default_kind: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionSpec {
+    pub strategy: String,
+    /// Ordered piecewise-isothermal CTMC segments. Each segment owns a
+    /// temperature and a duration in simulated wall time.
+    #[serde(default)]
+    pub schedule: Vec<ScheduleSegment>,
+    #[serde(default)]
+    pub ctmc: Option<CtmcSpec>,
+    #[serde(default)]
+    pub synchronous: Option<SynchronousSpec>,
+    #[serde(default)]
+    pub metropolis: Option<MetropolisSpec>,
+    #[serde(default)]
+    pub pca: Option<PcaSpec>,
+    #[serde(default)]
+    pub stop: StopSpec,
+    #[serde(default)]
+    pub ensemble: EnsembleSpec,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScheduleSegment {
+    /// Kelvin.
+    pub temperature: f64,
+    /// Simulated-time duration of this isothermal segment.
+    pub duration: f64,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CtmcSpec {}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+/// Synchronous CA parameters. When multiple rules are enabled at one site,
+/// the first rule in deck declaration order wins (RFC-001 §3).
+pub struct SynchronousSpec {
+    /// Synchronous updates fire at most one rule per site according to this
+    /// deterministic priority policy.
+    pub conflict_resolution: SynchronousConflictResolution,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SynchronousConflictResolution {
+    /// Choose the first enabled rule in deck declaration order (RFC-001 §3).
+    FirstMatch,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MetropolisSpec {
+    #[serde(default)]
+    pub temperature: Option<f64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PcaSpec {}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StopSpec {
+    #[serde(default)]
+    pub steps: Option<u64>,
+    #[serde(default)]
+    pub time: Option<f64>,
+    #[serde(default)]
+    pub predicate: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SeedPolicy {
+    Increment,
+    Hash,
+}
+
+fn one_replica() -> u64 {
+    1
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EnsembleSpec {
+    /// Base seed. v1 `[simulation] seed` is moved here by the shim.
+    #[serde(default)]
+    pub seed: u64,
+    #[serde(default = "one_replica")]
+    pub n_replicas: u64,
+    #[serde(default = "default_seed_policy")]
+    pub seed_policy: SeedPolicy,
+}
+
+fn default_seed_policy() -> SeedPolicy {
+    SeedPolicy::Increment
+}
+
+impl Default for EnsembleSpec {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            n_replicas: 1,
+            seed_policy: SeedPolicy::Increment,
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObservablesSpec {
+    #[serde(default)]
+    pub report_every: u64,
+    #[serde(default)]
+    pub series: Vec<ObservableSpec>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ObservableSpec {
+    pub kind: String,
+    #[serde(flatten)]
+    pub parameters: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeckV1 {
+    deck: Meta,
+    cell: CellSpec,
+    #[serde(default)]
+    species: Vec<SpeciesSpec>,
+    kinds: Vec<KindSpec>,
+    #[serde(default)]
+    aliases: BTreeMap<String, Vec<String>>,
+    lattice: LatticeSpec,
+    #[serde(default)]
+    defects: Vec<DefectSpec>,
+    thermo: ThermoSpec,
+    #[serde(default)]
+    init: Vec<InitPassSpec>,
+    #[serde(default)]
+    reactions: Vec<ReactionSpec>,
+    simulation: SimSpec,
+    #[serde(default)]
+    observables: Option<ObservablesSpec>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeckV2 {
+    deck: Meta,
+    structure: StructureV2,
+    dynamics: DynamicsV2,
+    execution: ExecutionSpec,
+    #[serde(default)]
+    observables: ObservablesSpec,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StructureV2 {
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    cell: Option<CellSpec>,
+    #[serde(default)]
+    lattice: Option<LatticeSpec>,
+    #[serde(default)]
+    grid: Option<String>,
+    #[serde(default)]
+    neighborhood: Option<String>,
+    #[serde(default)]
+    dims: Option<Vec<usize>>,
+    #[serde(default)]
+    boundary: Option<Vec<String>>,
+    #[serde(default)]
+    default_kind: Option<String>,
+    #[serde(default)]
+    species: Vec<SpeciesSpec>,
+    kinds: Vec<KindSpec>,
+    #[serde(default)]
+    init: Vec<InitPassSpec>,
+    #[serde(default)]
+    defects: Vec<DefectSpec>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DynamicsV2 {
+    thermo: ThermoSpec,
+    #[serde(default)]
+    aliases: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    rules: Vec<ReactionSpec>,
+}
+
+impl DeckFile {
+    fn from_v1(mut v1: DeckV1) -> Self {
+        v1.deck.schema = Some(2);
+        let execution = ExecutionSpec {
+            strategy: "ctmc".to_string(),
+            schedule: Vec::new(),
+            ctmc: None,
+            synchronous: None,
+            metropolis: None,
+            pca: None,
+            stop: StopSpec {
+                steps: Some(v1.simulation.steps),
+                time: None,
+                predicate: None,
+            },
+            ensemble: EnsembleSpec {
+                seed: v1.simulation.seed,
+                n_replicas: 1,
+                seed_policy: SeedPolicy::Increment,
+            },
+        };
+        let mut observables = v1.observables.unwrap_or_default();
+        if observables.report_every == 0 {
+            observables.report_every = v1.simulation.report_every.unwrap_or(0);
+        }
+        Self {
+            deck: v1.deck,
+            structure_kind: StructureKind::Cell,
+            grid: None,
+            cell: v1.cell,
+            species: v1.species,
+            kinds: v1.kinds,
+            aliases: v1.aliases,
+            lattice: v1.lattice,
+            defects: v1.defects,
+            thermo: v1.thermo,
+            init: v1.init,
+            reactions: v1.reactions,
+            execution,
+            observables,
+        }
+    }
+
+    fn from_v2(v2: DeckV2) -> Result<Self, String> {
+        if v2.deck.schema != Some(2) {
+            return Err("v2 deck must declare [deck] schema = 2".to_string());
+        }
+        validate_v2_surfaces(&v2)?;
+        let StructureV2 {
+            kind,
+            cell,
+            lattice,
+            grid,
+            neighborhood,
+            dims,
+            boundary,
+            default_kind,
+            species,
+            kinds,
+            init,
+            defects,
+        } = v2.structure;
+        let (structure_kind, grid_spec, cell, lattice) = match kind.as_deref().unwrap_or("cell") {
+            "cell" => {
+                if grid.is_some()
+                    || neighborhood.is_some()
+                    || dims.is_some()
+                    || boundary.is_some()
+                    || default_kind.is_some()
+                {
+                    return Err("cell structure cannot contain grid-form fields".to_string());
+                }
+                (
+                    StructureKind::Cell,
+                    None,
+                    cell.ok_or("[structure] kind = 'cell' requires [structure.cell]")?,
+                    lattice.ok_or("[structure] kind = 'cell' requires [structure.lattice]")?,
+                )
+            }
+            "grid" => {
+                if cell.is_some() || lattice.is_some() {
+                    return Err("grid structure cannot contain cell-form fields".to_string());
+                }
+                let dims_vec = dims.ok_or("[structure] kind = 'grid' requires dims")?;
+                let boundary_vec = boundary.ok_or("[structure] kind = 'grid' requires boundary")?;
+                let grid_spec = GridSpec {
+                    family: grid.ok_or("[structure] kind = 'grid' requires grid")?,
+                    neighborhood,
+                    dims: dims_vec,
+                    boundary: boundary_vec,
+                    default_kind: default_kind
+                        .ok_or("[structure] kind = 'grid' requires default_kind")?,
+                };
+                // Grid compilation is B3. Preserve the parsed grid verbatim
+                // and carry inert placeholders that compile() never reaches.
+                (
+                    StructureKind::Grid,
+                    Some(grid_spec),
+                    CellSpec {
+                        a: None,
+                        b: None,
+                        c: None,
+                        alpha: None,
+                        beta: None,
+                        gamma: None,
+                        matrix: Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]),
+                        sites: Vec::new(),
+                        bonds: Vec::new(),
+                    },
+                    LatticeSpec {
+                        dims: [1, 1, 1],
+                        boundary: [
+                            "periodic".to_string(),
+                            "periodic".to_string(),
+                            "periodic".to_string(),
+                        ],
+                    },
+                )
+            }
+            other => return Err(format!("unknown structure kind '{other}'")),
+        };
+        Ok(Self {
+            deck: v2.deck,
+            structure_kind,
+            grid: grid_spec,
+            cell,
+            species,
+            kinds,
+            aliases: v2.dynamics.aliases,
+            lattice,
+            defects,
+            thermo: v2.dynamics.thermo,
+            init,
+            reactions: v2.dynamics.rules,
+            execution: v2.execution,
+            observables: v2.observables,
+        })
+    }
+}
+
+fn validate_v2_surfaces(deck: &DeckV2) -> Result<(), String> {
+    validate_execution(&deck.execution)?;
+    validate_structure(&deck.structure)?;
+
+    for rule in &deck.dynamics.rules {
+        let ctx = format!("rule '{}'", rule.name);
+        if let Some(truth) = rule.truth.as_deref() {
+            if truth != "and" {
+                return Err(format!("{ctx}: truth must be 'and'"));
+            }
+        }
+        let effects: Vec<&EffectSpec> = rule
+            .effects
+            .iter()
+            .chain(rule.branches.iter().flat_map(|branch| &branch.effects))
+            .collect();
+        if deck.execution.strategy == "synchronous"
+            && (rule.branches.len() > 1
+                || effects
+                    .iter()
+                    .any(|effect| effect.select_mode.as_deref() == Some("one")))
+        {
+            return Err(format!(
+                "{ctx}: synchronous rules are draw-free and cannot use weighted branches or select_mode = 'one'"
+            ));
+        }
+        let source = rule.center.is_none();
+        if source && effects.iter().any(|effect| effect.target != "source") {
+            return Err(format!(
+                "{ctx}: a rule without center may contain only source effects"
+            ));
+        }
+        if !source && effects.iter().any(|effect| effect.target == "source") {
+            return Err(format!(
+                "{ctx}: a source effect requires the center to be absent"
+            ));
+        }
+        if source && (!rule.guards.is_empty() || !rule.modifiers.is_empty()) {
+            return Err(format!(
+                "{ctx}: source rules cannot declare center-relative guards or modifiers"
+            ));
+        }
+        for effect in effects {
+            match effect.target.as_str() {
+                "center" | "neighbor" | "neighbors" | "source" => {}
+                other => return Err(format!("{ctx}: unknown effect target '{other}'")),
+            }
+            match effect.select_mode.as_deref() {
+                None | Some("all") | Some("one") => {}
+                Some(other) => {
+                    return Err(format!(
+                        "{ctx}: select_mode must be 'all' or 'one', not '{other}'"
+                    ));
+                }
+            }
+            if effect.select_mode.is_some() && effect.target != "neighbors" {
+                return Err(format!(
+                    "{ctx}: select_mode is valid only for target = 'neighbors'"
+                ));
+            }
+            if effect.target == "source" && effect.select.is_some() {
+                return Err(format!("{ctx}: a source effect takes no selector"));
+            }
+        }
+        validate_rate_for_strategy(rule, &deck.execution.strategy, &ctx)?;
+    }
+
+    for observable in &deck.observables.series {
+        match observable.kind.as_str() {
+            "state_counts" | "event_rates" | "rate_spectra" | "cluster_sizes" | "surface_area"
+            | "exposure_age" | "snapshot" => {}
+            "interface_roughness" => {
+                let axis = observable
+                    .parameters
+                    .get("axis")
+                    .and_then(toml::Value::as_integer)
+                    .ok_or("interface_roughness observable requires integer axis")?;
+                if !(0..=2).contains(&axis) {
+                    return Err("interface_roughness axis must be 0, 1, or 2".to_string());
+                }
+            }
+            other => return Err(format!("unknown observable kind '{other}'")),
+        }
+    }
+    Ok(())
+}
+
+fn validate_structure(structure: &StructureV2) -> Result<(), String> {
+    if structure.kind.as_deref().unwrap_or("cell") != "grid" {
+        return Ok(());
+    }
+    let family = structure
+        .grid
+        .as_deref()
+        .ok_or("grid structure requires grid")?;
+    let dimensions = structure
+        .dims
+        .as_ref()
+        .ok_or("grid structure requires dims")?;
+    let boundary = structure
+        .boundary
+        .as_ref()
+        .ok_or("grid structure requires boundary")?;
+    let expected_dimensions = match family {
+        "square" | "hex" => 2,
+        "cubic" => 3,
+        other => return Err(format!("unknown grid family '{other}'")),
+    };
+    if dimensions.len() != expected_dimensions || dimensions.contains(&0) {
+        return Err(format!(
+            "{family} grid requires {expected_dimensions} nonzero dimensions"
+        ));
+    }
+    if boundary.len() != expected_dimensions {
+        return Err(format!(
+            "{family} grid boundary must have {expected_dimensions} values (one per axis), got {}",
+            boundary.len()
+        ));
+    }
+    if boundary
+        .iter()
+        .any(|value| !matches!(value.as_str(), "periodic" | "open" | "fixed"))
+    {
+        return Err(format!(
+            "{family} grid boundary values must be one of 'periodic', 'open', or 'fixed'"
+        ));
+    }
+    match (family, structure.neighborhood.as_deref()) {
+        ("hex", None) => {}
+        ("hex", Some(_)) => return Err("hex grid has a fixed neighborhood".to_string()),
+        (_, Some("moore" | "von_neumann")) => {}
+        (_, None) => return Err("square/cubic grid requires neighborhood".to_string()),
+        (_, Some(other)) => return Err(format!("unknown grid neighborhood '{other}'")),
+    }
+    Ok(())
+}
+
+fn validate_rate_for_strategy(
+    rule: &ReactionSpec,
+    strategy: &str,
+    ctx: &str,
+) -> Result<(), String> {
+    let rate = rule.rate.as_ref();
+    let variants = rate.map_or(0, |rate| {
+        usize::from(rate.constant.is_some())
+            + usize::from(rate.arrhenius.is_some())
+            + usize::from(rate.eyring.is_some())
+            + usize::from(rate.energy.is_some())
+            + usize::from(rate.probability.is_some())
+    });
+    match strategy {
+        "ctmc"
+            if variants == 1
+                && rate.is_some_and(|rate| {
+                    rate.constant.is_some() || rate.arrhenius.is_some() || rate.eyring.is_some()
+                }) => {}
+        "synchronous" if variants == 0 => {}
+        "metropolis" if variants == 1 && rate.is_some_and(|rate| rate.energy.is_some()) => {}
+        "pca" if variants == 1 && rate.is_some_and(|rate| rate.probability.is_some()) => {
+            let probability = rate.and_then(|rate| rate.probability).unwrap();
+            if !probability.is_finite() || !(0.0..=1.0).contains(&probability) {
+                return Err(format!("{ctx}: PCA probability must be in [0, 1]"));
+            }
+        }
+        _ => {
+            return Err(format!(
+                "{ctx}: rate variant does not match execution strategy '{strategy}'"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_execution(execution: &ExecutionSpec) -> Result<(), String> {
+    match execution.strategy.as_str() {
+        "ctmc" | "synchronous" | "metropolis" | "pca" => {}
+        other => return Err(format!("unknown execution strategy '{other}'")),
+    }
+    if execution.strategy == "synchronous" && execution.synchronous.is_none() {
+        return Err(
+            "[execution.synchronous] conflict_resolution = 'first_match' is required; \
+             when multiple rules match one site, the first rule in definition order wins"
+                .to_string(),
+        );
+    }
+    if !execution.schedule.is_empty() && execution.strategy != "ctmc" {
+        return Err("[execution.schedule] is supported only for CTMC".to_string());
+    }
+    let mut deadline = 0.0;
+    for (index, segment) in execution.schedule.iter().enumerate() {
+        if !segment.temperature.is_finite() || segment.temperature <= 0.0 {
+            return Err(format!(
+                "execution.schedule segment {index} temperature must be finite and positive"
+            ));
+        }
+        if !segment.duration.is_finite() || segment.duration <= 0.0 {
+            return Err(format!(
+                "execution.schedule segment {index} duration must be finite and positive"
+            ));
+        }
+        let next_deadline = deadline + segment.duration;
+        if !next_deadline.is_finite() {
+            return Err(format!(
+                "execution.schedule cumulative duration overflows at segment {index}"
+            ));
+        }
+        if next_deadline <= deadline {
+            return Err(format!(
+                "execution.schedule segment {index} duration is too small to advance cumulative wall time"
+            ));
+        }
+        deadline = next_deadline;
+    }
+    if let Some(temperature) = execution
+        .metropolis
+        .as_ref()
+        .and_then(|spec| spec.temperature)
+    {
+        if !temperature.is_finite() || temperature <= 0.0 {
+            return Err(
+                "[execution.metropolis] temperature must be finite and positive".to_string(),
+            );
+        }
+    }
+    if let Some(time) = execution.stop.time {
+        if !time.is_finite() || time < 0.0 {
+            return Err("[execution.stop] time must be finite and non-negative".to_string());
+        }
+    }
+    if execution.ensemble.n_replicas == 0 {
+        return Err("[execution.ensemble] n_replicas must be at least 1".to_string());
+    }
+    Ok(())
+}
+
+impl<'de> Deserialize<'de> for DeckFile {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+
+        let value = toml::Value::deserialize(deserializer)?;
+        let schema = value
+            .get("deck")
+            .and_then(|deck| deck.get("schema"))
+            .and_then(toml::Value::as_integer);
+        match schema {
+            None => {
+                let v1: DeckV1 = value.try_into().map_err(D::Error::custom)?;
+                Ok(Self::from_v1(v1))
+            }
+            Some(2) => {
+                let v2: DeckV2 = value.try_into().map_err(D::Error::custom)?;
+                Self::from_v2(v2).map_err(D::Error::custom)
+            }
+            Some(other) => Err(D::Error::custom(format!(
+                "unsupported deck schema {other}; expected absent (v1) or 2"
+            ))),
+        }
+    }
 }
 
 /// One build-time pass. The operation applies to the *center* site — once,
@@ -75,6 +683,10 @@ pub struct InitPassSpec {
     pub shift: Option<i32>,
     #[serde(default)]
     pub map: Option<BTreeMap<String, String>>,
+    /// Change the site's kind after applying the state operation. Used by
+    /// seeded binned-disorder init passes.
+    #[serde(default)]
+    pub rekind: Option<String>,
     /// `map` miss policy; init defaults to `"skip"` (the termination maps
     /// leave unlisted states alone).
     #[serde(default)]
@@ -106,6 +718,9 @@ pub struct Meta {
     pub name: String,
     #[serde(default)]
     pub comment: Option<String>,
+    /// Schema marker. The v1 shim normalizes an absent marker to `Some(2)`.
+    #[serde(default)]
+    pub schema: Option<u32>,
     /// Energy unit for every energy-valued field in this deck (activation
     /// energies, ΔEa modifiers, chemical potentials, ΔH‡, and ΔS‡ per K):
     /// `"kcal/mol"` (default), `"kJ/mol"`, or `"eV"`. Temperatures are
@@ -251,10 +866,16 @@ pub struct ThermoSpec {
 #[serde(deny_unknown_fields)]
 pub struct ReactionSpec {
     pub name: String,
-    pub center: CenterSpec,
+    /// Absent only for a per-site `target = "source"` rule.
+    #[serde(default)]
+    pub center: Option<CenterSpec>,
     #[serde(default)]
     pub guards: Vec<SelectorSpec>,
-    pub rate: RateSpec,
+    #[serde(default)]
+    pub rate: Option<RateSpec>,
+    /// Deterministic-CA truth-table mode. Parsed in B2; executed in B3.
+    #[serde(default)]
+    pub truth: Option<String>,
     /// Species drawn from solution: each contributes activity and Δμ
     /// factors to the forward rate (design doc §4).
     #[serde(default)]
@@ -337,6 +958,16 @@ pub struct RateSpec {
     pub arrhenius: Option<ArrheniusSpec>,
     #[serde(default)]
     pub eyring: Option<EyringSpec>,
+    #[serde(default)]
+    pub energy: Option<EnergySpec>,
+    #[serde(default)]
+    pub probability: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EnergySpec {
+    pub delta: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -413,6 +1044,9 @@ pub struct EffectSpec {
     /// `set`/`map` resolve unambiguously (v0 restriction).
     #[serde(default)]
     pub select: Option<SelectorSpec>,
+    /// Neighbor selection: `all` (default) or exactly `one` uniform match.
+    #[serde(default)]
+    pub select_mode: Option<String>,
     #[serde(default)]
     pub set: Option<String>,
     #[serde(default)]

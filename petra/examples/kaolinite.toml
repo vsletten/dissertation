@@ -223,6 +223,7 @@ o_occ = [
   "Osa.sialh", "Osa.si1", "Osa.al1", "Osa.pr1", "Osa.pr2",
   "Oaa.br", "Oaa.hy", "Oaa.al1",
 ]
+solid = ["@al_occ", "@si_occ", "@o_occ"]
 [cell]
 matrix = [[4.9725, -0.0262374, -1.3362], [0.0, 8.92893, -0.30084], [0.0, 0.0, 7.384]]
 
@@ -1152,3 +1153,25 @@ missing = "skip"
 steps = 20000
 seed = 42
 report_every = 2000
+
+[observables]
+report_every = 2000
+
+[[observables.series]]
+kind = "state_counts"
+
+[[observables.series]]
+kind = "event_rates"
+
+[[observables.series]]
+kind = "rate_spectra"
+
+[[observables.series]]
+kind = "surface_area"
+state = "@solid"
+axis = 1
+
+[[observables.series]]
+kind = "exposure_age"
+state = "@solid"
+axis = 1

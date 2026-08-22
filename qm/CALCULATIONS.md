@@ -16,7 +16,7 @@ in the store), `landed` (the number is in a merged deck).
 | id | quantity | consumer | status | current value / source |
 |---|---|---|---|---|
 | CALC-001 | Kaolinite interlayer H-bond energy (per OH···O bond, inner-surface OH → basal siloxane O) | `petra/examples/kaolinite-multilayer.toml` — `e_hb` in the two desorption `per_match` modifiers | **needed** | placeholder 5.0 kcal/mol (generic OH···O; deck header flags it) |
-| CALC-002 | Si–O–Si hydrolysis barrier, neutral/acid/base (Xiao & Lasaga reproduction) | kaolinite decks R0/R1; quarry Phase 1 validation | needed | legacy relative rates (flat tables); 1990s refs: ~24 kcal/mol acid, ~19 base |
+| CALC-002 | Si–O–Si hydrolysis barrier, neutral/acid/base (Xiao & Lasaga reproduction) | kaolinite decks R0/R1; quarry Phase 1 validation | **computed** (neutral, embedded pilot; acid/base pending) | free dimer ΔG‡ 113.05 kJ/mol; embedded n4 cell **205.7 kJ/mol** (sequential, TS2 rate-limiting, +92.7 lattice shift) @ b3lyp/def2-svp/df — provenance in `qm/runs/phase2/oss-neutral-n4-s2-b3lyp-def2-svp/store.sqlite`; A2 re-tiers |
 | CALC-003 | Si–O–Al hydrolysis barrier, both protonation sides | kaolinite decks R2–R13 family | needed | legacy relative rates |
 | CALC-004 | Al–OH–Al hydrolysis barrier ± protonation state | kaolinite decks R14/R15 | needed | legacy relative rates |
 | CALC-005 | Si and Al attachment/detachment energetics vs coordination (the `by_count` ladders) | kaolinite decks desorb/adsorb modifiers | needed | legacy 6/12 kcal-per-bucket heuristic tables |

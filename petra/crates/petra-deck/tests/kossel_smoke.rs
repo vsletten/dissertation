@@ -16,7 +16,11 @@ fn kossel_deck_compiles_with_expected_shape() {
     assert_eq!(deck.kind_names, ["M_site"]);
     assert_eq!(deck.state_names, ["M_site.occupied", "M_site.empty"]);
     assert_eq!(deck.reactions.len(), 2);
-    assert_eq!(deck.unit_cell.sites[0].bonds.len(), 6, "expanded to ±a ±b ±c");
+    assert_eq!(
+        deck.unit_cell.sites[0].bonds.len(),
+        6,
+        "expanded to ±a ±b ±c"
+    );
     // Attach folds mu = -2 into ln_thermo: ln(1) + (-2)/RT.
     let attach = deck
         .reactions
@@ -91,7 +95,11 @@ fn same_seed_reproduces_same_seed_diverges_different() {
     let (t1, c1) = run(11);
     let (t2, c2) = run(11);
     let (t3, c3) = run(12);
-    assert_eq!(t1.to_bits(), t2.to_bits(), "same seed → identical trajectory");
+    assert_eq!(
+        t1.to_bits(),
+        t2.to_bits(),
+        "same seed → identical trajectory"
+    );
     assert_eq!(c1, c2);
     assert!(
         t1.to_bits() != t3.to_bits() || c1 != c3,

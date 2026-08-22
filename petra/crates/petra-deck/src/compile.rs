@@ -9,14 +9,16 @@ use petra_core::lattice::{Boundary, Lattice};
 use petra_core::rate::{RateExpr, R_KCAL};
 use petra_core::reaction::{
     count_matches, Branch, Effect, EffectOp, EffectTarget, Guard, Modifier, ModifierKind,
-    NeighborSelect, Reaction,
+    NeighborSelect, Reaction, RuleValue,
 };
 use petra_core::state::{StateId, StateSet};
 use petra_core::Engine;
 use rand::{Rng as _, SeedableRng};
 use rand_pcg::Pcg64Mcg;
 
-use crate::schema::{DeckFile, EffectSpec, RateSpec, SelectorSpec};
+use crate::schema::{
+    DeckFile, EffectSpec, RateSpec, ScheduleSegment, SeedPolicy, SelectorSpec, StructureKind,
+};
 
 #[derive(Debug, thiserror::Error)]
 #[error("deck error: {0}")]
@@ -28,10 +30,11 @@ fn err<T>(msg: impl Into<String>) -> Result<T, CompileError> {
 
 /// Everything the engine and the reporting layer need, with the name
 /// tables kept for output (the runtime itself sees only dense ids).
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct CompiledDeck {
     pub name: String,
     pub unit_cell: UnitCell,
+    simple_grid: bool,
     pub kinds_per_template: Vec<KindId>,
     pub kind_names: Vec<String>,
     /// `"Kind.state"`, indexed by `StateId`.
@@ -51,15 +54,74 @@ pub struct CompiledDeck {
     pub temperature: f64,
     pub dims: [usize; 3],
     pub boundary: [Boundary; 3],
+    /// Legacy scalar view (`0` when omitted). New execution code should use
+    /// `step_limit` so an explicit zero remains distinguishable from absence.
     pub steps: u64,
+    pub step_limit: Option<u64>,
     pub seed: u64,
+    pub n_replicas: u64,
+    pub seed_policy: SeedPolicy,
     pub report_every: u64,
+    pub observables: Vec<CompiledObservable>,
+    pub strategy: ExecutionStrategy,
+    pub schedule: Vec<ScheduleSegment>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ScheduleAdvance {
+    Fired {
+        segment: usize,
+        fired: petra_core::Fired,
+    },
+    Boundary {
+        completed_segment: usize,
+        time: f64,
+    },
+    Complete,
+}
+
+pub struct ScheduleRun {
+    engine: Engine,
+    schedule: Vec<ScheduleSegment>,
+    segment: usize,
+    deadline: f64,
+    complete: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CompiledObservable {
+    StateCounts,
+    EventRates,
+    RateSpectra,
+    ClusterSizes { states: Vec<StateId> },
+    SurfaceArea { states: Vec<StateId>, axis: u8 },
+    ExposureAge { states: Vec<StateId>, axis: u8 },
+    Snapshot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ExecutionStrategy {
+    Ctmc,
+    Synchronous,
+    Metropolis { temperature: f64 },
+    Pca,
+}
+
+impl ExecutionStrategy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ctmc => "ctmc",
+            Self::Synchronous => "synchronous",
+            Self::Metropolis { .. } => "metropolis",
+            Self::Pca => "pca",
+        }
+    }
 }
 
 /// One compiled build-time pass (design doc §3.1 fill rules): sweep all
 /// sites in index order, writes immediately visible — the legacy
 /// TerminateSurface convention.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct InitPass {
     pub name: String,
     pub center_kind: Option<KindId>,
@@ -75,12 +137,13 @@ pub struct InitPass {
     /// Apply the op once per matching neighbor instead of once.
     pub foreach: Option<NeighborSelect>,
     pub op: EffectOp,
+    pub rekind: Option<KindId>,
 }
 
 /// One compiled line defect: u(r) = prefactor / max(r, core_radius)²,
 /// capped, superposed over all defects (docs/STRAIN.md §5). All values in
 /// internal units (kcal/mol, Å).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CompiledDefect {
     pub line_axis: u8,
     /// A point on the line, cell coordinates.
@@ -91,30 +154,100 @@ pub struct CompiledDefect {
     pub cap: Option<f64>,
 }
 
+fn simplify_grid_adjacency(lattice: &mut Lattice) {
+    let mut offsets = Vec::with_capacity(lattice.len() + 1);
+    let mut adjacency = Vec::new();
+    let mut labels = Vec::new();
+    offsets.push(0);
+    for site in 0..lattice.len() {
+        let start = lattice.adj_off[site] as usize;
+        let end = lattice.adj_off[site + 1] as usize;
+        for index in start..end {
+            let neighbor = lattice.adj[index];
+            if neighbor == site as u32 || adjacency[offsets[site] as usize..].contains(&neighbor) {
+                continue;
+            }
+            adjacency.push(neighbor);
+            labels.push(lattice.adj_label[index]);
+        }
+        offsets.push(adjacency.len() as u32);
+    }
+    lattice.adj_off = offsets;
+    lattice.adj = adjacency;
+    lattice.adj_label = labels;
+}
+
 impl CompiledDeck {
+    /// Construct the update strategy declared by `[execution]`.
+    pub fn strategy(&self) -> petra_core::Strategy {
+        match self.strategy {
+            ExecutionStrategy::Ctmc => petra_core::Strategy::ExactCtmc(petra_core::ExactCtmc),
+            ExecutionStrategy::Synchronous => {
+                petra_core::Strategy::Synchronous(petra_core::SynchronousCA)
+            }
+            ExecutionStrategy::Metropolis { temperature } => {
+                petra_core::Strategy::Metropolis(petra_core::AsyncMetropolis::new(temperature))
+            }
+            ExecutionStrategy::Pca => petra_core::Strategy::Pca(petra_core::DiscreteTimePCA),
+        }
+    }
+
     /// Instantiate the lattice (uniform per-kind fill), run the init
     /// passes, compute defect strain fields, and build the engine.
     pub fn build_engine(&self, seed_override: Option<u64>) -> Result<Engine, CompileError> {
         let seed = seed_override.unwrap_or(self.seed);
         let initial = self.initial_per_template.clone();
-        let mut lattice =
-            Lattice::build(&self.unit_cell, self.dims, self.boundary, |t| initial[t]);
-        let kinds: Vec<KindId> = lattice
+        let mut lattice = Lattice::build(&self.unit_cell, self.dims, self.boundary, |t| initial[t]);
+        if self.simple_grid {
+            simplify_grid_adjacency(&mut lattice);
+        }
+        let mut kinds: Vec<KindId> = lattice
             .template_index
             .iter()
             .map(|&t| self.kinds_per_template[t as usize])
             .collect();
-        self.run_init(&mut lattice, &kinds, seed)?;
+        self.run_init(&mut lattice, &mut kinds, seed)?;
         self.compute_strain(&mut lattice)?;
-        Ok(Engine::new(
+        let initial_temperature = self
+            .schedule
+            .first()
+            .map_or(self.temperature, |segment| segment.temperature);
+        let mut reactions = self.reactions.clone();
+        if initial_temperature != self.temperature {
+            for reaction in &mut reactions {
+                reaction.set_temperature(initial_temperature);
+            }
+        }
+        let mut engine = Engine::new_with_site_kinds(
             lattice,
-            &self.kinds_per_template,
+            kinds,
             self.kind_names.len(),
             self.kind_state_ranges.clone(),
-            self.reactions.clone(),
-            self.temperature,
+            reactions,
+            initial_temperature,
             seed,
-        ))
+        );
+        if let Some(CompiledObservable::ExposureAge { states, axis }) = self
+            .observables
+            .iter()
+            .find(|observable| matches!(observable, CompiledObservable::ExposureAge { .. }))
+        {
+            engine.enable_exposure_tracking(states.clone(), *axis);
+        }
+        Ok(engine)
+    }
+
+    pub fn build_schedule(&self, seed_override: Option<u64>) -> Result<ScheduleRun, CompileError> {
+        let first = self.schedule.first().ok_or_else(|| {
+            CompileError("build_schedule requires at least one execution segment".into())
+        })?;
+        Ok(ScheduleRun {
+            engine: self.build_engine(seed_override)?,
+            schedule: self.schedule.clone(),
+            segment: 0,
+            deadline: first.duration,
+            complete: false,
+        })
     }
 
     /// Superpose every defect's analytic field into `lattice.strain`
@@ -149,11 +282,7 @@ impl CompiledDeck {
                     [cell[0] as i32, cell[1] as i32, cell[2] as i32],
                 );
                 let v = [p[0] - q[0], p[1] - q[1], p[2] - q[2]];
-                let mut f = self
-                    .unit_cell
-                    .cell
-                    .to_fractional(v)
-                    .map_err(CompileError)?;
+                let mut f = self.unit_cell.cell.to_fractional(v).map_err(CompileError)?;
                 for (axis, fc) in f.iter_mut().enumerate() {
                     if self.boundary[axis] == Boundary::Periodic {
                         let period = self.dims[axis] as f64;
@@ -177,7 +306,7 @@ impl CompiledDeck {
     fn run_init(
         &self,
         lattice: &mut Lattice,
-        kinds: &[KindId],
+        kinds: &mut [KindId],
         seed: u64,
     ) -> Result<(), CompileError> {
         let mut scratch = Vec::new();
@@ -246,6 +375,11 @@ impl CompiledDeck {
                                 pass.name
                             ))
                         }
+                    }
+                }
+                if times > 0 {
+                    if let Some(kind) = pass.rekind {
+                        kinds[s] = kind;
                     }
                 }
             }
@@ -347,7 +481,80 @@ fn energy_factor(units: Option<&str>) -> Result<f64, CompileError> {
     }
 }
 
+pub fn replica_seed(seed: u64, replica: u64, policy: SeedPolicy) -> u64 {
+    match policy {
+        SeedPolicy::Increment => seed.wrapping_add(replica),
+        SeedPolicy::Hash => splitmix64(splitmix64(seed) ^ replica),
+    }
+}
+
+fn splitmix64(mut x: u64) -> u64 {
+    x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut z = x;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+fn compile_boundary(values: &[String]) -> Result<[Boundary; 3], CompileError> {
+    let mut boundary = [Boundary::Periodic; 3];
+    for (axis, value) in values.iter().enumerate() {
+        boundary[axis] = match value.as_str() {
+            "periodic" => Boundary::Periodic,
+            "open" => Boundary::Open,
+            "fixed" => Boundary::Fixed,
+            other => return err(format!("unknown boundary '{other}'")),
+        };
+    }
+    Ok(boundary)
+}
+
+fn grid_offsets(family: &str, neighborhood: Option<&str>) -> Vec<[i32; 3]> {
+    match (family, neighborhood) {
+        ("square", Some("von_neumann")) => {
+            vec![[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]]
+        }
+        ("square", Some("moore")) => (-1..=1)
+            .flat_map(|a| (-1..=1).map(move |b| [a, b, 0]))
+            .filter(|offset| *offset != [0, 0, 0])
+            .collect(),
+        ("hex", None) => vec![
+            [1, 0, 0],
+            [-1, 0, 0],
+            [0, 1, 0],
+            [0, -1, 0],
+            [1, -1, 0],
+            [-1, 1, 0],
+        ],
+        ("cubic", Some("von_neumann")) => vec![
+            [1, 0, 0],
+            [-1, 0, 0],
+            [0, 1, 0],
+            [0, -1, 0],
+            [0, 0, 1],
+            [0, 0, -1],
+        ],
+        ("cubic", Some("moore")) => (-1..=1)
+            .flat_map(|a| (-1..=1).flat_map(move |b| (-1..=1).map(move |c| [a, b, c])))
+            .filter(|offset| *offset != [0, 0, 0])
+            .collect(),
+        _ => unreachable!("grid family and neighborhood validated during deserialization"),
+    }
+}
+
 pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
+    if !matches!(
+        deck.execution.strategy.as_str(),
+        "ctmc" | "synchronous" | "metropolis" | "pca"
+    ) {
+        return err(format!(
+            "strategy '{}' is not implemented",
+            deck.execution.strategy
+        ));
+    }
+    if deck.execution.ensemble.n_replicas == 0 {
+        return err("execution.ensemble.n_replicas must be at least 1");
+    }
     let eunit = energy_factor(deck.deck.units.as_deref())?;
 
     // --- species ---
@@ -396,7 +603,10 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
                     .map_err(|_| CompileError("more than 65535 states".into()))?,
             );
             if per_kind.insert(st.name.clone(), id).is_some() {
-                return err(format!("duplicate state '{}' in kind '{}'", st.name, k.name));
+                return err(format!(
+                    "duplicate state '{}' in kind '{}'",
+                    st.name, k.name
+                ));
             }
             state_names.push(format!("{}.{}", k.name, st.name));
             state_occupants.push(if st.occupant == "vacant" {
@@ -424,83 +634,129 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
     }
     names.n_states = state_names.len();
 
-    // --- unit cell: geometry, sites, then bonds expanded onto both endpoints ---
-    let params = (
-        deck.cell.a,
-        deck.cell.b,
-        deck.cell.c,
-        deck.cell.alpha,
-        deck.cell.beta,
-        deck.cell.gamma,
-    );
-    let cell = match (deck.cell.matrix, params) {
-        (Some(m), (None, None, None, None, None, None)) => Cell::from_matrix(m),
-        (None, (Some(a), Some(b), Some(c), Some(al), Some(be), Some(ga))) => {
-            Cell::from_params(a, b, c, al, be, ga)
-        }
-        _ => {
-            return err(
-                "cell geometry must be either all of a,b,c,alpha,beta,gamma or a matrix, not a mix",
+    // --- topology: explicit cells and grid sugar both lower to one UnitCell ---
+    let (unit_cell, kinds_per_template, initial_per_template, dims, boundary) = match deck
+        .structure_kind
+    {
+        StructureKind::Cell => {
+            let params = (
+                deck.cell.a,
+                deck.cell.b,
+                deck.cell.c,
+                deck.cell.alpha,
+                deck.cell.beta,
+                deck.cell.gamma,
+            );
+            let cell = match (deck.cell.matrix, params) {
+                    (Some(m), (None, None, None, None, None, None)) => Cell::from_matrix(m),
+                    (None, (Some(a), Some(b), Some(c), Some(al), Some(be), Some(ga))) => {
+                        Cell::from_params(a, b, c, al, be, ga)
+                    }
+                    _ => return err(
+                        "cell geometry must be either all of a,b,c,alpha,beta,gamma or a matrix, not a mix",
+                    ),
+                };
+            let mut tsites = Vec::new();
+            let mut kinds_per_template = Vec::new();
+            let mut initial_per_template = Vec::new();
+            for (si, s) in deck.cell.sites.iter().enumerate() {
+                let ki = *names.kind_ids.get(&s.kind).ok_or_else(|| {
+                    CompileError(format!("cell site has unknown kind '{}'", s.kind))
+                })?;
+                kinds_per_template.push(KindId(ki));
+                initial_per_template.push(initial_by_kind[ki as usize]);
+                let frac = match (s.frac, s.cart) {
+                    (Some(f), None) => f,
+                    (None, Some(c)) => cell
+                        .to_fractional(c)
+                        .map_err(|e| CompileError(format!("cell site {si}: {e}")))?,
+                    _ => return err(format!("cell site {si}: exactly one of frac/cart")),
+                };
+                tsites.push(TemplateSite {
+                    kind: KindId(ki),
+                    frac,
+                    bonds: Vec::new(),
+                });
+            }
+            for b in &deck.cell.bonds {
+                if b.i >= tsites.len() || b.j >= tsites.len() {
+                    return err(format!("bond ({}, {}) references a missing site", b.i, b.j));
+                }
+                if b.i == b.j && b.dcell == [0, 0, 0] {
+                    return err(format!("site {} bonded to itself in the same cell", b.i));
+                }
+                let label = match &b.label {
+                    None => NO_LABEL,
+                    Some(l) => {
+                        let next = names.labels.len() as u16;
+                        *names.labels.entry(l.clone()).or_insert(next)
+                    }
+                };
+                let fwd = TemplateBond {
+                    to: b.j,
+                    dcell: b.dcell,
+                    label,
+                };
+                let rev = TemplateBond {
+                    to: b.i,
+                    dcell: [-b.dcell[0], -b.dcell[1], -b.dcell[2]],
+                    label,
+                };
+                if !tsites[b.i].bonds.contains(&fwd) {
+                    tsites[b.i].bonds.push(fwd);
+                }
+                if !tsites[b.j].bonds.contains(&rev) {
+                    tsites[b.j].bonds.push(rev);
+                }
+            }
+            (
+                UnitCell {
+                    cell,
+                    sites: tsites,
+                },
+                kinds_per_template,
+                initial_per_template,
+                deck.lattice.dims,
+                compile_boundary(&deck.lattice.boundary)?,
             )
         }
-    };
-    let mut tsites = Vec::new();
-    let mut kinds_per_template = Vec::new();
-    let mut initial_per_template = Vec::new();
-    for (si, s) in deck.cell.sites.iter().enumerate() {
-        let ki = *names
-            .kind_ids
-            .get(&s.kind)
-            .ok_or_else(|| CompileError(format!("cell site has unknown kind '{}'", s.kind)))?;
-        kinds_per_template.push(KindId(ki));
-        initial_per_template.push(initial_by_kind[ki as usize]);
-        let frac = match (s.frac, s.cart) {
-            (Some(f), None) => f,
-            (None, Some(c)) => cell
-                .to_fractional(c)
-                .map_err(|e| CompileError(format!("cell site {si}: {e}")))?,
-            _ => return err(format!("cell site {si}: exactly one of frac/cart")),
-        };
-        tsites.push(TemplateSite {
-            kind: KindId(ki),
-            frac,
-            bonds: Vec::new(),
-        });
-    }
-    for b in &deck.cell.bonds {
-        if b.i >= tsites.len() || b.j >= tsites.len() {
-            return err(format!("bond ({}, {}) references a missing site", b.i, b.j));
+        StructureKind::Grid => {
+            let grid = deck.grid.as_ref().expect("validated grid structure");
+            let kind = *names.kind_ids.get(&grid.default_kind).ok_or_else(|| {
+                CompileError(format!(
+                    "grid default_kind names unknown kind '{}'",
+                    grid.default_kind
+                ))
+            })?;
+            let mut dims = [1, 1, 1];
+            dims[..grid.dims.len()].copy_from_slice(&grid.dims);
+            let mut boundary_names = vec!["periodic".to_string(); 3];
+            boundary_names[..grid.boundary.len()].clone_from_slice(&grid.boundary);
+
+            let offsets = grid_offsets(&grid.family, grid.neighborhood.as_deref());
+            let bonds = offsets
+                .into_iter()
+                .map(|dcell| TemplateBond {
+                    to: 0,
+                    dcell,
+                    label: NO_LABEL,
+                })
+                .collect();
+            (
+                UnitCell {
+                    cell: Cell::from_params(1.0, 1.0, 1.0, 90.0, 90.0, 90.0),
+                    sites: vec![TemplateSite {
+                        kind: KindId(kind),
+                        frac: [0.0; 3],
+                        bonds,
+                    }],
+                },
+                vec![KindId(kind)],
+                vec![initial_by_kind[kind as usize]],
+                dims,
+                compile_boundary(&boundary_names)?,
+            )
         }
-        if b.i == b.j && b.dcell == [0, 0, 0] {
-            return err(format!("site {} bonded to itself in the same cell", b.i));
-        }
-        let label = match &b.label {
-            None => NO_LABEL,
-            Some(l) => {
-                let next = names.labels.len() as u16;
-                *names.labels.entry(l.clone()).or_insert(next)
-            }
-        };
-        let fwd = TemplateBond {
-            to: b.j,
-            dcell: b.dcell,
-            label,
-        };
-        let rev = TemplateBond {
-            to: b.i,
-            dcell: [-b.dcell[0], -b.dcell[1], -b.dcell[2]],
-            label,
-        };
-        if !tsites[b.i].bonds.contains(&fwd) {
-            tsites[b.i].bonds.push(fwd);
-        }
-        if !tsites[b.j].bonds.contains(&rev) {
-            tsites[b.j].bonds.push(rev);
-        }
-    }
-    let unit_cell = UnitCell {
-        cell,
-        sites: tsites,
     };
     unit_cell
         .check_reciprocity()
@@ -513,26 +769,19 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
     }
     let rt = R_KCAL * temperature;
 
-    // --- boundary ---
-    let mut boundary = [Boundary::Periodic; 3];
-    for (i, b) in deck.lattice.boundary.iter().enumerate() {
-        boundary[i] = match b.as_str() {
-            "periodic" => Boundary::Periodic,
-            "open" => Boundary::Open,
-            "fixed" => Boundary::Fixed,
-            other => return err(format!("unknown boundary '{other}'")),
-        };
-    }
-
     // --- reactions ---
     let mut reactions = Vec::new();
     for r in &deck.reactions {
         let ctx = format!("reaction '{}'", r.name);
-        let center_kind = *names
-            .kind_ids
-            .get(&r.center.kind)
-            .ok_or_else(|| CompileError(format!("{ctx}: unknown center kind '{}'", r.center.kind)))?;
-        let center_states = names.state_set(&r.center.state, Some(center_kind), &ctx)?;
+        let (center_kind, center_states) = match &r.center {
+            Some(center) => {
+                let kind = *names.kind_ids.get(&center.kind).ok_or_else(|| {
+                    CompileError(format!("{ctx}: unknown center kind '{}'", center.kind))
+                })?;
+                (kind, names.state_set(&center.state, Some(kind), &ctx)?)
+            }
+            None => infer_source_center(&names, &state_occupants, r, &ctx)?,
+        };
 
         let mut guards = Vec::new();
         for g in &r.guards {
@@ -544,10 +793,13 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
             });
         }
 
-        let rate = compile_rate(&r.rate, eunit, &ctx)?;
+        let (rate, value) = compile_rate(r.rate.as_ref(), &deck.execution.strategy, eunit, &ctx)?;
 
         // Fold solution coupling into ln_thermo (design doc §4):
-        // each consumed species contributes ln(activity) + Δμ/RT.
+        // each consumed species contributes ln(activity) + Δμ/RT. Keep
+        // temperature-independent components so schedules can recompile it.
+        let mut ln_activity = 0.0;
+        let mut mu_energy = 0.0;
         let mut ln_thermo = 0.0;
         for sp in &r.consumes {
             if !species.contains_key(sp) {
@@ -557,8 +809,11 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
             if activity <= 0.0 {
                 return err(format!("{ctx}: activity of '{sp}' must be positive"));
             }
-            ln_thermo +=
-                activity.ln() + deck.thermo.mu.get(sp).copied().unwrap_or(0.0) * eunit / rt;
+            let activity_term = activity.ln();
+            let mu_term = deck.thermo.mu.get(sp).copied().unwrap_or(0.0) * eunit;
+            ln_activity += activity_term;
+            mu_energy += mu_term;
+            ln_thermo += activity_term + mu_term / rt;
         }
         for sp in &r.produces {
             if !species.contains_key(sp) {
@@ -621,6 +876,9 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
             center_states,
             guards,
             rate,
+            value,
+            ln_activity,
+            mu_energy,
             ln_thermo,
             strain_scale: r.strain.as_ref().map(|s| s.scale).unwrap_or(0.0),
             modifiers,
@@ -632,8 +890,7 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
     // kcal/mol per GPa·Å³: 1 GPa·Å³ = 1e-21 J → × N_A / 4184.
     const KCAL_PER_GPA_A3: f64 = 0.143_932_6;
     let mm = unit_cell.cell.matrix();
-    let cell_volume = (mm[0][0]
-        * (mm[1][1] * mm[2][2] - mm[1][2] * mm[2][1])
+    let cell_volume = (mm[0][0] * (mm[1][1] * mm[2][2] - mm[1][2] * mm[2][1])
         - mm[0][1] * (mm[1][0] * mm[2][2] - mm[1][2] * mm[2][0])
         + mm[0][2] * (mm[1][0] * mm[2][1] - mm[1][1] * mm[2][0]))
         .abs();
@@ -682,8 +939,7 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         });
     }
 
-    let dims = deck.lattice.dims;
-    if dims.iter().any(|&d| d == 0) {
+    if dims.contains(&0) {
         return err("lattice dims must be nonzero");
     }
 
@@ -693,9 +949,12 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         let ctx = format!("init pass '{}'", p.name);
         let center_kind = match &p.center.kind {
             None => None,
-            Some(k) => Some(*names.kind_ids.get(k).ok_or_else(|| {
-                CompileError(format!("{ctx}: unknown center kind '{k}'"))
-            })?),
+            Some(k) => Some(
+                *names
+                    .kind_ids
+                    .get(k)
+                    .ok_or_else(|| CompileError(format!("{ctx}: unknown center kind '{k}'")))?,
+            ),
         };
         let center_states = names.state_set(&p.center.state, center_kind, &ctx)?;
         let region = match &p.region {
@@ -709,9 +968,7 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         };
         if let Some(prob) = p.probability {
             if !(0.0..=1.0).contains(&prob) {
-                return err(format!(
-                    "{ctx}: probability must be in [0, 1], got {prob}"
-                ));
+                return err(format!("{ctx}: probability must be in [0, 1], got {prob}"));
             }
         }
         if let Some(sites) = &p.sites {
@@ -746,11 +1003,23 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
             None => None,
             Some(sel) => Some(compile_selector(&names, sel, &ctx)?),
         };
+        let rekind = match &p.rekind {
+            None => None,
+            Some(kind) => {
+                if center_kind.is_none() {
+                    return err(format!("{ctx}: rekind requires center.kind"));
+                }
+                Some(KindId(*names.kind_ids.get(kind).ok_or_else(|| {
+                    CompileError(format!("{ctx}: rekind names unknown kind '{kind}'"))
+                })?))
+            }
+        };
         // Init maps default to skip (termination maps leave unlisted
         // states alone).
         let op = compile_op(
             &names,
             center_kind,
+            rekind.map(|kind| kind.0).or(center_kind),
             &p.set,
             &p.shift,
             &p.map,
@@ -768,6 +1037,7 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
             guards,
             foreach,
             op,
+            rekind,
         });
     }
 
@@ -776,9 +1046,95 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         label_names[id as usize] = name.clone();
     }
 
+    let mut observables = Vec::with_capacity(deck.observables.series.len());
+    let mut exposure_definition: Option<(Vec<StateId>, u8)> = None;
+    for observable in &deck.observables.series {
+        let state_filter = || -> Result<Vec<StateId>, CompileError> {
+            let state = observable
+                .parameters
+                .get("state")
+                .and_then(toml::Value::as_str)
+                .ok_or_else(|| {
+                    CompileError(format!(
+                        "{} observable requires string state",
+                        observable.kind
+                    ))
+                })?;
+            let mut refs = Vec::new();
+            names.resolve_ref(state, &mut refs, 0)?;
+            if !state.starts_with('@') && refs.len() != 1 {
+                return err(format!(
+                    "{} observable state '{state}' is ambiguous; qualify it as Kind.state",
+                    observable.kind
+                ));
+            }
+            let mut seen = vec![false; names.n_states];
+            let mut states: Vec<_> = refs
+                .into_iter()
+                .filter_map(|(_, state)| {
+                    let index = state.0 as usize;
+                    (!std::mem::replace(&mut seen[index], true)).then_some(state)
+                })
+                .collect();
+            states.sort_unstable();
+            Ok(states)
+        };
+        let axis = || -> Result<u8, CompileError> {
+            let value = observable
+                .parameters
+                .get("axis")
+                .and_then(toml::Value::as_integer)
+                .ok_or_else(|| {
+                    CompileError(format!(
+                        "{} observable requires integer axis",
+                        observable.kind
+                    ))
+                })?;
+            if !(0..=2).contains(&value) {
+                return err(format!(
+                    "{} observable axis must be 0, 1, or 2",
+                    observable.kind
+                ));
+            }
+            Ok(value as u8)
+        };
+        observables.push(match observable.kind.as_str() {
+            "state_counts" => CompiledObservable::StateCounts,
+            "event_rates" => CompiledObservable::EventRates,
+            "rate_spectra" => CompiledObservable::RateSpectra,
+            "cluster_sizes" => CompiledObservable::ClusterSizes {
+                states: state_filter()?,
+            },
+            "surface_area" => CompiledObservable::SurfaceArea {
+                states: state_filter()?,
+                axis: axis()?,
+            },
+            "exposure_age" => {
+                let states = state_filter()?;
+                let axis = axis()?;
+                if let Some((defined_states, defined_axis)) = &exposure_definition {
+                    if defined_states != &states || *defined_axis != axis {
+                        return err(
+                            "exposure_age declarations must use one shared state/axis definition",
+                        );
+                    }
+                } else {
+                    exposure_definition = Some((states.clone(), axis));
+                }
+                CompiledObservable::ExposureAge { states, axis }
+            }
+            "snapshot" => CompiledObservable::Snapshot,
+            "interface_roughness" => {
+                return err("interface_roughness is not implemented");
+            }
+            _ => unreachable!("observable kind validated before compilation"),
+        });
+    }
+
     Ok(CompiledDeck {
         name: deck.deck.name.clone(),
         unit_cell,
+        simple_grid: deck.structure_kind == StructureKind::Grid,
         kinds_per_template,
         kind_names,
         state_names,
@@ -793,10 +1149,130 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         temperature,
         dims,
         boundary,
-        steps: deck.simulation.steps,
-        seed: deck.simulation.seed,
-        report_every: deck.simulation.report_every.unwrap_or(0),
+        steps: deck.execution.stop.steps.unwrap_or(0),
+        step_limit: deck.execution.stop.steps,
+        seed: deck.execution.ensemble.seed,
+        n_replicas: deck.execution.ensemble.n_replicas,
+        seed_policy: deck.execution.ensemble.seed_policy,
+        report_every: deck.observables.report_every,
+        observables,
+        strategy: match deck.execution.strategy.as_str() {
+            "ctmc" => ExecutionStrategy::Ctmc,
+            "synchronous" => ExecutionStrategy::Synchronous,
+            "metropolis" => ExecutionStrategy::Metropolis {
+                temperature: deck
+                    .execution
+                    .metropolis
+                    .as_ref()
+                    .and_then(|spec| spec.temperature)
+                    .unwrap_or(temperature),
+            },
+            "pca" => ExecutionStrategy::Pca,
+            _ => unreachable!("strategy checked before compilation"),
+        },
+        schedule: deck.execution.schedule.clone(),
     })
+}
+
+impl ScheduleRun {
+    pub fn engine(&self) -> &Engine {
+        &self.engine
+    }
+
+    pub fn engine_mut(&mut self) -> &mut Engine {
+        &mut self.engine
+    }
+
+    pub fn advance(&mut self) -> Result<ScheduleAdvance, petra_core::Stop> {
+        if self.complete {
+            return Ok(ScheduleAdvance::Complete);
+        }
+        match self.engine.advance_ctmc_until(self.deadline)? {
+            petra_core::CtmcAdvance::Fired(fired) => Ok(ScheduleAdvance::Fired {
+                segment: self.segment,
+                fired,
+            }),
+            petra_core::CtmcAdvance::Deadline { time } => {
+                let completed_segment = self.segment;
+                self.segment += 1;
+                if let Some(next) = self.schedule.get(self.segment) {
+                    self.deadline += next.duration;
+                    self.engine
+                        .set_temperature(next.temperature)
+                        .expect("compiled schedule temperatures are valid");
+                } else {
+                    self.complete = true;
+                }
+                Ok(ScheduleAdvance::Boundary {
+                    completed_segment,
+                    time,
+                })
+            }
+        }
+    }
+}
+
+fn infer_source_center(
+    names: &Names,
+    state_occupants: &[Option<String>],
+    rule: &crate::schema::ReactionSpec,
+    ctx: &str,
+) -> Result<(u16, StateSet), CompileError> {
+    let effects = rule
+        .effects
+        .iter()
+        .chain(rule.branches.iter().flat_map(|branch| &branch.effects));
+    let mut target_kind = None;
+    for effect in effects {
+        let state = effect.set.as_deref().ok_or_else(|| {
+            CompileError(format!("{ctx}: source effects require a fixed 'set' state"))
+        })?;
+        if effect.shift.is_some() || effect.map.is_some() {
+            return err(format!("{ctx}: source effects support only 'set'"));
+        }
+        let mut resolved = Vec::new();
+        names.resolve_ref(state, &mut resolved, 0)?;
+        resolved.sort_unstable_by_key(|&(kind, state)| (kind, state.0));
+        resolved.dedup();
+        if resolved.len() != 1 {
+            return err(format!(
+                "{ctx}: source state '{state}' must identify exactly one kind"
+            ));
+        }
+        let kind = resolved[0].0;
+        if target_kind.is_some_and(|expected| expected != kind) {
+            return err(format!(
+                "{ctx}: all source effects must target the same kind"
+            ));
+        }
+        target_kind = Some(kind);
+    }
+    let kind =
+        target_kind.ok_or_else(|| CompileError(format!("{ctx}: source rule has no effects")))?;
+    let (start, count) = names
+        .kind_states
+        .get(kind as usize)
+        .and_then(|_| {
+            let ids: Vec<u16> = names.kind_states[kind as usize]
+                .values()
+                .map(|state| state.0)
+                .collect();
+            ids.iter()
+                .min()
+                .copied()
+                .map(|start| (start, ids.len() as u16))
+        })
+        .ok_or_else(|| CompileError(format!("{ctx}: source kind has no states")))?;
+    let mut vacant = StateSet::new(names.n_states);
+    for id in start..start + count {
+        if state_occupants[id as usize].is_none() {
+            vacant.insert(StateId(id));
+        }
+    }
+    if !(start..start + count).any(|id| vacant.contains(StateId(id))) {
+        return err(format!("{ctx}: source target kind has no vacant state"));
+    }
+    Ok((kind, vacant))
 }
 
 fn compile_selector(
@@ -826,9 +1302,7 @@ fn compile_selector(
     let exclude_label = match &s.exclude_label {
         None => None,
         Some(l) => Some(*names.labels.get(l).ok_or_else(|| {
-            CompileError(format!(
-                "{ctx}: selector excludes unknown bond label '{l}'"
-            ))
+            CompileError(format!("{ctx}: selector excludes unknown bond label '{l}'"))
         })?),
     };
     if label.is_some() && exclude_label.is_some() {
@@ -847,21 +1321,56 @@ fn compile_selector(
     })
 }
 
-fn compile_rate(r: &RateSpec, eunit: f64, ctx: &str) -> Result<RateExpr, CompileError> {
-    match (r.constant, &r.arrhenius, &r.eyring) {
-        (Some(k), None, None) => Ok(RateExpr::Constant { k }),
-        (None, Some(a), None) => Ok(RateExpr::Arrhenius {
+fn compile_rate(
+    rate: Option<&RateSpec>,
+    strategy: &str,
+    eunit: f64,
+    ctx: &str,
+) -> Result<(RateExpr, RuleValue), CompileError> {
+    if strategy == "synchronous" {
+        return Ok((RateExpr::Constant { k: 0.0 }, RuleValue::Deterministic));
+    }
+    if strategy == "metropolis" {
+        let delta = rate
+            .and_then(|rate| rate.energy.as_ref())
+            .ok_or_else(|| CompileError(format!("{ctx}: Metropolis rule requires energy.delta")))?
+            .delta
+            * eunit;
+        return Ok((RateExpr::Constant { k: 0.0 }, RuleValue::Energy(delta)));
+    }
+    if strategy == "pca" {
+        let probability = rate
+            .and_then(|rate| rate.probability)
+            .ok_or_else(|| CompileError(format!("{ctx}: PCA rule requires probability")))?;
+        return Ok((
+            RateExpr::Constant { k: 0.0 },
+            RuleValue::Probability(probability),
+        ));
+    }
+    let r = rate.ok_or_else(|| CompileError(format!("{ctx}: CTMC rule requires rate")))?;
+    let rate = match (
+        r.constant,
+        &r.arrhenius,
+        &r.eyring,
+        &r.energy,
+        r.probability,
+    ) {
+        (Some(k), None, None, None, None) => RateExpr::Constant { k },
+        (None, Some(a), None, None, None) => RateExpr::Arrhenius {
             prefactor: a.prefactor,
             ea: a.ea * eunit,
-        }),
-        (None, None, Some(e)) => Ok(RateExpr::Eyring {
+        },
+        (None, None, Some(e), None, None) => RateExpr::Eyring {
             dh: e.dh * eunit,
             ds: e.ds * eunit,
-        }),
-        _ => err(format!(
-            "{ctx}: rate needs exactly one of constant/arrhenius/eyring"
-        )),
-    }
+        },
+        _ => {
+            return err(format!(
+                "{ctx}: CTMC rate needs exactly one of constant/arrhenius/eyring"
+            ))
+        }
+    };
+    Ok((rate, RuleValue::Ctmc))
 }
 
 /// Resolve one state name within a specific kind (plain or "Kind."-prefixed).
@@ -885,9 +1394,11 @@ fn state_in_kind(names: &Names, kind: u16, name: &str, ctx: &str) -> Result<Stat
 
 /// Compile the set/shift/map trio into an EffectOp. `kind` scopes state-name
 /// resolution and is required for `set`/`map`.
+#[allow(clippy::too_many_arguments)] // Mirrors the deck's mutually exclusive op fields.
 fn compile_op(
     names: &Names,
-    kind: Option<u16>,
+    source_kind: Option<u16>,
+    target_kind: Option<u16>,
     set: &Option<String>,
     shift: &Option<i32>,
     map: &Option<std::collections::BTreeMap<String, String>>,
@@ -899,25 +1410,37 @@ fn compile_op(
         None => missing_default_error,
         Some("error") => true,
         Some("skip") => false,
-        Some(other) => return err(format!("{ctx}: missing must be 'error' or 'skip', not '{other}'")),
+        Some(other) => {
+            return err(format!(
+                "{ctx}: missing must be 'error' or 'skip', not '{other}'"
+            ))
+        }
     };
     match (set, shift, map) {
         (Some(name), None, None) => {
-            let k = kind.ok_or_else(|| {
-                CompileError(format!("{ctx}: 'set' needs a kind in scope to resolve '{name}'"))
+            let kind = target_kind.ok_or_else(|| {
+                CompileError(format!(
+                    "{ctx}: 'set' needs a kind in scope to resolve '{name}'"
+                ))
             })?;
-            Ok(EffectOp::Set(state_in_kind(names, k, name, ctx)?))
+            Ok(EffectOp::Set(state_in_kind(names, kind, name, ctx)?))
         }
-        (None, Some(n), None) => Ok(EffectOp::Shift(*n)),
+        (None, Some(n), None) => {
+            if source_kind != target_kind {
+                return err(format!("{ctx}: shift cannot cross kinds during rekind"));
+            }
+            Ok(EffectOp::Shift(*n))
+        }
         (None, None, Some(m)) => {
-            let k = kind.ok_or_else(|| {
-                CompileError(format!("{ctx}: 'map' needs a kind in scope"))
-            })?;
+            let from_kind = source_kind
+                .ok_or_else(|| CompileError(format!("{ctx}: 'map' needs a source kind")))?;
+            let to_kind = target_kind
+                .ok_or_else(|| CompileError(format!("{ctx}: 'map' needs a target kind")))?;
             let mut entries = Vec::new();
             for (from, to) in m {
                 entries.push((
-                    state_in_kind(names, k, from, ctx)?,
-                    state_in_kind(names, k, to, ctx)?,
+                    state_in_kind(names, from_kind, from, ctx)?,
+                    state_in_kind(names, to_kind, to, ctx)?,
                 ));
             }
             if entries.is_empty() {
@@ -944,11 +1467,16 @@ fn compile_effects(
     let mut out = Vec::new();
     for e in effects {
         let (target, target_kind) = match e.target.as_str() {
-            "center" => {
+            "center" | "source" => {
                 if e.select.is_some() {
-                    return err(format!("{ctx}: a center effect takes no selector"));
+                    return err(format!("{ctx}: a {} effect takes no selector", e.target));
                 }
-                (EffectTarget::Center, Some(center_kind))
+                let target = if e.target == "source" {
+                    EffectTarget::Source
+                } else {
+                    EffectTarget::Center
+                };
+                (target, Some(center_kind))
             }
             t @ ("neighbor" | "neighbors") => {
                 let sel = e.select.as_ref().ok_or_else(|| {
@@ -961,10 +1489,15 @@ fn compile_effects(
                     ));
                 }
                 let k = compiled.kind.map(|k| k.0);
-                let target = if t == "neighbor" {
-                    EffectTarget::FirstMatch(compiled)
-                } else {
-                    EffectTarget::AllMatches(compiled)
+                let target = match (t, e.select_mode.as_deref().unwrap_or("all")) {
+                    ("neighbor", "all") => EffectTarget::FirstMatch(compiled),
+                    ("neighbors", "all") => EffectTarget::AllMatches(compiled),
+                    ("neighbors", "one") => EffectTarget::RandomMatch(compiled),
+                    _ => {
+                        return err(format!(
+                            "{ctx}: select_mode is valid only for target = 'neighbors'"
+                        ));
+                    }
                 };
                 (target, k)
             }
@@ -972,6 +1505,7 @@ fn compile_effects(
         };
         let op = compile_op(
             names,
+            target_kind,
             target_kind,
             &e.set,
             &e.shift,

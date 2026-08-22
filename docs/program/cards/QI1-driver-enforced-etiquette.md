@@ -1,6 +1,6 @@
 # QI1-driver-enforced-etiquette — campaign drivers enforce their own compute caps
 
-- status: ready
+- status: done
 - track: A (quarry infrastructure)
 - priority: P2
 - machine: any (code + tests; no campaigns needed)
@@ -60,4 +60,26 @@ because the box was lightly loaded). Move enforcement into the code:
 
 ## Progress
 
+- 2026-08-20 22:55 UTC — Done. Full QM test/lint gates and direct CLI smoke checks are green; implementation, card, board, and program status are ready in the single card PR.
+- 2026-08-20 22:51 UTC — Implementation and verification checkpoint: added `quarry.etiquette`, wired all four campaign entry points before heavy imports, and added CLI/logging gates. `uv run --frozen pytest -q` passed (162 tests), `ruff check .` passed, and an unset-environment Phase-2 dry run reported all three managed thread variables at 16.
 - 2026-08-20 — card created (fable) after the live 22-thread probe.
+
+## Result
+
+Implemented `qm/quarry/etiquette.py` with a default 16-thread cap across
+`OMP_NUM_THREADS`, `MKL_NUM_THREADS`, and `OPENBLAS_NUM_THREADS`, best-effort
+niceness, non-root negative-nice rejection, and automatic stdout/stderr teeing
+to an explicit `--log` path or a timestamped file under `qm/runs/`. All four
+campaign entry points bootstrap it before NumPy/PySCF/quarry heavy imports and
+accept explicit `--threads`, `--nice`, and `--log` overrides. The entry-point
+inventory test makes this convention fail closed for newly added scripts.
+
+Verification:
+
+- `uv run --frozen pytest -q` — 162 passed.
+- `uv run --frozen ruff check .` — clean.
+- Direct `--help --nice 0 --log ...` smoke checks passed for all four entry points.
+- With all three managed environment variables deliberately unset,
+  `phase2_ladder.py --family oss --dry-run --threads 16 --nice 0` printed
+  `OMP_NUM_THREADS=16 MKL_NUM_THREADS=16 OPENBLAS_NUM_THREADS=16` before heavy
+  imports and completed the no-DFT geometry/metadata run.

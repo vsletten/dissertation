@@ -1,0 +1,8 @@
+step,time,K_gallery_A.K,K_gallery_A.vacant,K_gallery_A.Ar40,K_gallery_A.Ar39,K_gallery_A.Ar36,K_gallery_B.K,K_gallery_B.vacant,K_gallery_B.Ar40,K_gallery_B.Ar39,K_gallery_B.Ar36,OH_donor.OH,OH_donor.water_removed,OH_acceptor.OH,OH_acceptor.O_residual,Interface.bonded,Interface.delaminated,Defect_zone.pristine,Defect_zone.extended,Octahedral_trap.vacant,Octahedral_trap.Ar39_trapped,Surface_gate.closed,Surface_gate.open
+0,0.000000e0,1,86,6,2,1,2,86,6,2,0,96,0,96,0,96,0,73,23,62,34,64,32
+58,6.000000e2,1,91,3,1,0,2,87,6,1,0,58,38,58,38,83,13,73,23,62,34,64,32
+173,1.200000e3,1,95,0,0,0,2,94,0,0,0,38,58,38,58,7,89,73,23,66,30,64,32
+219,1.800000e3,1,95,0,0,0,2,94,0,0,0,27,69,27,69,0,96,73,23,80,16,64,32
+261,2.400000e3,1,95,0,0,0,2,94,0,0,0,16,80,16,80,0,96,73,23,95,1,64,32
+277,3.000000e3,1,95,0,0,0,2,94,0,0,0,0,96,0,96,0,96,73,23,95,1,64,32
+277,3.000000e3,1,95,0,0,0,2,94,0,0,0,0,96,0,96,0,96,73,23,95,1,64,32

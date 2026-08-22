@@ -31,3 +31,32 @@ someone re-derives the cell from a modern refinement (Bish 1993). The free
 region re-optimizes, so trends (ΔΔEa by connectivity) are safer than
 absolute barriers. Never freeze constructed protons: H positions are
 guesses, not crystallography (quarry/crystal.py freezes heavy atoms only).
+
+### Extreme lumped rates can erase slow Fenwick totals (2026-08-20)
+A phase-1 muscovite deck used `1e12 s^-1` for effectively instantaneous
+surface release beside `~1e-6 s^-1` migration/dehydroxylation events. Removing
+the fast event required subtracting nearly equal f64 Fenwick sums; after many
+updates the tree reported total rate zero while slow site events still
+existed. Use a rate that is merely fast relative to the load-bearing process
+(e.g. `1 s^-1` here), keep the dynamic range bounded, and run `--paranoid`.
+An engine hardening follow-up should rebuild/compensate the total when this
+`events exist but all rates are zero` condition occurs.
+
+### The 4090 is contested: extraction LLM vs QM campaigns (2026-08-20)
+The email-poc extraction daemons keep gemma4-deriver (~14 GB) resident on
+the workstation GPU with a self-refreshing keep-alive. When it is loaded,
+gpu4pyscf spills the DF integral tensor to *pinned* host memory, which
+collides with the 7.7 GB memlock ulimit → cudaErrorInvalidValue at
+~60 atoms/def2-svp (raising the ulimit is the wrong fix on a box that
+swap-spiraled in July: 7 GB unswappable RAM). Arbitration recipe for
+long GPU campaigns: `systemctl --user stop ophir-email-pipeline.service
+ophir-email-pipeline-hotmail.service`, run with a trap that restarts
+them on exit + a `systemd-run --user --on-active=10h` dead-man restart,
+and a VRAM-below-threshold gate before launch (ingest daemons keep
+running; extraction catches up afterward). Even with the GPU clear, the
+60+-atom DF **Hessian** pins async host-staging buffers past the 7.7 GB
+memlock default (cudaErrorInvalidValue from cupy's pinned pool, twice
+live) — raise it for the campaign process only, bounded:
+`sudo prlimit --pid $$ --memlock=17179869184:17179869184` before exec,
+never unlimited and never system-wide (this box swap-spiraled in July;
+a bounded cap keeps a runaway pin from wedging it again).

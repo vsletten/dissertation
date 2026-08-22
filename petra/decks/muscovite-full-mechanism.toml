@@ -1,0 +1,890 @@
+# E2 full muscovite mechanism: scheduled, species- and defect-resolved.
+# Published anchors and proxy barriers are documented in
+# docs/program/results/E2-muscovite-full-mechanism.md.
+[deck]
+name = "muscovite-full-mechanism"
+schema = 2
+units = "kcal/mol"
+comment = "mechanism comparison; proxy brackets are not computed kinetics"
+
+[structure]
+kind = "cell"
+[[structure.species]]
+name = "K"
+charge = 1.0
+[[structure.species]]
+name = "Ar40"
+mass = 39.962383
+[[structure.species]]
+name = "Ar39"
+mass = 38.964313
+[[structure.species]]
+name = "Ar36"
+mass = 35.967545
+[[structure.species]]
+name = "OH"
+[[structure.species]]
+name = "O"
+charge = -2.0
+
+[[structure.kinds]]
+name = "K_gallery_A"
+initial = "K"
+[[structure.kinds.states]]
+name = "K"
+occupant = "K"
+[[structure.kinds.states]]
+name = "vacant"
+occupant = "vacant"
+[[structure.kinds.states]]
+name = "Ar40"
+occupant = "Ar40"
+[[structure.kinds.states]]
+name = "Ar39"
+occupant = "Ar39"
+[[structure.kinds.states]]
+name = "Ar36"
+occupant = "Ar36"
+
+[[structure.kinds]]
+name = "K_gallery_B"
+initial = "K"
+[[structure.kinds.states]]
+name = "K"
+occupant = "K"
+[[structure.kinds.states]]
+name = "vacant"
+occupant = "vacant"
+[[structure.kinds.states]]
+name = "Ar40"
+occupant = "Ar40"
+[[structure.kinds.states]]
+name = "Ar39"
+occupant = "Ar39"
+[[structure.kinds.states]]
+name = "Ar36"
+occupant = "Ar36"
+
+[[structure.kinds]]
+name = "OH_donor"
+initial = "OH"
+[[structure.kinds.states]]
+name = "OH"
+occupant = "OH"
+[[structure.kinds.states]]
+name = "water_removed"
+occupant = "vacant"
+
+[[structure.kinds]]
+name = "OH_acceptor"
+initial = "OH"
+[[structure.kinds.states]]
+name = "OH"
+occupant = "OH"
+[[structure.kinds.states]]
+name = "O_residual"
+occupant = "O"
+
+[[structure.kinds]]
+name = "Interface"
+initial = "bonded"
+[[structure.kinds.states]]
+name = "bonded"
+occupant = "vacant"
+[[structure.kinds.states]]
+name = "delaminated"
+occupant = "vacant"
+
+[[structure.kinds]]
+name = "Defect_zone"
+initial = "pristine"
+[[structure.kinds.states]]
+name = "pristine"
+occupant = "vacant"
+[[structure.kinds.states]]
+name = "extended"
+occupant = "vacant"
+
+[[structure.kinds]]
+name = "Octahedral_trap"
+initial = "vacant"
+[[structure.kinds.states]]
+name = "vacant"
+occupant = "vacant"
+[[structure.kinds.states]]
+name = "Ar39_trapped"
+occupant = "Ar39"
+
+[[structure.kinds]]
+name = "Surface_gate"
+initial = "closed"
+[[structure.kinds.states]]
+name = "closed"
+occupant = "vacant"
+[[structure.kinds.states]]
+name = "open"
+occupant = "vacant"
+
+[structure.cell]
+a = 5.19
+b = 9.02
+c = 20.05
+alpha = 90.0
+beta = 95.7
+gamma = 90.0
+[[structure.cell.sites]]
+kind = "K_gallery_A"
+frac = [0.0, 0.0, 0.25]
+[[structure.cell.sites]]
+kind = "K_gallery_B"
+frac = [0.0, 0.0, 0.75]
+[[structure.cell.sites]]
+kind = "OH_donor"
+frac = [0.25, 0.25, 0.45]
+[[structure.cell.sites]]
+kind = "OH_acceptor"
+frac = [0.75, 0.75, 0.45]
+[[structure.cell.sites]]
+kind = "Interface"
+frac = [0.5, 0.5, 0.0]
+[[structure.cell.sites]]
+kind = "Defect_zone"
+frac = [0.1, 0.1, 0.5]
+[[structure.cell.sites]]
+kind = "Octahedral_trap"
+frac = [0.5, 0.0, 0.5]
+[[structure.cell.sites]]
+kind = "Surface_gate"
+frac = [0.9, 0.9, 0.5]
+[[structure.cell.bonds]]
+i = 0
+j = 1
+dcell = [0, 0, 0]
+label = "gallery_intra"
+[[structure.cell.bonds]]
+i = 0
+j = 1
+dcell = [0, 0, -1]
+label = "gallery_inter"
+[[structure.cell.bonds]]
+i = 2
+j = 3
+dcell = [0, 0, 0]
+label = "oh_pair"
+[[structure.cell.bonds]]
+i = 2
+j = 3
+dcell = [0, 0, -1]
+label = "steric"
+[[structure.cell.bonds]]
+i = 2
+j = 3
+dcell = [0, 0, 1]
+label = "steric"
+[[structure.cell.bonds]]
+i = 0
+j = 3
+dcell = [0, 0, 0]
+label = "local_structure"
+[[structure.cell.bonds]]
+i = 0
+j = 4
+dcell = [0, 0, 0]
+label = "gallery_interface"
+[[structure.cell.bonds]]
+i = 0
+j = 5
+dcell = [0, 0, 0]
+label = "local_defect"
+[[structure.cell.bonds]]
+i = 0
+j = 7
+dcell = [0, 0, 0]
+label = "surface_gate"
+[[structure.cell.bonds]]
+i = 1
+j = 3
+dcell = [0, 0, 0]
+label = "local_structure"
+[[structure.cell.bonds]]
+i = 1
+j = 4
+dcell = [0, 0, 0]
+label = "gallery_interface"
+[[structure.cell.bonds]]
+i = 1
+j = 5
+dcell = [0, 0, 0]
+label = "local_defect"
+[[structure.cell.bonds]]
+i = 1
+j = 7
+dcell = [0, 0, 0]
+label = "surface_gate"
+[[structure.cell.bonds]]
+i = 4
+j = 3
+dcell = [0, 0, 0]
+label = "delam_driver"
+[[structure.cell.bonds]]
+i = 4
+j = 3
+dcell = [0, 0, -1]
+label = "delam_driver"
+[[structure.cell.bonds]]
+i = 6
+j = 0
+dcell = [0, 0, 0]
+label = "trap_gallery"
+
+[structure.lattice]
+dims = [4, 4, 6]
+boundary = ["periodic", "periodic", "open"]
+[[structure.init]]
+name = "extended-defect-zones"
+center = { kind = "Defect_zone", state = ["pristine"] }
+probability = 0.2
+set = "extended"
+[[structure.init]]
+name = "vacancies-A"
+center = { kind = "K_gallery_A", state = ["K"] }
+probability = 0.9
+set = "vacant"
+[[structure.init]]
+name = "ar40-A"
+center = { kind = "K_gallery_A", state = ["K"] }
+probability = 0.55
+set = "Ar40"
+[[structure.init]]
+name = "ar39-A"
+center = { kind = "K_gallery_A", state = ["K"] }
+probability = 0.55
+set = "Ar39"
+[[structure.init]]
+name = "ar36-A"
+center = { kind = "K_gallery_A", state = ["K"] }
+probability = 0.55
+set = "Ar36"
+[[structure.init]]
+name = "vacancies-B"
+center = { kind = "K_gallery_B", state = ["K"] }
+probability = 0.9
+set = "vacant"
+[[structure.init]]
+name = "ar40-B"
+center = { kind = "K_gallery_B", state = ["K"] }
+probability = 0.55
+set = "Ar40"
+[[structure.init]]
+name = "ar39-B"
+center = { kind = "K_gallery_B", state = ["K"] }
+probability = 0.55
+set = "Ar39"
+[[structure.init]]
+name = "ar36-B"
+center = { kind = "K_gallery_B", state = ["K"] }
+probability = 0.55
+set = "Ar36"
+[[structure.init]]
+name = "recoil-octahedral-ar39"
+center = { kind = "Octahedral_trap", state = ["vacant"] }
+probability = 0.35
+set = "Ar39_trapped"
+[[structure.init]]
+name = "lower-basal-surface"
+center = { kind = "Surface_gate", state = ["closed"] }
+region = { axis = 2, min = 0, max = 0 }
+probability = 1.0
+set = "open"
+[[structure.init]]
+name = "upper-basal-surface"
+center = { kind = "Surface_gate", state = ["closed"] }
+region = { axis = 2, min = 5, max = 5 }
+probability = 1.0
+set = "open"
+
+[dynamics.thermo]
+temperature = 773.15
+
+# Published 57 kcal/mol bulk dehydroxylation anchor (Kodama & Brydon).
+[[dynamics.rules]]
+name = "dehydroxylate_pair"
+center = { kind = "OH_donor", state = ["OH"] }
+guards = [{ kind = "OH_acceptor", label = "oh_pair", state = ["OH"], min = 1 }]
+rate = { eyring = { dh = 57.0, ds = 0.0 } }
+[[dynamics.rules.modifiers]]
+select = { kind = "OH_acceptor", label = "steric", state = ["O_residual"] }
+by_count = { dea = [0.0, 3.0, 12.0] }
+[[dynamics.rules.effects]]
+target = "center"
+set = "water_removed"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "OH_acceptor", label = "oh_pair", state = ["OH"] }
+set = "O_residual"
+
+# Explicit interface transition. 58 kcal/mol is a sensitivity proxy,
+# not a computed barrier; analysis brackets it by ±5 kcal/mol.
+[[dynamics.rules]]
+name = "delaminate_interface"
+center = { kind = "Interface", state = ["bonded"] }
+guards = [{ kind = "OH_acceptor", label = "delam_driver", state = ["O_residual"], min = 1 }]
+rate = { eyring = { dh = 58.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "delaminated"
+
+# Recoil 39Ar escape is likewise a phase-2 proxy pending phase-3 NEB.
+[[dynamics.rules]]
+name = "escape_octahedral_Ar39"
+center = { kind = "Octahedral_trap", state = ["Ar39_trapped"] }
+guards = [{ kind = "K_gallery_A", label = "trap_gallery", state = ["vacant"], min = 1 }]
+rate = { eyring = { dh = 64.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_A", label = "trap_gallery", state = ["vacant"] }
+set = "Ar39"
+
+# pristine reservoir hops: 66 kcal/mol. Extended-zone value is
+# the Nteme-2023 six-order enhancement mapped to a proxy barrier.
+[[dynamics.rules]]
+name = "hop_pristine_Ar40_A_to_B_intra"
+center = { kind = "K_gallery_A", state = ["Ar40"] }
+guards = [
+  { kind = "K_gallery_B", label = "gallery_intra", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_B", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
+]
+rate = { eyring = { dh = 66.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_B", label = "gallery_intra", state = ["vacant"] }
+set = "Ar40"
+[[dynamics.rules]]
+name = "hop_pristine_Ar40_A_to_B_inter"
+center = { kind = "K_gallery_A", state = ["Ar40"] }
+guards = [
+  { kind = "K_gallery_B", label = "gallery_inter", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_B", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
+]
+rate = { eyring = { dh = 66.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_B", label = "gallery_inter", state = ["vacant"] }
+set = "Ar40"
+[[dynamics.rules]]
+name = "hop_pristine_Ar40_B_to_A_intra"
+center = { kind = "K_gallery_B", state = ["Ar40"] }
+guards = [
+  { kind = "K_gallery_A", label = "gallery_intra", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_A", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
+]
+rate = { eyring = { dh = 66.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_A", label = "gallery_intra", state = ["vacant"] }
+set = "Ar40"
+[[dynamics.rules]]
+name = "hop_pristine_Ar40_B_to_A_inter"
+center = { kind = "K_gallery_B", state = ["Ar40"] }
+guards = [
+  { kind = "K_gallery_A", label = "gallery_inter", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_A", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
+]
+rate = { eyring = { dh = 66.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_A", label = "gallery_inter", state = ["vacant"] }
+set = "Ar40"
+[[dynamics.rules]]
+name = "hop_pristine_Ar39_A_to_B_intra"
+center = { kind = "K_gallery_A", state = ["Ar39"] }
+guards = [
+  { kind = "K_gallery_B", label = "gallery_intra", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_B", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
+]
+rate = { eyring = { dh = 66.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_B", label = "gallery_intra", state = ["vacant"] }
+set = "Ar39"
+[[dynamics.rules]]
+name = "hop_pristine_Ar39_A_to_B_inter"
+center = { kind = "K_gallery_A", state = ["Ar39"] }
+guards = [
+  { kind = "K_gallery_B", label = "gallery_inter", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_B", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
+]
+rate = { eyring = { dh = 66.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_B", label = "gallery_inter", state = ["vacant"] }
+set = "Ar39"
+[[dynamics.rules]]
+name = "hop_pristine_Ar39_B_to_A_intra"
+center = { kind = "K_gallery_B", state = ["Ar39"] }
+guards = [
+  { kind = "K_gallery_A", label = "gallery_intra", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_A", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
+]
+rate = { eyring = { dh = 66.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_A", label = "gallery_intra", state = ["vacant"] }
+set = "Ar39"
+[[dynamics.rules]]
+name = "hop_pristine_Ar39_B_to_A_inter"
+center = { kind = "K_gallery_B", state = ["Ar39"] }
+guards = [
+  { kind = "K_gallery_A", label = "gallery_inter", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_A", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
+]
+rate = { eyring = { dh = 66.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_A", label = "gallery_inter", state = ["vacant"] }
+set = "Ar39"
+[[dynamics.rules]]
+name = "hop_pristine_Ar36_A_to_B_intra"
+center = { kind = "K_gallery_A", state = ["Ar36"] }
+guards = [
+  { kind = "K_gallery_B", label = "gallery_intra", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_B", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
+]
+rate = { eyring = { dh = 66.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_B", label = "gallery_intra", state = ["vacant"] }
+set = "Ar36"
+[[dynamics.rules]]
+name = "hop_pristine_Ar36_A_to_B_inter"
+center = { kind = "K_gallery_A", state = ["Ar36"] }
+guards = [
+  { kind = "K_gallery_B", label = "gallery_inter", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_B", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
+]
+rate = { eyring = { dh = 66.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_B", label = "gallery_inter", state = ["vacant"] }
+set = "Ar36"
+[[dynamics.rules]]
+name = "hop_pristine_Ar36_B_to_A_intra"
+center = { kind = "K_gallery_B", state = ["Ar36"] }
+guards = [
+  { kind = "K_gallery_A", label = "gallery_intra", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_A", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
+]
+rate = { eyring = { dh = 66.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_A", label = "gallery_intra", state = ["vacant"] }
+set = "Ar36"
+[[dynamics.rules]]
+name = "hop_pristine_Ar36_B_to_A_inter"
+center = { kind = "K_gallery_B", state = ["Ar36"] }
+guards = [
+  { kind = "K_gallery_A", label = "gallery_inter", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_A", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
+]
+rate = { eyring = { dh = 66.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_A", label = "gallery_inter", state = ["vacant"] }
+set = "Ar36"
+
+# extended reservoir hops: 40 kcal/mol. Extended-zone value is
+# the Nteme-2023 six-order enhancement mapped to a proxy barrier.
+[[dynamics.rules]]
+name = "hop_extended_Ar40_A_to_B_intra"
+center = { kind = "K_gallery_A", state = ["Ar40"] }
+guards = [
+  { kind = "K_gallery_B", label = "gallery_intra", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_B", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
+]
+rate = { eyring = { dh = 40.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_B", label = "gallery_intra", state = ["vacant"] }
+set = "Ar40"
+[[dynamics.rules]]
+name = "hop_extended_Ar40_A_to_B_inter"
+center = { kind = "K_gallery_A", state = ["Ar40"] }
+guards = [
+  { kind = "K_gallery_B", label = "gallery_inter", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_B", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
+]
+rate = { eyring = { dh = 40.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_B", label = "gallery_inter", state = ["vacant"] }
+set = "Ar40"
+[[dynamics.rules]]
+name = "hop_extended_Ar40_B_to_A_intra"
+center = { kind = "K_gallery_B", state = ["Ar40"] }
+guards = [
+  { kind = "K_gallery_A", label = "gallery_intra", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_A", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
+]
+rate = { eyring = { dh = 40.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_A", label = "gallery_intra", state = ["vacant"] }
+set = "Ar40"
+[[dynamics.rules]]
+name = "hop_extended_Ar40_B_to_A_inter"
+center = { kind = "K_gallery_B", state = ["Ar40"] }
+guards = [
+  { kind = "K_gallery_A", label = "gallery_inter", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_A", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
+]
+rate = { eyring = { dh = 40.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_A", label = "gallery_inter", state = ["vacant"] }
+set = "Ar40"
+[[dynamics.rules]]
+name = "hop_extended_Ar39_A_to_B_intra"
+center = { kind = "K_gallery_A", state = ["Ar39"] }
+guards = [
+  { kind = "K_gallery_B", label = "gallery_intra", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_B", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
+]
+rate = { eyring = { dh = 40.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_B", label = "gallery_intra", state = ["vacant"] }
+set = "Ar39"
+[[dynamics.rules]]
+name = "hop_extended_Ar39_A_to_B_inter"
+center = { kind = "K_gallery_A", state = ["Ar39"] }
+guards = [
+  { kind = "K_gallery_B", label = "gallery_inter", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_B", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
+]
+rate = { eyring = { dh = 40.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_B", label = "gallery_inter", state = ["vacant"] }
+set = "Ar39"
+[[dynamics.rules]]
+name = "hop_extended_Ar39_B_to_A_intra"
+center = { kind = "K_gallery_B", state = ["Ar39"] }
+guards = [
+  { kind = "K_gallery_A", label = "gallery_intra", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_A", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
+]
+rate = { eyring = { dh = 40.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_A", label = "gallery_intra", state = ["vacant"] }
+set = "Ar39"
+[[dynamics.rules]]
+name = "hop_extended_Ar39_B_to_A_inter"
+center = { kind = "K_gallery_B", state = ["Ar39"] }
+guards = [
+  { kind = "K_gallery_A", label = "gallery_inter", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_A", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
+]
+rate = { eyring = { dh = 40.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_A", label = "gallery_inter", state = ["vacant"] }
+set = "Ar39"
+[[dynamics.rules]]
+name = "hop_extended_Ar36_A_to_B_intra"
+center = { kind = "K_gallery_A", state = ["Ar36"] }
+guards = [
+  { kind = "K_gallery_B", label = "gallery_intra", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_B", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
+]
+rate = { eyring = { dh = 40.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_B", label = "gallery_intra", state = ["vacant"] }
+set = "Ar36"
+[[dynamics.rules]]
+name = "hop_extended_Ar36_A_to_B_inter"
+center = { kind = "K_gallery_A", state = ["Ar36"] }
+guards = [
+  { kind = "K_gallery_B", label = "gallery_inter", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_B", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
+]
+rate = { eyring = { dh = 40.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_B", label = "gallery_inter", state = ["vacant"] }
+set = "Ar36"
+[[dynamics.rules]]
+name = "hop_extended_Ar36_B_to_A_intra"
+center = { kind = "K_gallery_B", state = ["Ar36"] }
+guards = [
+  { kind = "K_gallery_A", label = "gallery_intra", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_A", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
+]
+rate = { eyring = { dh = 40.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_A", label = "gallery_intra", state = ["vacant"] }
+set = "Ar36"
+[[dynamics.rules]]
+name = "hop_extended_Ar36_B_to_A_inter"
+center = { kind = "K_gallery_B", state = ["Ar36"] }
+guards = [
+  { kind = "K_gallery_A", label = "gallery_inter", state = ["vacant"], min = 1 },
+  { kind = "K_gallery_A", state = ["vacant"], min = 2 },
+  { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
+  { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
+]
+rate = { eyring = { dh = 40.0, ds = 0.0 } }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules.effects]]
+target = "neighbor"
+select = { kind = "K_gallery_A", label = "gallery_inter", state = ["vacant"] }
+set = "Ar36"
+[[dynamics.rules]]
+name = "release_Ar40_surface_A"
+center = { kind = "K_gallery_A", state = ["Ar40"] }
+guards = [{ kind = "Surface_gate", label = "surface_gate", state = ["open"], min = 1 }]
+rate = { constant = 1.0 }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules]]
+name = "release_Ar40_delamination_A"
+center = { kind = "K_gallery_A", state = ["Ar40"] }
+guards = [{ kind = "Interface", label = "gallery_interface", state = ["delaminated"], min = 1 }]
+rate = { constant = 1.0 }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules]]
+name = "release_Ar40_surface_B"
+center = { kind = "K_gallery_B", state = ["Ar40"] }
+guards = [{ kind = "Surface_gate", label = "surface_gate", state = ["open"], min = 1 }]
+rate = { constant = 1.0 }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules]]
+name = "release_Ar40_delamination_B"
+center = { kind = "K_gallery_B", state = ["Ar40"] }
+guards = [{ kind = "Interface", label = "gallery_interface", state = ["delaminated"], min = 1 }]
+rate = { constant = 1.0 }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules]]
+name = "release_Ar39_surface_A"
+center = { kind = "K_gallery_A", state = ["Ar39"] }
+guards = [{ kind = "Surface_gate", label = "surface_gate", state = ["open"], min = 1 }]
+rate = { constant = 1.0 }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules]]
+name = "release_Ar39_delamination_A"
+center = { kind = "K_gallery_A", state = ["Ar39"] }
+guards = [{ kind = "Interface", label = "gallery_interface", state = ["delaminated"], min = 1 }]
+rate = { constant = 1.0 }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules]]
+name = "release_Ar39_surface_B"
+center = { kind = "K_gallery_B", state = ["Ar39"] }
+guards = [{ kind = "Surface_gate", label = "surface_gate", state = ["open"], min = 1 }]
+rate = { constant = 1.0 }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules]]
+name = "release_Ar39_delamination_B"
+center = { kind = "K_gallery_B", state = ["Ar39"] }
+guards = [{ kind = "Interface", label = "gallery_interface", state = ["delaminated"], min = 1 }]
+rate = { constant = 1.0 }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules]]
+name = "release_Ar36_surface_A"
+center = { kind = "K_gallery_A", state = ["Ar36"] }
+guards = [{ kind = "Surface_gate", label = "surface_gate", state = ["open"], min = 1 }]
+rate = { constant = 1.0 }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules]]
+name = "release_Ar36_delamination_A"
+center = { kind = "K_gallery_A", state = ["Ar36"] }
+guards = [{ kind = "Interface", label = "gallery_interface", state = ["delaminated"], min = 1 }]
+rate = { constant = 1.0 }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules]]
+name = "release_Ar36_surface_B"
+center = { kind = "K_gallery_B", state = ["Ar36"] }
+guards = [{ kind = "Surface_gate", label = "surface_gate", state = ["open"], min = 1 }]
+rate = { constant = 1.0 }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+[[dynamics.rules]]
+name = "release_Ar36_delamination_B"
+center = { kind = "K_gallery_B", state = ["Ar36"] }
+guards = [{ kind = "Interface", label = "gallery_interface", state = ["delaminated"], min = 1 }]
+rate = { constant = 1.0 }
+[[dynamics.rules.effects]]
+target = "center"
+set = "vacant"
+
+[execution]
+strategy = "ctmc"
+[[execution.schedule]]
+temperature = 773.15
+duration = 600.0
+[[execution.schedule]]
+temperature = 823.15
+duration = 600.0
+[[execution.schedule]]
+temperature = 873.15
+duration = 600.0
+[[execution.schedule]]
+temperature = 923.15
+duration = 600.0
+[[execution.schedule]]
+temperature = 973.15
+duration = 600.0
+[execution.stop]
+steps = 250000
+[execution.ensemble]
+seed = 1998
+n_replicas = 1
+seed_policy = "increment"
+
+[observables]
+report_every = 1000
+[[observables.series]]
+kind = "state_counts"
+[[observables.series]]
+kind = "event_rates"

@@ -630,10 +630,14 @@ def neb_ts_guess(
     # Interpolating those raw Cartesian frames sent the transferring proton
     # several Angstroms into vacuum and made the first DFT SCF fail. Remove
     # only that physically meaningless global motion before IDPP.
-    minimize_rotation_and_translation(images[0], images[-1])
+    # A frozen shell already pins both endpoints to one common frame —
+    # rigid re-fitting there would *move* the frozen atoms, so skip it.
+    frozen = bool(reactant.frozen_indices)
+    if not frozen:
+        minimize_rotation_and_translation(images[0], images[-1])
     for image in images:
         image.calc = make_ase_calculator(settings, reactant.charge, reactant.spin)
-        if reactant.frozen_indices:
+        if frozen:
             from ase.constraints import FixAtoms
 
             image.set_constraint(FixAtoms(indices=reactant.frozen_indices))
@@ -641,9 +645,14 @@ def neb_ts_guess(
         images,
         climb=False,
         method="improvedtangent",
-        remove_rotation_and_translation=True,
+        remove_rotation_and_translation=not frozen,
     )
-    neb.interpolate(method="idpp")
+    if frozen:
+        # ASE refuses to interpolate constrained images without an explicit
+        # choice; applying is exact here (identical frozen coordinates).
+        neb.interpolate(method="idpp", apply_constraint=True)
+    else:
+        neb.interpolate(method="idpp")
 
     relaxed = MDMin(
         neb,  # type: ignore[arg-type] -- ASE optimizers accept NEB objects
