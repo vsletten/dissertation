@@ -117,6 +117,15 @@ pub struct Fired {
     pub reaction: u16,
 }
 
+/// Result of advancing exact CTMC toward a wall-time deadline. A deadline is
+/// an execution event, not a reaction, so it advances time without changing
+/// the lattice or incrementing `step_count`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CtmcAdvance {
+    Fired(Fired),
+    Deadline { time: f64 },
+}
+
 /// Why the simulation cannot advance.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Stop {
@@ -527,6 +536,106 @@ impl Engine {
         self.tree.set(s, total);
         self.site_events[s] = events;
         self.enabled_rules[s] = enabled;
+    }
+
+    /// Change the CTMC temperature and rebuild every resolved propensity and
+    /// the event tree. This is the same `refresh_site` path used at engine
+    /// construction, including temperature-dependent solution coupling.
+    pub fn set_temperature(&mut self, temperature: f64) -> Result<(), &'static str> {
+        if !temperature.is_finite() || temperature <= 0.0 {
+            return Err("temperature must be finite and positive");
+        }
+        self.temperature = temperature;
+        for reaction in &mut self.reactions {
+            reaction.set_temperature(temperature);
+        }
+        for site in 0..self.lattice.len() {
+            self.refresh_site(site);
+        }
+        self.tree.rebuild();
+        Ok(())
+    }
+
+    pub fn temperature(&self) -> f64 {
+        self.temperature
+    }
+
+    /// Advance exact CTMC until either one reaction fires or `deadline` is
+    /// reached. If the sampled waiting time crosses the deadline, the draw is
+    /// consumed but the reaction is not applied; callers may then change the
+    /// temperature and draw afresh, as required by the memoryless CTMC law.
+    pub fn advance_ctmc_until(&mut self, deadline: f64) -> Result<CtmcAdvance, Stop> {
+        assert!(deadline.is_finite(), "CTMC deadline must be finite");
+        assert!(deadline >= self.time, "CTMC deadline cannot move backward");
+        if deadline == self.time {
+            self.last_changes.clear();
+            return Ok(CtmcAdvance::Deadline { time: self.time });
+        }
+        if self.tree.total() <= 0.0 && self.site_events.iter().any(|events| !events.is_empty()) {
+            self.tree.rebuild();
+        }
+        let total = self.tree.total();
+        if total <= 0.0 {
+            self.time = deadline;
+            self.last_changes.clear();
+            return Ok(CtmcAdvance::Deadline { time: self.time });
+        }
+
+        // Preserve ExactCtmc's selection and waiting-time draw order exactly.
+        let draw = self.rng.gen::<f64>() * total;
+        let Some((site, mut residual)) = self.tree.find(draw) else {
+            self.time = deadline;
+            self.last_changes.clear();
+            return Ok(CtmcAdvance::Deadline { time: self.time });
+        };
+        let events = &self.site_events[site];
+        let mut chosen = events.len() - 1;
+        for (index, &(_, rate)) in events.iter().enumerate() {
+            if residual < rate {
+                chosen = index;
+                break;
+            }
+            residual -= rate;
+        }
+        let reaction = events[chosen].0;
+        let wait_draw: f64 = self.rng.gen();
+        let dt = -(1.0 - wait_draw).ln() / total;
+        if self.time + dt >= deadline {
+            self.time = deadline;
+            self.last_changes.clear();
+            return Ok(CtmcAdvance::Deadline { time: self.time });
+        }
+
+        let mut pending = Vec::new();
+        {
+            let mut apply = ApplyHandle {
+                lattice: &self.lattice,
+                rules: &self.reactions,
+                kinds: &self.kinds,
+                kind_state_ranges: &self.kind_state_ranges,
+                site_events: &self.site_events,
+                enabled_rules: &self.enabled_rules,
+                live_sites: &self.live_sites,
+                tree: &self.tree,
+                scratch: &mut self.scratch,
+                pending: &mut pending,
+            };
+            apply.apply_transition(site, reaction, &mut self.rng)?;
+        }
+        let transition_time = self.time + dt;
+        self.commit_transitions(pending, transition_time);
+        self.time = transition_time;
+        self.step_count += 1;
+        if self.step_count.is_multiple_of(REBUILD_EVERY) {
+            self.tree.rebuild();
+        }
+        let fired = Fired {
+            step: self.step_count,
+            time: self.time,
+            site,
+            reaction,
+        };
+        Ok(CtmcAdvance::Fired(fired))
     }
 
     /// Advance with an explicitly supplied strategy. The strategy can only

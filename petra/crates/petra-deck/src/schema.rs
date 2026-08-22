@@ -45,6 +45,10 @@ pub struct GridSpec {
 #[serde(deny_unknown_fields)]
 pub struct ExecutionSpec {
     pub strategy: String,
+    /// Ordered piecewise-isothermal CTMC segments. Each segment owns a
+    /// temperature and a duration in simulated wall time.
+    #[serde(default)]
+    pub schedule: Vec<ScheduleSegment>,
     #[serde(default)]
     pub ctmc: Option<CtmcSpec>,
     #[serde(default)]
@@ -57,6 +61,15 @@ pub struct ExecutionSpec {
     pub stop: StopSpec,
     #[serde(default)]
     pub ensemble: EnsembleSpec,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScheduleSegment {
+    /// Kelvin.
+    pub temperature: f64,
+    /// Simulated-time duration of this isothermal segment.
+    pub duration: f64,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -232,6 +245,7 @@ impl DeckFile {
         v1.deck.schema = Some(2);
         let execution = ExecutionSpec {
             strategy: "ctmc".to_string(),
+            schedule: Vec::new(),
             ctmc: None,
             synchronous: None,
             metropolis: None,
@@ -550,6 +564,34 @@ fn validate_execution(execution: &ExecutionSpec) -> Result<(), String> {
              when multiple rules match one site, the first rule in definition order wins"
                 .to_string(),
         );
+    }
+    if !execution.schedule.is_empty() && execution.strategy != "ctmc" {
+        return Err("[execution.schedule] is supported only for CTMC".to_string());
+    }
+    let mut deadline = 0.0;
+    for (index, segment) in execution.schedule.iter().enumerate() {
+        if !segment.temperature.is_finite() || segment.temperature <= 0.0 {
+            return Err(format!(
+                "execution.schedule segment {index} temperature must be finite and positive"
+            ));
+        }
+        if !segment.duration.is_finite() || segment.duration <= 0.0 {
+            return Err(format!(
+                "execution.schedule segment {index} duration must be finite and positive"
+            ));
+        }
+        let next_deadline = deadline + segment.duration;
+        if !next_deadline.is_finite() {
+            return Err(format!(
+                "execution.schedule cumulative duration overflows at segment {index}"
+            ));
+        }
+        if next_deadline <= deadline {
+            return Err(format!(
+                "execution.schedule segment {index} duration is too small to advance cumulative wall time"
+            ));
+        }
+        deadline = next_deadline;
     }
     if let Some(temperature) = execution
         .metropolis

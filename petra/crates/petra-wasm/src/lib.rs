@@ -36,6 +36,11 @@ impl WasmSim {
                 "the WASM batch trajectory format currently supports only CTMC",
             ));
         }
+        if !deck.schedule.is_empty() {
+            return Err(JsError::new(
+                "piecewise-isothermal schedules currently require the native CLI or ScheduleRun API",
+            ));
+        }
         let seed_override = if seed >= 0.0 { Some(seed as u64) } else { None };
         let engine = deck
             .build_engine(seed_override)

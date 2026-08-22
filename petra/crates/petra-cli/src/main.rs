@@ -18,6 +18,23 @@ use std::process::ExitCode;
 
 use petra_core::Stop;
 
+enum ExecutionRun {
+    Direct {
+        engine: petra_core::Engine,
+        strategy: petra_core::Strategy,
+    },
+    Scheduled(petra_deck::ScheduleRun),
+}
+
+impl ExecutionRun {
+    fn engine(&self) -> &petra_core::Engine {
+        match self {
+            Self::Direct { engine, .. } => engine,
+            Self::Scheduled(run) => run.engine(),
+        }
+    }
+}
+
 struct Args {
     deck: String,
     steps: Option<u64>,
@@ -111,17 +128,37 @@ fn run() -> Result<(), String> {
                 .to_string(),
         );
     }
+    if args.viz && !deck.schedule.is_empty() {
+        return Err(
+            "scheduled --viz output is unsupported until trajectory artifacts encode schedule boundaries"
+                .to_string(),
+        );
+    }
     let ensemble = args.ensemble.unwrap_or(deck.n_replicas);
     if ensemble > 1 {
         return run_ensemble(&args, &deck, ensemble);
     }
     let seed = petra_deck::replica_seed(args.seed.unwrap_or(deck.seed), 0, deck.seed_policy);
-    let mut engine = deck.build_engine(Some(seed)).map_err(|e| e.to_string())?;
-    let steps = args.steps.unwrap_or(deck.steps);
-    let report_every = if deck.report_every == 0 {
-        steps.max(1)
+    let scheduled = !deck.schedule.is_empty();
+    let mut execution = if scheduled {
+        ExecutionRun::Scheduled(
+            deck.build_schedule(Some(seed))
+                .map_err(|error| error.to_string())?,
+        )
     } else {
-        deck.report_every
+        ExecutionRun::Direct {
+            engine: deck.build_engine(Some(seed)).map_err(|e| e.to_string())?,
+            strategy: deck.strategy(),
+        }
+    };
+    let steps = args
+        .steps
+        .or(deck.step_limit)
+        .unwrap_or(if scheduled { u64::MAX } else { 0 });
+    let report_every = if deck.report_every == 0 {
+        (!scheduled).then_some(steps.max(1))
+    } else {
+        Some(deck.report_every)
     };
 
     std::fs::create_dir_all(&args.out).map_err(|e| e.to_string())?;
@@ -140,14 +177,17 @@ fn run() -> Result<(), String> {
     // Trajectory artifacts: initial snapshot now, events as they fire.
     let mut event_log = if args.viz {
         let snap_path = format!("{}/snapshot.pgif.json", args.out);
-        std::fs::write(&snap_path, petra_io::snapshot_json(&deck, &engine))
-            .map_err(|e| e.to_string())?;
+        std::fs::write(
+            &snap_path,
+            petra_io::snapshot_json(&deck, execution.engine()),
+        )
+        .map_err(|e| e.to_string())?;
         println!("wrote {snap_path}");
         let file = std::fs::File::create(format!("{}/events.jsonl", args.out))
             .map_err(|e| e.to_string())?;
         let writer = std::io::BufWriter::new(file);
         Some(
-            petra_io::EventLogWriter::new(writer, &deck, seed, engine.lattice.len())
+            petra_io::EventLogWriter::new(writer, &deck, seed, execution.engine().lattice.len())
                 .map_err(|e| e.to_string())?,
         )
     } else {
@@ -177,46 +217,93 @@ fn run() -> Result<(), String> {
     println!(
         "deck '{}': {} sites, {} reactions, T = {} K, seed = {}, strategy = {}",
         deck.name,
-        engine.lattice.len(),
-        engine.reactions.len(),
-        deck.temperature,
+        execution.engine().lattice.len(),
+        execution.engine().reactions.len(),
+        execution.engine().temperature(),
         seed,
         deck.strategy.as_str(),
     );
-    report(&engine, &mut csv, observables.as_mut())?;
+    report(execution.engine(), &mut csv, observables.as_mut())?;
 
     let mut stopped: Option<Stop> = None;
-    let mut strategy = deck.strategy();
-    for i in 1..=steps {
-        match engine.step_with(&mut strategy) {
-            Ok(outcome) => {
-                if let Some(log) = &mut event_log {
-                    for fired in &outcome.fired {
-                        log.record(fired, &engine).map_err(|e| e.to_string())?;
+    let mut schedule_complete = false;
+    match &mut execution {
+        ExecutionRun::Direct { engine, strategy } => {
+            for i in 1..=steps {
+                match engine.step_with(strategy) {
+                    Ok(outcome) => {
+                        if let Some(log) = &mut event_log {
+                            for fired in &outcome.fired {
+                                log.record(fired, engine).map_err(|e| e.to_string())?;
+                            }
+                        }
+                    }
+                    Err(stop) => {
+                        stopped = Some(stop);
+                        break;
+                    }
+                }
+                if report_every.is_some_and(|cadence| i % cadence == 0) {
+                    report(engine, &mut csv, observables.as_mut())?;
+                    if args.paranoid {
+                        engine
+                            .paranoid_check()
+                            .map_err(|e| format!("paranoid: {e}"))?;
                     }
                 }
             }
-            Err(stop) => {
-                stopped = Some(stop);
+        }
+        ExecutionRun::Scheduled(run) => loop {
+            if run.engine().step_count >= steps {
                 break;
             }
-        }
-        if i % report_every == 0 {
-            report(&engine, &mut csv, observables.as_mut())?;
-            if args.paranoid {
-                engine
-                    .paranoid_check()
-                    .map_err(|e| format!("paranoid: {e}"))?;
+            match run.advance() {
+                Ok(petra_deck::ScheduleAdvance::Fired { fired, .. }) => {
+                    if let Some(log) = &mut event_log {
+                        log.record(&fired, run.engine())
+                            .map_err(|e| e.to_string())?;
+                    }
+                    if report_every.is_some_and(|cadence| run.engine().step_count % cadence == 0) {
+                        report(run.engine(), &mut csv, observables.as_mut())?;
+                        if args.paranoid {
+                            run.engine_mut()
+                                .paranoid_check()
+                                .map_err(|e| format!("paranoid: {e}"))?;
+                        }
+                    }
+                }
+                Ok(petra_deck::ScheduleAdvance::Boundary { .. }) => {
+                    report(run.engine(), &mut csv, observables.as_mut())?;
+                    if args.paranoid {
+                        run.engine_mut()
+                            .paranoid_check()
+                            .map_err(|e| format!("paranoid: {e}"))?;
+                    }
+                }
+                Ok(petra_deck::ScheduleAdvance::Complete) => {
+                    schedule_complete = true;
+                    break;
+                }
+                Err(stop) => {
+                    stopped = Some(stop);
+                    break;
+                }
             }
-        }
+        },
     }
-    if engine.step_count % report_every != 0 {
-        report(&engine, &mut csv, observables.as_mut())?;
+    if scheduled || report_every.is_some_and(|cadence| execution.engine().step_count % cadence != 0)
+    {
+        report(execution.engine(), &mut csv, observables.as_mut())?;
     }
 
+    let engine = execution.engine();
     match stopped {
         Some(stop) => println!(
             "stopped early at step {}: {stop} (t = {:.6e})",
+            engine.step_count, engine.time
+        ),
+        None if schedule_complete => println!(
+            "completed schedule: {} events, simulated time {:.6e}",
             engine.step_count, engine.time
         ),
         None => println!(
@@ -241,7 +328,7 @@ fn run() -> Result<(), String> {
     }
     if args.xyz {
         let path = format!("{}/final.xyz", args.out);
-        write_xyz(&engine, &deck, &path)?;
+        write_xyz(engine, &deck, &path)?;
         println!("wrote {path}");
     }
     Ok(())
@@ -335,12 +422,23 @@ fn write_observable_rows(
 }
 
 fn run_ensemble(args: &Args, deck: &petra_deck::CompiledDeck, ensemble: u64) -> Result<(), String> {
-    let steps = args.steps.unwrap_or(deck.steps);
+    let steps = args
+        .steps
+        .or(deck.step_limit)
+        .unwrap_or(if deck.schedule.is_empty() {
+            0
+        } else {
+            u64::MAX
+        });
     let base_seed = args.seed.unwrap_or(deck.seed);
     std::fs::create_dir_all(&args.out).map_err(|e| e.to_string())?;
 
     let sample_every = if deck.report_every == 0 {
-        steps.max(1)
+        if deck.schedule.is_empty() {
+            steps.max(1)
+        } else {
+            u64::MAX
+        }
     } else {
         deck.report_every
     };

@@ -246,6 +246,57 @@ fn run_replica(
     replica: u64,
 ) -> Result<ReplicaRun, String> {
     let seed = replica_seed(config.base_seed, replica, deck.seed_policy);
+    if !deck.schedule.is_empty() {
+        let mut run = deck
+            .build_schedule(Some(seed))
+            .map_err(|error| error.to_string())?;
+        let mut stop: Option<Stop> = None;
+        let mut complete = false;
+        let mut burn_events = 0;
+        while burn_events < config.burn_in && !complete {
+            match run.advance() {
+                Ok(petra_deck::ScheduleAdvance::Fired { .. }) => burn_events += 1,
+                Ok(petra_deck::ScheduleAdvance::Boundary { .. }) => {}
+                Ok(petra_deck::ScheduleAdvance::Complete) => complete = true,
+                Err(reason) => {
+                    stop = Some(reason);
+                    break;
+                }
+            }
+        }
+
+        let mut samples = vec![observe(run.engine(), deck)];
+        let mut sampled_events = 0;
+        while sampled_events < config.steps && !complete && stop.is_none() {
+            match run.advance() {
+                Ok(petra_deck::ScheduleAdvance::Fired { .. }) => {
+                    sampled_events += 1;
+                    if sampled_events % config.sample_every == 0 {
+                        samples.push(observe(run.engine(), deck));
+                    }
+                }
+                Ok(petra_deck::ScheduleAdvance::Boundary { .. }) => {
+                    samples.push(observe(run.engine(), deck));
+                }
+                Ok(petra_deck::ScheduleAdvance::Complete) => complete = true,
+                Err(reason) => stop = Some(reason),
+            }
+        }
+        if samples.last().is_none_or(|sample| {
+            sample.step != run.engine().step_count
+                || sample.time.to_bits() != run.engine().time.to_bits()
+        }) {
+            samples.push(observe(run.engine(), deck));
+        }
+        return Ok(ReplicaRun {
+            replica,
+            seed,
+            samples,
+            final_state_counts: run.engine().state_counts(deck.n_states),
+            stop: stop.map(|reason| reason.to_string()),
+        });
+    }
+
     let mut engine = deck
         .build_engine(Some(seed))
         .map_err(|error| error.to_string())?;

@@ -16,7 +16,9 @@ use petra_core::Engine;
 use rand::{Rng as _, SeedableRng};
 use rand_pcg::Pcg64Mcg;
 
-use crate::schema::{DeckFile, EffectSpec, RateSpec, SeedPolicy, SelectorSpec, StructureKind};
+use crate::schema::{
+    DeckFile, EffectSpec, RateSpec, ScheduleSegment, SeedPolicy, SelectorSpec, StructureKind,
+};
 
 #[derive(Debug, thiserror::Error)]
 #[error("deck error: {0}")]
@@ -52,13 +54,38 @@ pub struct CompiledDeck {
     pub temperature: f64,
     pub dims: [usize; 3],
     pub boundary: [Boundary; 3],
+    /// Legacy scalar view (`0` when omitted). New execution code should use
+    /// `step_limit` so an explicit zero remains distinguishable from absence.
     pub steps: u64,
+    pub step_limit: Option<u64>,
     pub seed: u64,
     pub n_replicas: u64,
     pub seed_policy: SeedPolicy,
     pub report_every: u64,
     pub observables: Vec<CompiledObservable>,
     pub strategy: ExecutionStrategy,
+    pub schedule: Vec<ScheduleSegment>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ScheduleAdvance {
+    Fired {
+        segment: usize,
+        fired: petra_core::Fired,
+    },
+    Boundary {
+        completed_segment: usize,
+        time: f64,
+    },
+    Complete,
+}
+
+pub struct ScheduleRun {
+    engine: Engine,
+    schedule: Vec<ScheduleSegment>,
+    segment: usize,
+    deadline: f64,
+    complete: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -181,13 +208,23 @@ impl CompiledDeck {
             .collect();
         self.run_init(&mut lattice, &mut kinds, seed)?;
         self.compute_strain(&mut lattice)?;
+        let initial_temperature = self
+            .schedule
+            .first()
+            .map_or(self.temperature, |segment| segment.temperature);
+        let mut reactions = self.reactions.clone();
+        if initial_temperature != self.temperature {
+            for reaction in &mut reactions {
+                reaction.set_temperature(initial_temperature);
+            }
+        }
         let mut engine = Engine::new_with_site_kinds(
             lattice,
             kinds,
             self.kind_names.len(),
             self.kind_state_ranges.clone(),
-            self.reactions.clone(),
-            self.temperature,
+            reactions,
+            initial_temperature,
             seed,
         );
         if let Some(CompiledObservable::ExposureAge { states, axis }) = self
@@ -198,6 +235,19 @@ impl CompiledDeck {
             engine.enable_exposure_tracking(states.clone(), *axis);
         }
         Ok(engine)
+    }
+
+    pub fn build_schedule(&self, seed_override: Option<u64>) -> Result<ScheduleRun, CompileError> {
+        let first = self.schedule.first().ok_or_else(|| {
+            CompileError("build_schedule requires at least one execution segment".into())
+        })?;
+        Ok(ScheduleRun {
+            engine: self.build_engine(seed_override)?,
+            schedule: self.schedule.clone(),
+            segment: 0,
+            deadline: first.duration,
+            complete: false,
+        })
     }
 
     /// Superpose every defect's analytic field into `lattice.strain`
@@ -746,7 +796,10 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         let (rate, value) = compile_rate(r.rate.as_ref(), &deck.execution.strategy, eunit, &ctx)?;
 
         // Fold solution coupling into ln_thermo (design doc §4):
-        // each consumed species contributes ln(activity) + Δμ/RT.
+        // each consumed species contributes ln(activity) + Δμ/RT. Keep
+        // temperature-independent components so schedules can recompile it.
+        let mut ln_activity = 0.0;
+        let mut mu_energy = 0.0;
         let mut ln_thermo = 0.0;
         for sp in &r.consumes {
             if !species.contains_key(sp) {
@@ -756,8 +809,11 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
             if activity <= 0.0 {
                 return err(format!("{ctx}: activity of '{sp}' must be positive"));
             }
-            ln_thermo +=
-                activity.ln() + deck.thermo.mu.get(sp).copied().unwrap_or(0.0) * eunit / rt;
+            let activity_term = activity.ln();
+            let mu_term = deck.thermo.mu.get(sp).copied().unwrap_or(0.0) * eunit;
+            ln_activity += activity_term;
+            mu_energy += mu_term;
+            ln_thermo += activity_term + mu_term / rt;
         }
         for sp in &r.produces {
             if !species.contains_key(sp) {
@@ -821,6 +877,8 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
             guards,
             rate,
             value,
+            ln_activity,
+            mu_energy,
             ln_thermo,
             strain_scale: r.strain.as_ref().map(|s| s.scale).unwrap_or(0.0),
             modifiers,
@@ -1092,6 +1150,7 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
         dims,
         boundary,
         steps: deck.execution.stop.steps.unwrap_or(0),
+        step_limit: deck.execution.stop.steps,
         seed: deck.execution.ensemble.seed,
         n_replicas: deck.execution.ensemble.n_replicas,
         seed_policy: deck.execution.ensemble.seed_policy,
@@ -1111,7 +1170,46 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
             "pca" => ExecutionStrategy::Pca,
             _ => unreachable!("strategy checked before compilation"),
         },
+        schedule: deck.execution.schedule.clone(),
     })
+}
+
+impl ScheduleRun {
+    pub fn engine(&self) -> &Engine {
+        &self.engine
+    }
+
+    pub fn engine_mut(&mut self) -> &mut Engine {
+        &mut self.engine
+    }
+
+    pub fn advance(&mut self) -> Result<ScheduleAdvance, petra_core::Stop> {
+        if self.complete {
+            return Ok(ScheduleAdvance::Complete);
+        }
+        match self.engine.advance_ctmc_until(self.deadline)? {
+            petra_core::CtmcAdvance::Fired(fired) => Ok(ScheduleAdvance::Fired {
+                segment: self.segment,
+                fired,
+            }),
+            petra_core::CtmcAdvance::Deadline { time } => {
+                let completed_segment = self.segment;
+                self.segment += 1;
+                if let Some(next) = self.schedule.get(self.segment) {
+                    self.deadline += next.duration;
+                    self.engine
+                        .set_temperature(next.temperature)
+                        .expect("compiled schedule temperatures are valid");
+                } else {
+                    self.complete = true;
+                }
+                Ok(ScheduleAdvance::Boundary {
+                    completed_segment,
+                    time,
+                })
+            }
+        }
+    }
 }
 
 fn infer_source_center(
