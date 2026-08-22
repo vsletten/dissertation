@@ -41,6 +41,18 @@ with provenance. Closes CALCULATIONS.md rows CALC-002..005 from
 - Full fast test suite + ruff green on every PR.
 
 ## Progress
+- 2026-08-21 — MECHANISM FINDING (pilot, oss-neutral-n4-s2): the embedded
+  Si-O-Si neutral hydrolysis is SEQUENTIAL, not concerted like the free
+  X&L dimer — Sella + PHVA verified a pentacoordinate-Si intermediate
+  (r(Si-Ow)=1.80, r(Si-Obr)=1.78, proton mid-transfer at 1.26 A; zero
+  significant imaginary modes) at ~+92 kJ/mol above the reactant
+  complex. Lattice resistance stabilizes 5-coordinate Si. Per the
+  handoff: both saddles recorded, rate-limiting TS2 (bridge rupture,
+  crest near r(Si-Obr)=2.46) being converged with the directed
+  Cartesian Sella (#40 machinery). Artifacts: intermediate.xyz +
+  ts.rejected-slid-to-intermediate.xyz in the run dir. Ops lessons
+  (GPU contention arbitration, memlock, cuTENSOR) in learnings +
+  merged PR #55.
 - 2026-08-19 — card created with the Phase-2 handoff rewrite (fable).
 - 2026-08-19 — claimed; cluster builder (`qm/quarry/crystal.py`) +
   campaign driver (`qm/scripts/phase2_ladder.py`) built and gated
