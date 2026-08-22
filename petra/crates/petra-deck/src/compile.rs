@@ -69,7 +69,6 @@ pub enum CompiledObservable {
     ClusterSizes { states: Vec<StateId> },
     SurfaceArea { states: Vec<StateId>, axis: u8 },
     Snapshot,
-    InterfaceRoughness { axis: u8 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1038,7 +1037,9 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
                 axis: axis()?,
             },
             "snapshot" => CompiledObservable::Snapshot,
-            "interface_roughness" => CompiledObservable::InterfaceRoughness { axis: axis()? },
+            "interface_roughness" => {
+                return err("interface_roughness is not implemented");
+            }
             _ => unreachable!("observable kind validated before compilation"),
         });
     }

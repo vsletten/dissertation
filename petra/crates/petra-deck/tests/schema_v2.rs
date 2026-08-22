@@ -381,6 +381,24 @@ fn rfc_surfaces_fail_closed_at_parse_time() {
 }
 
 #[test]
+fn unimplemented_interface_roughness_fails_at_compile_time() {
+    let text = V2.replace(
+        "report_every = 5",
+        "report_every = 5\n[[observables.series]]\nkind = \"interface_roughness\"\naxis = 2",
+    );
+    let parsed: petra_deck::DeckFile =
+        toml::from_str(&text).expect("interface roughness declaration parses");
+    let error = petra_deck::compile(&parsed)
+        .expect_err("unimplemented interface roughness must fail closed");
+    assert!(
+        error
+            .to_string()
+            .contains("interface_roughness is not implemented"),
+        "{error}"
+    );
+}
+
+#[test]
 fn grid_v2_compiles_to_the_shared_lattice_representation() {
     let text = r#"
 [deck]

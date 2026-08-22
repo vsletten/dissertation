@@ -190,9 +190,9 @@ pub fn observe(engine: &Engine, deck: &CompiledDeck) -> Sample {
             CompiledObservable::SurfaceArea { states, axis } => Some(ObservableValue::SurfaceArea(
                 surface_area(engine, deck, states, *axis),
             )),
-            // Existing exporters own these two outputs. They remain accepted
-            // schema declarations but do not produce scalar ensemble values.
-            CompiledObservable::Snapshot | CompiledObservable::InterfaceRoughness { .. } => None,
+            // Existing exporters own snapshot output. It remains an accepted
+            // schema declaration but does not produce scalar ensemble values.
+            CompiledObservable::Snapshot => None,
         })
         .collect();
     Sample {
