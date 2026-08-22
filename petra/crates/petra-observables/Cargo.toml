@@ -1,0 +1,16 @@
+[package]
+name = "petra-observables"
+description = "Declarative observables, deterministic ensembles, and statistics for Petra"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+petra-core = { path = "../petra-core" }
+petra-deck = { path = "../petra-deck" }
+rand = { workspace = true }
+rand_pcg = { workspace = true }
+rayon = "1.10"
+
+[dev-dependencies]
+toml = { workspace = true }

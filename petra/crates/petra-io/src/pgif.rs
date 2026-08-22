@@ -220,10 +220,8 @@ seed = 1
         assert_eq!(doc["nodes"]["count"], 4);
         // 4-ring: 4 undirected edges, each emitted once; the 0-3 bond wraps.
         assert_eq!(doc["edges"]["count"], 4);
-        let seam: Vec<bool> = serde_json::from_value(
-            doc["edges"]["columns"]["seam"]["data"].clone(),
-        )
-        .unwrap();
+        let seam: Vec<bool> =
+            serde_json::from_value(doc["edges"]["columns"]["seam"]["data"].clone()).unwrap();
         assert_eq!(seam.iter().filter(|&&s| s).count(), 1, "one wrap edge");
 
         let dict: Vec<String> =

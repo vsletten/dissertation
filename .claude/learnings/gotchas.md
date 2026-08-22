@@ -53,7 +53,13 @@ long GPU campaigns: `systemctl --user stop ophir-email-pipeline.service
 ophir-email-pipeline-hotmail.service`, run with a trap that restarts
 them on exit + a `systemd-run --user --on-active=10h` dead-man restart,
 and a VRAM-below-threshold gate before launch (ingest daemons keep
-running; extraction catches up afterward).
+running; extraction catches up afterward). Even with the GPU clear, the
+60+-atom DF **Hessian** pins async host-staging buffers past the 7.7 GB
+memlock default (cudaErrorInvalidValue from cupy's pinned pool, twice
+live) — raise it for the campaign process only, bounded:
+`sudo prlimit --pid $$ --memlock=17179869184:17179869184` before exec,
+never unlimited and never system-wide (this box swap-spiraled in July;
+a bounded cap keeps a runaway pin from wedging it again).
 
 Honcho's `honcho-deriver-1` and `honcho-api-1` containers also call local
 Ollama (`gemma4-deriver` + `bge-m3`) and can reload ~19 GB immediately after

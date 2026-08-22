@@ -1,0 +1,124 @@
+# Phase-0 qualitative kaolinite surface-aging smoke deck.
+#
+# This is deliberately a reduced surface-unit model, not the production
+# 26-site chemistry deck: a finite population of fast damaged/defect units is
+# seeded only on the top basal face. Once consumed, slower terrace retreat can
+# continue only next to an existing vacancy. The deck exists to exercise the
+# A5 observables and the qualitative H1 inventory-depletion signature without
+# claiming calibrated kaolinite kinetics.
+
+[deck]
+name = "kaolinite-aging-smoke"
+comment = "reduced kaolinite surface-unit smoke for finite defect depletion"
+
+[[species]]
+name = "Kao"
+
+[[kinds]]
+name = "Kaolinite_site"
+initial = "terrace"
+
+[[kinds.states]]
+name = "terrace"
+occupant = "Kao"
+
+[[kinds.states]]
+name = "defect"
+occupant = "Kao"
+
+[[kinds.states]]
+name = "empty"
+occupant = "vacant"
+
+[aliases]
+solid = ["Kaolinite_site.terrace", "Kaolinite_site.defect"]
+
+[cell]
+a = 5.15
+b = 8.94
+c = 7.39
+alpha = 90.0
+beta = 104.7
+gamma = 90.0
+
+[[cell.sites]]
+kind = "Kaolinite_site"
+frac = [0.0, 0.0, 0.0]
+
+[[cell.bonds]]
+i = 0
+j = 0
+dcell = [1, 0, 0]
+
+[[cell.bonds]]
+i = 0
+j = 0
+dcell = [0, 1, 0]
+
+[[cell.bonds]]
+i = 0
+j = 0
+dcell = [0, 0, 1]
+
+[lattice]
+dims = [12, 12, 4]
+boundary = ["periodic", "periodic", "open"]
+
+# Seed a deterministic, finite damaged-site inventory on the top basal face.
+[[init]]
+name = "ground-surface-defects"
+center = { kind = "Kaolinite_site", state = ["terrace"] }
+region = { axis = 2, min = 3, max = 3 }
+probability = 0.25
+set = "defect"
+
+[thermo]
+temperature = 298.15
+
+# Damage-associated units are the fast tail of the initial rate spectrum.
+[[reactions]]
+name = "defect-dissolution"
+center = { kind = "Kaolinite_site", state = ["defect"] }
+rate = { arrhenius = { prefactor = 10.0, ea = 0.0 } }
+
+[[reactions.effects]]
+target = "center"
+set = "empty"
+
+# Terrace retreat is three orders slower and requires an existing edge.
+[[reactions]]
+name = "terrace-dissolution"
+center = { kind = "Kaolinite_site", state = ["terrace"] }
+guards = [{ distance = 1, state = ["Kaolinite_site.empty"], min = 1 }]
+rate = { arrhenius = { prefactor = 0.01, ea = 0.0 } }
+
+[[reactions.effects]]
+target = "center"
+set = "empty"
+
+[simulation]
+steps = 600
+seed = 42
+report_every = 10
+
+[observables]
+report_every = 10
+
+[[observables.series]]
+kind = "state_counts"
+
+[[observables.series]]
+kind = "event_rates"
+
+[[observables.series]]
+kind = "rate_spectra"
+
+[[observables.series]]
+kind = "surface_area"
+state = "@solid"
+axis = 2
+
+[[observables.series]]
+kind = "exposure_age"
+state = "@solid"
+axis = 2

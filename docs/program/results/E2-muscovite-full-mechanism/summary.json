@@ -1,0 +1,83 @@
+{
+  "deck": "petra/decks/muscovite-full-mechanism.toml",
+  "initial": {
+    "Ar36": 1,
+    "Ar39": 38,
+    "Ar40": 12
+  },
+  "interpretation": "Synthetic step observables from a proxy-bracket mechanism; not a fitted calibration.",
+  "j_factor": 0.01,
+  "populations": "docs/program/results/E2-muscovite-full-mechanism/populations.csv",
+  "steps": [
+    {
+      "apparent_age_ma": 26.860206555566755,
+      "ar36_ar40": 0.3333333333333333,
+      "cumulative_ar36": 1,
+      "cumulative_ar39": 2,
+      "cumulative_ar40": 3,
+      "end_s": 600.0,
+      "released_ar36": 1,
+      "released_ar39": 2,
+      "released_ar40": 3,
+      "segment": 1,
+      "start_s": 0.0,
+      "temperature_k": 773.15
+    },
+    {
+      "apparent_age_ma": 26.860206555566755,
+      "ar36_ar40": 0.0,
+      "cumulative_ar36": 1,
+      "cumulative_ar39": 8,
+      "cumulative_ar40": 12,
+      "end_s": 1200.0,
+      "released_ar36": 0,
+      "released_ar39": 6,
+      "released_ar40": 9,
+      "segment": 2,
+      "start_s": 600.0,
+      "temperature_k": 823.15
+    },
+    {
+      "apparent_age_ma": 0.0,
+      "ar36_ar40": null,
+      "cumulative_ar36": 1,
+      "cumulative_ar39": 22,
+      "cumulative_ar40": 12,
+      "end_s": 1800.0,
+      "released_ar36": 0,
+      "released_ar39": 14,
+      "released_ar40": 0,
+      "segment": 3,
+      "start_s": 1200.0,
+      "temperature_k": 873.15
+    },
+    {
+      "apparent_age_ma": 0.0,
+      "ar36_ar40": null,
+      "cumulative_ar36": 1,
+      "cumulative_ar39": 37,
+      "cumulative_ar40": 12,
+      "end_s": 2400.0,
+      "released_ar36": 0,
+      "released_ar39": 15,
+      "released_ar40": 0,
+      "segment": 4,
+      "start_s": 1800.0,
+      "temperature_k": 923.15
+    },
+    {
+      "apparent_age_ma": null,
+      "ar36_ar40": null,
+      "cumulative_ar36": 1,
+      "cumulative_ar39": 37,
+      "cumulative_ar40": 12,
+      "end_s": 3000.0,
+      "released_ar36": 0,
+      "released_ar39": 0,
+      "released_ar40": 0,
+      "segment": 5,
+      "start_s": 2400.0,
+      "temperature_k": 973.15
+    }
+  ]
+}

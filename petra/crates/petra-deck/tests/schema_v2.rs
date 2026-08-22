@@ -162,14 +162,18 @@ fn explicit_v2_from_v1(text: &str) -> String {
     );
     execution.insert("stop".to_string(), toml::Value::Table(stop));
     execution.insert("ensemble".to_string(), toml::Value::Table(ensemble));
-    let mut observables = toml::map::Map::new();
-    observables.insert(
-        "report_every".to_string(),
-        simulation
-            .get("report_every")
-            .cloned()
-            .unwrap_or(toml::Value::Integer(0)),
-    );
+    let mut observables = root
+        .remove("observables")
+        .and_then(|value| value.as_table().cloned())
+        .unwrap_or_default();
+    observables
+        .entry("report_every".to_string())
+        .or_insert_with(|| {
+            simulation
+                .get("report_every")
+                .cloned()
+                .unwrap_or(toml::Value::Integer(0))
+        });
 
     root.insert("structure".to_string(), toml::Value::Table(structure));
     root.insert("dynamics".to_string(), toml::Value::Table(dynamics));
@@ -269,7 +273,7 @@ fn unknown_schema_version_is_rejected() {
 }
 
 #[test]
-fn non_ctmc_strategy_is_rejected_in_b2() {
+fn metropolis_strategy_compiles_in_b3() {
     let text = V2
         .replace("strategy = \"ctmc\"", "strategy = \"metropolis\"")
         .replace(
@@ -277,22 +281,30 @@ fn non_ctmc_strategy_is_rejected_in_b2() {
             "rate = { energy = { delta = 2.0 } }",
         );
     let parsed: petra_deck::DeckFile = toml::from_str(&text).expect("future strategy parses");
-    let error = petra_deck::compile(&parsed).expect_err("B2 implements only CTMC");
-    assert!(
-        error.to_string().contains("not implemented in B2"),
-        "{error}"
-    );
+    let deck = petra_deck::compile(&parsed).expect("Metropolis compiles");
+    assert!(matches!(
+        deck.strategy,
+        petra_deck::ExecutionStrategy::Metropolis { temperature: 300.0 }
+    ));
 }
 
 #[test]
 fn every_rfc_strategy_parameter_block_parses() {
     let text = V2.replace(
         "[execution.stop]",
-        "[execution.ctmc]\n[execution.synchronous]\n[execution.metropolis]\ntemperature = 310.0\n[execution.pca]\n[execution.stop]",
+        "[execution.ctmc]\n[execution.synchronous]\nconflict_resolution = \"first_match\"\n[execution.metropolis]\ntemperature = 310.0\n[execution.pca]\n[execution.stop]",
     );
     let parsed: petra_deck::DeckFile = toml::from_str(&text).expect("all blocks parse");
     assert!(parsed.execution.ctmc.is_some());
-    assert!(parsed.execution.synchronous.is_some());
+    let synchronous = parsed
+        .execution
+        .synchronous
+        .as_ref()
+        .expect("synchronous block present");
+    assert_eq!(
+        synchronous.conflict_resolution,
+        petra_deck::schema::SynchronousConflictResolution::FirstMatch
+    );
     assert_eq!(
         parsed
             .execution
@@ -306,6 +318,14 @@ fn every_rfc_strategy_parameter_block_parses() {
 
 #[test]
 fn execution_parameter_blocks_validate_at_parse_time() {
+    let invalid_conflict_resolution = V2.replace(
+        "[execution.stop]",
+        "[execution.synchronous]\nconflict_resolution = \"last_match\"\n[execution.stop]",
+    );
+    let error = toml::from_str::<petra_deck::DeckFile>(&invalid_conflict_resolution)
+        .expect_err("unknown conflict resolution rejected");
+    assert!(error.to_string().contains("first_match"), "{error}");
+
     let bad_temperature = V2.replace(
         "[execution.stop]",
         "[execution.metropolis]\ntemperature = -1.0\n[execution.stop]",
@@ -321,19 +341,23 @@ fn execution_parameter_blocks_validate_at_parse_time() {
 }
 
 #[test]
-fn future_strategy_rate_surfaces_parse_then_compile_reject() {
+fn b3_strategy_rate_surfaces_parse_and_compile() {
     let synchronous = V2
         .replace("strategy = \"ctmc\"", "strategy = \"synchronous\"")
-        .replace("rate = { constant = 2.0 }\n", "truth = \"and\"\n");
+        .replace("rate = { constant = 2.0 }\n", "truth = \"and\"\n")
+        .replace(
+            "[execution.stop]",
+            "[execution.synchronous]\nconflict_resolution = \"first_match\"\n[execution.stop]",
+        );
     let parsed: petra_deck::DeckFile =
         toml::from_str(&synchronous).expect("synchronous truth surface parses");
-    assert!(petra_deck::compile(&parsed).is_err());
+    assert!(petra_deck::compile(&parsed).is_ok());
 
     let pca = V2
         .replace("strategy = \"ctmc\"", "strategy = \"pca\"")
         .replace("rate = { constant = 2.0 }", "rate = { probability = 0.25 }");
     let parsed: petra_deck::DeckFile = toml::from_str(&pca).expect("PCA probability parses");
-    assert!(petra_deck::compile(&parsed).is_err());
+    assert!(petra_deck::compile(&parsed).is_ok());
 }
 
 #[test]
@@ -357,7 +381,25 @@ fn rfc_surfaces_fail_closed_at_parse_time() {
 }
 
 #[test]
-fn grid_v2_parses_but_waits_for_b3_compilation() {
+fn unimplemented_interface_roughness_fails_at_compile_time() {
+    let text = V2.replace(
+        "report_every = 5",
+        "report_every = 5\n[[observables.series]]\nkind = \"interface_roughness\"\naxis = 2",
+    );
+    let parsed: petra_deck::DeckFile =
+        toml::from_str(&text).expect("interface roughness declaration parses");
+    let error = petra_deck::compile(&parsed)
+        .expect_err("unimplemented interface roughness must fail closed");
+    assert!(
+        error
+            .to_string()
+            .contains("interface_roughness is not implemented"),
+        "{error}"
+    );
+}
+
+#[test]
+fn grid_v2_compiles_to_the_shared_lattice_representation() {
     let text = r#"
 [deck]
 name = "grid-parse"
@@ -385,8 +427,14 @@ steps = 10
 "#;
     let parsed: petra_deck::DeckFile = toml::from_str(text).expect("grid schema parses");
     assert_eq!(parsed.structure_kind, StructureKind::Grid);
-    let error = petra_deck::compile(&parsed).expect_err("grid compile is B3");
-    assert!(error.to_string().contains("B3"), "{error}");
+    let deck = petra_deck::compile(&parsed).expect("grid compiles in B3");
+    let engine = deck.build_engine(Some(1)).expect("grid lattice builds");
+    assert_eq!(engine.lattice.dims, [8, 8, 1]);
+    assert!(engine
+        .lattice
+        .adj_off
+        .windows(2)
+        .all(|offset| offset[1] - offset[0] == 8));
 }
 
 struct PublicSeamCtmc;
@@ -543,4 +591,87 @@ fn splitmix64_replica_seed_matches_rfc_vectors() {
     assert_eq!(replica_seed(42, 1, SeedPolicy::Hash), 0xF34F_E924_8C93_42E5);
     assert_eq!(replica_seed(42, 2, SeedPolicy::Hash), 0x7253_9538_8690_AE46);
     assert_eq!(replica_seed(42, 3, SeedPolicy::Increment), 45);
+}
+
+#[test]
+fn v1_compat_decks_may_opt_in_to_declarative_observables() {
+    let path = format!(
+        "{}/../../examples/kossel-etchpit.toml",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("v1 fixture");
+    let parsed: petra_deck::DeckFile = toml::from_str(&text).expect("extended v1 deck parses");
+    let compiled = petra_deck::compile(&parsed).expect("extended v1 deck compiles");
+    assert_eq!(compiled.report_every, 200);
+    assert!(compiled
+        .observables
+        .contains(&petra_deck::CompiledObservable::RateSpectra));
+}
+
+#[test]
+fn exposure_age_observable_accepts_a_solid_state_alias() {
+    let path = format!(
+        "{}/../../examples/kossel-etchpit.toml",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("v1 fixture").replace(
+        "[lattice]",
+        "[aliases]\nsolid = [\"M_site.occupied\"]\n\n[lattice]",
+    )
+        + "\n[[observables.series]]\nkind = \"exposure_age\"\nstate = \"@solid\"\naxis = 2\n";
+    let parsed: petra_deck::DeckFile = toml::from_str(&text).expect("exposure deck parses");
+    let compiled = petra_deck::compile(&parsed).expect("exposure declaration compiles");
+    assert!(compiled.observables.iter().any(|observable| matches!(
+        observable,
+        petra_deck::CompiledObservable::ExposureAge { axis: 2, states }
+            if states.len() == 1
+    )));
+}
+
+#[test]
+fn exposure_age_declarations_accept_equivalent_state_sets_in_different_orders() {
+    let path = format!(
+        "{}/../../examples/kossel-etchpit.toml",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path)
+        .expect("v1 fixture")
+        .replace(
+            "[lattice]",
+            "[aliases]\nsolid = [\"M_site.occupied\", \"M_site.empty\"]\n\
+             solid_reversed = [\"M_site.empty\", \"M_site.occupied\"]\n\n[lattice]",
+        )
+        .replace(
+            "kind = \"exposure_age\"\nstate = \"M_site.occupied\"\naxis = 2",
+            "kind = \"exposure_age\"\nstate = \"@solid\"\naxis = 2",
+        )
+        + "\n[[observables.series]]\nkind = \"exposure_age\"\nstate = \"@solid_reversed\"\naxis = 2\n";
+    let parsed: petra_deck::DeckFile = toml::from_str(&text).expect("exposure deck parses");
+    let compiled = petra_deck::compile(&parsed).expect("equivalent state sets compile");
+    let exposure_states: Vec<_> = compiled
+        .observables
+        .iter()
+        .filter_map(|observable| match observable {
+            petra_deck::CompiledObservable::ExposureAge { states, .. } => Some(states),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(exposure_states.len(), 2);
+    assert_eq!(exposure_states[0], exposure_states[1]);
+    assert!(exposure_states[0].windows(2).all(|pair| pair[0] < pair[1]));
+}
+
+#[test]
+fn exposure_age_declarations_fail_closed_on_different_surface_definitions() {
+    let path = format!(
+        "{}/../../examples/kossel-etchpit.toml",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("v1 fixture")
+        + "\n[[observables.series]]\nkind = \"exposure_age\"\nstate = \"M_site.occupied\"\naxis = 1\n";
+    let parsed: petra_deck::DeckFile = toml::from_str(&text).expect("exposure deck parses");
+    let error = petra_deck::compile(&parsed).expect_err("different tracked surfaces must fail");
+    assert!(error
+        .to_string()
+        .contains("exposure_age declarations must use one shared state/axis definition"));
 }

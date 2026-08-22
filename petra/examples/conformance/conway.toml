@@ -1,0 +1,81 @@
+# Conway's Game of Life conformance deck.
+# CI gate: a glider repeats after four synchronous steps translated by (1, 1).
+[deck]
+name = "conway-glider"
+schema = 2
+
+[structure]
+kind = "grid"
+grid = "square"
+neighborhood = "moore"
+dims = [8, 8]
+boundary = ["periodic", "periodic"]
+default_kind = "cell"
+
+[[structure.species]]
+name = "life"
+
+[[structure.kinds]]
+name = "cell"
+initial = "dead"
+
+[[structure.kinds.states]]
+name = "dead"
+occupant = "vacant"
+
+[[structure.kinds.states]]
+name = "alive"
+occupant = "life"
+
+[[structure.init]]
+name = "glider"
+center = { kind = "cell", state = ["dead"] }
+sites = [[1, 0, 0, 0], [2, 1, 0, 0], [0, 2, 0, 0], [1, 2, 0, 0], [2, 2, 0, 0]]
+set = "alive"
+
+[dynamics.thermo]
+temperature = 1.0
+
+[[dynamics.rules]]
+name = "underpopulation"
+center = { kind = "cell", state = ["alive"] }
+guards = [{ distance = 1, kind = "cell", state = ["alive"], max = 1 }]
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "dead"
+
+[[dynamics.rules]]
+name = "overpopulation"
+center = { kind = "cell", state = ["alive"] }
+guards = [{ distance = 1, kind = "cell", state = ["alive"], min = 4 }]
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "dead"
+
+[[dynamics.rules]]
+name = "birth"
+center = { kind = "cell", state = ["dead"] }
+guards = [{ distance = 1, kind = "cell", state = ["alive"], min = 3, max = 3 }]
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "alive"
+
+[execution]
+strategy = "synchronous"
+
+[execution.synchronous]
+conflict_resolution = "first_match"
+
+[execution.stop]
+steps = 8
+
+[execution.ensemble]
+seed = 42
+n_replicas = 1
+seed_policy = "increment"
+
+[observables]
+report_every = 1
