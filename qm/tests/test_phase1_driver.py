@@ -330,6 +330,71 @@ def test_block_run_quarantines_stale_success_and_records_reason(tmp_path):
     }
 
 
+@pytest.mark.parametrize("terminal_failure", ["channel-escape", "saddle", "quick-irc"])
+def test_acid_main_records_terminal_stage_failures(
+    monkeypatch, tmp_path, terminal_failure
+):
+    dimer = disilicate()
+    reactant = protonated_bridge_complex(dimer)
+    ow_index = len(dimer.symbols)
+    approach = _place_attacking_water(reactant, ow_index, 1.90)
+    saddle = _place_attacking_water(reactant, ow_index, 2.00)
+    escaped = _place_attacking_water(reactant, ow_index, 3.00)
+
+    monkeypatch.setattr(
+        phase1.sys,
+        "argv",
+        ["phase1_xiao_lasaga.py", "--reaction", "si-acid"],
+    )
+    monkeypatch.setattr(phase1, "reaction_run_slug", lambda *args: tmp_path)
+    monkeypatch.setattr(phase1, "optimize", lambda cluster, settings: cluster)
+    monkeypatch.setattr(
+        phase1,
+        "scan_to_maximum",
+        lambda *args, **kwargs: [(1.90, -1.0, approach)],
+    )
+    monkeypatch.setattr(phase1, "acid_neb_guess", lambda *args, **kwargs: saddle)
+    monkeypatch.setattr(
+        phase1,
+        "refine_phase1_saddle",
+        lambda *args, **kwargs: (
+            escaped if terminal_failure == "channel-escape" else saddle
+        ),
+    )
+    frequency = FrequencyResult(
+        frequencies_cm=np.array([300.0, 700.0, 1100.0]),
+        imaginary_cm=np.array([500.0] if terminal_failure == "quick-irc" else []),
+        electronic_hartree=-100.0,
+        molar_mass_kg=0.1,
+        rotational_temperatures_k=(1.0, 2.0, 3.0),
+        linear=False,
+        imaginary_mode=(
+            np.ones_like(saddle.coords) if terminal_failure == "quick-irc" else None
+        ),
+    )
+    monkeypatch.setattr(phase1, "frequencies", lambda cluster, settings: frequency)
+    monkeypatch.setattr(
+        phase1,
+        "quick_irc",
+        lambda *args, **kwargs: (reactant, reactant),
+    )
+    monkeypatch.setattr(
+        phase1,
+        "acid_quick_irc_channel_reason",
+        lambda *args, **kwargs: "quick IRC missed the product basin",
+    )
+    monkeypatch.setattr(
+        phase1,
+        "acid_quick_irc_cleavage_reason",
+        lambda *args, **kwargs: "quick IRC missed the product basin",
+    )
+
+    assert phase1.main() == 1
+    status = json.loads((tmp_path / "run_status.json").read_text())
+    assert status["status"] == "blocked"
+    assert status["detail"]
+
+
 def test_sequential_closeout_writes_gated_profile(monkeypatch, tmp_path):
     reactant = geometry("complex", 3.2, si_obr=1.6)
     reactant.coords[3:] += np.array([0.0, 3.0, 0.0])
