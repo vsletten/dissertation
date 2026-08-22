@@ -10,10 +10,10 @@ updated through the same PRs that do the work.*
 |---|---|---|
 | M0 — scoping + in-flight landed | ✅ done 2026-08-18 | Omnibus + 3 scoping docs merged; Phase-1 si-neutral barrier landed (ΔG‡ 27.0 kcal/mol vs X&L ~29) |
 | M1 — B1 schema RFC reviewed | ✅ done 2026-08-19 | RFC-001 merged (PR #25); B2 unblocked |
-| M2 — B2 refactor, parity green | in progress | B2 READY as of B1 merge |
-| M3 — B3 conformance decks green | blocked (B2) | Conway / Ising / SIR with analytic gates |
-| M4 — B4 ensembles + observables | blocked (B2) | design against A5-Phase-0 needs |
-| M5 — first science on new platform | blocked (M3/M4) | A5 aging study ∥ C2 corrosion deck ∥ D2 rates campaign |
+| M2 — B2 refactor, parity green | ✅ done 2026-08-20 | B2 merged in PR #33; schema v2 + bitwise-parity gates green |
+| M3 — B3 conformance decks green | ✅ done 2026-08-21 | Conway / Ising / SIR analytic gates green; all four update strategies executable |
+| M4 — B4 ensembles + observables | ✅ done 2026-08-22 | Parallel replicas, distributions/bootstrap CIs, first A5 observables |
+| M5 — first science on new platform | ready | M3/M4 done; A5 aging study ∥ C2 corrosion deck ∥ D2 rates campaign |
 | M6 — first external deliverables | blocked (M5) | tool paper, corrosion statistics, KIDA submissions, field-lab mechanism paper |
 
 ## Cards
@@ -26,29 +26,37 @@ on main). Priority P0 > P1 > P2 within READY.
 | Card | Track | Priority | Machine | Status | Depends on |
 |---|---|---|---|---|---|
 | [B1-schema-rfc](cards/B1-schema-rfc.md) | B | P0 | any | done | — |
-| [B2-engine-refactor](cards/B2-engine-refactor.md) | B | P0 | any | ready | B1 ✅ |
+| [B2-engine-refactor](cards/B2-engine-refactor.md) | B | P0 | any | done | B1 ✅ |
 | [QI1-driver-enforced-etiquette](cards/QI1-driver-enforced-etiquette.md) | A | P2 | any | done | — |
 | [QI2-gpu-lease](cards/QI2-gpu-lease.md) | A | P1 | any | ready | — |
-| [QI3-fenwick-total-cancellation](cards/QI3-fenwick-total-cancellation.md) | B | P1 | any | ready | — |
+| [QI3-fenwick-total-cancellation](cards/QI3-fenwick-total-cancellation.md) | B | P1 | any | done | — |
 | [E1-muscovite-deck](cards/E1-muscovite-deck.md) | E | P1 | any | done | — (phase 1 isothermal) |
-| [E2-muscovite-full-mechanism](cards/E2-muscovite-full-mechanism.md) | E | P1 | any | blocked: B5 | B5 |
+| [E2-muscovite-full-mechanism](cards/E2-muscovite-full-mechanism.md) | E | P1 | any | done | B5 ✅ |
+| [A8-thesis-archive-intake](cards/A8-thesis-archive-intake.md) | A | P1 | workstation | ready | — |
 | [A1b-acid-mechanisms](cards/A1b-acid-mechanisms.md) | A | P1 | workstation | ready | — |
 | [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | ready | — |
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
 | [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: ORCA install (Victor) + A1b | A1b |
-| [B3-conformance-decks](cards/B3-conformance-decks.md) | B | P1 | any | blocked: B2 | B2 |
-| [B4-ensembles-observables](cards/B4-ensembles-observables.md) | B | P1 | any | blocked: B2 | B2 |
-| [B5-execution-schedule](cards/B5-execution-schedule.md) | B | P1 | any | blocked: B2 | B2 |
-| [C2-corrosion-deck](cards/C2-corrosion-deck.md) | C | P2 | any | blocked: B3 | B3 |
-| [D3-ice-mantle-deck](cards/D3-ice-mantle-deck.md) | D | P2 | any | blocked: B3 + D2a | B3, D2a |
-| [A5p0-aging-observables](cards/A5p0-aging-observables.md) | A | P1 | any | blocked: B4 | B4 |
+| [B3-conformance-decks](cards/B3-conformance-decks.md) | B | P1 | any | done | B2 ✅ |
+| [B4-ensembles-observables](cards/B4-ensembles-observables.md) | B | P1 | any | done | B2 ✅ |
+| [B5-execution-schedule](cards/B5-execution-schedule.md) | B | P1 | any | done | B2 ✅ |
+| [C2-corrosion-deck](cards/C2-corrosion-deck.md) | C | P2 | any | ready | B3 ✅ |
+| [D3-ice-mantle-deck](cards/D3-ice-mantle-deck.md) | D | P2 | any | ready | B3 ✅, D2a ✅ |
+| [A5p0-aging-observables](cards/A5p0-aging-observables.md) | A | P1 | any | done | B4 ✅ |
 
-**Done** (acceptance verified on main): QI1-driver-enforced-etiquette,
-B1-schema-rfc (PR #25),
+**Done** (acceptance verified on main): E2-muscovite-full-mechanism,
+B5-execution-schedule,
+A5p0-aging-observables,
+B4-ensembles-observables,
+B3-conformance-decks,
+QI1-driver-enforced-etiquette,
+QI3-fenwick-total-cancellation (PR #52), B1-schema-rfc (PR #25),
+B2-engine-refactor (PR #33),
 D2a-astro-rate-reproduction (PR #31 — verdict: GO gas-phase /
 NO-GO surface-LH), A7-kinetics-database (PR #27 — 36 minerals, 74
-mechanisms, validator green). **Active**: A3-barrier-ladder
-(claim branch live).
+mechanisms, validator green). **Active claim**: A1b-acid-mechanisms.
+A3-barrier-ladder remains `in-progress` in its card after platform PR
+#37; that merged PR auto-deleted its remote claim branch.
 
 **Tracked elsewhere**: TASK-164 (scan-smoothness repair + al-neutral
 barrier) predates this board and lives in the mission-control queue —

@@ -6,9 +6,9 @@
 
 use std::path::PathBuf;
 
-use petra_core::Lattice;
 use petra_core::rate::R_KCAL;
 use petra_core::reaction::resolve_rate;
+use petra_core::Lattice;
 
 /// 9×9 single-site sheet, screw along c with a bare prefactor: u = 16/r²,
 /// clamp at 2 Å. Cell is a 3 Å cube so cartesian = 3 × cell coords.
@@ -111,7 +111,11 @@ fn strain_field_matches_hand_formula_with_clamp_and_min_image() {
     assert!((u(3, 5) - 16.0 / 180.0).abs() < 1e-12);
     // Minimum image: site (8,1) is 7 cells = 21 Å away directly, but only
     // 2 cells = 6 Å through the periodic wrap → u = 16/36.
-    assert!((u(8, 1) - 16.0 / 36.0).abs() < 1e-12, "min-image: {}", u(8, 1));
+    assert!(
+        (u(8, 1) - 16.0 / 36.0).abs() < 1e-12,
+        "min-image: {}",
+        u(8, 1)
+    );
 
     // Superposition sanity: exactly one defect, all sites strained > 0.
     assert!(lat.strain.iter().all(|&v| v > 0.0));

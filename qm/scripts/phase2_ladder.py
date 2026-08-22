@@ -71,6 +71,7 @@ NOISE_FLOOR_CM = 30.0
 MIN_PLAUSIBLE_DE_KJ = 20.0
 # The Phase-1 free-dimer anchor for the lattice-resistance comparison.
 SI_NEUTRAL_FREE_DIMER_DG_KJ = 113.05
+APPROACH_SEED_VERSION = 1
 
 # Per-element approach parameters (Angstrom).
 APPROACH = {
@@ -99,16 +100,25 @@ def preload_cutensor() -> None:
     contraction engine, which materializes temporaries that OOM a 24 GB
     card at ~60 atoms/def2-svp (seen live, twice). Preloading by
     absolute path makes cupy's dlopen find them regardless of
-    LD_LIBRARY_PATH. Harmless no-op when the wheel is absent (CPU runs).
+    LD_LIBRARY_PATH. The core library is mandatory for GPU runs; the
+    multi-GPU companion is optional.
     """
     import contextlib
     import ctypes
     import sysconfig
 
     libdir = Path(sysconfig.get_paths()["purelib"]) / "cutensor" / "lib"
-    for name in ("libcutensor.so.2", "libcutensorMg.so.2"):
-        with contextlib.suppress(OSError):
-            ctypes.CDLL(str(libdir / name), mode=ctypes.RTLD_GLOBAL)
+    core = libdir / "libcutensor.so.2"
+    try:
+        ctypes.CDLL(str(core), mode=ctypes.RTLD_GLOBAL)
+    except OSError as exc:
+        raise RuntimeError(
+            f"failed to load required cuTENSOR core library {core}: {exc}; "
+            "install cutensor-cu12 in the active environment before using --gpu"
+        ) from exc
+
+    with contextlib.suppress(OSError):
+        ctypes.CDLL(str(libdir / "libcutensorMg.so.2"), mode=ctypes.RTLD_GLOBAL)
 
 
 def trim_gpu_pool() -> None:
@@ -141,6 +151,58 @@ def load_xyz(path: Path, template: Cluster) -> Cluster:
         [[float(x) for x in line.split()[1:4]] for line in lines[2 : 2 + n]]
     )
     return replace(template, coords=coords)
+
+
+def approach_seed_signature(
+    complex_guess: Cluster,
+    *,
+    m_index: int,
+    br_index: int,
+    ow_index: int,
+    pin_a: float,
+) -> dict[str, object]:
+    """Parameters that make an approach checkpoint safe to resume."""
+    return {
+        "version": APPROACH_SEED_VERSION,
+        "complex_guess_geometry_hash": geometry_hash(complex_guess.to_xyz()),
+        "m_index": m_index,
+        "br_index": br_index,
+        "ow_index": ow_index,
+        "pin_a": pin_a,
+    }
+
+
+def save_approach_seed(
+    seed: Cluster, path: Path, signature: dict[str, object]
+) -> None:
+    """Write an approach checkpoint and its compatibility data."""
+    save_xyz(seed, path)
+    path.with_suffix(".json").write_text(json.dumps(signature, indent=2))
+
+
+def load_compatible_approach_seed(
+    path: Path, template: Cluster, expected: dict[str, object]
+) -> Cluster | None:
+    """Load a seed only when its recorded inputs match this run exactly."""
+    signature_path = path.with_suffix(".json")
+    if not path.exists():
+        return None
+    if not signature_path.exists():
+        log("  ignoring approach_seed.xyz: compatibility metadata is missing")
+        return None
+    try:
+        actual = json.loads(signature_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        log(f"  ignoring approach_seed.xyz: invalid compatibility metadata ({exc})")
+        return None
+    if actual != expected:
+        log("  ignoring approach_seed.xyz: parameters or input geometry changed")
+        return None
+    try:
+        return load_xyz(path, template)
+    except (OSError, ValueError) as exc:
+        log(f"  ignoring approach_seed.xyz: checkpoint is unreadable ({exc})")
+        return None
 
 
 def checkpointed(path: Path, template: Cluster, compute) -> Cluster:
@@ -181,7 +243,7 @@ def proton_neb_guess(
     parameterized for arbitrary cluster indices)."""
     product_path = run_dir / "product.xyz"
     product_seed: Cluster | None = None
-    h_candidates = [ow_index + 1, ow_index + 2]
+    h_candidates = _attacker_h_indices(approach_seed, ow_index)
 
     if product_path.exists():
         product = load_xyz(product_path, approach_seed)
@@ -347,7 +409,14 @@ def crest_from_product(
     would a NEB peak. neb_ts_guess remains the escaped-saddle fallback.
     """
     r_br = float(np.linalg.norm(product.coords[m_index] - product.coords[br_index]))
+    first = round(r_br - 0.20, 2)
+    if first < 1.70:
+        raise ValueError(
+            f"product M-Obr bond ({r_br:.2f} A) is too short for a reverse crest scan"
+        )
     distances = [round(r, 2) for r in np.arange(r_br - 0.20, 1.99, -0.15)]
+    if not distances:
+        distances = [first]
     log("  stage 2d: reverse crest scan r(M-Obr) from the product side")
     scan = scan_to_maximum(
         product,
@@ -369,10 +438,28 @@ def crest_from_product(
     return scan_ts_guess(scan)
 
 
+def _attacker_h_indices(cluster: Cluster, ow_index: int) -> list[int]:
+    """Return appended attacker H indices, failing fast if ordering changed.
+
+    ``attack_complex`` appends water/hydronium with its oxygen first. This
+    builder contract preserves proton identity after transfer, when the
+    delivered proton is intentionally no longer bonded to the water oxygen.
+    """
+    if not 0 <= ow_index < len(cluster.symbols) or cluster.symbols[ow_index] != "O":
+        raise ValueError(f"attacker oxygen index {ow_index} is not an O atom")
+    h_indices = list(range(ow_index + 1, len(cluster.symbols)))
+    if not h_indices or any(cluster.symbols[i] != "H" for i in h_indices):
+        raise ValueError(
+            "attacker atom ordering changed: expected only H atoms after "
+            f"oxygen index {ow_index}"
+        )
+    return h_indices
+
+
 def _nearest_h(cluster: Cluster, br_index: int, ow_index: int) -> int:
-    """The delivered proton: the water H closest to the bridge oxygen."""
+    """The attacker proton closest to the bridge oxygen."""
     return min(
-        (ow_index + 1, ow_index + 2),
+        _attacker_h_indices(cluster, ow_index),
         key=lambda i: np.linalg.norm(cluster.coords[i] - cluster.coords[br_index]),
     )
 
@@ -429,6 +516,7 @@ def main() -> int:
     attacker = attacker_factory()
     complex_guess, ow_index = attack_complex(cc, attacker)
     m_index, br_index = cc.attacked_index, cc.bridge_index
+    assert br_index is not None  # ladder families always attack a bridge oxygen
     metal = cc.cluster.symbols[m_index]
     approach = APPROACH[metal]
 
@@ -500,6 +588,13 @@ def main() -> int:
     ts_guess_path = run_dir / "ts_guess.xyz"
     route_path = run_dir / "ts_guess.route"
     approach_seed_path = run_dir / "approach_seed.xyz"
+    seed_signature = approach_seed_signature(
+        complex_guess,
+        m_index=m_index,
+        br_index=br_index,
+        ow_index=ow_index,
+        pin_a=approach["pin"],
+    )
     route = route_path.read_text().strip() if route_path.exists() else "direct"
     if ts_guess_path.exists():
         ts_guess = load_xyz(ts_guess_path, complex_opt)
@@ -508,11 +603,14 @@ def main() -> int:
         route = "direct"
         route_path.unlink(missing_ok=True)
         base: Cluster | None = None
-        if approach_seed_path.exists():
+        base = load_compatible_approach_seed(
+            approach_seed_path, complex_opt, seed_signature
+        )
+        if base is not None:
             # A crashed proton-route attempt already proved the direct
             # route dead — skip the approach scan entirely.
             log("  resume: approach_seed.xyz exists, skipping approach scan")
-            base = load_xyz(approach_seed_path, complex_opt)
+
         else:
             try:
                 scan = scan_to_maximum(
@@ -530,8 +628,10 @@ def main() -> int:
             except ScanNoMaximumError as exc:
                 log("  approach coordinate alone does not cross the ridge;")
                 base = min(exc.scan, key=lambda p: abs(p[0] - approach["pin"]))[2]
-                save_xyz(base, approach_seed_path)
+                save_approach_seed(base, approach_seed_path, seed_signature)
         if base is not None:
+            route = "proton-neb"
+            route_path.write_text(route)
             ts_guess = proton_neb_guess(
                 base,
                 complex_opt,
@@ -542,7 +642,6 @@ def main() -> int:
                 ow_index=ow_index,
                 pin_a=approach["pin"],
             )
-            route = "proton-neb"
         save_xyz(ts_guess, ts_guess_path)
         if route == "proton-neb":
             route_path.write_text(route)

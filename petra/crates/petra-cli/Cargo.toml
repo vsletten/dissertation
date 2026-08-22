@@ -13,3 +13,4 @@ path = "src/main.rs"
 petra-core = { path = "../petra-core" }
 petra-deck = { path = "../petra-deck" }
 petra-io = { path = "../petra-io" }
+petra-observables = { path = "../petra-observables" }

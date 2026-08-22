@@ -45,6 +45,10 @@ pub struct GridSpec {
 #[serde(deny_unknown_fields)]
 pub struct ExecutionSpec {
     pub strategy: String,
+    /// Ordered piecewise-isothermal CTMC segments. Each segment owns a
+    /// temperature and a duration in simulated wall time.
+    #[serde(default)]
+    pub schedule: Vec<ScheduleSegment>,
     #[serde(default)]
     pub ctmc: Option<CtmcSpec>,
     #[serde(default)]
@@ -59,13 +63,35 @@ pub struct ExecutionSpec {
     pub ensemble: EnsembleSpec,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScheduleSegment {
+    /// Kelvin.
+    pub temperature: f64,
+    /// Simulated-time duration of this isothermal segment.
+    pub duration: f64,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CtmcSpec {}
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SynchronousSpec {}
+/// Synchronous CA parameters. When multiple rules are enabled at one site,
+/// the first rule in deck declaration order wins (RFC-001 §3).
+pub struct SynchronousSpec {
+    /// Synchronous updates fire at most one rule per site according to this
+    /// deterministic priority policy.
+    pub conflict_resolution: SynchronousConflictResolution,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SynchronousConflictResolution {
+    /// Choose the first enabled rule in deck declaration order (RFC-001 §3).
+    FirstMatch,
+}
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -161,6 +187,8 @@ struct DeckV1 {
     #[serde(default)]
     reactions: Vec<ReactionSpec>,
     simulation: SimSpec,
+    #[serde(default)]
+    observables: Option<ObservablesSpec>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -217,6 +245,7 @@ impl DeckFile {
         v1.deck.schema = Some(2);
         let execution = ExecutionSpec {
             strategy: "ctmc".to_string(),
+            schedule: Vec::new(),
             ctmc: None,
             synchronous: None,
             metropolis: None,
@@ -232,10 +261,10 @@ impl DeckFile {
                 seed_policy: SeedPolicy::Increment,
             },
         };
-        let observables = ObservablesSpec {
-            report_every: v1.simulation.report_every.unwrap_or(0),
-            series: Vec::new(),
-        };
+        let mut observables = v1.observables.unwrap_or_default();
+        if observables.report_every == 0 {
+            observables.report_every = v1.simulation.report_every.unwrap_or(0);
+        }
         Self {
             deck: v1.deck,
             structure_kind: StructureKind::Cell,
@@ -367,6 +396,16 @@ fn validate_v2_surfaces(deck: &DeckV2) -> Result<(), String> {
             .iter()
             .chain(rule.branches.iter().flat_map(|branch| &branch.effects))
             .collect();
+        if deck.execution.strategy == "synchronous"
+            && (rule.branches.len() > 1
+                || effects
+                    .iter()
+                    .any(|effect| effect.select_mode.as_deref() == Some("one")))
+        {
+            return Err(format!(
+                "{ctx}: synchronous rules are draw-free and cannot use weighted branches or select_mode = 'one'"
+            ));
+        }
         let source = rule.center.is_none();
         if source && effects.iter().any(|effect| effect.target != "source") {
             return Err(format!(
@@ -410,7 +449,8 @@ fn validate_v2_surfaces(deck: &DeckV2) -> Result<(), String> {
 
     for observable in &deck.observables.series {
         match observable.kind.as_str() {
-            "state_counts" | "event_rates" | "rate_spectra" | "cluster_sizes" | "snapshot" => {}
+            "state_counts" | "event_rates" | "rate_spectra" | "cluster_sizes" | "surface_area"
+            | "exposure_age" | "snapshot" => {}
             "interface_roughness" => {
                 let axis = observable
                     .parameters
@@ -517,6 +557,41 @@ fn validate_execution(execution: &ExecutionSpec) -> Result<(), String> {
     match execution.strategy.as_str() {
         "ctmc" | "synchronous" | "metropolis" | "pca" => {}
         other => return Err(format!("unknown execution strategy '{other}'")),
+    }
+    if execution.strategy == "synchronous" && execution.synchronous.is_none() {
+        return Err(
+            "[execution.synchronous] conflict_resolution = 'first_match' is required; \
+             when multiple rules match one site, the first rule in definition order wins"
+                .to_string(),
+        );
+    }
+    if !execution.schedule.is_empty() && execution.strategy != "ctmc" {
+        return Err("[execution.schedule] is supported only for CTMC".to_string());
+    }
+    let mut deadline = 0.0;
+    for (index, segment) in execution.schedule.iter().enumerate() {
+        if !segment.temperature.is_finite() || segment.temperature <= 0.0 {
+            return Err(format!(
+                "execution.schedule segment {index} temperature must be finite and positive"
+            ));
+        }
+        if !segment.duration.is_finite() || segment.duration <= 0.0 {
+            return Err(format!(
+                "execution.schedule segment {index} duration must be finite and positive"
+            ));
+        }
+        let next_deadline = deadline + segment.duration;
+        if !next_deadline.is_finite() {
+            return Err(format!(
+                "execution.schedule cumulative duration overflows at segment {index}"
+            ));
+        }
+        if next_deadline <= deadline {
+            return Err(format!(
+                "execution.schedule segment {index} duration is too small to advance cumulative wall time"
+            ));
+        }
+        deadline = next_deadline;
     }
     if let Some(temperature) = execution
         .metropolis

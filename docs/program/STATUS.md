@@ -2,7 +2,7 @@
 
 *Newest first. One line per merged unit of work (or notable event),
 appended by the PR that did it: `date — actor — what + pointer`.
-Deviations get a `DEVIATION:` note; details live in the card.*
+*Deviations get a `DEVIATION:` note; details live in the card.*
 
 - 2026-08-21 — fable — A3 pilot cell DONE: embedded Si–O–Si neutral
   hydrolysis ΔG‡ = 205.7 kJ/mol (free dimer 113.0; +92.7 lattice shift,
@@ -12,6 +12,34 @@ Deviations get a `DEVIATION:` note; details live in the card.*
   Campaign recipe + workstation ops prerequisites in the card Result;
   family ladders are factory work per the 2026-08-20 handoff.
 
+- 2026-08-22 — hermes-laptop — E2 DONE: scheduled full muscovite mechanism
+  now distinguishes pristine/extended galleries, explicit locally driven
+  delamination, ⁴⁰Ar/³⁹Ar/³⁶Ar, and octahedral recoil traps; deterministic
+  release/age/contamination products and honest ±5 kcal proxy bands land at
+  `docs/program/results/E2-muscovite-full-mechanism.md`. E1's 500/700 °C gates
+  remain green.
+- 2026-08-22 — hermes-laptop — B5 DONE: ordered piecewise-isothermal CTMC
+  schedules now advance through exact wall-time boundaries, recompile full
+  thermo/propensity tables + Fenwick trees, and run through native CLI and
+  deterministic ensembles. Exact T1 replay, seeded T2 statistics, v1 20k-step
+  parity, workspace tests, format, Clippy, and independent review are green.
+- 2026-08-22 — hermes-laptop — A5 Phase 0 DONE: long-time rate spectra,
+  projected-geometric versus BET-like surface accounting, and core-owned
+  per-site exposure ages landed with deterministic alias-aware tracking. The
+  finite-defect kaolinite smoke exhausts 33 fast sites by step 40 and cuts bulk
+  propensity 286.96×; 96 tests, bitwise parity, Clippy, and paranoid replay are
+  green. `docs/program/results/A5p0-aging-observables.md`.
+- 2026-08-22 — hermes-laptop — B4 DONE: Rayon-parallel deterministic replicas,
+  full distributions/means/bootstrap CIs, and declarative state-count, event-rate,
+  rate-spectrum, cluster-size, and geometric/BET-like area outputs; Ising Binder
+  dogfood + Kossel spectrum-broadening golden green, with all 88 Petra tests and
+  Clippy clean. `petra/docs/OBSERVABLES.md` records the A5 exposure-age seam.
+- 2026-08-21 — hermes-laptop — B3 DONE: Petra now runs synchronous CA,
+  asynchronous Metropolis, and discrete-time PCA on schema-v2 grids; Conway,
+  Ising (`Tc=2.273230` vs `2.269185`), and SIR (`R0*=1.017094`) analytic gates
+  are green with CTMC bitwise parity preserved.
+- 2026-08-21 — omnibus supervisor — reconciled merged-main board drift:
+  B2 and QI3 are done; B3, B4, and B5 are now ready after B2 PR #33.
 - 2026-08-20 — hermes x2 + fable — B2 DONE: petra engine behind the
   UpdateStrategy trait, schema v2 complete, bitwise parity green on
   three gates (incl. shipped-kossel full-lifetime). Two-worker relay +
@@ -118,3 +146,9 @@ Deviations get a `DEVIATION:` note; details live in the card.*
   commit `a2edf91`: `factory/hermes/cron/queue-drain.md` now points to
   POLICY v7, and service activation moved to
   `factory/services/activate.sh` for cloud-safe installation.
+- 2026-08-20 — fable — Victor recovered his complete 1999 dissertation
+  archive from the NAS (thesis LaTeX, the original C-language model,
+  88 timestamped MC campaign runs, 86 Gaussian B3LYP logs incl.
+  oxalate/ligand systems). New card A8-thesis-archive-intake (READY,
+  workstation): catalog, curate golden data into legacy/, build the
+  1999-vs-2026 DFT barrier ledger.

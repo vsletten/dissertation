@@ -23,7 +23,9 @@ const E_HB: f64 = 5.0; // kcal/mol, the deck's placeholder (CALC-001)
 const T: f64 = 8000.0;
 
 fn repo_path(rel: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..").join(rel)
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .join(rel)
 }
 
 fn load_multilayer() -> petra_deck::CompiledDeck {
@@ -45,7 +47,10 @@ fn state_id(deck: &petra_deck::CompiledDeck, name: &str) -> StateId {
     )
 }
 
-fn kinds_of(deck: &petra_deck::CompiledDeck, lat: &petra_core::lattice::Lattice) -> Vec<petra_core::crystal::KindId> {
+fn kinds_of(
+    deck: &petra_deck::CompiledDeck,
+    lat: &petra_core::lattice::Lattice,
+) -> Vec<petra_core::crystal::KindId> {
     lat.template_index
         .iter()
         .map(|&t| deck.kinds_per_template[t as usize])
@@ -71,7 +76,12 @@ fn interlayer_bond_topology_matches_geometry() {
     // its bond at the b = 2 fixed face: 20 × 2 × 3 = 120. Times 2 for the
     // two CSR directions.
     let count: usize = (0..lat.len())
-        .map(|s| lat.neighbor_labels(s).iter().filter(|&&l| l == hbond).count())
+        .map(|s| {
+            lat.neighbor_labels(s)
+                .iter()
+                .filter(|&&l| l == hbond)
+                .count()
+        })
         .sum();
     assert_eq!(count, 2 * (900 + 120), "hbond adjacency entries");
 
@@ -105,10 +115,7 @@ fn every_layer_initializes_identically_to_the_single_sheet() {
                 for c in 0..4 {
                     let ml_i = site(a, b, c, t);
                     let ml_name = &ml_deck.state_names[ml.lattice.states[ml_i].0 as usize];
-                    assert_eq!(
-                        ml_name, ss_name,
-                        "state at (a={a}, b={b}, c={c}, t={t})"
-                    );
+                    assert_eq!(ml_name, ss_name, "state at (a={a}, b={b}, c={c}, t={t})");
                     // Frozen flags agree except the one documented case:
                     // donor 24's hbond crosses the fixed b-face, so pos 24
                     // in the extreme b-row freezes in the multilayer.
@@ -274,7 +281,9 @@ fn multilayer_dynamics_runs_and_conserves_sites() {
         assert!(fired.time > last_time, "time must increase (step {i})");
         last_time = fired.time;
         if i % 1000 == 999 {
-            engine.paranoid_check().expect("incremental tables consistent");
+            engine
+                .paranoid_check()
+                .expect("incremental tables consistent");
             assert_eq!(count_by_kind(&engine), kind_totals, "site conservation");
         }
     }

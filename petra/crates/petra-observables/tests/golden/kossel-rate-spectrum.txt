@@ -1,0 +1,2 @@
+initial_log10_std=0.847370502
+nucleated_log10_std=1.141527947

@@ -18,7 +18,9 @@ use kaolinite::build::LatticeParams;
 use kaolinite::{create_lattice, find_pairs, populate_solid, terminate_lattice};
 
 fn repo_path(rel: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..").join(rel)
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .join(rel)
 }
 
 /// Petra "Kind.state" name → legacy 3-digit code.
@@ -29,8 +31,18 @@ fn code_table() -> HashMap<String, i32> {
         }
     }
     let mut m = HashMap::new();
-    add(&mut m, "Al", &["empty", "l0", "l1", "l2", "l3", "l4", "l5", "l6"], 100);
-    add(&mut m, "Si", &["empty", "oh0", "oh1", "oh2", "oh3", "oh4"], 200);
+    add(
+        &mut m,
+        "Al",
+        &["empty", "l0", "l1", "l2", "l3", "l4", "l5", "l6"],
+        100,
+    );
+    add(
+        &mut m,
+        "Si",
+        &["empty", "oh0", "oh1", "oh2", "oh3", "oh4"],
+        200,
+    );
     add(&mut m, "Oss", &["empty", "br", "hy", "si1"], 300);
     add(
         &mut m,
@@ -91,9 +103,7 @@ fn kaolinite_build_matches_kmc_rs_site_by_site() {
             continue;
         }
         if lat.frozen[i] {
-            mismatches.push(format!(
-                "site {i}: petra frozen but legacy state {legacy}"
-            ));
+            mismatches.push(format!("site {i}: petra frozen but legacy state {legacy}"));
             continue;
         }
         let p = petra_code(i);
@@ -148,9 +158,7 @@ fn kaolinite_dynamics_runs_and_conserves_sites() {
         let counts = engine.state_counts(deck.n_states);
         deck.kind_state_ranges
             .iter()
-            .map(|&(start, n)| {
-                (start..start + n).map(|s| counts[s as usize]).sum::<u64>()
-            })
+            .map(|&(start, n)| (start..start + n).map(|s| counts[s as usize]).sum::<u64>())
             .collect()
     };
     assert_eq!(count_by_kind(&engine), kind_totals);
@@ -163,7 +171,9 @@ fn kaolinite_dynamics_runs_and_conserves_sites() {
         assert!(fired.time > last_time, "time must increase (step {i})");
         last_time = fired.time;
         if i % 1000 == 999 {
-            engine.paranoid_check().expect("incremental tables consistent");
+            engine
+                .paranoid_check()
+                .expect("incremental tables consistent");
             assert_eq!(count_by_kind(&engine), kind_totals, "site conservation");
         }
     }
