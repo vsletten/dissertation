@@ -583,10 +583,15 @@ def quarantine_final_outputs(run_dir: Path, *, reason: str) -> None:
             path.replace(quarantined)
 
 
-def begin_sequential_run(run_dir: Path) -> None:
+def begin_gated_run(run_dir: Path) -> None:
     """Quarantine prior final outputs before a new gated attempt starts."""
     quarantine_final_outputs(run_dir, reason="superseded")
     write_sequential_run_status(run_dir, "running")
+
+
+def begin_sequential_run(run_dir: Path) -> None:
+    """Backward-compatible name for sequential closeout initialization."""
+    begin_gated_run(run_dir)
 
 
 def block_run(run_dir: Path, detail: str) -> None:
@@ -1421,6 +1426,7 @@ def main() -> int:
     dimer, attacker = dimer_factory(), attacker_factory()
     acid_path = args.reaction.endswith("-acid")
     if acid_path:
+        begin_gated_run(run_dir)
         complex_guess = protonated_bridge_complex(dimer, mode=args.approach)
     else:
         complex_guess = hydrolysis_complex(dimer, attacker, mode=args.approach)
@@ -1790,6 +1796,13 @@ def main() -> int:
             attacker_opt.to_xyz(),
             charge=attacker_opt.charge,
             spin=attacker_opt.spin,
+        )
+
+    if acid_path:
+        write_sequential_run_status(
+            run_dir,
+            "completed",
+            detail="results.json and store.sqlite passed saddle/IRC/minimum gates",
         )
 
     log("")

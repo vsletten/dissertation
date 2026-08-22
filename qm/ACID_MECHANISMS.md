@@ -28,7 +28,7 @@ laundering a constrained non-minimum into thermochemistry.
 
 Run directory (ignored campaign state):
 
-`runs/phase1/al-acid-preprotonated-v1-b3lyp-def2-svp-flank/`
+`runs/phase1/al-acid-preprotonated-v2-b3lyp-def2-svp-flank/`
 
 | Quantity | Result |
 |---|---:|
@@ -44,20 +44,22 @@ Run directory (ignored campaign state):
 Both saddles have exactly one imaginary mode. Quick-IRC endpoint signatures
 are exact:
 
-- addition: `(False, True, True, 1, 2)` ↔ `(True, True, True, 1, 2)`;
-- cleavage: `(True, True, True, 1, 2)` ↔ `(True, False, True, 1, 1)`.
+- addition: `(False, True, True, 1, 2, 0)` ↔ `(True, True, True, 1, 2, 0)`;
+- cleavage: `(True, True, True, 1, 2, 0)` ↔ `(True, False, True, 1, 1, 1)`.
 
 The tuple is `(Si–Ow bonded, Si–Obr bonded, opposite-center–Obr bonded,
-bridge proton count, attacker proton count)`. The hydrolyzed endpoint's third
-acid proton resides on a terminal oxygen; that proton rotamer is accepted only
-after heavy reactive-core RMSD and same-method energy gates.
+bridge proton count, attacker proton count, terminal-framework proton count)`.
+Every tracked acid proton is assigned uniquely to its nearest oxygen, so a
+dissociated/missing proton cannot pass as the terminal rotamer. The addition
+R/I endpoints also pass heavy reactive-core RMSD and same-method energy gates.
+Reactant and associative-intermediate Hessians have zero imaginary modes.
 
 Artifact receipts:
 
 | Artifact | SHA-256 |
 |---|---|
-| `results.json` | `584c13af974383c3ec77582776060723526c116fac99ad7ce072739232e63b96` |
-| `store.sqlite` | `e1349a9b0caac58e8e9656965c6450096b912315fd0ed7a61c08dc4a573b2a10` |
+| `results.json` | `2c584be0340d17a2d9ee67049dced03d98515640985a12379ac755eb70a86ff2` |
+| `store.sqlite` | `330d36b02f1c887d289715f9871afb6658cd8be746cc74c92cf17ecd345bcc3d` |
 | `addition_scan/scan.json` | `28bac5ae20ae10f04cce986499f04682c1bb2ad324da65a9a94ec6286e914768` |
 | `addition_scan_directed_ts.xyz` | `14256e743add5ede70f7c1f8ce1d842e8f27f4d5a04c482d9c79d401b4693175` |
 | `cleavage_ts.xyz` | `e7ae4a246ef49d38c41d2b0236e898b88ecdf4bf9ffebb1e0fa30718f18dd68d` |
@@ -87,9 +89,9 @@ the next run.
 ## `si-acid` negative result
 
 The pre-equilibrium contract requires the optimized reactant signature
-`(False, True, True, 1, 2)`: protonated intact bridge plus residual H2O. The
+`(False, True, True, 1, 2, 0)`: protonated intact bridge plus residual H2O. The
 one-water disilicate cluster instead optimized to
-`(False, True, True, 0, 3)`: intact neutral bridge plus H3O+.
+`(False, True, True, 0, 3, 0)`: intact neutral bridge plus H3O+.
 
 Receipts:
 
@@ -99,6 +101,10 @@ Receipts:
 | Residual water placed at 4.5 Å | same `(0, 3)` proton counts | `00d47740a2dda94869491308f3cb9d0e52aee1ed39c118b39631c0432d750753` |
 | Aqueous PCM | same `(0, 3)` proton counts after 100 optimizer steps | `f7e192e4ae83611a7f446101f6ed258389c40d35997aa3a514a9ea57b454cc0c` |
 | SMD/GPU probe | nonphysical energy descent / O(1) Ha/Bohr gradients; stopped | `233942dabcc318cc980ed38810397cde0ee1623b1b4006a5771d69c9c9a6d61d` |
+
+The mechanism-v2 driver reverified this failure, wrote `run_status.json` as
+`blocked`, and left no canonical `results.json`/`store.sqlite`; log SHA-256 is
+`13d8c392cf991059d35274469b7db5148f0bab94db7b3c74b5aeabceb8ad9809`.
 
 This is a model-validity failure, not a compute failure. Holding Obr–H by a
 constraint would make the requested reactant exist but would invalidate the
