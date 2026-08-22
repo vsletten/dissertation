@@ -651,6 +651,27 @@ def test_acid_saddle_refinement_uses_endpoint_directed_cartesian_mode(
     assert calls[0]["trajectory"] == str(tmp_path / "sella.traj")
 
 
+def test_acid_addition_scan_guess_persists_structures_and_manifest(
+    monkeypatch, tmp_path
+):
+    reactant = geometry("reactant", 3.2)
+    crest = geometry("crest", 2.6)
+    product_side = geometry("product-side", 2.4)
+    points = [
+        (2.8, -2.0, geometry("loose", 2.8)),
+        (2.6, -1.0, crest),
+        (2.4, -2.0, product_side),
+    ]
+    monkeypatch.setattr(phase1, "scan_to_maximum", lambda *args, **kwargs: points)
+
+    result = phase1.acid_addition_scan_guess(reactant, CHEAP, tmp_path, 2)
+
+    assert result is crest
+    manifest = json.loads((tmp_path / "addition_scan" / "scan.json").read_text())
+    assert [point["distance_a"] for point in manifest] == [2.8, 2.6, 2.4]
+    assert (tmp_path / "addition_scan" / "r-2.60.xyz").exists()
+
+
 def test_acid_checkpoint_namespace_is_mechanism_qualified():
     assert phase1.reaction_run_slug("si-neutral", "b3lyp", "def2-svp", "flank") == (
         "si-neutral-b3lyp-def2-svp-flank"

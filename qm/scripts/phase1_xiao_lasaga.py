@@ -862,6 +862,38 @@ def refine_phase1_saddle(
     return find_ts(ts_guess, settings, trajectory=str(trajectory_path))
 
 
+def acid_addition_scan_guess(
+    complex_opt: Cluster,
+    settings: DftSettings,
+    run_dir: Path,
+    ow_index: int,
+) -> Cluster:
+    """Locate the acid water-addition crest without endpoint conformer mixing."""
+    scan = scan_to_maximum(
+        complex_opt,
+        settings,
+        atom_i=SI_INDEX,
+        atom_j=ow_index,
+        distances_a=[2.8, 2.6, 2.4, 2.2, 2.1, 2.0, 1.9],
+        progress=lambda r, e: log(f"  acid addition r={r:.2f} A  E={e:.6f} Ha"),
+    )
+    scan_dir = run_dir / "addition_scan"
+    scan_dir.mkdir(exist_ok=True)
+    manifest = []
+    for distance, electronic, cluster in scan:
+        filename = f"r-{distance:.2f}.xyz"
+        save_xyz(cluster, scan_dir / filename)
+        manifest.append(
+            {
+                "distance_a": distance,
+                "electronic_hartree": electronic,
+                "structure": filename,
+            }
+        )
+    (scan_dir / "scan.json").write_text(json.dumps(manifest, indent=2))
+    return scan_ts_guess(scan)
+
+
 def finish_al_neutral_sequential(
     *,
     complex_opt: Cluster,
@@ -930,73 +962,90 @@ def finish_al_neutral_sequential(
     save_xyz(cleavage_fwd, run_dir / "cleavage_irc_fwd.xyz")
 
     log("stage 4b: directed reactant -> associative-intermediate saddle")
-    addition_guess = checkpointed(
-        run_dir / "addition_ts_guess.xyz",
-        complex_opt,
-        lambda: neb_ts_guess(
+    if acid_path:
+        addition_guess = checkpointed(
+            run_dir / "addition_scan_ts_guess.xyz",
             complex_opt,
-            intermediate,
-            settings,
-            n_images=5,
-            fmax_ev_a=0.20,
-            max_steps=240,
-            pre_relax_fmax_ev_a=1.0,
-            pre_relax_steps=120,
-            climb_optimizer="ode",
-        ),
-    )
-    h_candidates = proton_indices if acid_path else (ow_index + 1, ow_index + 2)
-    transfer_h = min(
-        h_candidates,
-        key=lambda i: np.linalg.norm(
-            addition_guess.coords[i] - addition_guess.coords[BR_INDEX]
-        ),
-    )
-    pinned_distances = [
-        (
-            SI_INDEX,
-            ow_index,
-            float(
-                np.linalg.norm(
-                    addition_guess.coords[SI_INDEX] - addition_guess.coords[ow_index]
-                )
+            lambda: acid_addition_scan_guess(
+                complex_opt,
+                settings,
+                run_dir,
+                ow_index,
             ),
-        ),
-        (
-            BR_INDEX,
-            transfer_h,
-            float(
-                np.linalg.norm(
-                    addition_guess.coords[BR_INDEX] - addition_guess.coords[transfer_h]
-                )
+        )
+        addition_relaxed_guess = addition_guess
+        addition_ts_path = run_dir / "addition_scan_directed_ts.xyz"
+        addition_trajectory_path = run_dir / "addition_scan_directed_sella.traj"
+    else:
+        addition_guess = checkpointed(
+            run_dir / "addition_ts_guess.xyz",
+            complex_opt,
+            lambda: neb_ts_guess(
+                complex_opt,
+                intermediate,
+                settings,
+                n_images=5,
+                fmax_ev_a=0.20,
+                max_steps=240,
+                pre_relax_fmax_ev_a=1.0,
+                pre_relax_steps=120,
+                climb_optimizer="ode",
             ),
-        ),
-    ]
-    log("stage 4c: exact two-coordinate relaxation of addition-peak spectators")
-    addition_relaxed_guess = checkpointed(
-        run_dir / "addition_pinned_relaxed.xyz",
-        addition_guess,
-        lambda: relax_at_fixed_distances(
+        )
+        transfer_h = min(
+            (ow_index + 1, ow_index + 2),
+            key=lambda i: np.linalg.norm(
+                addition_guess.coords[i] - addition_guess.coords[BR_INDEX]
+            ),
+        )
+        pinned_distances = [
+            (
+                SI_INDEX,
+                ow_index,
+                float(
+                    np.linalg.norm(
+                        addition_guess.coords[SI_INDEX]
+                        - addition_guess.coords[ow_index]
+                    )
+                ),
+            ),
+            (
+                BR_INDEX,
+                transfer_h,
+                float(
+                    np.linalg.norm(
+                        addition_guess.coords[BR_INDEX]
+                        - addition_guess.coords[transfer_h]
+                    )
+                ),
+            ),
+        ]
+        log("stage 4c: exact two-coordinate relaxation of addition-peak spectators")
+        addition_relaxed_guess = checkpointed(
+            run_dir / "addition_pinned_relaxed.xyz",
             addition_guess,
-            settings,
-            fixed_distances=pinned_distances,
-            fmax_ev_a=0.05 if acid_path else 0.02,
-            max_steps=180 if acid_path else 120,
-            optimizer_maxstep=0.05,
-            trajectory=str(run_dir / "addition_pinned_relax.traj"),
-        ),
-    )
+            lambda: relax_at_fixed_distances(
+                addition_guess,
+                settings,
+                fixed_distances=pinned_distances,
+                fmax_ev_a=0.02,
+                max_steps=120,
+                optimizer_maxstep=0.05,
+                trajectory=str(run_dir / "addition_pinned_relax.traj"),
+            ),
+        )
+        addition_ts_path = run_dir / "addition_directed_ts.xyz"
+        addition_trajectory_path = run_dir / "addition_directed_sella.traj"
     core_protons = proton_indices if acid_path else (ow_index + 1, ow_index + 2)
     reactive_core = sorted({BR_INDEX, SI_INDEX, AL_INDEX, ow_index, *core_protons})
     trim_gpu_pool()
-    addition_ts_path = run_dir / "addition_directed_ts.xyz"
     addition_ts = checkpointed(
         addition_ts_path,
         addition_relaxed_guess,
         lambda: find_ts(
             addition_relaxed_guess,
             settings,
-            trajectory=str(run_dir / "addition_directed_sella.traj"),
+            trajectory=str(addition_trajectory_path),
             initial_mode=reaction_path_vector(
                 complex_opt,
                 intermediate,
@@ -1013,7 +1062,7 @@ def finish_al_neutral_sequential(
     )
     if addition_escape:
         rejected = run_dir / (
-            f"addition_directed_ts.rejected-channel-escape-{time.time_ns()}.xyz"
+            f"{addition_ts_path.stem}.rejected-channel-escape-{time.time_ns()}.xyz"
         )
         addition_ts_path.replace(rejected)
         return fail(f"{addition_escape}; rejected directed addition saddle")
