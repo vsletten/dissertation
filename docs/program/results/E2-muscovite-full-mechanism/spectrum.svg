@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520">
+<rect width="100%" height="100%" fill="#fbfaf7"/>
+<text x="450" y="30" text-anchor="middle" font-family="sans-serif" font-size="21" font-weight="700">Synthetic 40Ar/39Ar step spectrum</text>
+<rect x="80" y="55" width="760" height="360" fill="white" stroke="#334155"/>
+<rect x="84.00" y="101.96" width="144.00" height="313.04" fill="#b45309"/>
+<text x="156.00" y="438" text-anchor="middle" font-family="monospace" font-size="11">500 C</text>
+<rect x="236.00" y="101.96" width="144.00" height="313.04" fill="#b45309"/>
+<text x="308.00" y="438" text-anchor="middle" font-family="monospace" font-size="11">550 C</text>
+<rect x="388.00" y="415.00" width="144.00" height="0.00" fill="#b45309"/>
+<text x="460.00" y="438" text-anchor="middle" font-family="monospace" font-size="11">600 C</text>
+<rect x="540.00" y="415.00" width="144.00" height="0.00" fill="#b45309"/>
+<text x="612.00" y="438" text-anchor="middle" font-family="monospace" font-size="11">650 C</text>
+<text x="764.00" y="438" text-anchor="middle" font-family="monospace" font-size="11">700 C</text>
+<text x="460.0" y="485" text-anchor="middle" font-family="sans-serif" font-size="14">incremental-heating step</text>
+<text x="22" y="235.0" transform="rotate(-90 22 235.0)" text-anchor="middle" font-family="sans-serif" font-size="14">apparent age (Ma)</text>
+<text x="450" y="500" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#475569">Proxy mechanism and user-selected J factor; not a calibrated geological age</text>
+</svg>

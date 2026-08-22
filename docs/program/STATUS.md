@@ -4,6 +4,12 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-22 — hermes-laptop — E2 DONE: scheduled full muscovite mechanism
+  now distinguishes pristine/extended galleries, explicit locally driven
+  delamination, ⁴⁰Ar/³⁹Ar/³⁶Ar, and octahedral recoil traps; deterministic
+  release/age/contamination products and honest ±5 kcal proxy bands land at
+  `docs/program/results/E2-muscovite-full-mechanism.md`. E1's 500/700 °C gates
+  remain green.
 - 2026-08-22 — hermes-laptop — B5 DONE: ordered piecewise-isothermal CTMC
   schedules now advance through exact wall-time boundaries, recompile full
   thermo/propensity tables + Fenwick trees, and run through native CLI and
