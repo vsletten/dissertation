@@ -50,6 +50,9 @@ pub struct Lattice {
     /// the deck declares defects (docs/STRAIN.md §2). Static in v1 — a
     /// future relaxation provider mutates it and dirties the sites.
     pub strain: Vec<f64>,
+    /// Physical/strategy time when a tracked solid site most recently became
+    /// exposed. `None` means untracked or currently buried/non-solid.
+    pub exposed_since: Vec<Option<f64>>,
 }
 
 impl Lattice {
@@ -112,6 +115,7 @@ impl Lattice {
             adj_label: Vec::new(),
             states: Vec::with_capacity(n),
             strain: vec![0.0; n],
+            exposed_since: vec![None; n],
         };
 
         lat.adj_off.push(0);

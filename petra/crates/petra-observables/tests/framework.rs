@@ -10,6 +10,26 @@ fn ising_deck() -> petra_deck::CompiledDeck {
     petra_deck::compile(&parsed).expect("deck compiles")
 }
 
+fn kossel_with_exposure() -> petra_deck::CompiledDeck {
+    let path = format!(
+        "{}/../../examples/kossel-etchpit.toml",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("Kossel fixture");
+    let parsed: petra_deck::DeckFile = toml::from_str(&text).expect("deck parses");
+    petra_deck::compile(&parsed).expect("deck compiles")
+}
+
+fn aging_smoke_deck() -> petra_deck::CompiledDeck {
+    let path = format!(
+        "{}/../../examples/kaolinite-aging-smoke.toml",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("aging-smoke fixture");
+    let parsed: petra_deck::DeckFile = toml::from_str(&text).expect("deck parses");
+    petra_deck::compile(&parsed).expect("deck compiles")
+}
+
 #[test]
 fn summary_keeps_distribution_and_has_reproducible_bootstrap_ci() {
     let first = summarize(&[1.0, 2.0, 3.0, 4.0], 2_000, 91);
@@ -98,6 +118,96 @@ fn declared_kossel_observables_cover_rates_clusters_and_area() {
         }
         ref other => panic!("expected surface area, got {other:?}"),
     }
+}
+
+#[test]
+fn exposure_age_preserves_old_surfaces_and_timestamps_newly_exposed_sites() {
+    let deck = kossel_with_exposure();
+    let mut engine = deck.build_engine(Some(42)).expect("engine builds");
+    let ObservableValue::ExposureAge(initial) = &observe(&engine, &deck).values[5] else {
+        panic!("expected exposure ages")
+    };
+    assert!(!initial.is_empty());
+    assert!(initial.iter().all(|age| *age == 0.0));
+
+    engine.step().expect("first dissolution event");
+    let ObservableValue::ExposureAge(ages) = &observe(&engine, &deck).values[5] else {
+        panic!("expected exposure ages")
+    };
+    assert!(ages.contains(&0.0), "new surface starts at age zero");
+    assert!(
+        ages.iter()
+            .any(|age| age.to_bits() == engine.time.to_bits()),
+        "continuously exposed initial surface ages by physical time"
+    );
+    assert!(ages.iter().all(|age| *age >= 0.0 && *age <= engine.time));
+}
+
+#[test]
+fn geometric_footprint_stays_fixed_while_bet_proxy_resolves_new_internal_area() {
+    let deck = kossel_with_exposure();
+    let mut engine = deck.build_engine(Some(42)).expect("engine builds");
+    let ObservableValue::SurfaceArea(initial) = &observe(&engine, &deck).values[4] else {
+        panic!("expected surface area")
+    };
+    let initial = initial.clone();
+
+    for _ in 0..20 {
+        engine.step().expect("dissolution event");
+        let ObservableValue::SurfaceArea(after) = &observe(&engine, &deck).values[4] else {
+            panic!("expected surface area")
+        };
+        if after.bet_site_proxy > initial.bet_site_proxy {
+            assert_eq!(after.geometric, initial.geometric);
+            return;
+        }
+    }
+    panic!("BET proxy did not resolve newly created internal area");
+}
+
+#[test]
+fn kaolinite_aging_smoke_depletes_finite_defects_and_declines_in_rate() {
+    let deck = aging_smoke_deck();
+    let defect = deck
+        .state_names
+        .iter()
+        .position(|name| name == "Kaolinite_site.defect")
+        .expect("defect state");
+    let mut engine = deck.build_engine(Some(42)).expect("engine builds");
+    let initial = observe(&engine, &deck);
+    let ObservableValue::StateCounts(initial_counts) = &initial.values[0] else {
+        panic!("state counts")
+    };
+    let ObservableValue::EventRates(initial_rates) = &initial.values[1] else {
+        panic!("event rates")
+    };
+    let initial_defects = initial_counts[defect];
+    let initial_rate: f64 = initial_rates.iter().sum();
+    assert!(
+        initial_defects > 0,
+        "smoke starts with a finite defect inventory"
+    );
+
+    for _ in 0..180 {
+        engine.step().expect("bounded smoke trajectory continues");
+    }
+    let aged = observe(&engine, &deck);
+    let ObservableValue::StateCounts(aged_counts) = &aged.values[0] else {
+        panic!("state counts")
+    };
+    let ObservableValue::EventRates(aged_rates) = &aged.values[1] else {
+        panic!("event rates")
+    };
+    let aged_rate: f64 = aged_rates.iter().sum();
+    assert_eq!(aged_counts[defect], 0, "fast defect inventory is exhausted");
+    assert!(
+        aged_rate < initial_rate * 0.1,
+        "bulk rate must decline with depletion: initial={initial_rate}, aged={aged_rate}"
+    );
+    assert!(aged
+        .values
+        .iter()
+        .any(|value| matches!(value, ObservableValue::ExposureAge(ages) if !ages.is_empty())));
 }
 
 fn spectrum_log10_width(sample: &petra_observables::Sample) -> f64 {

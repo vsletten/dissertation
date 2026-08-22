@@ -607,3 +607,38 @@ fn v1_compat_decks_may_opt_in_to_declarative_observables() {
         .observables
         .contains(&petra_deck::CompiledObservable::RateSpectra));
 }
+
+#[test]
+fn exposure_age_observable_accepts_a_solid_state_alias() {
+    let path = format!(
+        "{}/../../examples/kossel-etchpit.toml",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("v1 fixture").replace(
+        "[lattice]",
+        "[aliases]\nsolid = [\"M_site.occupied\"]\n\n[lattice]",
+    )
+        + "\n[[observables.series]]\nkind = \"exposure_age\"\nstate = \"@solid\"\naxis = 2\n";
+    let parsed: petra_deck::DeckFile = toml::from_str(&text).expect("exposure deck parses");
+    let compiled = petra_deck::compile(&parsed).expect("exposure declaration compiles");
+    assert!(compiled.observables.iter().any(|observable| matches!(
+        observable,
+        petra_deck::CompiledObservable::ExposureAge { axis: 2, states }
+            if states.len() == 1
+    )));
+}
+
+#[test]
+fn exposure_age_declarations_fail_closed_on_different_surface_definitions() {
+    let path = format!(
+        "{}/../../examples/kossel-etchpit.toml",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(path).expect("v1 fixture")
+        + "\n[[observables.series]]\nkind = \"exposure_age\"\nstate = \"M_site.occupied\"\naxis = 1\n";
+    let parsed: petra_deck::DeckFile = toml::from_str(&text).expect("exposure deck parses");
+    let error = petra_deck::compile(&parsed).expect_err("different tracked surfaces must fail");
+    assert!(error
+        .to_string()
+        .contains("exposure_age declarations must use one shared state/axis definition"));
+}

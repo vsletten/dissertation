@@ -318,6 +318,9 @@ fn write_observable_rows(
                     area.exposed_sites as f64,
                 ],
             ),
+            petra_observables::ObservableValue::ExposureAge(values) => {
+                ("exposure_age", values.clone())
+            }
         };
         for (index, value) in values.iter().enumerate() {
             writeln!(

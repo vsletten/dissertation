@@ -68,6 +68,7 @@ pub enum CompiledObservable {
     RateSpectra,
     ClusterSizes { states: Vec<StateId> },
     SurfaceArea { states: Vec<StateId>, axis: u8 },
+    ExposureAge { states: Vec<StateId>, axis: u8 },
     Snapshot,
 }
 
@@ -180,7 +181,7 @@ impl CompiledDeck {
             .collect();
         self.run_init(&mut lattice, &mut kinds, seed)?;
         self.compute_strain(&mut lattice)?;
-        Ok(Engine::new_with_site_kinds(
+        let mut engine = Engine::new_with_site_kinds(
             lattice,
             kinds,
             self.kind_names.len(),
@@ -188,7 +189,15 @@ impl CompiledDeck {
             self.reactions.clone(),
             self.temperature,
             seed,
-        ))
+        );
+        if let Some(CompiledObservable::ExposureAge { states, axis }) = self
+            .observables
+            .iter()
+            .find(|observable| matches!(observable, CompiledObservable::ExposureAge { .. }))
+        {
+            engine.enable_exposure_tracking(states.clone(), *axis);
+        }
+        Ok(engine)
     }
 
     /// Superpose every defect's analytic field into `lattice.strain`
@@ -980,6 +989,7 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
     }
 
     let mut observables = Vec::with_capacity(deck.observables.series.len());
+    let mut exposure_definition: Option<(Vec<StateId>, u8)> = None;
     for observable in &deck.observables.series {
         let state_filter = || -> Result<Vec<StateId>, CompileError> {
             let state = observable
@@ -992,19 +1002,22 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
                         observable.kind
                     ))
                 })?;
-            let refs = names.state_refs.get(state).ok_or_else(|| {
-                CompileError(format!(
-                    "{} observable names unknown state '{state}'",
-                    observable.kind
-                ))
-            })?;
-            if refs.len() != 1 {
+            let mut refs = Vec::new();
+            names.resolve_ref(state, &mut refs, 0)?;
+            if !state.starts_with('@') && refs.len() != 1 {
                 return err(format!(
                     "{} observable state '{state}' is ambiguous; qualify it as Kind.state",
                     observable.kind
                 ));
             }
-            Ok(vec![refs[0].1])
+            let mut seen = vec![false; names.n_states];
+            Ok(refs
+                .into_iter()
+                .filter_map(|(_, state)| {
+                    let index = state.0 as usize;
+                    (!std::mem::replace(&mut seen[index], true)).then_some(state)
+                })
+                .collect())
         };
         let axis = || -> Result<u8, CompileError> {
             let value = observable
@@ -1036,6 +1049,20 @@ pub fn compile(deck: &DeckFile) -> Result<CompiledDeck, CompileError> {
                 states: state_filter()?,
                 axis: axis()?,
             },
+            "exposure_age" => {
+                let states = state_filter()?;
+                let axis = axis()?;
+                if let Some((defined_states, defined_axis)) = &exposure_definition {
+                    if defined_states != &states || *defined_axis != axis {
+                        return err(
+                            "exposure_age declarations must use one shared state/axis definition",
+                        );
+                    }
+                } else {
+                    exposure_definition = Some((states.clone(), axis));
+                }
+                CompiledObservable::ExposureAge { states, axis }
+            }
             "snapshot" => CompiledObservable::Snapshot,
             "interface_roughness" => {
                 return err("interface_roughness is not implemented");

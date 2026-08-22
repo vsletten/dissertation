@@ -406,6 +406,9 @@ pub struct Engine {
     /// actually changed — the trajectory-export/streaming feed. Reused
     /// across steps; read it before calling [`Engine::step`] again.
     last_changes: Vec<(SiteId, crate::state::StateId, crate::state::StateId)>,
+    /// Deck-selected solid-state definition for exposure-age tracking.
+    exposure_states: Vec<crate::state::StateId>,
+    exposure_axis: Option<u8>,
 }
 
 impl Engine {
@@ -479,6 +482,8 @@ impl Engine {
             rng: Pcg64Mcg::seed_from_u64(seed),
             scratch: Vec::new(),
             last_changes: Vec::new(),
+            exposure_states: Vec::new(),
+            exposure_axis: None,
         };
         for s in 0..n {
             engine.refresh_site(s);
@@ -586,7 +591,7 @@ impl Engine {
                 }
             }
         }
-        self.commit_transitions(pending);
+        self.commit_transitions(pending, self.time + outcome.dt);
         self.time += outcome.dt;
         self.step_count += 1;
         if self.step_count.is_multiple_of(REBUILD_EVERY) {
@@ -609,7 +614,7 @@ impl Engine {
 
     /// Commit a strategy step's prepared transitions, record actual state
     /// changes, and refresh the union of their dirty neighborhoods once.
-    fn commit_transitions(&mut self, transitions: Vec<PreparedTransition>) {
+    fn commit_transitions(&mut self, transitions: Vec<PreparedTransition>, transition_time: f64) {
         self.last_changes.clear();
         // Marking array gives O(1) dedup while preserving insertion order, so
         // refresh order (and thus RNG consumption) stays deterministic.
@@ -650,6 +655,62 @@ impl Engine {
         for site in dirty {
             self.refresh_site(site);
         }
+
+        if let Some(axis) = self.exposure_axis {
+            // Exposure can change at a written site and its immediate
+            // neighbors. Preserve changed-site/adjacency insertion order.
+            let mut exposure_seen = vec![false; self.lattice.len()];
+            let mut exposure_dirty = Vec::new();
+            for &site in &changed {
+                if !exposure_seen[site] {
+                    exposure_seen[site] = true;
+                    exposure_dirty.push(site);
+                }
+                for &neighbor in self.lattice.neighbors(site) {
+                    let neighbor = neighbor as usize;
+                    if !exposure_seen[neighbor] {
+                        exposure_seen[neighbor] = true;
+                        exposure_dirty.push(neighbor);
+                    }
+                }
+            }
+            for site in exposure_dirty {
+                let exposed =
+                    site_is_exposed(&self.lattice, site, &self.exposure_states, axis as usize);
+                match (exposed, self.lattice.exposed_since[site]) {
+                    (true, None) => self.lattice.exposed_since[site] = Some(transition_time),
+                    (false, Some(_)) => self.lattice.exposed_since[site] = None,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    /// Enable core-owned exposure history for one deck-defined solid surface.
+    pub fn enable_exposure_tracking(&mut self, states: Vec<crate::state::StateId>, axis: u8) {
+        assert!(axis <= 2, "exposure axis must be 0, 1, or 2");
+        self.exposure_states = states;
+        self.exposure_axis = Some(axis);
+        for site in 0..self.lattice.len() {
+            self.lattice.exposed_since[site] =
+                site_is_exposed(&self.lattice, site, &self.exposure_states, axis as usize)
+                    .then_some(self.time);
+        }
+    }
+
+    /// Ages of currently exposed tracked sites in deterministic site order.
+    pub fn exposure_ages(&self, states: &[crate::state::StateId], axis: u8) -> Vec<f64> {
+        assert_eq!(
+            self.exposure_axis,
+            Some(axis),
+            "exposure definition mismatch"
+        );
+        assert_eq!(self.exposure_states, states, "exposure state mismatch");
+        self.lattice
+            .exposed_since
+            .iter()
+            .filter_map(|since| since.map(|since| self.time - since))
+            .collect()
     }
 
     /// The per-site state changes of the most recently applied event:
@@ -694,6 +755,25 @@ impl Engine {
         }
         Ok(())
     }
+}
+
+fn site_is_exposed(
+    lattice: &Lattice,
+    site: SiteId,
+    states: &[crate::state::StateId],
+    axis: usize,
+) -> bool {
+    if !states.contains(&lattice.states[site]) {
+        return false;
+    }
+    let (cell, _) = lattice.coords(site);
+    let declared_face = lattice.boundary[axis] == crate::lattice::Boundary::Open
+        && (cell[axis] == 0 || cell[axis] + 1 == lattice.dims[axis]);
+    declared_face
+        || lattice
+            .neighbors(site)
+            .iter()
+            .any(|&neighbor| !states.contains(&lattice.states[neighbor as usize]))
 }
 
 impl UpdateStrategy for ExactCtmc {
@@ -843,6 +923,8 @@ impl UpdateStrategy for Strategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crystal::{Cell, TemplateBond, TemplateSite, UnitCell, NO_LABEL};
+    use crate::state::StateId;
 
     #[test]
     fn rate_tree_matches_linear_scan() {
@@ -939,5 +1021,64 @@ mod tests {
         tree.rebuild();
         assert!((tree.total() - 18.0).abs() < 1e-12);
         assert_eq!(tree.get(2), 10.0);
+    }
+
+    #[test]
+    fn exposure_history_clears_on_burial_and_restarts_on_reexposure() {
+        let cell = UnitCell {
+            cell: Cell::from_params(3.0, 3.0, 3.0, 90.0, 90.0, 90.0),
+            sites: vec![TemplateSite {
+                kind: KindId(0),
+                frac: [0.0; 3],
+                bonds: vec![
+                    TemplateBond {
+                        to: 0,
+                        dcell: [0, 0, 1],
+                        label: NO_LABEL,
+                    },
+                    TemplateBond {
+                        to: 0,
+                        dcell: [0, 0, -1],
+                        label: NO_LABEL,
+                    },
+                ],
+            }],
+        };
+        let lattice = Lattice::build(
+            &cell,
+            [1, 1, 4],
+            [
+                crate::lattice::Boundary::Periodic,
+                crate::lattice::Boundary::Periodic,
+                crate::lattice::Boundary::Open,
+            ],
+            |_| StateId(0),
+        );
+        let mut engine = Engine::new(
+            lattice,
+            &[KindId(0)],
+            1,
+            vec![(0, 2)],
+            Vec::new(),
+            298.15,
+            7,
+        );
+        engine.enable_exposure_tracking(vec![StateId(0)], 2);
+        assert_eq!(
+            engine.lattice.exposed_since,
+            vec![Some(0.0), None, None, Some(0.0)]
+        );
+
+        let transition = |state| PreparedTransition {
+            site: 1,
+            reaction: 0,
+            writes: vec![(1, state)],
+        };
+        engine.commit_transitions(vec![transition(StateId(1))], 1.0);
+        assert_eq!(engine.lattice.exposed_since[2], Some(1.0));
+        engine.commit_transitions(vec![transition(StateId(0))], 2.0);
+        assert_eq!(engine.lattice.exposed_since[2], None);
+        engine.commit_transitions(vec![transition(StateId(1))], 4.0);
+        assert_eq!(engine.lattice.exposed_since[2], Some(4.0));
     }
 }
