@@ -1434,6 +1434,12 @@ def main() -> int:
     proton_indices = tuple(range(ow_index + 1, ow_index + (4 if acid_path else 3)))
     product_route = "acid-neb" if acid_path else "proton-neb"
 
+    def abort_campaign(detail: str) -> int:
+        log(f"  !! {detail}")
+        if acid_path:
+            block_run(run_dir, detail)
+        return 1
+
     def build_product_neb(seed: Cluster) -> Cluster:
         if acid_path:
             return acid_neb_guess(
@@ -1630,8 +1636,9 @@ def main() -> int:
         log(f"  r(Si-Ow): NEB guess {r_guess:.2f} A -> saddle {r_ts:.2f} A")
         escape = channel_escape_reason(ts_guess, ts, ow_index)
     if escape:
-        log(f"  !! {escape}; {route} route exhausted — aborting before thermochemistry")
-        return 1
+        return abort_campaign(
+            f"{escape}; {route} route exhausted before thermochemistry"
+        )
 
     # Stage 4 — verify + quick IRC.
     trim_gpu_pool()
@@ -1639,8 +1646,7 @@ def main() -> int:
     ts_freq = frequencies(ts, settings)
     log(f"  TS imaginary modes: {np.round(ts_freq.imaginary_cm, 1).tolist()}")
     if ts_freq.n_imaginary != 1:
-        log("  !! not a clean first-order saddle — inspect ts.xyz; aborting")
-        return 1
+        return abort_campaign("not a clean first-order saddle — inspect ts.xyz")
     back, fwd = quick_irc(
         ts,
         settings,
@@ -1690,23 +1696,18 @@ def main() -> int:
     if args.reaction == "al-neutral":
         assert cleavage_failure is not None
         if cleavage_failure:
-            log(
-                "  !! al-neutral requires the proven associative-intermediate "
+            return abort_campaign(
+                "al-neutral requires the proven associative-intermediate "
                 f"mechanism; {cleavage_failure}"
             )
-            return 1
     if irc_failure:
-        log(f"  !! {irc_failure}; aborting before thermochemistry")
-        return 1
+        return abort_campaign(f"{irc_failure}; aborting before thermochemistry")
 
     # Stage 5 — thermochemistry.
     log("stage 5: thermochemistry")
     cx_freq = frequencies(complex_opt, settings)
     if detail := minimum_frequency_reason("reactant", cx_freq):
-        log(f"  !! {detail}; aborting before thermochemistry")
-        if acid_path:
-            block_run(run_dir, detail)
-        return 1
+        return abort_campaign(f"{detail}; aborting before thermochemistry")
     t = args.temperature
 
     def thermo(freq):
