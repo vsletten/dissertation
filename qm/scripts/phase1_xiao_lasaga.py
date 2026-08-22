@@ -135,6 +135,17 @@ def load_xyz(path: Path, template: Cluster) -> Cluster:
     return replace(template, coords=coords)
 
 
+def trim_gpu_pool() -> None:
+    """Return cached CuPy blocks between long campaign stages."""
+    try:
+        import cupy
+
+        cupy.get_default_memory_pool().free_all_blocks()
+        cupy.get_default_pinned_memory_pool().free_all_blocks()
+    except Exception:
+        pass
+
+
 def checkpointed(path: Path, template: Cluster, compute) -> Cluster:
     """Load a stage result from disk or compute-and-save it."""
     if path.exists():
@@ -1201,6 +1212,7 @@ def main() -> int:
         attacker,
         lambda: optimize(attacker, settings),
     )
+    trim_gpu_pool()
 
     # Stage 2 — relaxed scan pulling the attacker O onto Si, extended
     # until the energy maximum is interior (ridge actually crossed).
@@ -1215,12 +1227,11 @@ def main() -> int:
     if ts_guess_path.exists():
         ts_guess = load_xyz(ts_guess_path, complex_opt)
         log(f"  resume: ts_guess.xyz exists ({route} route)")
-        if route == product_route and channel_escape_reason(
-            ts_guess, ts_guess, ow_index
-        ):
-            r_bad = float(
-                np.linalg.norm(ts_guess.coords[SI_INDEX] - ts_guess.coords[ow_index])
-            )
+        r_bad = float(
+            np.linalg.norm(ts_guess.coords[SI_INDEX] - ts_guess.coords[ow_index])
+        )
+        guess_channel_limit = 2.8 if acid_path else 2.6
+        if route == product_route and r_bad > guess_channel_limit:
             log(
                 "  saved NEB peak is outside the channel "
                 f"(r(Si-Ow)={r_bad:.2f} A); rebuilding from the closer endpoint"
@@ -1270,6 +1281,7 @@ def main() -> int:
     # Stage 3 — saddle search. A direct approach crest gets one bounded
     # fallback through the concerted proton/product/CI-NEB route if Sella
     # escapes. A proton-NEB saddle that escapes is terminal.
+    trim_gpu_pool()
     log("stage 3: Sella saddle search")
     ts_path = run_dir / "ts.xyz"
     trajectory_path = run_dir / "sella.traj"
@@ -1353,6 +1365,7 @@ def main() -> int:
         return 1
 
     # Stage 4 — verify + quick IRC.
+    trim_gpu_pool()
     log("stage 4: frequencies + quick-IRC")
     ts_freq = frequencies(ts, settings)
     log(f"  TS imaginary modes: {np.round(ts_freq.imaginary_cm, 1).tolist()}")
