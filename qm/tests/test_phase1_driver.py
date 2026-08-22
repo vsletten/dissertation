@@ -124,6 +124,38 @@ def test_acid_quick_irc_requires_full_pre_equilibrium_and_product_speciation(
         is None
     )
 
+    intermediate = _place_attacking_water(reactant, ow_index, 1.80)
+    terminal_product = replace(product, coords=product.coords.copy())
+    terminal_product.coords[ow_index + 2] = terminal_product.coords[3] + np.array(
+        [0.0, 0.0, 0.98]
+    )
+    assert (
+        phase1.acid_basin_signature(terminal_product, ow_index, proton_indices)
+        in phase1.ACID_HYDROLYZED_BASINS
+    )
+    assert (
+        phase1.acid_quick_irc_addition_reason(
+            reactant, intermediate, ow_index, proton_indices
+        )
+        is None
+    )
+    assert (
+        phase1.acid_quick_irc_cleavage_reason(
+            intermediate, terminal_product, ow_index, proton_indices
+        )
+        is None
+    )
+    assert (
+        phase1.acid_endpoint_in_basins(
+            intermediate,
+            terminal_product,
+            ow_index,
+            proton_indices,
+            phase1.ACID_HYDROLYZED_BASINS,
+        )
+        is terminal_product
+    )
+
 
 @pytest.mark.parametrize("dimer_factory", [disilicate, aluminosilicate_dimer])
 def test_acid_speciation_guards_reject_lost_proton_bridge_or_water(dimer_factory):

@@ -102,7 +102,12 @@ REACTANT_BASIN = (False, True, False)
 ASSOCIATIVE_BASIN = (True, True, True)
 HYDROLYZED_BASIN = (True, False, True)
 ACID_REACTANT_BASIN = (False, True, True, 1, 2)
+ACID_ASSOCIATIVE_BASIN = (True, True, True, 1, 2)
 ACID_PRODUCT_BASIN = (True, False, True, 2, 1)
+ACID_HYDROLYZED_BASINS = {
+    ACID_PRODUCT_BASIN,
+    (True, False, True, 1, 1),
+}
 ACID_MECHANISM_VERSION = 1
 
 
@@ -265,6 +270,65 @@ def acid_quick_irc_channel_reason(
     if actual != expected:
         return f"acid quick-IRC basin signatures {sorted(actual)} != {sorted(expected)}"
     return None
+
+
+def acid_quick_irc_addition_reason(
+    back: Cluster,
+    fwd: Cluster,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+) -> str | None:
+    """Require pre-protonated reactant ↔ associative-intermediate connectivity."""
+    actual = {
+        acid_basin_signature(back, ow_index, proton_indices),
+        acid_basin_signature(fwd, ow_index, proton_indices),
+    }
+    expected = {ACID_REACTANT_BASIN, ACID_ASSOCIATIVE_BASIN}
+    if actual != expected:
+        return (
+            f"acid addition IRC basin signatures {sorted(actual)} != {sorted(expected)}"
+        )
+    return None
+
+
+def acid_quick_irc_cleavage_reason(
+    back: Cluster,
+    fwd: Cluster,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+) -> str | None:
+    """Require associative intermediate ↔ protonated hydrolysis product."""
+    actual = [
+        acid_basin_signature(back, ow_index, proton_indices),
+        acid_basin_signature(fwd, ow_index, proton_indices),
+    ]
+    if actual.count(ACID_ASSOCIATIVE_BASIN) != 1:
+        return f"acid cleavage IRC lacks one associative endpoint: {sorted(actual)}"
+    hydrolyzed = [
+        signature for signature in actual if signature in ACID_HYDROLYZED_BASINS
+    ]
+    if len(hydrolyzed) != 1:
+        return f"acid cleavage IRC lacks one hydrolyzed endpoint: {sorted(actual)}"
+    return None
+
+
+def acid_endpoint_in_basins(
+    back: Cluster,
+    fwd: Cluster,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+    signatures: set[tuple[bool, bool, bool, int, int]],
+) -> Cluster:
+    """Return the unique acid quick-IRC endpoint in one accepted basin."""
+    matches = [
+        endpoint
+        for endpoint in (back, fwd)
+        if acid_basin_signature(endpoint, ow_index, proton_indices) in signatures
+    ]
+    if len(matches) != 1:
+        detail = f"acid basins {sorted(signatures)}, found {len(matches)}"
+        raise RuntimeError(f"expected one quick-IRC endpoint in {detail}")
+    return matches[0]
 
 
 def quick_irc_channel_reason(
@@ -790,8 +854,11 @@ def finish_al_neutral_sequential(
     temperature: float,
     dimer_opt: Cluster,
     attacker_opt: Cluster,
+    reaction: str = "al-neutral",
+    acid_path: bool = False,
+    proton_indices: tuple[int, ...] = (),
 ) -> int:
-    """Close the proven R → associative I → hydrolyzed P mechanism."""
+    """Close a proven R → associative I → hydrolyzed P mechanism."""
     begin_sequential_run(run_dir)
 
     def fail(detail: str) -> int:
@@ -799,16 +866,42 @@ def finish_al_neutral_sequential(
         write_sequential_run_status(run_dir, "failed", detail=detail)
         return 1
 
-    cleavage_failure = quick_irc_cleavage_reason(cleavage_back, cleavage_fwd, ow_index)
+    if acid_path:
+        cleavage_failure = acid_quick_irc_cleavage_reason(
+            cleavage_back,
+            cleavage_fwd,
+            ow_index,
+            proton_indices,
+        )
+    else:
+        cleavage_failure = quick_irc_cleavage_reason(
+            cleavage_back, cleavage_fwd, ow_index
+        )
     if cleavage_failure:
         return fail(f"invalid cleavage handoff: {cleavage_failure}")
 
-    intermediate = endpoint_in_basin(
-        cleavage_back, cleavage_fwd, ow_index, ASSOCIATIVE_BASIN
-    )
-    hydrolyzed = endpoint_in_basin(
-        cleavage_back, cleavage_fwd, ow_index, HYDROLYZED_BASIN
-    )
+    if acid_path:
+        intermediate = acid_endpoint_in_basins(
+            cleavage_back,
+            cleavage_fwd,
+            ow_index,
+            proton_indices,
+            {ACID_ASSOCIATIVE_BASIN},
+        )
+        hydrolyzed = acid_endpoint_in_basins(
+            cleavage_back,
+            cleavage_fwd,
+            ow_index,
+            proton_indices,
+            ACID_HYDROLYZED_BASINS,
+        )
+    else:
+        intermediate = endpoint_in_basin(
+            cleavage_back, cleavage_fwd, ow_index, ASSOCIATIVE_BASIN
+        )
+        hydrolyzed = endpoint_in_basin(
+            cleavage_back, cleavage_fwd, ow_index, HYDROLYZED_BASIN
+        )
     save_xyz(intermediate, run_dir / "intermediate.xyz")
     save_xyz(hydrolyzed, run_dir / "hydrolyzed_product.xyz")
     save_xyz(cleavage_ts, run_dir / "cleavage_ts.xyz")
@@ -831,8 +924,9 @@ def finish_al_neutral_sequential(
             climb_optimizer="ode",
         ),
     )
+    h_candidates = proton_indices if acid_path else (ow_index + 1, ow_index + 2)
     transfer_h = min(
-        (ow_index + 1, ow_index + 2),
+        h_candidates,
         key=lambda i: np.linalg.norm(
             addition_guess.coords[i] - addition_guess.coords[BR_INDEX]
         ),
@@ -871,9 +965,9 @@ def finish_al_neutral_sequential(
             trajectory=str(run_dir / "addition_pinned_relax.traj"),
         ),
     )
-    reactive_core = sorted(
-        {BR_INDEX, SI_INDEX, AL_INDEX, ow_index, ow_index + 1, ow_index + 2}
-    )
+    core_protons = proton_indices if acid_path else (ow_index + 1, ow_index + 2)
+    reactive_core = sorted({BR_INDEX, SI_INDEX, AL_INDEX, ow_index, *core_protons})
+    trim_gpu_pool()
     addition_ts_path = run_dir / "addition_directed_ts.xyz"
     addition_ts = checkpointed(
         addition_ts_path,
@@ -899,6 +993,7 @@ def finish_al_neutral_sequential(
         )
         addition_ts_path.replace(rejected)
         return fail(f"{addition_escape}; rejected directed addition saddle")
+    trim_gpu_pool()
     addition_freq = frequencies(addition_ts, settings)
     log(
         "  addition TS imaginary modes: "
@@ -909,6 +1004,7 @@ def finish_al_neutral_sequential(
 
     accepted_addition_irc = None
     for displacement in (0.50, 1.00):
+        trim_gpu_pool()
         back, fwd = quick_irc(
             addition_ts,
             settings,
@@ -918,7 +1014,12 @@ def finish_al_neutral_sequential(
         tag = f"{displacement:.2f}".replace(".", "p")
         save_xyz(back, run_dir / f"addition_irc_back_{tag}.xyz")
         save_xyz(fwd, run_dir / f"addition_irc_fwd_{tag}.xyz")
-        failure = quick_irc_addition_reason(back, fwd, ow_index)
+        if acid_path:
+            failure = acid_quick_irc_addition_reason(
+                back, fwd, ow_index, proton_indices
+            )
+        else:
+            failure = quick_irc_addition_reason(back, fwd, ow_index)
         if failure is None:
             accepted_addition_irc = (back, fwd, displacement)
             break
@@ -929,6 +1030,7 @@ def finish_al_neutral_sequential(
     save_xyz(addition_back, run_dir / "addition_irc_back.xyz")
     save_xyz(addition_fwd, run_dir / "addition_irc_fwd.xyz")
 
+    trim_gpu_pool()
     log("stage 5: sequential thermochemistry")
     complex_freq = frequencies(complex_opt, settings)
     intermediate_freq = frequencies(intermediate, settings)
@@ -939,13 +1041,29 @@ def finish_al_neutral_sequential(
         if freq.n_imaginary:
             return fail(f"{label} minimum has {freq.n_imaginary} imaginary modes")
 
-    addition_reactant = endpoint_in_basin(
-        addition_back, addition_fwd, ow_index, REACTANT_BASIN
-    )
-    addition_intermediate = endpoint_in_basin(
-        addition_back, addition_fwd, ow_index, ASSOCIATIVE_BASIN
-    )
-    reactive_core = [BR_INDEX, SI_INDEX, ow_index, ow_index + 1, ow_index + 2]
+    if acid_path:
+        addition_reactant = acid_endpoint_in_basins(
+            addition_back,
+            addition_fwd,
+            ow_index,
+            proton_indices,
+            {ACID_REACTANT_BASIN},
+        )
+        addition_intermediate = acid_endpoint_in_basins(
+            addition_back,
+            addition_fwd,
+            ow_index,
+            proton_indices,
+            {ACID_ASSOCIATIVE_BASIN},
+        )
+    else:
+        addition_reactant = endpoint_in_basin(
+            addition_back, addition_fwd, ow_index, REACTANT_BASIN
+        )
+        addition_intermediate = endpoint_in_basin(
+            addition_back, addition_fwd, ow_index, ASSOCIATIVE_BASIN
+        )
+    reactive_core = sorted({BR_INDEX, SI_INDEX, ow_index, *core_protons})
     equivalence_checks = (
         (
             "reactant",
@@ -1000,8 +1118,15 @@ def finish_al_neutral_sequential(
         tunneling="wigner",
     )
     overall_dg = float(metrics["overall_profile_dG_dagger_kj"])
-    si_neutral_dg = SI_NEUTRAL_DG_KJ
-    al_easier = overall_dg < si_neutral_dg
+    comparison: dict[str, float | bool] = {}
+    if reaction == "al-neutral":
+        al_easier = overall_dg < SI_NEUTRAL_DG_KJ
+        comparison = {
+            "si_neutral_dG_kj": SI_NEUTRAL_DG_KJ,
+            "si_neutral_dG_kcal": SI_NEUTRAL_DG_KCAL,
+            "al_easier_than_si": al_easier,
+            "xiao_lasaga_easier_si_o_al_ordering_confirmed": al_easier,
+        }
     de_kj = (
         highest_freq.electronic_hartree - complex_freq.electronic_hartree
     ) * HARTREE_TO_KJ
@@ -1012,8 +1137,10 @@ def finish_al_neutral_sequential(
     ) * HARTREE_TO_KJ
 
     results = {
-        "reaction": "al-neutral",
-        "mechanism": "sequential-associative",
+        "reaction": reaction,
+        "mechanism": (
+            "sequential-associative-acid" if acid_path else "sequential-associative"
+        ),
         "method": f"{settings.xc}/{settings.basis}/df",
         "temperature_k": temperature,
         "dE_elec_vs_complex_kj": de_kj,
@@ -1045,12 +1172,7 @@ def finish_al_neutral_sequential(
                 "accepted_quick_irc_displacement_a": 0.50,
             },
         },
-        "comparison": {
-            "si_neutral_dG_kj": si_neutral_dg,
-            "si_neutral_dG_kcal": SI_NEUTRAL_DG_KCAL,
-            "al_easier_than_si": al_easier,
-            "xiao_lasaga_easier_si_o_al_ordering_confirmed": al_easier,
-        },
+        "comparison": comparison,
         "literature": {
             "xiao_lasaga_acid_kcal": 24.0,
             "xiao_lasaga_base_kcal": 19.0,
@@ -1071,7 +1193,7 @@ def finish_al_neutral_sequential(
             ("cleavage-ts", cleavage_ts, cleavage_freq),
         ):
             sid = store.add_structure(
-                f"al-neutral-{name}",
+                f"{reaction}-{name}",
                 cluster.formula,
                 cluster.to_xyz(),
                 charge=cluster.charge,
@@ -1094,7 +1216,7 @@ def finish_al_neutral_sequential(
     )
 
     log("")
-    log(f"=== al-neutral sequential @ {results['method']} ===")
+    log(f"=== {reaction} sequential @ {results['method']} ===")
     log(
         f"  addition dG‡(298) = {addition_rate.dg_kj:8.3f} kJ/mol "
         f"({addition_rate.dg_kj / KCAL:.3f} kcal/mol)"
@@ -1107,8 +1229,12 @@ def finish_al_neutral_sequential(
         f"  overall profile dG‡(298) = {overall_dg:8.3f} kJ/mol "
         f"({overall_dg / KCAL:.3f} kcal/mol)"
     )
-    ordering = "CONFIRMED" if al_easier else "NOT CONFIRMED"
-    log(f"  X&L easier Si-O-Al ordering: {ordering} vs si-neutral {si_neutral_dg:.3f}")
+    if reaction == "al-neutral":
+        ordering = "CONFIRMED" if comparison["al_easier_than_si"] else "NOT CONFIRMED"
+        log(
+            "  X&L easier Si-O-Al ordering: "
+            f"{ordering} vs si-neutral {SI_NEUTRAL_DG_KJ:.3f}"
+        )
     log(f"results.json + store.sqlite written to {run_dir}")
     return 0
 
@@ -1389,14 +1515,18 @@ def main() -> int:
         )
     else:
         irc_failure = quick_irc_channel_reason(back, fwd, ow_index)
-    if args.reaction == "al-neutral":
+    cleavage_failure = None
+    if acid_path:
+        cleavage_failure = acid_quick_irc_cleavage_reason(
+            back,
+            fwd,
+            ow_index,
+            proton_indices,
+        )
+    elif args.reaction == "al-neutral":
         cleavage_failure = quick_irc_cleavage_reason(back, fwd, ow_index)
-        if cleavage_failure:
-            log(
-                "  !! al-neutral requires the proven associative-intermediate "
-                f"mechanism; {cleavage_failure}"
-            )
-            return 1
+
+    if cleavage_failure is None and (acid_path or args.reaction == "al-neutral"):
         log("  full path resolved as sequential associative hydrolysis")
         return finish_al_neutral_sequential(
             complex_opt=complex_opt,
@@ -1410,7 +1540,18 @@ def main() -> int:
             temperature=args.temperature,
             dimer_opt=dimer_opt,
             attacker_opt=attacker_opt,
+            reaction=args.reaction,
+            acid_path=acid_path,
+            proton_indices=proton_indices,
         )
+    if args.reaction == "al-neutral":
+        assert cleavage_failure is not None
+        if cleavage_failure:
+            log(
+                "  !! al-neutral requires the proven associative-intermediate "
+                f"mechanism; {cleavage_failure}"
+            )
+            return 1
     if irc_failure:
         log(f"  !! {irc_failure}; aborting before thermochemistry")
         return 1
