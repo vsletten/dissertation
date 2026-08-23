@@ -9,7 +9,7 @@ appended by the PR that did it: `date — actor — what + pointer`.
   DLPNO-CCSD(T) + ByteQC canonical GPU CCSD(T), cross-validating; both
   installed and smoke-verified on the workstation (water dimer/cc-pVTZ:
   canonical CCSD(T) agrees across engines to 1e-8 Eh; DLPNO −0.53
-  kJ/mol off canonical). Runbook `qm/CALIBRATION.md`; SURVEY §2.3/§6.4
+  kJ/mol off canonical). Runbook `qm/CALIBRATION.md`; SURVEY §§2.3–2.4/§6.4
   amended; A2 card re-scoped → READY (feeder-eligible).
 
 - 2026-08-22 — hermes-workstation — A1b partial closeout: validated one-water

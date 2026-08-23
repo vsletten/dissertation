@@ -28,7 +28,7 @@ barrier calculations. That's the platform we build.
 | Layer | Choice | Why |
 |---|---|---|
 | Workhorse DFT engine | **PySCF + GPU4PySCF** | Apache-2.0, Python-native, analytic gradients *and* Hessians on the 4090, SMD/PCM solvation, D3/D4 dispersion. The only free stack that makes the GPU a real asset. |
-| Cross-check + benchmark engine | **Psi4 1.11 (DLPNO-CCSD(T)) + ByteQC (canonical GPU CCSD(T))** — *amended 2026-08-23, was ORCA 6.1.1; see §2.3* | Both fully open source (LGPL / Apache-2.0), installable and containerizable without registration. Psi4 1.11 gained native DLPNO-CCSD(T); ByteQC runs canonical CCSD(T) on GPU (~1380 orbitals on 80 GB). Together they cross-validate and bound the DLPNO local-approximation error. |
+| Cross-check + benchmark engine | **Psi4 1.11 (DLPNO-CCSD(T)) + ByteQC (canonical GPU CCSD(T))** — *amended 2026-08-23, was ORCA 6.1.1; see §§2.3–2.4* | Both fully open source (LGPL / Apache-2.0), installable and containerizable without registration. Psi4 1.11 gained native DLPNO-CCSD(T); ByteQC runs canonical CCSD(T) on GPU (~1380 orbitals on 80 GB). Together they cross-validate and bound the DLPNO local-approximation error. |
 | TS search / IRC | **geomeTRIC** (drives PySCF natively) + **Sella** (over ASE) | Both maintained, both do saddle points and IRC, backend-agnostic. |
 | Pre-screening | **xtb (GFN2-xTB) + CREST**; optionally an OMol25-class ML potential (**UMA** or **OrbMol**) | Seconds-per-structure geometry pre-optimization, conformer/water-placement sampling, TS guesses. |
 | Thermochemistry → k(T) | **Shermo or GoodVibes** (quasi-RRHO ΔG) + **Arkane** (TST with Wigner/Eckart tunneling) or a small in-house Eyring module | All free, all scriptable. |
@@ -63,7 +63,7 @@ right workloads. Concretely, on one node today:
   hours with the GPU. Composite-method (r²SCAN-3c) opt+freq on 100–300 atoms:
   hours.
 - **DLPNO-CCSD(T)/CBS single points on 30–80-atom clusters** (Psi4; ByteQC
-  canonical spot checks — §2.3 amendment): hours to
+  canonical spot checks — §2.4): hours to
   a day — the "gold standard" calibration layer that was unaffordable in 1999.
 - Whole new modalities fit on one box: ab initio MD with metadynamics on
   ~200-atom explicit-water systems (CP2K), and ML-potential MD on thousands of
@@ -85,9 +85,9 @@ which is exactly what a KMC reaction table wants.
 | Package | License | TS opt | Analytic DFT Hessian | IRC | Solvation | Python | GPU | Verdict |
 |---|---|---|---|---|---|---|---|---|
 | **PySCF** 2.14 | Apache-2.0 | via geomeTRIC/Sella | **yes** | via Sella/geomeTRIC | PCM, **SMD**, ddCOSMO | native | **GPU4PySCF** | **Primary** |
-| **ORCA** 6.1.1 | free academic/personal, closed | **native OptTS, NEB-TS** | **yes** | **native** | CPCM, **SMD** | no (wrappers) | no | *Descoped 2026-08-23 (licensing) — see §2.3 amendment* |
-| **Psi4** 1.11 | LGPL-3.0 | native (OptKing) | no (finite-diff) | native | PCM, ddCOSMO; **no SMD** | native | no | **DLPNO-CCSD(T) calibration engine** (since 1.11; §2.3 amendment); freq-heavy work pays 2×3N gradients per Hessian |
-| **ByteQC** | Apache-2.0 | no (CC solver only) | no | no | no | no | **yes (CC on GPU)** | **Canonical CCSD(T) calibration anchor**, ~1380 orbitals/80 GB (§2.3 amendment) |
+| **ORCA** 6.1.1 | free academic/personal, closed | **native OptTS, NEB-TS** | **yes** | **native** | CPCM, **SMD** | no (wrappers) | no | *Descoped 2026-08-23 (licensing) — see §2.3* |
+| **Psi4** 1.11 | LGPL-3.0 | native (OptKing) | no (finite-diff) | native | PCM, ddCOSMO; **no SMD** | native | no | **DLPNO-CCSD(T) calibration engine** (since 1.11; §2.4); freq-heavy work pays 2×3N gradients per Hessian |
+| **ByteQC** | Apache-2.0 | no (CC solver only) | no | no | no | native | **yes (CC on GPU)** | **Canonical CCSD(T) calibration anchor**, ~1380 orbitals/80 GB (§2.4) |
 | **NWChem** 7.3.1 | ECL-2.0 | native (`saddle`) | yes (in-core, small systems) | yes | COSMO, SMD | weak | not for DFT | Open-source fallback; unique Polyrate/VTST interface; archaic ergonomics |
 | **GAMESS-US** 2024R2 | free, no-redistribution | native | HF only | native | PCM, SMD | no | partial | Dominated by the above; license blocks containers |
 | **xtb** 6.7.1 | LGPL-3.0 | (screening level) | numerical | — | ALPB/GBSA | via tblite/ASE | no | Pre-screening layer, not for barriers |
