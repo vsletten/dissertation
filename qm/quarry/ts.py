@@ -12,7 +12,10 @@ standard first line.
 
 from __future__ import annotations
 
-from dataclasses import replace
+import json
+import time
+from dataclasses import asdict, replace
+from pathlib import Path
 
 import numpy as np
 
@@ -578,6 +581,119 @@ def scan_ts_guess(scan: list[tuple[float, float, Cluster]]) -> Cluster:
     return scan[idx][2]
 
 
+_NEB_CHECKPOINT_SCHEMA = 1
+
+
+def _write_neb_checkpoint(
+    images,
+    checkpoint_root: Path,
+    *,
+    stage: str,
+    converged: bool | None,
+    settings: DftSettings,
+    charge: int,
+    spin: int,
+    frozen_indices: list[int] | None,
+    optimizer: str,
+    fmax_ev_a: float,
+    step_bound: int,
+) -> Path:
+    """Atomically persist every image plus the exact NEB stage contract.
+
+    Checkpoints are immutable timestamped directories. ``latest.json`` is only
+    an atomic pointer, so a later failed attempt cannot destroy an earlier
+    pre-relaxed band. Energies are deliberately omitted: asking for them here
+    could add expensive calculator calls merely to write a crash receipt.
+    """
+    checkpoint_root.mkdir(parents=True, exist_ok=True)
+    checkpoint_name = f"{time.time_ns()}-{stage}"
+    temporary = checkpoint_root / f".{checkpoint_name}.tmp"
+    final = checkpoint_root / checkpoint_name
+    temporary.mkdir()
+    symbols = list(images[0].get_chemical_symbols())
+    image_files = []
+    for index, image in enumerate(images):
+        if list(image.get_chemical_symbols()) != symbols:
+            raise ValueError("NEB checkpoint images have inconsistent atom mappings")
+        filename = f"image-{index:02d}.xyz"
+        lines = [str(len(symbols)), f"NEB {stage} image {index}"]
+        lines.extend(
+            f"{symbol} {x:.16f} {y:.16f} {z:.16f}"
+            for symbol, (x, y, z) in zip(symbols, image.positions, strict=True)
+        )
+        (temporary / filename).write_text("\n".join(lines) + "\n")
+        image_files.append(filename)
+    manifest = {
+        "schema_version": _NEB_CHECKPOINT_SCHEMA,
+        "stage": stage,
+        "converged": converged,
+        "created_at_ns": time.time_ns(),
+        "settings": asdict(settings),
+        "charge": charge,
+        "spin": spin,
+        "frozen_indices": list(frozen_indices or []),
+        "symbols": symbols,
+        "n_images": len(images),
+        "optimizer": optimizer,
+        "fmax_ev_a": fmax_ev_a,
+        "step_bound": step_bound,
+        "images": image_files,
+    }
+    (temporary / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    temporary.replace(final)
+    latest_tmp = checkpoint_root / ".latest.json.tmp"
+    latest_tmp.write_text(json.dumps({"checkpoint": checkpoint_name}, indent=2) + "\n")
+    latest_tmp.replace(checkpoint_root / "latest.json")
+    return final
+
+
+def _load_neb_checkpoint(
+    checkpoint: Path,
+    *,
+    settings: DftSettings,
+    reactant: Cluster,
+    n_images: int,
+) -> tuple[list[np.ndarray], dict]:
+    """Load and validate a complete pre-relaxed band for climb-only resume."""
+    if (checkpoint / "latest.json").is_file():
+        latest = json.loads((checkpoint / "latest.json").read_text())
+        checkpoint = checkpoint / latest["checkpoint"]
+    manifest = json.loads((checkpoint / "manifest.json").read_text())
+    expected = {
+        "schema_version": _NEB_CHECKPOINT_SCHEMA,
+        "settings": asdict(settings),
+        "charge": reactant.charge,
+        "spin": reactant.spin,
+        "frozen_indices": list(reactant.frozen_indices or []),
+        "symbols": list(reactant.symbols),
+        "n_images": n_images,
+    }
+    for key, value in expected.items():
+        if manifest.get(key) != value:
+            raise ValueError(f"NEB checkpoint {key} does not match this run")
+    if (
+        manifest.get("stage") != "pre-relax-final"
+        or manifest.get("converged") is not True
+    ):
+        raise ValueError("NEB resume requires a converged pre-relax-final checkpoint")
+    coords = []
+    for filename in manifest["images"]:
+        lines = (checkpoint / filename).read_text().splitlines()
+        if int(lines[0]) != len(reactant.symbols):
+            raise ValueError("NEB checkpoint image atom count does not match")
+        image_symbols = [line.split()[0] for line in lines[2:]]
+        if image_symbols != reactant.symbols:
+            raise ValueError("NEB checkpoint image atom order does not match")
+        xyz = np.asarray(
+            [[float(value) for value in line.split()[1:4]] for line in lines[2:]],
+            dtype=float,
+        )
+        if xyz.shape != reactant.coords.shape or not np.all(np.isfinite(xyz)):
+            raise ValueError("NEB checkpoint image coordinates are invalid")
+        coords.append(xyz)
+    return coords, manifest
+
+
 def neb_ts_guess(
     reactant: Cluster,
     product: Cluster,
@@ -591,6 +707,10 @@ def neb_ts_guess(
     optimizer_dt: float = 0.05,
     optimizer_maxstep: float = 0.05,
     climb_optimizer: str = "mdmin",
+    checkpoint_dir: str | Path | None = None,
+    checkpoint_interval: int = 5,
+    resume_from: str | Path | None = None,
+    initial_image_coords: list[np.ndarray] | None = None,
 ) -> Cluster:
     """Climbing-image NEB between two basins; returns the peak image.
 
@@ -608,7 +728,12 @@ def neb_ts_guess(
     optimizer, or BFGS. ODE and BFGS are the measured fallbacks for a live
     al-neutral associative band whose MDMin climb stalled. Both stages must
     converge; returning an arbitrary peak from an exhausted optimizer is
-    forbidden.
+    forbidden. When ``checkpoint_dir`` is set, every image and the optimizer
+    contract are persisted periodically and at each stage boundary. A
+    ``pre-relax-final`` checkpoint with ``converged=true`` can be supplied via
+    ``resume_from`` to skip interpolation and pre-relaxation safely.
+    ``initial_image_coords`` supplies a complete physically seeded band; it is
+    mutually exclusive with resume and still undergoes bounded pre-relaxation.
     """
     from ase import Atoms
     from ase.build.rotate import minimize_rotation_and_translation
@@ -621,8 +746,20 @@ def neb_ts_guess(
 
     if reactant.charge != product.charge or reactant.spin != product.spin:
         raise ValueError("reactant/product electronic states differ")
+    if reactant.symbols != product.symbols:
+        raise ValueError("reactant/product atom order differs")
+    if reactant.frozen_indices != product.frozen_indices:
+        raise ValueError("reactant/product frozen atom sets differ")
     if climb_optimizer not in {"mdmin", "ode", "bfgs"}:
         raise ValueError(f"unknown NEB climb optimizer '{climb_optimizer}'")
+    if n_images < 3:
+        raise ValueError("NEB requires at least three images")
+    if checkpoint_interval <= 0:
+        raise ValueError("checkpoint_interval must be positive")
+    if resume_from is not None and initial_image_coords is not None:
+        raise ValueError("resume_from and initial_image_coords are mutually exclusive")
+    checkpoint_root = Path(checkpoint_dir) if checkpoint_dir is not None else None
+
     images = [Atoms(symbols=reactant.symbols, positions=reactant.coords)]
     for _ in range(n_images - 2):
         images.append(images[0].copy())
@@ -634,7 +771,31 @@ def neb_ts_guess(
     # A frozen shell already pins both endpoints to one common frame —
     # rigid re-fitting there would *move* the frozen atoms, so skip it.
     frozen = bool(reactant.frozen_indices)
-    if not frozen:
+    resumed_manifest = None
+    if resume_from is not None:
+        resumed, resumed_manifest = _load_neb_checkpoint(
+            Path(resume_from),
+            settings=settings,
+            reactant=reactant,
+            n_images=n_images,
+        )
+        for image, coords in zip(images, resumed, strict=True):
+            image.positions[:] = coords
+    elif initial_image_coords is not None:
+        if len(initial_image_coords) != n_images:
+            raise ValueError("initial_image_coords length does not match n_images")
+        seeded = [np.asarray(coords, dtype=float) for coords in initial_image_coords]
+        if any(coords.shape != reactant.coords.shape for coords in seeded):
+            raise ValueError("initial_image_coords contains an invalid shape")
+        if any(not np.all(np.isfinite(coords)) for coords in seeded):
+            raise ValueError("initial_image_coords contains non-finite coordinates")
+        if not np.allclose(seeded[0], reactant.coords, atol=1e-8):
+            raise ValueError("initial_image_coords first image is not the reactant")
+        if not np.allclose(seeded[-1], product.coords, atol=1e-8):
+            raise ValueError("initial_image_coords last image is not the product")
+        for image, coords in zip(images, seeded, strict=True):
+            image.positions[:] = coords
+    elif not frozen:
         minimize_rotation_and_translation(images[0], images[-1])
     for image in images:
         image.calc = make_ase_calculator(settings, reactant.charge, reactant.spin)
@@ -648,23 +809,73 @@ def neb_ts_guess(
         method="improvedtangent",
         remove_rotation_and_translation=not frozen,
     )
-    if frozen:
+    if resumed_manifest is not None or initial_image_coords is not None:
+        pass
+    elif frozen:
         # ASE refuses to interpolate constrained images without an explicit
         # choice; applying is exact here (identical frozen coordinates).
         neb.interpolate(method="idpp", apply_constraint=True)
     else:
         neb.interpolate(method="idpp")
 
-    relaxed = MDMin(
-        neb,  # type: ignore[arg-type] -- ASE optimizers accept NEB objects
-        dt=optimizer_dt,
-        maxstep=optimizer_maxstep,
-    ).run(fmax=pre_relax_fmax_ev_a, steps=pre_relax_steps)
-    if not relaxed:
-        raise RuntimeError(
-            "NEB pre-relaxation did not converge "
-            f"to {pre_relax_fmax_ev_a:.3f} eV/A within {pre_relax_steps} steps"
+    if checkpoint_root is not None:
+        _write_neb_checkpoint(
+            images,
+            checkpoint_root,
+            stage="initialized",
+            converged=None,
+            settings=settings,
+            charge=reactant.charge,
+            spin=reactant.spin,
+            frozen_indices=reactant.frozen_indices,
+            optimizer="none",
+            fmax_ev_a=pre_relax_fmax_ev_a,
+            step_bound=pre_relax_steps,
         )
+
+    if resumed_manifest is None:
+        pre_relax = MDMin(
+            neb,  # type: ignore[arg-type] -- ASE optimizers accept NEB objects
+            dt=optimizer_dt,
+            maxstep=optimizer_maxstep,
+        )
+        if checkpoint_root is not None and hasattr(pre_relax, "attach"):
+            pre_relax.attach(
+                lambda: _write_neb_checkpoint(
+                    images,
+                    checkpoint_root,
+                    stage=f"pre-relax-step-{pre_relax.nsteps:06d}",
+                    converged=None,
+                    settings=settings,
+                    charge=reactant.charge,
+                    spin=reactant.spin,
+                    frozen_indices=reactant.frozen_indices,
+                    optimizer="mdmin",
+                    fmax_ev_a=pre_relax_fmax_ev_a,
+                    step_bound=pre_relax_steps,
+                ),
+                interval=checkpoint_interval,
+            )
+        relaxed = pre_relax.run(fmax=pre_relax_fmax_ev_a, steps=pre_relax_steps)
+        if checkpoint_root is not None:
+            _write_neb_checkpoint(
+                images,
+                checkpoint_root,
+                stage="pre-relax-final",
+                converged=bool(relaxed),
+                settings=settings,
+                charge=reactant.charge,
+                spin=reactant.spin,
+                frozen_indices=reactant.frozen_indices,
+                optimizer="mdmin",
+                fmax_ev_a=pre_relax_fmax_ev_a,
+                step_bound=pre_relax_steps,
+            )
+        if not relaxed:
+            raise RuntimeError(
+                "NEB pre-relaxation did not converge "
+                f"to {pre_relax_fmax_ev_a:.3f} eV/A within {pre_relax_steps} steps"
+            )
 
     neb.climb = True
     if climb_optimizer == "mdmin":
@@ -685,7 +896,38 @@ def neb_ts_guess(
             neb,  # type: ignore[arg-type] -- ASE optimizers accept NEB objects
             maxstep=optimizer_maxstep,
         )
+    if checkpoint_root is not None and hasattr(climb, "attach"):
+        climb.attach(
+            lambda: _write_neb_checkpoint(
+                images,
+                checkpoint_root,
+                stage=f"climb-step-{climb.nsteps:06d}",
+                converged=None,
+                settings=settings,
+                charge=reactant.charge,
+                spin=reactant.spin,
+                frozen_indices=reactant.frozen_indices,
+                optimizer=climb_optimizer,
+                fmax_ev_a=fmax_ev_a,
+                step_bound=max_steps,
+            ),
+            interval=checkpoint_interval,
+        )
     climbed = climb.run(fmax=fmax_ev_a, steps=max_steps)
+    if checkpoint_root is not None:
+        _write_neb_checkpoint(
+            images,
+            checkpoint_root,
+            stage="climb-final",
+            converged=bool(climbed),
+            settings=settings,
+            charge=reactant.charge,
+            spin=reactant.spin,
+            frozen_indices=reactant.frozen_indices,
+            optimizer=climb_optimizer,
+            fmax_ev_a=fmax_ev_a,
+            step_bound=max_steps,
+        )
     if not climbed:
         raise RuntimeError(
             "climbing-image NEB did not converge "
