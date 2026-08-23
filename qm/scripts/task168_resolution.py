@@ -320,19 +320,137 @@ def attempt_addition_saddle(
         return None
 
 
+def attempt_standard_saddle(
+    run_dir: Path,
+    *,
+    stage: str,
+    reactant: Cluster,
+    product: Cluster,
+    settings: DftSettings,
+    ow_index: int,
+) -> tuple[Cluster, FrequencyResult, Cluster, Cluster] | None:
+    """Run one checkpointed standard-ladder NEB -> Sella -> IRC stage."""
+    receipt_path = run_dir / f"task168-{stage}-attempt.json"
+    if receipt_path.is_file():
+        receipt = json.loads(receipt_path.read_text())
+        if receipt.get("status") == "no-saddle":
+            print(f"TASK168_{stage.upper()}_ALREADY_EXHAUSTED", flush=True)
+            return None
+        if receipt.get("status") == "accepted":
+            ts = load_xyz(run_dir / receipt["ts"], reactant)
+            back = load_xyz(run_dir / receipt["irc_back"], reactant)
+            fwd = load_xyz(run_dir / receipt["irc_fwd"], reactant)
+            freq = cached_frequency(run_dir / receipt["frequency"], ts, settings)
+            return ts, freq, back, fwd
+
+    checkpoint_root = run_dir / f"task168-{stage}-neb-checkpoints"
+    pre_relaxed = newest_pre_relaxed_checkpoint(checkpoint_root)
+    try:
+        neb_kwargs = {
+            "n_images": 7,
+            "fmax_ev_a": 0.05,
+            "max_steps": 240,
+            "pre_relax_fmax_ev_a": 0.20,
+            "pre_relax_steps": 180,
+            "optimizer_dt": 0.02,
+            "optimizer_maxstep": 0.03,
+            "climb_optimizer": "ode",
+            "checkpoint_dir": checkpoint_root,
+            "checkpoint_interval": 5,
+        }
+        if pre_relaxed is not None:
+            neb_kwargs["resume_from"] = pre_relaxed
+        guess = neb_ts_guess(reactant, product, settings, **neb_kwargs)
+        guess_path = run_dir / f"task168-{stage}-neb-guess.xyz"
+        save_xyz(guess, guess_path)
+        reactive_core = sorted(
+            {BR_INDEX, SI_INDEX, AL_INDEX, ow_index, ow_index + 1, ow_index + 2}
+        )
+        ts = find_ts(
+            guess,
+            settings,
+            trajectory=str(run_dir / f"task168-{stage}-sella.traj"),
+            initial_mode=reaction_path_vector(
+                reactant, product, active_indices=reactive_core
+            ),
+            internal=False,
+            max_steps=300,
+        )
+        ts_path = run_dir / f"task168-{stage}-ts.xyz"
+        save_xyz(ts, ts_path)
+        if reason := addition_channel_escape_reason(
+            guess, ts, ow_index, acid_path=False
+        ):
+            raise RuntimeError(reason)
+        freq_path = run_dir / f"task168-{stage}-ts.frequency.npz"
+        freq = cached_frequency(freq_path, ts, settings)
+        if freq.n_imaginary != 1:
+            raise RuntimeError(f"{stage} saddle has {freq.n_imaginary} imaginary modes")
+        accepted = None
+        for displacement in (0.50, 1.00):
+            back, fwd = quick_irc(
+                ts,
+                settings,
+                displacement_a=displacement,
+                frequency=freq,
+            )
+            failure = (
+                quick_irc_addition_reason(back, fwd, ow_index)
+                if stage == "addition-lower-i"
+                else quick_irc_cleavage_reason(back, fwd, ow_index)
+            )
+            if failure is None:
+                accepted = back, fwd, displacement
+                break
+        if accepted is None:
+            raise RuntimeError(f"{stage} saddle failed its endpoint basin gate")
+        back, fwd, displacement = accepted
+        back_path = run_dir / f"task168-{stage}-irc-back.xyz"
+        fwd_path = run_dir / f"task168-{stage}-irc-fwd.xyz"
+        save_xyz(back, back_path)
+        save_xyz(fwd, fwd_path)
+        receipt = {
+            "status": "accepted",
+            "ts": ts_path.name,
+            "frequency": freq_path.name,
+            "irc_back": back_path.name,
+            "irc_fwd": fwd_path.name,
+            "quick_irc_displacement_a": displacement,
+        }
+        atomic_json(receipt_path, receipt)
+        return ts, freq, back, fwd
+    except Exception as exc:
+        receipt = {
+            "status": "no-saddle",
+            "reason": f"{type(exc).__name__}: {exc}",
+            "checkpoint_root": checkpoint_root.name,
+        }
+        atomic_json(receipt_path, receipt)
+        print(
+            f"TASK168_{stage.upper()}_NO_SADDLE " + json.dumps(receipt, sort_keys=True),
+            flush=True,
+        )
+        return None
+
+
 def finalize(
     run_dir: Path,
     settings: DftSettings,
     temperature: float,
     addition: tuple[Cluster, FrequencyResult, Cluster, Cluster] | None,
+    cleavage: tuple[Cluster, FrequencyResult, Cluster, Cluster] | None = None,
 ) -> dict:
     template = hydrolysis_complex(aluminosilicate_dimer(), water(), mode="flank")
     ow_index = len(aluminosilicate_dimer().symbols)
     reactant = load_xyz(run_dir / "complex.xyz", template)
     intermediate = load_xyz(run_dir / "intermediate.task168-selected.xyz", template)
-    cleavage_ts = load_xyz(run_dir / "cleavage_ts.xyz", template)
-    cleavage_back = load_xyz(run_dir / "cleavage_irc_back.xyz", template)
-    cleavage_fwd = load_xyz(run_dir / "cleavage_irc_fwd.xyz", template)
+    if cleavage is None:
+        cleavage_ts = load_xyz(run_dir / "cleavage_ts.xyz", template)
+        cleavage_back = load_xyz(run_dir / "cleavage_irc_back.xyz", template)
+        cleavage_fwd = load_xyz(run_dir / "cleavage_irc_fwd.xyz", template)
+        cleavage_freq = None
+    else:
+        cleavage_ts, cleavage_freq, cleavage_back, cleavage_fwd = cleavage
     if quick_irc_cleavage_reason(cleavage_back, cleavage_fwd, ow_index):
         raise RuntimeError("preserved cleavage saddle no longer passes I<->P gate")
     endpoint_in_basin(cleavage_back, cleavage_fwd, ow_index, ASSOCIATIVE_BASIN)
@@ -345,9 +463,10 @@ def finalize(
     intermediate_freq = cached_frequency(
         run_dir / "intermediate.task168.frequency.npz", intermediate, settings
     )
-    cleavage_freq = cached_frequency(
-        run_dir / "cleavage_ts.task168.frequency.npz", cleavage_ts, settings
-    )
+    if cleavage_freq is None:
+        cleavage_freq = cached_frequency(
+            run_dir / "cleavage_ts.task168.frequency.npz", cleavage_ts, settings
+        )
     for label, freq in (
         ("reactant", reactant_freq),
         ("intermediate", intermediate_freq),
@@ -377,9 +496,10 @@ def finalize(
     )
     intermediate_dg = th_intermediate.gibbs - th_reactant.gibbs
     overall_dg = th_cleavage.gibbs - th_reactant.gibbs
-    addition_attempt = json.loads(
-        (run_dir / "task168-addition-attempt.json").read_text()
-    )
+    addition_attempt_path = run_dir / "task168-addition-attempt.json"
+    if not addition_attempt_path.is_file():
+        addition_attempt_path = run_dir / "task168-addition-lower-i-attempt.json"
+    addition_attempt = json.loads(addition_attempt_path.read_text())
     sweep = json.loads(
         (run_dir / "task168-intermediate-sweep" / "manifest.json").read_text()
     )["summary"]
@@ -515,11 +635,6 @@ def main() -> int:
         (args.run_dir / "task168-intermediate-sweep" / "manifest.json").read_text()
     )
     summary = sweep_manifest["summary"]
-    if summary["lower_intermediate_found"]:
-        raise RuntimeError(
-            "a significantly lower intermediate was found; rebuild both elementary "
-            "bands through the standard ladder before using the old cleavage saddle"
-        )
     template = hydrolysis_complex(aluminosilicate_dimer(), water(), mode="flank")
     reactant = load_xyz(args.run_dir / "complex.xyz", template)
     intermediate = load_xyz(
@@ -531,10 +646,34 @@ def main() -> int:
     settings = DftSettings(
         xc="b3lyp", basis="def2-svp", density_fit=True, use_gpu=args.gpu
     )
-    addition = attempt_addition_saddle(
-        args.run_dir, reactant, intermediate, settings, ow_index
-    )
-    finalize(args.run_dir, settings, args.temperature, addition)
+    if summary["lower_intermediate_found"]:
+        hydrolyzed = load_xyz(args.run_dir / "hydrolyzed_product.xyz", template)
+        addition = attempt_standard_saddle(
+            args.run_dir,
+            stage="addition-lower-i",
+            reactant=reactant,
+            product=intermediate,
+            settings=settings,
+            ow_index=ow_index,
+        )
+        if addition is None:
+            raise RuntimeError("lower-I standard addition ladder did not close")
+        cleavage = attempt_standard_saddle(
+            args.run_dir,
+            stage="cleavage-lower-i",
+            reactant=intermediate,
+            product=hydrolyzed,
+            settings=settings,
+            ow_index=ow_index,
+        )
+        if cleavage is None:
+            raise RuntimeError("lower-I standard cleavage ladder did not close")
+    else:
+        addition = attempt_addition_saddle(
+            args.run_dir, reactant, intermediate, settings, ow_index
+        )
+        cleavage = None
+    finalize(args.run_dir, settings, args.temperature, addition, cleavage)
     return 0
 
 
