@@ -4,6 +4,14 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-23 — fable — A2 unblocked: ORCA descoped from the platform
+  (Victor's call, licensing). Calibration layer is now Psi4 1.11
+  DLPNO-CCSD(T) + ByteQC canonical GPU CCSD(T), cross-validating; both
+  installed and smoke-verified on the workstation (water dimer/cc-pVTZ:
+  canonical CCSD(T) agrees across engines to 1e-8 Eh; DLPNO −0.53
+  kJ/mol off canonical). Runbook `qm/CALIBRATION.md`; SURVEY §2.3/§6.4
+  amended; A2 card re-scoped → READY (feeder-eligible).
+
 - 2026-08-22 — hermes-workstation — A1b partial closeout: validated one-water
   al-acid sequential hydrolysis at ΔG‡(298) = 82.193 kJ/mol (19.645 kcal/mol),
   with exact one-mode/quick-IRC gates for addition and cleavage. DEVIATION:

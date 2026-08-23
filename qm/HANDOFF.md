@@ -48,8 +48,9 @@ reaction the same number).
   the one-water si-acid protonated bridge is not an unconstrained minimum;
   it is BLOCKED on 3–6-water microsolvation (`qm/ACID_MECHANISMS.md`).
   `A2-production-energetics` remains
-  (r²SCAN-3c / ωB97M-V/def2-TZVPD + SMD +
-  DLPNO calibration — BLOCKED on Victor's ORCA install). Phase 2 runs at
+  (r²SCAN-3c / ωB97M-V/def2-TZVPD + SMD + coupled-cluster calibration —
+  unblocked 2026-08-23: ORCA descoped, replaced by Psi4 DLPNO-CCSD(T) +
+  ByteQC canonical GPU CCSD(T), see `qm/CALIBRATION.md`). Phase 2 runs at
   the validated b3lyp/def2-svp/df tier; A2 re-tiers the ladder later.
   Design every result file so re-tiering is a settings swap, not a redo.
 

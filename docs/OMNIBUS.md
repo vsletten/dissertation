@@ -54,9 +54,12 @@ with provenance). Remaining:
 
 **A2. Production-tier energetics.** Upgrade from B3LYP/def2-SVP first
 pass to the survey's protocol: r²SCAN-3c geometries, ωB97M-V/def2-TZVPD
-+ SMD single points, D4 dispersion; ORCA DLPNO-CCSD(T) spot calibration.
-*Victor action: ORCA registration + install (never committed).* Also:
-full Gonzalez-Schlegel IRC to replace quick-IRC on soft-mode saddles.
++ SMD single points, D4 dispersion; coupled-cluster spot calibration via
+the open-source layer — Psi4 1.11 DLPNO-CCSD(T) cross-validated against
+ByteQC canonical GPU CCSD(T) (`qm/CALIBRATION.md`; ORCA descoped
+2026-08-23 on licensing grounds, both replacement engines installed and
+smoke-verified). Also: full Gonzalez-Schlegel IRC to replace quick-IRC
+on soft-mode saddles.
 
 **A3. Phase 2 — the barrier ladder.** The crystallographic cluster
 builder (terminated, constrained edge clusters cut from kaolinite
