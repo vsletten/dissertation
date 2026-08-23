@@ -63,7 +63,7 @@ make -j12 -C ~/opt/byteqc/cuobc/lib/build  # capped -j: 32-way nvcc can swap-thr
 # (which needs NCCL) at import — both wheel lib dirs must be on the
 # loader path (the phase2_ladder.preload_cutensor gotcha, extended):
 SP=~/venvs/byteqc/lib/python3.12/site-packages
-export LD_LIBRARY_PATH=$SP/cutensor/lib:$SP/nvidia/nccl/lib
+export LD_LIBRARY_PATH="$SP/cutensor/lib:$SP/nvidia/nccl/lib:${LD_LIBRARY_PATH:-}"
 export PYTHONPATH=~/opt:$PYTHONPATH   # the *parent* of the clone
 python -c "from byteqc import cucc"
 ```
