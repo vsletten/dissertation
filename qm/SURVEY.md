@@ -118,48 +118,29 @@ Q-Chem, Molpro, TURBOMOLE, ADF/AMS, Jaguar, TeraChem.
   orchestration layer can call it directly, in-process, with no input-file
   generation or output parsing.
 
-### 2.3 ORCA 6.1.1 — the turnkey cross-check
+### 2.3 ORCA 6.1.1 — historical evaluation *(descoped 2026-08-23)*
 
-- Closed source, **free for academic and personal use**; commercial use
-  requires a paid FACCTs license; download via registration. No
-  redistribution (so no containers/conda). v6.1.1 December 2025.
-  https://www.faccts.de/orca/
-- This is the closest modern equivalent of the dissertation-era Gaussian
-  workflow, and it is *built* for exactly our pipeline: `Opt` → `OptTS`
-  (eigenvector following) / `NEB-TS` → analytic frequencies → `IRC` →
-  quasi-RRHO thermochemistry, with CPCM/SMD, RIJCOSX-accelerated hybrids, and
-  native GFN2-xTB pre-optimization. MPI-parallel; 16 cores gives ~14–15× on
-  typical DFT jobs.
-- Uniquely valuable here: **DLPNO-CCSD(T)** — near-CCSD(T) accuracy on
-  30–80-atom clusters on this hardware. No other free code offers this. It is
-  the calibration standard for DFT barrier heights in the modern literature
-  (see §6.4).
-- Use it for: validating PySCF barriers, NEB-TS on awkward reactions, and all
-  coupled-cluster single points.
+ORCA was evaluated as a turnkey cross-check because its integrated
+optimization, transition-state, frequency, IRC, solvation, and
+DLPNO-CCSD(T) workflows closely match the dissertation-era Gaussian
+pipeline. It is not a current platform engine: ORCA is closed source,
+registration-gated, and cannot be redistributed in containers or conda
+environments. Do not select it for new work. Its former calibration role is
+covered by the open-source Psi4/ByteQC layer below; the authoritative install
+and execution protocol is `CALIBRATION.md`.
 
-> **AMENDED 2026-08-23 — ORCA descoped from the platform** (Victor's
-> call, licensing: registration-gated, closed, no redistribution — the
-> one component that could never be committed or containerized). Its
-> sole irreplaceable role, DLPNO-CCSD(T) calibration, is no longer
-> unique: **Psi4 1.11** (June 2026) ships native DLPNO-CCSD(T) (Jiang
-> et al., JCP 161, 082502), and **ByteQC** (Apache-2.0,
-> github.com/bytedance/byteqc) runs *canonical* CCSD(T) on GPU at up to
-> ~1380 orbitals. The calibration layer now runs both, cross-validated
-> — install runbook and protocol in `CALIBRATION.md`. "No other free
-> code offers this" above is left as written but is no longer true.
+### 2.4 Psi4 + ByteQC — coupled-cluster calibration layer
 
-### 2.4 Psi4 — honorable mention *(promoted 2026-08-23: calibration engine)*
-
-LGPL, one-line conda install, native TS+IRC via OptKing, clean Python API.
-Two dealbreakers for this project: DFT frequencies are finite-difference
-(a ~100-atom Hessian costs ~600 gradient evaluations), and there is no SMD
-solvation (a long-standing gap). Keep as a third opinion; don't build on it.
-
-*Amendment 2026-08-23: both dealbreakers concern the workhorse-DFT role
-only and are irrelevant to single-point coupled cluster on frozen
-geometries. With native DLPNO-CCSD(T) since 1.11, Psi4 is now the
-platform's DLPNO calibration engine (conda env `calib-psi4`, verified —
-see `CALIBRATION.md`).*
+Psi4 is LGPL, has a clean Python API, and installs into the verified
+`calib-psi4` conda environment. Its finite-difference DFT frequencies and lack
+of SMD still rule it out as the workhorse DFT engine; PySCF retains that role.
+For coupled-cluster single points on frozen geometries, however, **Psi4 1.11**
+(June 2026) provides native DLPNO-CCSD(T) (Jiang et al., JCP 161, 082502).
+**ByteQC** (Apache-2.0, github.com/bytedance/byteqc) supplies the independent,
+canonical GPU CCSD(T) anchor at up to ~1380 orbitals. Use these engines
+cross-validated as the sole current coupled-cluster calibration guidance; see
+`CALIBRATION.md` for installation, provenance requirements, and the acceptance
+protocol.
 
 ### 2.5 NWChem — the all-open fallback
 
