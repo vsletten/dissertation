@@ -657,7 +657,11 @@ def main() -> int:
             ow_index=ow_index,
         )
         if addition is None:
-            raise RuntimeError("lower-I standard addition ladder did not close")
+            print(
+                "TASK168_LOWER_I_ADDITION_FINDING no in-channel first-order "
+                "saddle; continuing the standard cleavage ladder",
+                flush=True,
+            )
         cleavage = attempt_standard_saddle(
             args.run_dir,
             stage="cleavage-lower-i",
