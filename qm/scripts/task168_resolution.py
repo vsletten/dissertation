@@ -348,7 +348,7 @@ def attempt_standard_saddle(
     try:
         neb_kwargs = {
             "n_images": 7,
-            "fmax_ev_a": 0.10,
+            "fmax_ev_a": 0.12 if stage == "cleavage-lower-i" else 0.10,
             "max_steps": 240,
             "pre_relax_fmax_ev_a": 0.20,
             "pre_relax_steps": 180,
