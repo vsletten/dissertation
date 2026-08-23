@@ -1,0 +1,348 @@
+# Minimal microscopic H2-formation benchmark on a disordered ice/olivine-like
+# grain. Energies are deliberately rate-compressed (same activated-process
+# ordering, smaller stiffness ratio) so the finite-temperature efficiency
+# window is reproducible in CI without a superbasin accelerator.
+[deck]
+name = "h2-ice-mantle"
+schema = 2
+units = "kcal/mol"
+
+[structure]
+kind = "grid"
+grid = "square"
+neighborhood = "von_neumann"
+dims = [24, 24]
+boundary = ["periodic", "periodic"]
+default_kind = "shallow"
+
+[[structure.species]]
+name = "H"
+
+[[structure.species]]
+name = "H2"
+
+[[structure.kinds]]
+name = "shallow"
+initial = "empty"
+
+[[structure.kinds.states]]
+name = "empty"
+occupant = "vacant"
+
+[[structure.kinds.states]]
+name = "H"
+occupant = "H"
+
+[[structure.kinds.states]]
+name = "H_mobile"
+occupant = "H"
+
+[[structure.kinds.states]]
+name = "H2"
+occupant = "H2"
+
+[[structure.kinds]]
+name = "deep"
+initial = "empty"
+
+[[structure.kinds.states]]
+name = "empty"
+occupant = "vacant"
+
+[[structure.kinds.states]]
+name = "H"
+occupant = "H"
+
+[[structure.kinds.states]]
+name = "H_mobile"
+occupant = "H"
+
+[[structure.kinds.states]]
+name = "H2"
+occupant = "H2"
+
+# Quenched binding-energy disorder: the init RNG assigns a fixed 20% of sites
+# to the deeper class. The class never changes during a trajectory.
+[[structure.init]]
+name = "quench-deep-sites"
+center = { kind = "shallow", state = ["empty"] }
+probability = 0.20
+set = "empty"
+rekind = "deep"
+
+[dynamics.thermo]
+temperature = 12.0
+
+# Open-system H deposition: one independent bath event per vacant site.
+[[dynamics.rules]]
+name = "deposit_shallow"
+rate = { constant = 1.0e-3 }
+
+[[dynamics.rules.effects]]
+target = "source"
+set = "shallow.H"
+
+[[dynamics.rules]]
+name = "deposit_deep"
+rate = { constant = 1.0e-3 }
+
+[[dynamics.rules.effects]]
+target = "source"
+set = "deep.H"
+
+# Thermal diffusion. The four source/target combinations preserve the
+# quenched class of both sites while moving the H occupant.
+[[dynamics.rules]]
+name = "thermal_hop_shallow"
+center = { kind = "shallow", state = ["H", "H_mobile"] }
+rate = { arrhenius = { prefactor = 1.0e4, ea = 0.1987 } }
+guards = [{ distance = 1, kind = "shallow", state = ["empty"], min = 1 }]
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "empty"
+
+[[dynamics.rules.effects]]
+target = "neighbors"
+select = { distance = 1, kind = "shallow", state = ["empty"] }
+select_mode = "one"
+set = "H_mobile"
+
+[[dynamics.rules]]
+name = "thermal_hop_shallow_to_deep"
+center = { kind = "shallow", state = ["H", "H_mobile"] }
+rate = { arrhenius = { prefactor = 1.0e4, ea = 0.1987 } }
+guards = [{ distance = 1, kind = "deep", state = ["empty"], min = 1 }]
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "empty"
+
+[[dynamics.rules.effects]]
+target = "neighbors"
+select = { distance = 1, kind = "deep", state = ["empty"] }
+select_mode = "one"
+set = "H_mobile"
+
+[[dynamics.rules]]
+name = "thermal_hop_deep"
+center = { kind = "deep", state = ["H", "H_mobile"] }
+rate = { arrhenius = { prefactor = 1.0e4, ea = 0.25831 } }
+guards = [{ distance = 1, kind = "deep", state = ["empty"], min = 1 }]
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "empty"
+
+[[dynamics.rules.effects]]
+target = "neighbors"
+select = { distance = 1, kind = "deep", state = ["empty"] }
+select_mode = "one"
+set = "H_mobile"
+
+[[dynamics.rules]]
+name = "thermal_hop_deep_to_shallow"
+center = { kind = "deep", state = ["H", "H_mobile"] }
+rate = { arrhenius = { prefactor = 1.0e4, ea = 0.25831 } }
+guards = [{ distance = 1, kind = "shallow", state = ["empty"], min = 1 }]
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "empty"
+
+[[dynamics.rules.effects]]
+target = "neighbors"
+select = { distance = 1, kind = "shallow", state = ["empty"] }
+select_mode = "one"
+set = "H_mobile"
+
+# Temperature-independent tunneling floor, represented as a second event
+# channel so its propensity adds to the thermal hopping propensity.
+[[dynamics.rules]]
+name = "tunnel_hop_shallow"
+center = { kind = "shallow", state = ["H", "H_mobile"] }
+rate = { constant = 1.0e-5 }
+guards = [{ distance = 1, kind = "shallow", state = ["empty"], min = 1 }]
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "empty"
+
+[[dynamics.rules.effects]]
+target = "neighbors"
+select = { distance = 1, kind = "shallow", state = ["empty"] }
+select_mode = "one"
+set = "H_mobile"
+
+[[dynamics.rules]]
+name = "tunnel_hop_shallow_to_deep"
+center = { kind = "shallow", state = ["H", "H_mobile"] }
+rate = { constant = 1.0e-5 }
+guards = [{ distance = 1, kind = "deep", state = ["empty"], min = 1 }]
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "empty"
+
+[[dynamics.rules.effects]]
+target = "neighbors"
+select = { distance = 1, kind = "deep", state = ["empty"] }
+select_mode = "one"
+set = "H_mobile"
+
+[[dynamics.rules]]
+name = "tunnel_hop_deep"
+center = { kind = "deep", state = ["H", "H_mobile"] }
+rate = { constant = 1.0e-5 }
+guards = [{ distance = 1, kind = "deep", state = ["empty"], min = 1 }]
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "empty"
+
+[[dynamics.rules.effects]]
+target = "neighbors"
+select = { distance = 1, kind = "deep", state = ["empty"] }
+select_mode = "one"
+set = "H_mobile"
+
+[[dynamics.rules]]
+name = "tunnel_hop_deep_to_shallow"
+center = { kind = "deep", state = ["H", "H_mobile"] }
+rate = { constant = 1.0e-5 }
+guards = [{ distance = 1, kind = "shallow", state = ["empty"], min = 1 }]
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "empty"
+
+[[dynamics.rules.effects]]
+target = "neighbors"
+select = { distance = 1, kind = "shallow", state = ["empty"] }
+select_mode = "one"
+set = "H_mobile"
+
+# Langmuir-Hinshelwood recombination. Each center/neighbor class pairing is
+# explicit so both sites retain their quenched class after the rewrite.
+[[dynamics.rules]]
+name = "form_h2_shallow"
+center = { kind = "shallow", state = ["H_mobile"] }
+rate = { constant = 1.0e3 }
+guards = [{ distance = 1, kind = "shallow", state = ["H", "H_mobile"], min = 1 }]
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "H2"
+
+[[dynamics.rules.effects]]
+target = "neighbors"
+select = { distance = 1, kind = "shallow", state = ["H", "H_mobile"] }
+select_mode = "one"
+set = "empty"
+
+[[dynamics.rules]]
+name = "form_h2_shallow_with_deep"
+center = { kind = "shallow", state = ["H_mobile"] }
+rate = { constant = 1.0e3 }
+guards = [{ distance = 1, kind = "deep", state = ["H", "H_mobile"], min = 1 }]
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "H2"
+
+[[dynamics.rules.effects]]
+target = "neighbors"
+select = { distance = 1, kind = "deep", state = ["H", "H_mobile"] }
+select_mode = "one"
+set = "empty"
+
+[[dynamics.rules]]
+name = "form_h2_deep"
+center = { kind = "deep", state = ["H_mobile"] }
+rate = { constant = 1.0e3 }
+guards = [{ distance = 1, kind = "deep", state = ["H", "H_mobile"], min = 1 }]
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "H2"
+
+[[dynamics.rules.effects]]
+target = "neighbors"
+select = { distance = 1, kind = "deep", state = ["H", "H_mobile"] }
+select_mode = "one"
+set = "empty"
+
+[[dynamics.rules]]
+name = "form_h2_deep_with_shallow"
+center = { kind = "deep", state = ["H_mobile"] }
+rate = { constant = 1.0e3 }
+guards = [{ distance = 1, kind = "shallow", state = ["H", "H_mobile"], min = 1 }]
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "H2"
+
+[[dynamics.rules.effects]]
+target = "neighbors"
+select = { distance = 1, kind = "shallow", state = ["H", "H_mobile"] }
+select_mode = "one"
+set = "empty"
+
+# Atomic and molecular desorption. Deep sites carry larger barriers.
+[[dynamics.rules]]
+name = "desorb_h_shallow"
+center = { kind = "shallow", state = ["H", "H_mobile"] }
+rate = { arrhenius = { prefactor = 1.0e4, ea = 0.3974 } }
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "empty"
+
+[[dynamics.rules]]
+name = "desorb_h_deep"
+center = { kind = "deep", state = ["H", "H_mobile"] }
+rate = { arrhenius = { prefactor = 1.0e4, ea = 0.51662 } }
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "empty"
+
+[[dynamics.rules]]
+name = "desorb_h2_shallow"
+center = { kind = "shallow", state = ["H2"] }
+rate = { arrhenius = { prefactor = 1.0e4, ea = 0.31792 } }
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "empty"
+
+[[dynamics.rules]]
+name = "desorb_h2_deep"
+center = { kind = "deep", state = ["H2"] }
+rate = { arrhenius = { prefactor = 1.0e4, ea = 0.41727 } }
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "empty"
+
+[execution]
+strategy = "ctmc"
+
+[execution.ctmc]
+
+[execution.stop]
+steps = 20000
+
+[execution.ensemble]
+seed = 7001
+n_replicas = 16
+seed_policy = "hash"
+
+[observables]
+report_every = 1000
+
+[[observables.series]]
+kind = "state_counts"
+
+[[observables.series]]
+kind = "event_rates"

@@ -9,7 +9,9 @@ fragments (`[[reactions]]` TOML) and the legacy `data.rxn`.
 
 Everything heavy is assembled, not written: PySCF (+ GPU4PySCF on the
 workstation) for DFT, geomeTRIC/Sella for TS searches and IRC, xtb/CREST for
-screening, ORCA for cross-checks and DLPNO-CCSD(T) calibration. Quarry owns
+screening, Psi4 (DLPNO-CCSD(T)) + ByteQC (canonical GPU CCSD(T)) for
+coupled-cluster calibration ([CALIBRATION.md](CALIBRATION.md); ORCA descoped
+2026-08-23 on licensing grounds). Quarry owns
 the cluster builder, the pipeline sequencing, the ~50-line quasi-RRHO/Eyring
 rate module, the emitters, and the provenance store.
 
@@ -54,10 +56,11 @@ cuTENSOR, and bigger `--waters` probes the regime where the survey's
 
 ### Not managed by uv (install separately, never commit)
 
-- **ORCA 6** — registration-gated download from https://www.faccts.de/orca/.
-  Free for academic/personal use, closed source, **no redistribution**: never
-  commit the binary, never bake it into a container. Install anywhere on
-  `PATH`; quarry treats it as optional and detects it at runtime.
+- **Psi4** (calibration, CPU DLPNO-CCSD(T)) — conda env `calib-psi4`;
+  **ByteQC** (calibration, GPU canonical CCSD(T)) — venv `~/venvs/byteqc`
+  + source build at `~/opt/byteqc`. Both open source and rebuildable from
+  public sources; full install runbook with the measured build gotchas in
+  [CALIBRATION.md](CALIBRATION.md). (ORCA was descoped 2026-08-23.)
 - **xtb / CREST** — `conda install -c conda-forge xtb crest`, or the static
   binaries from the Grimme-lab GitHub releases. Also optional-detected.
 - Gated ML weights (e.g. UMA): same rule — document, don't vendor.

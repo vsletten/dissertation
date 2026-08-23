@@ -4,6 +4,33 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-23 — fable — A2 unblocked: ORCA descoped from the platform
+  (Victor's call, licensing). Calibration layer is now Psi4 1.11
+  DLPNO-CCSD(T) + ByteQC canonical GPU CCSD(T), cross-validating; both
+  installed and smoke-verified on the workstation (water dimer/cc-pVTZ:
+  canonical CCSD(T) agrees across engines to 1e-8 Eh; DLPNO −0.53
+  kJ/mol off canonical). Runbook `qm/CALIBRATION.md`; SURVEY §§2.3–2.4/§6.4
+  amended; A2 card re-scoped → READY (feeder-eligible).
+
+- 2026-08-22 — hermes-workstation — A1b partial closeout: validated one-water
+  al-acid sequential hydrolysis at ΔG‡(298) = 82.193 kJ/mol (19.645 kcal/mol),
+  with exact one-mode/quick-IRC gates for addition and cleavage. DEVIATION:
+  one-water si-acid is not an unconstrained protonated-bridge minimum in gas
+  phase or PCM, so the card is blocked on 3–6-water microsolvation rather than
+  publishing a constrained fake barrier. `qm/ACID_MECHANISMS.md`.
+
+- 2026-08-22 — omnibus supervisor — reconciled board metadata after merged
+  work: C2 is ready after B3, A3 is ready for its remaining family campaigns,
+  and the completed D2a card now has its missing PLAN.md row.
+
+- 2026-08-22 — hermes-laptop — D3 DONE: a 24×24 open-system H₂ grain deck
+  now exercises source deposition, thermal+tunneling diffusion, LH reaction,
+  H/H₂ desorption, and seeded 20% quenched deep sites. The 16-replica sweep
+  has the published finite window (efficiency 0.310 at 6 K, ~0.96 at 12–14 K,
+  0.559 at 20 K, 0.055 at 26 K). DEVIATION: D2a surface rates are explicit
+  NO-GO; D2b + blocked D3b cards preserve the CO follow-through honestly.
+  `docs/program/results/D3-ice-mantle-deck.md`.
+
 - 2026-08-21 — fable — A3 pilot cell DONE: embedded Si–O–Si neutral
   hydrolysis ΔG‡ = 205.7 kJ/mol (free dimer 113.0; +92.7 lattice shift,
   matching Pelmenschikov's ~205 embedded first-rupture) via a verified

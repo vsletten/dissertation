@@ -60,3 +60,41 @@ live) — raise it for the campaign process only, bounded:
 `sudo prlimit --pid $$ --memlock=17179869184:17179869184` before exec,
 never unlimited and never system-wide (this box swap-spiraled in July;
 a bounded cap keeps a runaway pin from wedging it again).
+
+Honcho's `honcho-deriver-1` and `honcho-api-1` containers also call local
+Ollama (`gemma4-deriver` + `bge-m3`) and can reload ~19 GB immediately after
+`ollama stop`. Stop those two containers for Hessian campaigns, unload both
+models, verify `ollama ps` is empty, and restart the containers at exfil.
+
+### One-water Si-acid is not a protonated-bridge minimum (2026-08-22)
+At B3LYP/def2-SVP/DF, the neutral disilicate + one H3O+ model returns the
+bridge proton to residual water in gas phase, with water moved to 4.5 A, and
+under aqueous PCM. Do not hold Obr-H and publish constrained thermochemistry.
+Use 3–6 explicit waters and first prove an unconstrained protonated-bridge
+minimum. The anionic Si-O-Al cluster *does* stabilize this state and closes as
+a sequential addition/cleavage mechanism; receipts are in
+`qm/ACID_MECHANISMS.md`.
+
+### WebGL2 unavailable at boot kills module-top-level wiring silently (2026-08-22)
+A Chrome with a pending update can keep running with a dead GPU process, so
+`canvas.getContext('webgl2')` returns null on an otherwise healthy box (same
+symptom as hardware acceleration disabled). Any throw at module top level —
+e.g. constructing the three.js renderer — then silently kills every statement
+after it: the static HTML renders but no handlers ever attach, with only a
+console error as evidence. graph-viz boot now probes WebGL2, shows a banner,
+and wires the non-GPU UI regardless (PR #74); guard renderer construction the
+same way in any future web frontend.
+
+### ByteQC kernel build: three stacked traps on this box (2026-08-23)
+`python byteqc/setup.py` fails opaquely unless: (1) a non-snap cmake is
+used (snap confinement breaks CUDA compiler detection — `uv pip install
+cmake` into the venv); (2) `CUDACXX=/usr/local/cuda-12.6/bin/nvcc` is
+exported, else CMake picks the distro CUDA 12.0 nvcc which cannot parse
+gcc-13 glibc headers (`_Float32 does not name a type`); (3) stale
+`*/lib/build/CMakeCache.txt` from a failed attempt is deleted, or the
+poisoned compiler choice persists across retries. At runtime cupy's
+cutensor backend also dlopens libcutensorMg, which needs NCCL: put BOTH
+`site-packages/cutensor/lib` and `site-packages/nvidia/nccl/lib` on
+LD_LIBRARY_PATH (the cutensor-preload gotcha, extended). cupbc (PBC) is
+unneeded for cluster work and wants a tarball/conda cuTENSOR layout —
+skip it. Full working recipe: qm/CALIBRATION.md.
