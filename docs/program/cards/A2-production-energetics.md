@@ -1,30 +1,53 @@
-# A2-production-energetics — production-tier energies + ORCA calibration
+# A2-production-energetics — production-tier energies + open-source CC calibration
 
-- status: blocked (ORCA install by Victor; A1b for the full reaction set)
+- status: ready
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
-- depends: A1b
+- depends: — (re-tiers whatever stationary points are banked in runs/;
+  further points from A1b/A3 are re-tiered as they land — re-tiering is
+  a settings swap by design, not a redo)
 - claimed-by:
 
 ## Objective
-Upgrade Phase-1 barriers to the survey protocol: r2SCAN-3c geometries
+Upgrade banked barriers to the survey protocol: r2SCAN-3c geometries
 (needs pyscf-dispersion — already in the venv), wB97M-V/def2-TZVPD + SMD
-single points on all stationary points, D4 dispersion; ORCA
-DLPNO-CCSD(T)/CBS spot calibration on si-neutral (the "which functional
-do we trust" half-day, SURVEY §6.4). Full Gonzalez-Schlegel IRC on the
-soft-mode saddles replaces quick-IRC. Report the barrier shifts
-SVP→production per reaction.
+single points on all stationary points, D4 dispersion; coupled-cluster
+spot calibration on si-neutral (the "which functional do we trust"
+half-day, SURVEY §6.4) via the **open-source calibration layer** —
+Psi4 1.11 DLPNO-CCSD(T) cross-validated against ByteQC canonical GPU
+CCSD(T), per `qm/CALIBRATION.md` (ORCA descoped 2026-08-23 on licensing
+grounds). Full Gonzalez-Schlegel IRC on the soft-mode saddles replaces
+quick-IRC. Report the barrier shifts SVP→production per reaction.
 
 ## Context
-qm/SURVEY.md §6 (the tiered protocol), §2.3 (ORCA); quarry pipeline
-supports solvent="smd" already. ORCA: registration-gated download,
-NEVER committed/containerized (license — Appendix A).
+qm/SURVEY.md §6 (the tiered protocol) as amended 2026-08-23;
+**qm/CALIBRATION.md — the calibration runbook: installed environments
+(conda `calib-psi4`, `~/venvs/byteqc` + `~/opt/byteqc`), the focal-point
+CBS recipe, and the DLPNO-vs-canonical acceptance gate**; quarry
+pipeline supports solvent="smd" already. Banked stationary points:
+si-neutral (runs/phase1), al-neutral (TASK-168/PR #29), al-acid
+one-water (A1b), oss-neutral-n4 pilot set (runs/phase2). Large single
+points that OOM the 4090 may use a rented H200/B200 (not B300 —
+FP64-gutted); ByteQC checkpoints tolerate preemption.
 
 ## Acceptance
-- Production ΔG‡ table for all Phase-1 reactions with method provenance;
-  DLPNO calibration number for si-neutral; IRC-verified saddles.
-- Unblocks: mark done only when Victor confirms ORCA installed.
+- Production ΔG‡ table for all banked reactions with method provenance
+  in the runs' store.sqlite.
+- si-neutral calibration: CCSD(T)/CBS focal-point barrier from ByteQC
+  (canonical) AND Psi4 (DLPNO, TightPNO), with the DLPNO−canonical
+  delta reported (gate: ≤ 2 kJ/mol on the barrier); functional ranking
+  stated (B3LYP-D4 vs r2SCAN-3c vs wB97M-V for Si–O chemistry).
+- IRC-verified saddles (full Gonzalez-Schlegel) for the soft-mode TSs.
+- Emitted petra fragments updated where re-tiered numbers change decks;
+  CALCULATIONS.md rows updated to the new tier.
 
 ## Progress
 - 2026-08-18 — card created (fable).
+- 2026-08-23 — fable — **descoped from ORCA** (Victor's call: licensing).
+  Calibration layer replaced by Psi4 1.11 DLPNO-CCSD(T) + ByteQC
+  canonical GPU CCSD(T), cross-validating. Both environments installed
+  and smoke-verified on the workstation (water dimer/cc-pVTZ, frozen
+  core): Psi4 canonical vs ByteQC canonical CCSD(T) agree to 1e-8 Eh
+  (CPU vs GPU, independent codes); Psi4 DLPNO −0.53 kJ/mol off
+  canonical. Runbook: qm/CALIBRATION.md. Card unblocked: status → ready.

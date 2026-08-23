@@ -28,7 +28,7 @@ barrier calculations. That's the platform we build.
 | Layer | Choice | Why |
 |---|---|---|
 | Workhorse DFT engine | **PySCF + GPU4PySCF** | Apache-2.0, Python-native, analytic gradients *and* Hessians on the 4090, SMD/PCM solvation, D3/D4 dispersion. The only free stack that makes the GPU a real asset. |
-| Cross-check + benchmark engine | **ORCA 6.1.1** | Free for academic/personal use (closed source). Turnkey OptTS / NEB-TS / IRC / analytic frequencies, and the only free access to DLPNO-CCSD(T) for calibrating DFT barriers. |
+| Cross-check + benchmark engine | **Psi4 1.11 (DLPNO-CCSD(T)) + ByteQC (canonical GPU CCSD(T))** — *amended 2026-08-23, was ORCA 6.1.1; see §2.3* | Both fully open source (LGPL / Apache-2.0), installable and containerizable without registration. Psi4 1.11 gained native DLPNO-CCSD(T); ByteQC runs canonical CCSD(T) on GPU (~1380 orbitals on 80 GB). Together they cross-validate and bound the DLPNO local-approximation error. |
 | TS search / IRC | **geomeTRIC** (drives PySCF natively) + **Sella** (over ASE) | Both maintained, both do saddle points and IRC, backend-agnostic. |
 | Pre-screening | **xtb (GFN2-xTB) + CREST**; optionally an OMol25-class ML potential (**UMA** or **OrbMol**) | Seconds-per-structure geometry pre-optimization, conformer/water-placement sampling, TS guesses. |
 | Thermochemistry → k(T) | **Shermo or GoodVibes** (quasi-RRHO ΔG) + **Arkane** (TST with Wigner/Eckart tunneling) or a small in-house Eyring module | All free, all scriptable. |
@@ -62,7 +62,8 @@ right workloads. Concretely, on one node today:
   analytic frequencies on **50–150-atom clusters**: overnight on the CPU,
   hours with the GPU. Composite-method (r²SCAN-3c) opt+freq on 100–300 atoms:
   hours.
-- **DLPNO-CCSD(T)/CBS single points on 30–80-atom clusters** (ORCA): hours to
+- **DLPNO-CCSD(T)/CBS single points on 30–80-atom clusters** (Psi4; ByteQC
+  canonical spot checks — §2.3 amendment): hours to
   a day — the "gold standard" calibration layer that was unaffordable in 1999.
 - Whole new modalities fit on one box: ab initio MD with metadynamics on
   ~200-atom explicit-water systems (CP2K), and ML-potential MD on thousands of
@@ -84,8 +85,9 @@ which is exactly what a KMC reaction table wants.
 | Package | License | TS opt | Analytic DFT Hessian | IRC | Solvation | Python | GPU | Verdict |
 |---|---|---|---|---|---|---|---|---|
 | **PySCF** 2.14 | Apache-2.0 | via geomeTRIC/Sella | **yes** | via Sella/geomeTRIC | PCM, **SMD**, ddCOSMO | native | **GPU4PySCF** | **Primary** |
-| **ORCA** 6.1.1 | free academic/personal, closed | **native OptTS, NEB-TS** | **yes** | **native** | CPCM, **SMD** | no (wrappers) | no | **Cross-check + DLPNO-CCSD(T)** |
-| **Psi4** 1.11 | LGPL-3.0 | native (OptKing) | no (finite-diff) | native | PCM, ddCOSMO; **no SMD** | native | no | Easiest install; freq-heavy work pays 2×3N gradients per Hessian |
+| **ORCA** 6.1.1 | free academic/personal, closed | **native OptTS, NEB-TS** | **yes** | **native** | CPCM, **SMD** | no (wrappers) | no | *Descoped 2026-08-23 (licensing) — see §2.3 amendment* |
+| **Psi4** 1.11 | LGPL-3.0 | native (OptKing) | no (finite-diff) | native | PCM, ddCOSMO; **no SMD** | native | no | **DLPNO-CCSD(T) calibration engine** (since 1.11; §2.3 amendment); freq-heavy work pays 2×3N gradients per Hessian |
+| **ByteQC** | Apache-2.0 | no (CC solver only) | no | no | no | no | **yes (CC on GPU)** | **Canonical CCSD(T) calibration anchor**, ~1380 orbitals/80 GB (§2.3 amendment) |
 | **NWChem** 7.3.1 | ECL-2.0 | native (`saddle`) | yes (in-core, small systems) | yes | COSMO, SMD | weak | not for DFT | Open-source fallback; unique Polyrate/VTST interface; archaic ergonomics |
 | **GAMESS-US** 2024R2 | free, no-redistribution | native | HF only | native | PCM, SMD | no | partial | Dominated by the above; license blocks containers |
 | **xtb** 6.7.1 | LGPL-3.0 | (screening level) | numerical | — | ALPB/GBSA | via tblite/ASE | no | Pre-screening layer, not for barriers |
@@ -135,12 +137,29 @@ Q-Chem, Molpro, TURBOMOLE, ADF/AMS, Jaguar, TeraChem.
 - Use it for: validating PySCF barriers, NEB-TS on awkward reactions, and all
   coupled-cluster single points.
 
-### 2.4 Psi4 — honorable mention
+> **AMENDED 2026-08-23 — ORCA descoped from the platform** (Victor's
+> call, licensing: registration-gated, closed, no redistribution — the
+> one component that could never be committed or containerized). Its
+> sole irreplaceable role, DLPNO-CCSD(T) calibration, is no longer
+> unique: **Psi4 1.11** (June 2026) ships native DLPNO-CCSD(T) (Jiang
+> et al., JCP 161, 082502), and **ByteQC** (Apache-2.0,
+> github.com/bytedance/byteqc) runs *canonical* CCSD(T) on GPU at up to
+> ~1380 orbitals. The calibration layer now runs both, cross-validated
+> — install runbook and protocol in `CALIBRATION.md`. "No other free
+> code offers this" above is left as written but is no longer true.
+
+### 2.4 Psi4 — honorable mention *(promoted 2026-08-23: calibration engine)*
 
 LGPL, one-line conda install, native TS+IRC via OptKing, clean Python API.
 Two dealbreakers for this project: DFT frequencies are finite-difference
 (a ~100-atom Hessian costs ~600 gradient evaluations), and there is no SMD
 solvation (a long-standing gap). Keep as a third opinion; don't build on it.
+
+*Amendment 2026-08-23: both dealbreakers concern the workhorse-DFT role
+only and are irrelevant to single-point coupled cluster on frozen
+geometries. With native DLPNO-CCSD(T) since 1.11, Psi4 is now the
+platform's DLPNO calibration engine (conda env `calib-psi4`, verified —
+see `CALIBRATION.md`).*
 
 ### 2.5 NWChem — the all-open fallback
 
@@ -368,7 +387,9 @@ several-kcal/mol error source across the field.
 
 Modern barrier papers calibrate DFT against **DLPNO-CCSD(T)/CBS (TightPNO)**
 single points — MAD ≤ 0.4 kcal/mol vs canonical CCSD(T). On this hardware
-that's hours-to-a-day for 30–80-atom clusters in ORCA. The 1990s dissertation
+that's hours-to-a-day for 30–80-atom clusters (Psi4 since the 2026-08-23
+amendment; ByteQC adds canonical CCSD(T) spot checks on the GPU, making
+the DLPNO error itself measurable — see `CALIBRATION.md`). The 1990s dissertation
 could never afford this layer; we get it for free, and it converts "which
 functional do we trust for Si–O–Al?" from a literature argument into a
 half-day calculation.
@@ -456,20 +477,20 @@ platform layer:
 2. **Barrier pipeline**: xtb/CREST screening → r²SCAN-3c or B3LYP-D4
    opt+freq (GPU4PySCF) → geomeTRIC/Sella TS + IRC verification → ωB97M-V +
    SMD single points → quasi-RRHO ΔG‡ → Eyring k(T) with tunneling
-   correction; ORCA DLPNO-CCSD(T) spot checks.
+   correction; DLPNO-CCSD(T) (Psi4) + canonical CCSD(T) (ByteQC) spot checks.
 3. **The bridge**: emit the site-resolved rate table in exactly the format
    `kmc-rs` consumes (the modern `data.rxn`), with provenance for every
    number.
 
 That's a modest Python package — the QM analog of what `kmc-rs` is to the
 C++ model — standing on PySCF + ASE + geomeTRIC/Sella, with every heavy
-component free and (except ORCA) open source.
+component free and — since the 2026-08-23 ORCA descope — open source.
 
 ## 9. Pilot plan
 
 **Phase 0 — install & smoke test** (an evening): `pip install pyscf
-gpu4pyscf-cuda12x geometric sella ase xtb goodvibes` (+ ORCA download after
-registration; + `nvidia-cuest-cu12` to test the emulation path). Verify the
+gpu4pyscf-cuda12x geometric sella ase xtb goodvibes` (+ the calibration
+engines per `CALIBRATION.md`; + `nvidia-cuest-cu12` to test the emulation path). Verify the
 4090: B3LYP/def2-TZVP energy+gradient+Hessian on Si(OH)₄·nH₂O, CPU vs GPU
 timings.
 
@@ -493,7 +514,8 @@ run `kmc-rs` against the dissertation's original parameterization.
 
 | Item | Flag |
 |---|---|
-| ORCA | Free academic/personal only; closed; no redistribution; commercial use needs paid license |
+| ORCA | *Descoped 2026-08-23* — was: free academic/personal only; closed; no redistribution; commercial use needs paid license. Replaced by Psi4 (LGPL) + ByteQC (Apache-2.0), `CALIBRATION.md` |
+| ByteQC | Apache-2.0 — fully open, containerizable |
 | GAMESS-US | Free but no redistribution (blocks containers); registration |
 | geomeTRIC | BSD-3 + added "no AI training datasets" clause |
 | pysisyphus, SevenNet | GPL-3.0; pysisyphus unmaintained |
