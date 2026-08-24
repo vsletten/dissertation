@@ -4,6 +4,13 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-24 — hermes-workstation — A1e post-merge activation closeout
+  independently rehashed all 24 campaign evidence files, reconfirmed four
+  typed Si endpoint rejections with zero failed/blocked/running paths and READY
+  A1f follow-through, and passed 341 QM tests plus CLI/diff gates. A narrow
+  follow-up normalizes the review-added regression test so whole-tree Ruff lint
+  and formatting are both green on the final merged behavior.
+
 - 2026-08-24 — hermes-workstation — A1e's exact concerted hydronium-as-
   nucleophile campaign is model-valid NO-GO: all four 3/4-water bridge-chain
   and compact-cycle Si paths are conclusive typed endpoint rejections, with
