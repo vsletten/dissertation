@@ -6,7 +6,7 @@
 - machine: workstation (GPU campaign)
 - depends: — (TASK-164's scan-smoothness repair helps but is not required)
 - claimed-by: hermes-workstation (continuation: agents/A1b-acid-microsolvation)
-- blocked-on: A1c-acid-microsolvation-conformers
+- blocked-on: A1e-acid-concerted-hydronium-relay
 
 ## Objective
 Extend scripts/phase1_xiao_lasaga.py with the acid mechanism: H3O+ first
@@ -32,6 +32,12 @@ and the si-neutral 27.0 kcal/mol (acid must come out LOWER).
 - New clusters/driver code unit-tested; suite green; PR merged.
 
 ## Progress
+- 2026-08-24 10:15 PDT — A1c/A1d closed the finite 3--6-water
+  pre-equilibrated-bridge hypothesis as a model-valid NO-GO: all 16 Si seeds are
+  now conclusive occupancy/connectivity rejections. This parent card remains
+  blocked, but its blocker advances to executable redesign card
+  `A1e-acid-concerted-hydronium-relay`; do not constrain Obr--H or revive the
+  retired pre-equilibrium.
 - 2026-08-23 20:21 PDT — **DEVIATION / SCIENTIFIC BLOCKER:** a bounded
   matched microsolvation count survey did not rescue the Si protonated bridge.
   Production B3LYP/def2-SVP/DF endpoints converged for 3, 4 (continued beyond
