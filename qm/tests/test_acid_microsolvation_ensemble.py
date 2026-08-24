@@ -440,10 +440,14 @@ def test_matched_receipt_binds_both_models_and_refuses_tampering(tmp_path):
         )
 
 
-@pytest.mark.parametrize("bound", [True, 0, -1, 161, 1.5])
-def test_refinement_bound_is_strictly_one_through_160(bound):
-    with pytest.raises(ValueError, match="integer in 1..160"):
+@pytest.mark.parametrize("bound", [True, 0, -1, 1, 159, 161, 1.5])
+def test_refinement_bound_is_exactly_160(bound):
+    with pytest.raises(ValueError, match="must be exactly 160"):
         ensemble._require_refinement_bound(bound)
+
+
+def test_refinement_bound_accepts_the_card_budget():
+    assert ensemble._require_refinement_bound(160) == 160
 
 
 def test_refinement_source_requires_pinned_hash_and_exact_artifacts(tmp_path):

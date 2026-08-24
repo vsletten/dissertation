@@ -308,10 +308,8 @@ def _expected_si_keys() -> set[str]:
 
 
 def _require_refinement_bound(max_steps: object) -> int:
-    if type(max_steps) is not int or not 1 <= max_steps <= REFINEMENT_MAX_STEPS:
-        raise ValueError(
-            f"refinement max_steps must be an integer in 1..{REFINEMENT_MAX_STEPS}"
-        )
+    if type(max_steps) is not int or max_steps != REFINEMENT_MAX_STEPS:
+        raise ValueError(f"refinement max_steps must be exactly {REFINEMENT_MAX_STEPS}")
     return max_steps
 
 
