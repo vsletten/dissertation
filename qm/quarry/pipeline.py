@@ -120,10 +120,17 @@ def constraints_file(text: str):
         os.unlink(path)
 
 
-def optimize(
+@dataclass(frozen=True)
+class OptimizationResult:
+    cluster: Cluster
+    converged: bool
+    max_steps: int
+
+
+def optimize_bounded(
     cluster: Cluster, settings: DftSettings, *, max_steps: int = 100
-) -> Cluster:
-    """Minimum-energy geometry via geomeTRIC; reject an exhausted step bound."""
+) -> OptimizationResult:
+    """Run a bounded geomeTRIC relaxation while preserving its convergence bit."""
     from pyscf.geomopt.geometric_solver import kernel as geometric_kernel
 
     mf = _make_scf(build_mol(cluster, settings), settings)
@@ -139,15 +146,24 @@ def optimize(
             )
     else:
         converged, mol_opt = geometric_kernel(mf, maxsteps=max_steps)
-    if not converged:
-        raise RuntimeError(
-            f"geometry optimization did not converge within {max_steps} steps"
-        )
-    return replace(
+    optimized = replace(
         cluster,
         symbols=[mol_opt.atom_symbol(i) for i in range(mol_opt.natm)],
         coords=mol_opt.atom_coords() * BOHR_TO_ANGSTROM,
     )
+    return OptimizationResult(optimized, bool(converged), max_steps)
+
+
+def optimize(
+    cluster: Cluster, settings: DftSettings, *, max_steps: int = 100
+) -> Cluster:
+    """Minimum-energy geometry via geomeTRIC; reject an exhausted step bound."""
+    result = optimize_bounded(cluster, settings, max_steps=max_steps)
+    if not result.converged:
+        raise RuntimeError(
+            f"geometry optimization did not converge within {max_steps} steps"
+        )
+    return result.cluster
 
 
 @dataclass(frozen=True)

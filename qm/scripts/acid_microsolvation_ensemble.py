@@ -38,7 +38,12 @@ from quarry.clusters import (  # noqa: E402
     disilicate,
     protonated_bridge_complex,
 )
-from quarry.pipeline import DftSettings, frequencies, optimize  # noqa: E402
+from quarry.pipeline import (  # noqa: E402
+    DftSettings,
+    frequencies,
+    optimize,
+    optimize_bounded,
+)
 from scripts import phase1_xiao_lasaga as phase1  # noqa: E402
 
 SCHEMA_VERSION = 1
@@ -303,12 +308,15 @@ def screen_seed(
             "artifacts": _artifact_hashes(seed_dir, ("seed.xyz",)),
         }
     else:
+        preoptimization_converged = None
         try:
-            preopt = optimize(
+            preopt_result = optimize_bounded(
                 seed,
                 DftSettings(xc="hf", basis="sto-3g"),
                 max_steps=max_steps,
             )
+            preoptimization_converged = preopt_result.converged
+            preopt = preopt_result.cluster
             phase1.save_xyz(preopt, seed_dir / "preoptimized.xyz")
             optimized = optimize(preopt, settings, max_steps=max_steps)
             optimized_path = seed_dir / "optimized.xyz"
@@ -368,6 +376,7 @@ def screen_seed(
                 "water_count": n_water,
                 "family": family,
                 "reason": reason,
+                "preoptimization_converged": preoptimization_converged,
                 "basin_signature": list(signature),
                 "n_imaginary": n_imaginary,
                 "electronic_hartree": electronic_hartree,
@@ -384,6 +393,7 @@ def screen_seed(
                 "water_count": n_water,
                 "family": family,
                 "reason": f"{type(exc).__name__}: {exc}",
+                "preoptimization_converged": preoptimization_converged,
                 "artifacts": _artifact_hashes(
                     seed_dir,
                     ("seed.xyz", "preoptimized.xyz", "optimized.xyz", "minimum.json"),

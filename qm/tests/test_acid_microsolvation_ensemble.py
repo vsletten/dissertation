@@ -1,6 +1,7 @@
 """Finite matched proton-relay ensemble orchestration gates."""
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -107,6 +108,13 @@ def test_screen_seed_rejects_exhausted_optimization_without_frequency(
         frequency_called = True
         raise AssertionError("frequency must not run after exhausted optimization")
 
+    monkeypatch.setattr(
+        ensemble,
+        "optimize_bounded",
+        lambda cluster, _settings, max_steps: SimpleNamespace(
+            cluster=cluster, converged=False
+        ),
+    )
     monkeypatch.setattr(ensemble, "optimize", exhausted)
     monkeypatch.setattr(ensemble, "frequencies", forbidden_frequency)
 
@@ -129,6 +137,13 @@ def test_screen_seed_rejects_malformed_frequency_receipt(tmp_path, monkeypatch):
     settings = DftSettings(xc="b3lyp", basis="def2-svp", density_fit=True)
     manifest_path = tmp_path / "manifest.json"
     manifest = {"seeds": {}}
+    monkeypatch.setattr(
+        ensemble,
+        "optimize_bounded",
+        lambda cluster, _settings, max_steps: SimpleNamespace(
+            cluster=cluster, converged=True
+        ),
+    )
     monkeypatch.setattr(
         ensemble, "optimize", lambda cluster, _settings, max_steps: cluster
     )

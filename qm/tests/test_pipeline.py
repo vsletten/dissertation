@@ -194,10 +194,20 @@ class TestOptimization:
 
         monkeypatch.setattr(pipeline, "build_mol", lambda cluster, settings: object())
         monkeypatch.setattr(pipeline, "_make_scf", lambda mol, settings: object())
+
+        class FakeMol:
+            natm = len(water().symbols)
+
+            def atom_symbol(self, index):
+                return water().symbols[index]
+
+            def atom_coords(self):
+                return water().coords / pipeline.BOHR_TO_ANGSTROM
+
         monkeypatch.setattr(
             geometric_solver,
             "kernel",
-            lambda method, **kwargs: (False, object()),
+            lambda method, **kwargs: (False, FakeMol()),
         )
 
         with pytest.raises(RuntimeError, match="did not converge within 7 steps"):

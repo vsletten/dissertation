@@ -53,6 +53,14 @@ ensemble**, not another single-shell or water-count retry.
 
 ## Progress
 
+- 2026-08-24 — campaign preflight correction: the first GPU-isolated launch was
+  deliberately stopped during seed 1's HF pre-relaxation at step 76/100, before
+  any production B3LYP result or accepted receipt. geomeTRIC convergence remains
+  mandatory for every production endpoint, while the cheap HF stage now exposes
+  and records its convergence bit but may hand its bounded last geometry to the
+  production optimizer instead of burning the entire ensemble on a non-load-
+  bearing precondition. Fresh 293-test/Ruff/format/diff gates pass; the stopped
+  seed's running checkpoint will be quarantined automatically on relaunch.
 - 2026-08-24 — implementation checkpoint: four deterministic 3--6-water
   families now carry explicit connected donor/acceptor graphs, stable O/H/H
   indices, collision gates, and exact physical-H ownership. The finite Si-first
