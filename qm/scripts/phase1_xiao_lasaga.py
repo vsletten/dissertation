@@ -309,26 +309,52 @@ def _acid_mobile_assignments(
     return assignments
 
 
-def acid_solvent_occupancy_reason(
+def _all_hydrogen_assignments(cluster: Cluster) -> list[int | None]:
+    """Assign every physical hydrogen, including framework OH protons."""
+    hydrogen_indices = tuple(
+        index for index, symbol in enumerate(cluster.symbols) if symbol == "H"
+    )
+    return _acid_mobile_assignments(cluster, hydrogen_indices)
+
+
+def acid_occupancy_reason(
     cluster: Cluster,
     ow_index: int,
-    proton_indices: tuple[int, ...],
     *,
     solvent_oxygen_indices: tuple[int, ...] = (),
     attacker_h_count: int,
+    bridge_h_count: int,
+    extra_framework_h_count: int,
 ) -> str | None:
-    """Require a neutral shell instead of hiding OH-/H3O+ in an aggregate."""
+    """Reject hidden proton swaps across attacker, shell, and framework OH."""
     ordered_solvent = (
         ow_index,
         *(oxygen for oxygen in solvent_oxygen_indices if oxygen != ow_index),
     )
-    assignments = _acid_mobile_assignments(cluster, proton_indices)
-    actual = tuple(assignments.count(oxygen) for oxygen in ordered_solvent)
-    expected = (attacker_h_count, *(2 for _ in ordered_solvent[1:]))
-    if actual != expected:
+    assignments = _all_hydrogen_assignments(cluster)
+    actual_solvent = tuple(assignments.count(oxygen) for oxygen in ordered_solvent)
+    expected_solvent = (attacker_h_count, *(2 for _ in ordered_solvent[1:]))
+    if actual_solvent != expected_solvent:
         return (
-            f"acid solvent occupancies {actual} != {expected} (attacker, shell waters)"
+            f"acid solvent occupancies {actual_solvent} != {expected_solvent} "
+            "(attacker, shell waters)"
         )
+    actual_bridge = assignments.count(BR_INDEX)
+    if actual_bridge != bridge_h_count:
+        return f"acid bridge occupancy {actual_bridge} != {bridge_h_count}"
+    solvent_set = set(ordered_solvent)
+    framework_oxygens = [
+        index
+        for index, symbol in enumerate(cluster.symbols)
+        if symbol == "O" and index not in {BR_INDEX, *solvent_set}
+    ]
+    actual_framework = sorted(assignments.count(oxygen) for oxygen in framework_oxygens)
+    expected_framework = sorted(
+        [1] * (len(framework_oxygens) - extra_framework_h_count)
+        + [2] * extra_framework_h_count
+    )
+    if actual_framework != expected_framework:
+        return f"acid framework occupancies {actual_framework} != {expected_framework}"
     return None
 
 
@@ -388,12 +414,13 @@ def protonated_bridge_reason(
             f"acid reactant basin {signature} != {expected} "
             "(protonated intact bridge + microsolvated H2O attacker)"
         )
-    return acid_solvent_occupancy_reason(
+    return acid_occupancy_reason(
         cluster,
         ow_index,
-        proton_indices,
         solvent_oxygen_indices=solvent_oxygen_indices,
         attacker_h_count=2,
+        bridge_h_count=1,
+        extra_framework_h_count=0,
     )
 
 
@@ -414,12 +441,13 @@ def acid_product_reason(
     expected = acid_product_basin(proton_indices)
     if signature != expected:
         return f"acid product basin {signature} != {expected}"
-    return acid_solvent_occupancy_reason(
+    return acid_occupancy_reason(
         cluster,
         ow_index,
-        proton_indices,
         solvent_oxygen_indices=solvent_oxygen_indices,
         attacker_h_count=1,
+        bridge_h_count=2,
+        extra_framework_h_count=0,
     )
 
 
@@ -450,12 +478,13 @@ def acid_irc_solvent_reason(
             attacker_h_count = 1
         else:
             return f"acid IRC endpoint has unsupported basin {signature}"
-        if reason := acid_solvent_occupancy_reason(
+        if reason := acid_occupancy_reason(
             endpoint,
             ow_index,
-            proton_indices,
             solvent_oxygen_indices=solvent_oxygen_indices,
             attacker_h_count=attacker_h_count,
+            bridge_h_count=signature[3],
+            extra_framework_h_count=signature[5],
         ):
             return reason
     return None
@@ -784,10 +813,24 @@ def load_reactant_minimum_receipt(
     """Load only a geometry/settings-bound minimum receipt."""
     if not path.is_file():
         return None
-    payload = json.loads(path.read_text())
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
     if payload.get("geometry_fingerprint") != frequency_geometry_fingerprint(cluster):
         return None
     if payload.get("settings_fingerprint") != frequency_settings_fingerprint(settings):
+        return None
+    n_imaginary = payload.get("n_imaginary")
+    passed = payload.get("passed")
+    imaginary_cm = payload.get("imaginary_cm")
+    if type(n_imaginary) is not int or n_imaginary < 0:  # bool is not accepted
+        return None
+    if type(passed) is not bool or passed is not (n_imaginary == 0):
+        return None
+    if not isinstance(imaginary_cm, list) or len(imaginary_cm) != n_imaginary:
         return None
     return payload
 
@@ -831,6 +874,23 @@ def write_sequential_run_status(
         payload["detail"] = detail
     path = run_dir / "run_status.json"
     temporary = run_dir / "run_status.json.tmp"
+    temporary.write_text(json.dumps(payload, indent=2))
+    temporary.replace(path)
+
+
+def write_reactant_survey_status(
+    run_dir: Path,
+    status: str,
+    detail: str,
+) -> None:
+    """Publish a reactant-only result without touching canonical campaign state."""
+    payload = {
+        "status": status,
+        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "detail": detail,
+    }
+    path = run_dir / "reactant_status.json"
+    temporary = run_dir / "reactant_status.json.tmp"
     temporary.write_text(json.dumps(payload, indent=2))
     temporary.replace(path)
 
@@ -1758,7 +1818,8 @@ def main() -> int:
         else attacker_factory()
     )
     if acid_path:
-        begin_gated_run(run_dir)
+        if not args.reactant_only:
+            begin_gated_run(run_dir)
         complex_guess = protonated_bridge_complex(
             dimer,
             mode=args.approach,
@@ -1813,6 +1874,9 @@ def main() -> int:
         complex_pre,
         lambda: optimize(complex_pre, settings),
     )
+    # Every downstream gate consumes the exact archived coordinates. This keeps
+    # geometry fingerprints stable across a crash/restart despite XYZ rounding.
+    complex_opt = load_xyz(run_dir / "complex.xyz", complex_pre)
     if acid_path:
         pre_equilibrium_failure = protonated_bridge_reason(
             complex_opt,
@@ -1821,6 +1885,13 @@ def main() -> int:
             solvent_oxygen_indices=solvent_oxygen_indices,
         )
         if pre_equilibrium_failure:
+            if args.reactant_only:
+                write_reactant_survey_status(
+                    run_dir,
+                    "blocked",
+                    pre_equilibrium_failure,
+                )
+                return 1
             block_run(run_dir, pre_equilibrium_failure)
             raise RuntimeError(pre_equilibrium_failure)
 
@@ -1843,19 +1914,22 @@ def main() -> int:
             assert minimum_receipt is not None
         else:
             log("  resume: geometry/settings-bound reactant minimum receipt exists")
-        if not bool(minimum_receipt["passed"]):
+        if minimum_receipt["passed"] is not True:
             detail = (
                 "microsolvated reactant minimum has "
                 f"{minimum_receipt['n_imaginary']} imaginary modes; "
                 "TS search forbidden"
             )
-            block_run(run_dir, detail)
+            if args.reactant_only:
+                write_reactant_survey_status(run_dir, "blocked", detail)
+            else:
+                block_run(run_dir, detail)
             return 1
         if args.reactant_only:
-            write_sequential_run_status(
+            write_reactant_survey_status(
                 run_dir,
-                "reactant-verified",
-                detail="microsolvated reactant passed connectivity and minimum gates",
+                "verified",
+                "microsolvated reactant passed connectivity and minimum gates",
             )
             log("reactant-only gate passed; TS search intentionally skipped")
             return 0

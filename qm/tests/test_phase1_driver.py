@@ -240,6 +240,37 @@ def test_microsolvated_basin_rejects_hidden_hydroxide_hydronium_pair():
     assert reason is not None and "solvent occupancies" in reason
 
 
+def test_microsolvated_basin_rejects_untracked_framework_proton_theft():
+    dimer = disilicate()
+    reactant = protonated_bridge_complex(dimer, n_water=4)
+    ow_index = len(dimer.symbols)
+    proton_indices, solvent_oxygen_indices = phase1.acid_mobile_indices(ow_index, 4)
+    corrupted = replace(reactant, coords=reactant.coords.copy())
+    framework_h = next(
+        index for index in range(len(dimer.symbols)) if dimer.symbols[index] == "H"
+    )
+    shell_oxygen = solvent_oxygen_indices[1]
+    corrupted.coords[framework_h] = corrupted.coords[shell_oxygen] + np.array(
+        [0.0, 0.0, 0.96]
+    )
+
+    # Mobile-proton bookkeeping is unchanged, but the physical shell is H3O+
+    # and one terminal framework oxygen is bare.
+    assert phase1.acid_basin_signature(
+        corrupted,
+        ow_index,
+        proton_indices,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+    ) == phase1.acid_reactant_basin(proton_indices)
+    reason = phase1.protonated_bridge_reason(
+        corrupted,
+        ow_index,
+        proton_indices,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+    )
+    assert reason is not None and "solvent occupancies" in reason
+
+
 def test_microsolvated_basin_equivalence_includes_every_solvent_oxygen():
     canonical = protonated_bridge_complex(disilicate(), n_water=4)
     ow_index = len(disilicate().symbols)
@@ -295,6 +326,15 @@ def test_reactant_minimum_receipt_is_geometry_and_settings_bound(tmp_path):
         )
         is None
     )
+    xyz_path = tmp_path / "complex.xyz"
+    phase1.save_xyz(cluster, xyz_path)
+    archived = phase1.load_xyz(xyz_path, cluster)
+    phase1.write_reactant_minimum_receipt(path, archived, settings, frequency)
+    assert phase1.load_reactant_minimum_receipt(path, archived, settings) is not None
+    tampered = json.loads(path.read_text())
+    tampered["passed"] = "false"
+    path.write_text(json.dumps(tampered))
+    assert phase1.load_reactant_minimum_receipt(path, cluster, settings) is None
 
 
 def test_microsolvated_main_blocks_before_ts_when_reactant_is_not_minimum(
@@ -343,6 +383,11 @@ def test_microsolvated_main_blocks_before_ts_when_reactant_is_not_minimum(
 
 
 def test_reactant_only_stops_after_verified_minimum(monkeypatch, tmp_path):
+    (tmp_path / "results.json").write_text('{"durable": true}')
+    (tmp_path / "store.sqlite").write_bytes(b"durable-store")
+    (tmp_path / "run_status.json").write_text(
+        json.dumps({"status": "completed", "detail": "existing accepted campaign"})
+    )
     monkeypatch.setattr(
         phase1.sys,
         "argv",
@@ -378,8 +423,12 @@ def test_reactant_only_stops_after_verified_minimum(monkeypatch, tmp_path):
     )
 
     assert phase1.main() == 0
-    status = json.loads((tmp_path / "run_status.json").read_text())
-    assert status["status"] == "reactant-verified"
+    survey = json.loads((tmp_path / "reactant_status.json").read_text())
+    canonical = json.loads((tmp_path / "run_status.json").read_text())
+    assert survey["status"] == "verified"
+    assert canonical["status"] == "completed"
+    assert json.loads((tmp_path / "results.json").read_text()) == {"durable": True}
+    assert (tmp_path / "store.sqlite").read_bytes() == b"durable-store"
 
 
 @pytest.mark.parametrize("dimer_factory", [disilicate, aluminosilicate_dimer])
