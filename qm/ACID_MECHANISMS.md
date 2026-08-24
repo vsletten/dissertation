@@ -174,23 +174,58 @@ A1d's resolution manifest is
 `6b02432f4920b2ff8406de5cd22d379ebc54ceed66800b1db8149efff7df62cf`
 under `/mnt/data/vsletten/dissertation-data/task199-a1d-acid-3w-bridge-20260824/`.
 
+## Concerted hydronium-as-nucleophile result (A1e)
+
+A1e retired the pre-equilibrium and ran the predeclared finite concerted scope
+at B3LYP/def2-SVP/DF: total waters 3 and 4 crossed with
+`bridge-donor-chain` and `compact-cyclic-relay`. The reactant began with an
+intact unprotonated Si--O--Si bridge and H3O+ in the network. The exact product
+made that same hydronium oxygen the Si--Ow nucleophile while the physical-H
+relay protonated Obr. Every endpoint was unconstrained in production.
+
+All four Si paths are conclusive rejections, with no computational failures:
+
+| path | terminal gate | exact result |
+|---|---|---|
+| 3w bridge-donor-chain | optimized product | `(False, False, True, 1, 5, 0)`; Si--Ow dissociated |
+| 3w compact-cyclic-relay | optimized product | `(False, False, True, 1, 5, 0)`; Si--Ow dissociated |
+| 4w bridge-donor-chain | optimized reactant | solvent occupancy `(2,2,2,3)` instead of H3O+ `(3,2,2,2)` |
+| 4w compact-cyclic-relay | optimized reactant | `(False, True, True, 0, 8, 1)`; proton moved to framework O |
+
+The required endpoint gates correctly stopped every path before CI-NEB. No
+pre-climb band, saddle, IRC, Al screen, barrier, or ordering was fabricated from
+a rejected basin. The implementation nevertheless lands the reusable,
+regression-tested downstream contract: hash-bound finite driver, persisted
+pre-climb/climb checkpoints, coupled relay/attack/cleavage one-mode gate, and
+bounded full bidirectional Sella Gonzalez--Schlegel IRC.
+
+Durable evidence root:
+`/mnt/data/vsletten/dissertation-data/task200-a1e-acid-concerted-20260824/`.
+Evidence manifest SHA-256 is
+`3162e39f2f0f263444741b03e0a023b1209bf515a9f8291c330ca9995811e622`;
+production log is
+`627914bbb22ee655932508ea974f006a503389198f656b173fe225607a8ca784`;
+run manifest is
+`dfea131556fddf907ccabfc52945d390695f99d372cfdeac6859a4f2c0549982`.
+
 ## Required follow-up
 
-Retire the pre-equilibrium rather than retrying counts, conformers, or an Obr--H
-constraint. Executable board card `A1e-acid-concerted-hydronium-relay` owns a
-finite matched concerted pathway: hydronium proton transfer occurs during
-nucleophilic attack/bridge cleavage, with double-ended path finding, a coupled
-one-imaginary-mode saddle, and full IRC endpoint proof before any Si/Al ordering
-is published. Never hold Obr--H by constraint to manufacture thermochemistry.
+Do not retry A1e's water counts/topologies or use the hydronium oxygen as the
+nucleophile again. Executable board card
+`A1f-acid-neutral-water-attacker-relay` tests exactly one four-water topology
+with distinct roles: H3O+ is the acid donor, a separate neutral H2O attacks Si,
+one water relays the proton, and one solvates the network. Only a fully accepted
+Si path may trigger its exact matched Al path. Never hold Obr--H, Si--Ow, or
+Si--Obr to manufacture thermochemistry.
 
 Reproduction commands must clear inherited environments:
 
 ```bash
 env -u PYTHONPATH -u VIRTUAL_ENV \
   uv run --frozen --extra gpu --extra dev \
-  python scripts/phase1_xiao_lasaga.py --reaction si-acid --gpu \
-  --microsolvation-waters 4 --reactant-only \
-  --threads 16 --nice 10 --log <durable-log>
+  python scripts/concerted_acid_relay.py --gpu \
+  --run-dir <durable-run-dir> --threads 16 --nice 10 \
+  --log <durable-log>
 ```
 
 The RTX 4090 must be isolated from both email extraction and Honcho memory

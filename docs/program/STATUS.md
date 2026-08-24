@@ -4,6 +4,15 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-24 — hermes-workstation — A1e's exact concerted hydronium-as-
+  nucleophile campaign is model-valid NO-GO: all four 3/4-water bridge-chain
+  and compact-cycle Si paths are conclusive typed endpoint rejections, with
+  zero optimizer/NEB/Hessian/IRC failures and therefore no eligible Al,
+  barrier, or ordering. Mechanism-v1/gate-v1, full bidirectional Sella IRC,
+  physical-H relay ownership, hash-bound receipts, and 338-test proof land with
+  narrower READY `A1f-acid-neutral-water-attacker-relay`, which separates H3O+
+  donor from the neutral-water nucleophile.
+
 - 2026-08-24 — hermes-workstation — A1d closes A1c's sole inconclusive
   three-water seed and the finite pre-equilibrium: one hash-pinned fresh
   B3LYP/def2-SVP/DF continuation converged after 54 steps, then failed the exact

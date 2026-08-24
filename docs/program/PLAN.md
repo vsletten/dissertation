@@ -33,10 +33,11 @@ on main). Priority P0 > P1 > P2 within READY.
 | [E1-muscovite-deck](cards/E1-muscovite-deck.md) | E | P1 | any | done | — (phase 1 isothermal) |
 | [E2-muscovite-full-mechanism](cards/E2-muscovite-full-mechanism.md) | E | P1 | any | done | B5 ✅ |
 | [A8-thesis-archive-intake](cards/A8-thesis-archive-intake.md) | A | P1 | workstation | ready | — |
-| [A1b-acid-mechanisms](cards/A1b-acid-mechanisms.md) | A | P1 | workstation | blocked: A1e | concerted hydronium/proton-relay redesign |
+| [A1b-acid-mechanisms](cards/A1b-acid-mechanisms.md) | A | P1 | workstation | blocked: A1f | separate hydronium donor / neutral-water attacker |
 | [A1c-acid-microsolvation-conformers](cards/A1c-acid-microsolvation-conformers.md) | A | P1 | workstation | done | 16/16 conclusive Si rejections via A1d |
 | [A1d-acid-3w-bridge-convergence](cards/A1d-acid-3w-bridge-convergence.md) | A | P1 | workstation | done | A1c infrastructure + archived receipts |
-| [A1e-acid-concerted-hydronium-relay](cards/A1e-acid-concerted-hydronium-relay.md) | A | P1 | workstation | ready | A1c/A1d pre-equilibrium NO-GO |
+| [A1e-acid-concerted-hydronium-relay](cards/A1e-acid-concerted-hydronium-relay.md) | A | P1 | workstation | done | 4/4 conclusive hydronium-as-nucleophile rejections |
+| [A1f-acid-neutral-water-attacker-relay](cards/A1f-acid-neutral-water-attacker-relay.md) | A | P1 | workstation | ready | A1e ✅ |
 | [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | ready | — |
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
 | [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | ready | — |
@@ -50,7 +51,8 @@ on main). Priority P0 > P1 > P2 within READY.
 | [D3b-co-hydrogenation-deck](cards/D3b-co-hydrogenation-deck.md) | D | P2 | any | blocked: D2b | D3 ✅, D2b |
 | [A5p0-aging-observables](cards/A5p0-aging-observables.md) | A | P1 | any | done | B4 ✅ |
 
-**Done** (acceptance verified on main): A1d-acid-3w-bridge-convergence,
+**Done** (acceptance verified on main): A1e-acid-concerted-hydronium-relay,
+A1d-acid-3w-bridge-convergence,
 A1c-acid-microsolvation-conformers, D3-ice-mantle-deck,
 E2-muscovite-full-mechanism,
 B5-execution-schedule,

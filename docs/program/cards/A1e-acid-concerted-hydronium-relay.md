@@ -1,11 +1,11 @@
 # A1e-acid-concerted-hydronium-relay — retire the failed pre-equilibrium
 
-- status: ready
+- status: done
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaign)
 - depends: A1c/A1d model-valid NO-GO for the pre-equilibrated protonated bridge
-- claimed-by:
+- claimed-by: hermes-workstation
 
 ## Objective
 
@@ -65,6 +65,22 @@ along the same elementary path as water attack and Si--Obr weakening/cleavage.
 
 ## Progress
 
+- 2026-08-24 13:08 PDT — **DONE / four-path model-valid rejection.** The exact
+  mechanism-v1/gate-v1 B3LYP/def2-SVP/DF campaign finished with four terminal
+  Si records: **4 rejected / 0 accepted / 0 failed / 0 blocked**, and no
+  `running` record. Both three-water reactants were genuine zero-imaginary
+  minima, but each exact hydrolyzed product relaxed to complete Si--Ow
+  dissociation while Si--Obr remained cleaved. The four-water bridge-chain
+  reactant moved one proton from H3O+ to the last shell water; the compact-cycle
+  reactant moved one solvent proton onto a terminal framework O. These are
+  conclusive typed endpoint rejections, not optimizer/Hessian/NEB/IRC failures.
+  No Si path was eligible for CI-NEB or matched Al, so no downstream saddle,
+  barrier, or ordering was fabricated. **DEVIATION:** the card listed every
+  downstream artifact class, but its fail-closed endpoint gates correctly
+  terminated all four paths before pre-climb; manufacturing NEB/saddle/IRC
+  artifacts from rejected endpoints would violate the same contract. Narrower
+  executable card `A1f-acid-neutral-water-attacker-relay` is filed and separates
+  the H3O+ proton donor from the neutral-water nucleophile.
 - 2026-08-24 12:41 PDT — implementation checkpoint: added mechanism-v1/gate-v1
   unconstrained concerted endpoint builders for the exact 3/4-water ×
   bridge-chain/compact-cycle scope, including stable A1c atom order and an
@@ -78,3 +94,39 @@ along the same elementary path as water attack and Si--Obr weakening/cleavage.
   unconstrained pre-equilibrated Si bridge seeds are conclusive rejections; the
   concerted hydronium/proton-relay path is now the only authorized acid-mechanism
   continuation. No A1e computation has started.
+
+## Result
+
+- Added `concerted_acid_relay_endpoints()` and the finite
+  `scripts/concerted_acid_relay.py` campaign. The builder preserves A1c atom
+  order and exact physical-H ownership; bridge chains shift every relay proton
+  owner explicitly. The driver binds topology/water/method/mechanism/gates and
+  every stage bound into resume identity; refuses drift; persists/hash-journals
+  terminal artifacts; and admits Al only after its exact Si path is fully
+  accepted. `quarry.ts.full_irc()` adds bounded two-direction Sella
+  Gonzalez--Schlegel integration using one shared TS Hessian.
+- Production verdict:
+  `all-four-si-paths-conclusive-rejection`. Three-water bridge-chain and compact
+  cycle both rejected at optimized product signature `(False, False, True, 1,
+  5, 0)` versus required `(True, False, True, 1, 6, 0)`. Four-water bridge-chain
+  rejected exact solvent occupancies `(2,2,2,3)` versus `(3,2,2,2)`; four-water
+  compact cycle rejected reactant signature `(False, True, True, 0, 8, 1)`
+  versus `(False, True, True, 0, 9, 0)`. No computational stage failed.
+- Durable external root:
+  `/mnt/data/vsletten/dissertation-data/task200-a1e-acid-concerted-20260824/`.
+  Evidence manifest: 24 files / 286,860 bytes, SHA-256
+  `3162e39f2f0f263444741b03e0a023b1209bf515a9f8291c330ca9995811e622`.
+  Campaign log SHA-256
+  `627914bbb22ee655932508ea974f006a503389198f656b173fe225607a8ca784`;
+  run manifest SHA-256
+  `dfea131556fddf907ccabfc52945d390695f99d372cfdeac6859a4f2c0549982`.
+  Every terminal and referenced artifact re-hashed exactly after completion.
+- GPU isolation used a process-scoped 16 GiB memlock cap, cuTENSOR assertion,
+  OMP/MKL/OpenBLAS 16, nice 10, stopped email pipelines/Honcho inference, and a
+  ten-hour dead-man. On exit both email pipelines restarted on fresh PIDs,
+  Honcho deriver/API are running, API `/health` is `{"status":"ok"}`, the
+  dead-man is inactive, Ollama is empty, and the GPU returned idle.
+- Fresh implementation verification before closeout: **338 full QM tests
+  passed** with cache disabled; whole-tree Ruff check/format, CLI help, and diff
+  check are green. Card/PLAN/STATUS and executable A1f follow-through are in the
+  same PR.
