@@ -214,3 +214,83 @@ def test_mechanism_finding_publishes_only_with_verified_cleavage(monkeypatch, tm
     assert json.loads((tmp_path / "run_status.json").read_text())["status"] == (
         "completed"
     )
+
+
+def _mechanism_finding_closeout_inputs(tmp_path):
+    template = resolution.hydrolysis_complex(
+        resolution.aluminosilicate_dimer(), resolution.water(), mode="flank"
+    )
+    ow_index = len(resolution.aluminosilicate_dimer().symbols)
+    reactant_coords = template.coords.copy()
+    reactant_coords[ow_index] = reactant_coords[resolution.SI_INDEX] + np.array(
+        [0.0, 3.2, 0.0]
+    )
+    reactant_coords[ow_index + 1] = reactant_coords[ow_index] + np.array(
+        [0.0, 0.96, 0.0]
+    )
+    reactant_coords[ow_index + 2] = reactant_coords[ow_index] + np.array(
+        [0.0, -0.96, 0.0]
+    )
+    reactant = replace(template, name="reactant", coords=reactant_coords)
+    intermediate_coords = template.coords.copy()
+    intermediate_coords[ow_index] = intermediate_coords[resolution.SI_INDEX] + np.array(
+        [0.0, 1.8, 0.0]
+    )
+    intermediate_coords[ow_index + 1] = intermediate_coords[
+        resolution.BR_INDEX
+    ] + np.array([0.0, 0.98, 0.0])
+    intermediate_coords[ow_index + 2] = intermediate_coords[ow_index] + np.array(
+        [0.0, 0.96, 0.0]
+    )
+    intermediate = replace(template, name="intermediate", coords=intermediate_coords)
+    product_coords = intermediate.coords.copy()
+    product_coords[resolution.BR_INDEX] = product_coords[
+        resolution.SI_INDEX
+    ] + np.array([3.5, 0.0, 0.0])
+    product_coords[ow_index + 1] = product_coords[resolution.BR_INDEX] + np.array(
+        [0.0, 0.98, 0.0]
+    )
+    product = replace(template, name="product", coords=product_coords)
+    cleavage_ts = replace(intermediate, name="cleavage-ts")
+
+    resolution.save_xyz(reactant, tmp_path / "complex.xyz")
+    resolution.save_xyz(intermediate, tmp_path / "intermediate.task168-selected.xyz")
+    (tmp_path / "task168-addition-lower-i-attempt.json").write_text(
+        json.dumps({"status": "no-saddle", "reason": "two soft modes"})
+    )
+    sweep_dir = tmp_path / "task168-intermediate-sweep"
+    sweep_dir.mkdir()
+    (sweep_dir / "manifest.json").write_text(
+        json.dumps({"summary": {"selected_label": "lower"}})
+    )
+    cleavage_freq = FrequencyResult(
+        frequencies_cm=np.array([300.0, 700.0]),
+        imaginary_cm=np.array((84.0,)),
+        electronic_hartree=-99.95,
+        molar_mass_kg=0.1,
+        rotational_temperatures_k=(1.0, 2.0, 3.0),
+        linear=False,
+    )
+    return cleavage_ts, cleavage_freq, intermediate, product
+
+
+def test_finalize_marks_failed_when_closeout_after_begin_raises(monkeypatch, tmp_path):
+    cleavage = _mechanism_finding_closeout_inputs(tmp_path)
+
+    def boom(path, cluster, settings):
+        raise RuntimeError("frequency cache exploded")
+
+    monkeypatch.setattr(resolution, "cached_frequency", boom)
+
+    with pytest.raises(RuntimeError, match="frequency cache exploded"):
+        resolution.finalize(
+            tmp_path,
+            DftSettings(),
+            298.15,
+            addition=None,
+            cleavage=cleavage,
+        )
+
+    status = json.loads((tmp_path / "run_status.json").read_text())
+    assert status["status"] == "failed"
+    assert "frequency cache exploded" in status["detail"]

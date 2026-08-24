@@ -465,6 +465,42 @@ def finalize(
     endpoint_in_basin(cleavage_back, cleavage_fwd, ow_index, HYDROLYZED_BASIN)
 
     begin_sequential_run(run_dir)
+    try:
+        return _finalize_after_begin(
+            run_dir,
+            settings,
+            temperature,
+            addition,
+            reactant,
+            intermediate,
+            cleavage_ts,
+            cleavage_freq,
+            cleavage_back,
+            cleavage_fwd,
+            ow_index,
+        )
+    except Exception as exc:
+        write_sequential_run_status(
+            run_dir,
+            "failed",
+            detail=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+
+
+def _finalize_after_begin(
+    run_dir: Path,
+    settings: DftSettings,
+    temperature: float,
+    addition: tuple[Cluster, FrequencyResult, Cluster, Cluster] | None,
+    reactant: Cluster,
+    intermediate: Cluster,
+    cleavage_ts: Cluster,
+    cleavage_freq: FrequencyResult | None,
+    cleavage_back: Cluster,
+    cleavage_fwd: Cluster,
+    ow_index: int,
+) -> dict:
     reactant_freq = cached_frequency(
         run_dir / "complex.task168.frequency.npz", reactant, settings
     )
