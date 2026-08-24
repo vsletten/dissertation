@@ -28,17 +28,22 @@ hydroxyls on each center, one Si–O–Al bridge, total charge -1, and singlet s
 TASK-168 constructed that core with `aluminosilicate_dimer()` and added one
 neutral water, so its reacting complex is `H8SiAlO8-` and remains charge -1.
 This identity follows both the current builder and the campaign's exact template,
-not an inference from the result label. [TASK-168 code: `quarry/clusters.py`
-`aluminosilicate_dimer()` and `scripts/task168_intermediate_sweep.py` lines
-160–170; durable receipt: `task168-al-neutral-20260823/results.json`.]
+not an inference from the result label. [TASK-168 code: `qm/quarry/clusters.py`
+`aluminosilicate_dimer()` and `qm/scripts/task168_intermediate_sweep.py`
+`run_sweep()`, which builds the template from that dimer plus one water.
+The campaign tree is not in this repository; the durable `results.json`
+SHA-256 is `94ecd8ea45dbea17743d7ce9ad354beb4ed150ff97d988714e6f0dd895ccb148`
+in Durable receipts below.]
 
 Victor's thesis used Gaussian 94/B3LYP, B3LYP/3-21G(3d,2p) geometries, and
 6-31G(3d) single-point energies. Its dimer table reports **29.9267 kcal/mol**
 for the direct net reaction from `H6SiAlO7- + H2O·H2O` to silicic acid,
 `Al(OH)4-`, and a spectator water; the pre-adsorbed-water hydrolysis step is
-**35.7769 kcal/mol**. [Victor Sletten dissertation, ch. 4, “Computational
-Method” and “Reaction Model,” `phd_thesis/text/ch4.tex`; exact “Dimer
-Hydrolysis” values in `phd_thesis/dft/tex/tbls.tex`.]
+**35.7769 kcal/mol**. [Victor Sletten, *Playing Dice with the Universe*
+(~1999), ch. 4, “Computational Method” and “Reaction Model”; exact “Dimer
+Hydrolysis” values from the thesis dimer table. Those LaTeX sources live in
+the workstation thesis archive and are not yet ingested here; see
+`docs/program/cards/A8-thesis-archive-intake.md`.]
 
 The modern **32.221 kcal/mol** result is only **2.294 kcal/mol above** the old
 29.9267 number and therefore corroborates the energy scale Victor found in the

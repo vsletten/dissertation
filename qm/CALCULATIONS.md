@@ -61,9 +61,10 @@ families, emitted as Petra `by_count`/`when` tables with provenance.
   step (B3LYP/3-21G(3d,2p) geometries, 6-31G(3d) energies). TASK-168's 32.221
   kcal/mol is a 298.15 K `ΔG‡`, so the 2.294-kcal numerical agreement
   corroborates scale, not equality of observables. Sources: Victor Sletten
-  dissertation ch. 4 (`phd_thesis/text/ch4.tex`) and the exact dimer table
-  (`phd_thesis/dft/tex/tbls.tex`); current provenance is in
-  `AL_NEUTRAL_MECHANISM.md` and the TASK-168 durable receipts.
+  dissertation ch. 4 (“Computational Method” / “Reaction Model”) and the
+  thesis dimer table (workstation archive; not yet ingested — see
+  `docs/program/cards/A8-thesis-archive-intake.md`); current provenance is
+  in `AL_NEUTRAL_MECHANISM.md` and the TASK-168 durable receipt hashes there.
 - **Three-tier interpretation:** neutral free-dimer `al > si` does not directly
   test Xiao & Lasaga's catalyzed ~24/~19 kcal/mol channels; matched A1b acids do.
   Izadifar's embedded Si–O–Al 86 versus Si–O–Si 169 kJ/mol ordering remains an
