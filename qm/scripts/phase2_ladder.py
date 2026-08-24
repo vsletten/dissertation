@@ -172,9 +172,7 @@ def approach_seed_signature(
     }
 
 
-def save_approach_seed(
-    seed: Cluster, path: Path, signature: dict[str, object]
-) -> None:
+def save_approach_seed(seed: Cluster, path: Path, signature: dict[str, object]) -> None:
     """Write an approach checkpoint and its compatibility data."""
     save_xyz(seed, path)
     path.with_suffix(".json").write_text(json.dumps(signature, indent=2))
@@ -495,8 +493,10 @@ def main() -> int:
     if args.gpu:
         preload_cutensor()
     qm_root = Path(__file__).resolve().parent.parent
-    deck = Path(args.deck) if args.deck else (
-        qm_root.parent / "petra" / "examples" / "kaolinite.toml"
+    deck = (
+        Path(args.deck)
+        if args.deck
+        else (qm_root.parent / "petra" / "examples" / "kaolinite.toml")
     )
     settings = DftSettings(
         xc=args.xc, basis=args.basis, density_fit=True, use_gpu=args.gpu
