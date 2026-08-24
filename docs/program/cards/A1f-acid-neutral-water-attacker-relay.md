@@ -1,6 +1,6 @@
 # A1f-acid-neutral-water-attacker-relay — separate donor from nucleophile
 
-- status: ready
+- status: done
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaign)
@@ -70,6 +70,17 @@ those four topologies.
 
 ## Progress
 
+- 2026-08-24 16:09 PDT — **DONE / one-path conclusive rejection.** The exact
+  mechanism-v2/gate-v2 B3LYP/def2-SVP/DF Si reactant converged in 68 steps with
+  valid aggregate basin `(False, True, True, 0, 9, 0)`, unique ownership, and a
+  neutral attacker, but physical H16 moved from the declared outer H3O+ donor
+  onto the bridge-side relay water. Exact solvent occupancies became
+  `(2,2,3,2)` instead of required `(3,2,2,2)`. The terminal is therefore
+  `rejected` at `optimize-reactant`, not a computational failure; no CI-NEB,
+  saddle, IRC, Al screen, barrier, or ordering was fabricated. Executable A1g
+  now tests the selected bridge-side-H3O+ / distinct-neutral-attacker topology
+  directly. All six archived files re-hash exactly; services and GPU isolation
+  are restored healthy.
 - 2026-08-24 16:00 PDT — implementation checkpoint: atomically claimed branch
   `agents/A1f-acid-neutral-water-attacker-relay`; added the exact four-water
   `separated-donor-neutral-attacker` R/P builder with A1e atom order, distinct
@@ -82,3 +93,45 @@ those four topologies.
 - 2026-08-24 — filed from A1e's exact four-path result. The narrower hypothesis
   is not “more waters”: it separates acid donor from neutral nucleophile so the
   attacking oxygen need not be the oxygen that began as H3O+.
+
+## Result
+
+- Added `separated_acid_relay_endpoints()` and
+  `scripts/separated_acid_relay.py`. The exact four-water topology preserves
+  A1e atom order but assigns distinct outer H3O+ donor, neutral measured-flank
+  attacker, bridge-side relay, and spectator waters. Its product moves donor H
+  through the relay onto Obr while the attacker's own two H remain on the
+  Si-bound nucleophile. Mechanism-v2/gate-v2 reuses A1e's bounded,
+  hash-journaled endpoint/CI-NEB/fresh-saddle/full-IRC transaction; resumes
+  bound to A1e v1 are refused.
+- Nineteen new regressions pin exact scope, role-distinct atoms, every physical-H
+  owner, finite/collision-safe endpoints, neutral-attacker product identity,
+  six-component donor/relay/attack/cleavage mode coupling, exact IRC basins,
+  conditional atom-matched Al, terminal identity, and incomplete failure
+  semantics. Fresh final gates: **360 QM tests passed** with cache disabled;
+  whole-tree Ruff check/format, CLI help, and `git diff --check` are green.
+- Production verdict: `si-path-conclusive-rejection`. The optimized reactant
+  retained intact Si--O--Si, neutral attacker, nine solvent H, zero Obr H, zero
+  framework migration, and unique ownership, but changed exact solvent roles
+  from `(3,2,2,2)` to `(2,2,3,2)`: physical H16 moved from outer donor O15 to
+  bridge-side relay O22. Minimum pair distance is `0.964661 A`; no computational
+  stage failed and no `running` record remains. No Al path was eligible.
+- Durable evidence root:
+  `/mnt/data/vsletten/dissertation-data/task201-a1f-acid-separated-20260824/`.
+  Evidence manifest covers 6 files / 36,212 bytes and has SHA-256
+  `940cd4b754f8b67244fd9e51812d4504a7872bb4cf1bb797bdc81776c7777d9c`;
+  production log `bcaa68f2c415653b235c61c9b537ea0fe8f8cae6f35911c3f500a9d40243073b`,
+  run manifest `3a72c6fdaef2ac8fe0730a91b44604e8b83dded4f9a5dfa7275818709dee9efb`,
+  and terminal `0b51c68336cf3dff739f51135664f6ac7918bd2374500f642c8f112bc1b5f095`
+  all re-hash exactly.
+- GPU isolation used a process-scoped 16 GiB memlock cap, OMP/MKL/OpenBLAS 16,
+  nice 10, stopped email pipelines/Honcho inference, empty Ollama, and a bounded
+  ten-hour dead-man. The first wrapper mistakenly `exec`'d the campaign, which
+  discards the shell's EXIT trap; restoration was immediately completed and
+  verified manually. Both email pipelines are active on fresh PIDs, Honcho API
+  is healthy at `/health`, the dead-man is inactive, Ollama is empty, and GPU
+  utilization returned idle. The trap/`exec` pitfall is captured in learnings.
+- Follow-through is executable card
+  `A1g-acid-bridge-side-hydronium-neutral-attacker`; it promotes A1f's selected
+  relay-H3O+ topology under a new identity instead of weakening this card's
+  exact physical-H/family acceptance.

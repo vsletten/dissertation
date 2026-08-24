@@ -4,6 +4,15 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-24 — hermes-workstation — A1f's one four-water separated-donor /
+  neutral-attacker Si path is a conclusive reactant-family rejection: the
+  unconstrained B3LYP/def2-SVP/DF endpoint moved physical H16 from outer donor
+  O15 to bridge-side relay O22, changing exact solvent occupancies from
+  `(3,2,2,2)` to `(2,2,3,2)` while keeping the attacker neutral, bridge intact,
+  and ownership valid. No computational stage failed; no Al/barrier/ordering
+  was emitted. Mechanism-v2/gate-v2, 360-test proof, hash-bound archive, and
+  READY A1g bridge-side-H3O+ follow-through land in the A1f card.
+
 - 2026-08-24 — hermes-workstation — A1e post-merge activation closeout
   independently rehashed all 24 campaign evidence files, reconfirmed four
   typed Si endpoint rejections with zero failed/blocked/running paths and READY

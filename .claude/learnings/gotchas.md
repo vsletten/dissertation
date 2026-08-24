@@ -93,6 +93,22 @@ those counts/topologies or add an Obr--H constraint. The next finite hypothesis
 must keep hydronium as proton donor while a distinct neutral water attacks Si,
 with physical-H relay ownership and an unconstrained product-minimum gate.
 
+### An outer hydronium donor migrates to the bridge-side relay (2026-08-24)
+A1f's exact four-water separated-donor/neutral-attacker Si reactant converged
+cleanly only after physical H16 moved from outer donor O15 to bridge-side relay
+O22: solvent occupancies `(3,2,2,2)` became `(2,2,3,2)`. The attacker stayed
+neutral and the bridge stayed intact. Do not relabel that endpoint under A1f or
+weaken role ownership; it selects a new bridge-side-H3O+ / distinct-neutral-
+attacker topology (A1g) under a new mechanism/gate identity.
+
+### `exec` discards the GPU-isolation shell's EXIT trap (2026-08-24)
+A shell that owns email/Honcho restoration and a bounded systemd dead-man must
+invoke the QM command normally, not with `exec`. `exec` replaces the shell, so
+its EXIT trap never runs even when the campaign exits successfully; A1f needed
+immediate manual restoration. Keep `set -o pipefail`, let the child return to
+the trap-owning shell, then verify both pipelines, Honcho health, dead-man
+inactivity, Ollama emptiness, and idle GPU before closeout.
+
 ### WebGL2 unavailable at boot kills module-top-level wiring silently (2026-08-22)
 A Chrome with a pending update can keep running with a dead GPU process, so
 `canvas.getContext('webgl2')` returns null on an otherwise healthy box (same
