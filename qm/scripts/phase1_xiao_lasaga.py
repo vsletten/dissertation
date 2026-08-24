@@ -135,6 +135,13 @@ def acid_mobile_indices(
     return proton_indices, (ow_index, *extra_oxygen_indices)
 
 
+def acid_basin_equivalence_indices(
+    solvent_oxygen_indices: tuple[int, ...],
+) -> list[int]:
+    """Heavy atoms that must identify one microsolvated basin conformer."""
+    return sorted({BR_INDEX, SI_INDEX, *solvent_oxygen_indices})
+
+
 def acid_reactant_basin(
     proton_indices: tuple[int, ...],
 ) -> tuple[bool, bool, bool, int, int, int]:
@@ -277,20 +284,11 @@ def hydrolysis_basin_signature(
     )
 
 
-def acid_basin_signature(
+def _acid_mobile_assignments(
     cluster: Cluster,
-    ow_index: int,
     proton_indices: tuple[int, ...],
-    *,
-    solvent_oxygen_indices: tuple[int, ...] = (),
-) -> tuple[bool, bool, bool, int, int, int]:
-    """Return acid connectivity and unique mobile-proton assignments.
-
-    Each tracked acid/solvent proton is assigned to its nearest oxygen. The
-    solvent count includes the attacking oxygen plus every explicit-shell water
-    oxygen, so proton relays inside the water network do not create false basin
-    failures. Framework assignments remain explicit and fail closed.
-    """
+) -> list[int | None]:
+    """Assign each tracked mobile proton to one nearby oxygen, if any."""
     oxygen_indices = [
         index for index, symbol in enumerate(cluster.symbols) if symbol == "O"
     ]
@@ -308,6 +306,46 @@ def acid_basin_signature(
             )
         )
         assignments.append(nearest_oxygen if distance < 1.25 else None)
+    return assignments
+
+
+def acid_solvent_occupancy_reason(
+    cluster: Cluster,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+    *,
+    solvent_oxygen_indices: tuple[int, ...] = (),
+    attacker_h_count: int,
+) -> str | None:
+    """Require a neutral shell instead of hiding OH-/H3O+ in an aggregate."""
+    ordered_solvent = (
+        ow_index,
+        *(oxygen for oxygen in solvent_oxygen_indices if oxygen != ow_index),
+    )
+    assignments = _acid_mobile_assignments(cluster, proton_indices)
+    actual = tuple(assignments.count(oxygen) for oxygen in ordered_solvent)
+    expected = (attacker_h_count, *(2 for _ in ordered_solvent[1:]))
+    if actual != expected:
+        return (
+            f"acid solvent occupancies {actual} != {expected} (attacker, shell waters)"
+        )
+    return None
+
+
+def acid_basin_signature(
+    cluster: Cluster,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+    *,
+    solvent_oxygen_indices: tuple[int, ...] = (),
+) -> tuple[bool, bool, bool, int, int, int]:
+    """Return acid connectivity and aggregate mobile-proton assignments.
+
+    The aggregate tuple preserves the one-water wire contract. Every acceptance
+    gate separately calls :func:`acid_solvent_occupancy_reason`, which rejects
+    hidden OH-/H3O+ pairs inside a microsolvated shell.
+    """
+    assignments = _acid_mobile_assignments(cluster, proton_indices)
     solvent_oxygens = {ow_index, *solvent_oxygen_indices}
     bridge_h_count = assignments.count(BR_INDEX)
     solvent_h_count = sum(
@@ -350,7 +388,13 @@ def protonated_bridge_reason(
             f"acid reactant basin {signature} != {expected} "
             "(protonated intact bridge + microsolvated H2O attacker)"
         )
-    return None
+    return acid_solvent_occupancy_reason(
+        cluster,
+        ow_index,
+        proton_indices,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+        attacker_h_count=2,
+    )
 
 
 def acid_product_reason(
@@ -370,6 +414,50 @@ def acid_product_reason(
     expected = acid_product_basin(proton_indices)
     if signature != expected:
         return f"acid product basin {signature} != {expected}"
+    return acid_solvent_occupancy_reason(
+        cluster,
+        ow_index,
+        proton_indices,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+        attacker_h_count=1,
+    )
+
+
+def acid_irc_solvent_reason(
+    back: Cluster,
+    fwd: Cluster,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+    *,
+    solvent_oxygen_indices: tuple[int, ...] = (),
+) -> str | None:
+    """Require the attacker/shell partition at both accepted IRC endpoints."""
+    two_hydrogen_basins = {
+        acid_reactant_basin(proton_indices),
+        acid_associative_basin(proton_indices),
+    }
+    one_hydrogen_basins = acid_hydrolyzed_basins(proton_indices)
+    for endpoint in (back, fwd):
+        signature = acid_basin_signature(
+            endpoint,
+            ow_index,
+            proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
+        )
+        if signature in two_hydrogen_basins:
+            attacker_h_count = 2
+        elif signature in one_hydrogen_basins:
+            attacker_h_count = 1
+        else:
+            return f"acid IRC endpoint has unsupported basin {signature}"
+        if reason := acid_solvent_occupancy_reason(
+            endpoint,
+            ow_index,
+            proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
+            attacker_h_count=attacker_h_count,
+        ):
+            return reason
     return None
 
 
@@ -397,7 +485,13 @@ def acid_quick_irc_channel_reason(
     }
     if actual != expected:
         return f"acid quick-IRC basin signatures {sorted(actual)} != {sorted(expected)}"
-    return None
+    return acid_irc_solvent_reason(
+        back,
+        fwd,
+        ow_index,
+        proton_indices,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+    )
 
 
 def acid_quick_irc_addition_reason(
@@ -426,7 +520,13 @@ def acid_quick_irc_addition_reason(
         return (
             f"acid addition IRC basin signatures {sorted(actual)} != {sorted(expected)}"
         )
-    return None
+    return acid_irc_solvent_reason(
+        back,
+        fwd,
+        ow_index,
+        proton_indices,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+    )
 
 
 def acid_quick_irc_cleavage_reason(
@@ -454,7 +554,13 @@ def acid_quick_irc_cleavage_reason(
     hydrolyzed = [signature for signature in actual if signature in accepted_hydrolyzed]
     if len(hydrolyzed) != 1:
         return f"acid cleavage IRC lacks one hydrolyzed endpoint: {sorted(actual)}"
-    return None
+    return acid_irc_solvent_reason(
+        back,
+        fwd,
+        ow_index,
+        proton_indices,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+    )
 
 
 def acid_endpoint_in_basins(
@@ -1398,7 +1504,7 @@ def finish_al_neutral_sequential(
     # Connectivity gates already prove their speciation, so compare the heavy
     # reaction center and allow the measured <10 kJ/mol rotamer spread.
     reactive_core = (
-        [BR_INDEX, SI_INDEX, ow_index]
+        acid_basin_equivalence_indices(solvent_oxygen_indices)
         if acid_path
         else sorted({BR_INDEX, SI_INDEX, ow_index, *core_protons})
     )

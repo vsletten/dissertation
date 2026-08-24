@@ -211,6 +211,52 @@ def test_microsolvated_acid_basin_counts_all_mobile_solvent_protons(n_water):
     )
 
 
+def test_microsolvated_basin_rejects_hidden_hydroxide_hydronium_pair():
+    dimer = disilicate()
+    reactant = protonated_bridge_complex(dimer, n_water=4)
+    ow_index = len(dimer.symbols)
+    proton_indices, solvent_oxygen_indices = phase1.acid_mobile_indices(ow_index, 4)
+    corrupted = replace(reactant, coords=reactant.coords.copy())
+    attacker_h = ow_index + 2
+    first_shell_oxygen = solvent_oxygen_indices[1]
+    corrupted.coords[attacker_h] = corrupted.coords[first_shell_oxygen] + np.array(
+        [0.0, 0.0, 0.96]
+    )
+
+    # The aggregate tuple is intentionally backward-compatible and cannot see
+    # this OH-/H3O+ pair; the acceptance gate must reject its per-water shape.
+    assert phase1.acid_basin_signature(
+        corrupted,
+        ow_index,
+        proton_indices,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+    ) == phase1.acid_reactant_basin(proton_indices)
+    reason = phase1.protonated_bridge_reason(
+        corrupted,
+        ow_index,
+        proton_indices,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+    )
+    assert reason is not None and "solvent occupancies" in reason
+
+
+def test_microsolvated_basin_equivalence_includes_every_solvent_oxygen():
+    canonical = protonated_bridge_complex(disilicate(), n_water=4)
+    ow_index = len(disilicate().symbols)
+    _protons, solvent_oxygen_indices = phase1.acid_mobile_indices(ow_index, 4)
+    candidate = replace(canonical, coords=canonical.coords.copy())
+    candidate.coords[solvent_oxygen_indices[-1]] += np.array([0.0, 0.0, 2.0])
+
+    reason = phase1.basin_equivalence_reason(
+        candidate,
+        canonical,
+        phase1.acid_basin_equivalence_indices(solvent_oxygen_indices),
+        candidate_energy_hartree=-100.0,
+        canonical_energy_hartree=-100.0,
+    )
+    assert reason is not None and "RMSD" in reason
+
+
 def test_microsolvation_run_slug_is_checkpoint_isolated():
     assert phase1.reaction_run_slug("si-acid", "b3lyp", "def2-svp", "flank") == (
         "si-acid-preprotonated-v2-b3lyp-def2-svp-flank"
