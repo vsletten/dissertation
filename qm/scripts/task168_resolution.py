@@ -81,6 +81,10 @@ KCAL = 4.184
 OBSERVED_ADDITION_CREST_ELECTRONIC_KJ = 150.471
 
 
+class SaddleGateFailure(RuntimeError):
+    """Verified saddle, frequency, or IRC gate failure — not an operational error."""
+
+
 def atomic_json(path: Path, payload: dict) -> None:
     temporary = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
     temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
@@ -279,12 +283,12 @@ def attempt_addition_saddle(
         if reason := addition_channel_escape_reason(
             guess, ts, ow_index, acid_path=False
         ):
-            raise RuntimeError(reason)
+            raise SaddleGateFailure(reason)
         freq = cached_frequency(
             run_dir / "addition_task168_ts.frequency.npz", ts, settings
         )
         if freq.n_imaginary != 1:
-            raise RuntimeError(
+            raise SaddleGateFailure(
                 f"TASK-168 addition saddle has {freq.n_imaginary} imaginary modes"
             )
         accepted = None
@@ -299,7 +303,7 @@ def attempt_addition_saddle(
                 accepted = (back, fwd, displacement)
                 break
         if accepted is None:
-            raise RuntimeError("TASK-168 addition saddle does not connect R and I")
+            raise SaddleGateFailure("TASK-168 addition saddle does not connect R and I")
         back, fwd, displacement = accepted
         save_xyz(back, run_dir / "addition_task168_irc_back.xyz")
         save_xyz(fwd, run_dir / "addition_task168_irc_fwd.xyz")
@@ -313,7 +317,7 @@ def attempt_addition_saddle(
         }
         atomic_json(receipt_path, receipt)
         return ts, freq, back, fwd
-    except Exception as exc:
+    except SaddleGateFailure as exc:
         receipt = {
             "status": "no-saddle",
             "reason": f"{type(exc).__name__}: {exc}",
@@ -389,11 +393,13 @@ def attempt_standard_saddle(
         if reason := addition_channel_escape_reason(
             guess, ts, ow_index, acid_path=False
         ):
-            raise RuntimeError(reason)
+            raise SaddleGateFailure(reason)
         freq_path = run_dir / f"task168-{stage}-ts.frequency.npz"
         freq = cached_frequency(freq_path, ts, settings)
         if freq.n_imaginary != 1:
-            raise RuntimeError(f"{stage} saddle has {freq.n_imaginary} imaginary modes")
+            raise SaddleGateFailure(
+                f"{stage} saddle has {freq.n_imaginary} imaginary modes"
+            )
         accepted = None
         for displacement in (0.50, 1.00):
             back, fwd = quick_irc(
@@ -411,7 +417,7 @@ def attempt_standard_saddle(
                 accepted = back, fwd, displacement
                 break
         if accepted is None:
-            raise RuntimeError(f"{stage} saddle failed its endpoint basin gate")
+            raise SaddleGateFailure(f"{stage} saddle failed its endpoint basin gate")
         back, fwd, displacement = accepted
         back_path = run_dir / f"task168-{stage}-irc-back.xyz"
         fwd_path = run_dir / f"task168-{stage}-irc-fwd.xyz"
@@ -427,7 +433,7 @@ def attempt_standard_saddle(
         }
         atomic_json(receipt_path, receipt)
         return ts, freq, back, fwd
-    except Exception as exc:
+    except SaddleGateFailure as exc:
         receipt = {
             "status": "no-saddle",
             "reason": f"{type(exc).__name__}: {exc}",

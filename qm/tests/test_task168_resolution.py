@@ -294,3 +294,67 @@ def test_finalize_marks_failed_when_closeout_after_begin_raises(monkeypatch, tmp
     status = json.loads((tmp_path / "run_status.json").read_text())
     assert status["status"] == "failed"
     assert "frequency cache exploded" in status["detail"]
+
+
+def _addition_attempt_clusters():
+    template = resolution.hydrolysis_complex(
+        resolution.aluminosilicate_dimer(), resolution.water(), mode="flank"
+    )
+    ow_index = len(resolution.aluminosilicate_dimer().symbols)
+    reactant = replace(template, name="reactant")
+    intermediate = replace(template, name="intermediate")
+    return reactant, intermediate, ow_index
+
+
+def test_addition_attempt_records_only_verified_saddle_gate_failures(
+    monkeypatch, tmp_path
+):
+    reactant, intermediate, ow_index = _addition_attempt_clusters()
+    resolution.save_xyz(reactant, tmp_path / "addition_pinned_relaxed.xyz")
+    monkeypatch.setattr(resolution, "neb_ts_guess", lambda *args, **kwargs: reactant)
+    monkeypatch.setattr(resolution, "find_ts", lambda *args, **kwargs: reactant)
+    monkeypatch.setattr(
+        resolution, "addition_channel_escape_reason", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        resolution,
+        "reaction_path_vector",
+        lambda *args, **kwargs: np.zeros_like(reactant.coords),
+    )
+    monkeypatch.setattr(
+        resolution,
+        "cached_frequency",
+        lambda *args, **kwargs: FrequencyResult(
+            frequencies_cm=np.array([300.0, 700.0]),
+            imaginary_cm=np.array([80.0, 40.0]),
+            electronic_hartree=-1.0,
+            molar_mass_kg=0.1,
+            rotational_temperatures_k=(1.0, 2.0, 3.0),
+            linear=False,
+        ),
+    )
+
+    result = resolution.attempt_addition_saddle(
+        tmp_path, reactant, intermediate, DftSettings(), ow_index
+    )
+
+    assert result is None
+    receipt = json.loads((tmp_path / "task168-addition-attempt.json").read_text())
+    assert receipt["status"] == "no-saddle"
+    assert "imaginary modes" in receipt["reason"]
+
+
+def test_addition_attempt_propagates_operational_failures(monkeypatch, tmp_path):
+    reactant, intermediate, ow_index = _addition_attempt_clusters()
+    resolution.save_xyz(reactant, tmp_path / "addition_pinned_relaxed.xyz")
+    monkeypatch.setattr(
+        resolution,
+        "neb_ts_guess",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("calculator died")),
+    )
+
+    with pytest.raises(OSError, match="calculator died"):
+        resolution.attempt_addition_saddle(
+            tmp_path, reactant, intermediate, DftSettings(), ow_index
+        )
+    assert not (tmp_path / "task168-addition-attempt.json").exists()

@@ -36,7 +36,13 @@ from quarry.clusters import (  # noqa: E402
     hydrolysis_complex,
     water,
 )
-from quarry.pipeline import HARTREE_TO_KJ, DftSettings, energy, optimize  # noqa: E402
+from quarry.pipeline import (  # noqa: E402
+    HARTREE_TO_KJ,
+    DftSettings,
+    energy,
+    frequencies,
+    optimize,
+)
 from scripts.phase1_xiao_lasaga import (  # noqa: E402
     AL_INDEX,
     ASSOCIATIVE_BASIN,
@@ -211,9 +217,21 @@ def run_sweep(run_dir: Path, settings: DftSettings, *, max_steps: int) -> dict:
             electronic = energy(optimized, settings)
             signature = hydrolysis_basin_signature(optimized, ow_index)
             accepted = signature == ASSOCIATIVE_BASIN
+            n_imaginary = None
+            if accepted:
+                freq = frequencies(optimized, settings)
+                n_imaginary = int(freq.n_imaginary)
+                if n_imaginary != 0:
+                    accepted = False
+            if accepted:
+                reason = None
+            elif signature != ASSOCIATIVE_BASIN:
+                reason = f"basin signature {signature}"
+            else:
+                reason = f"candidate has {n_imaginary} imaginary modes"
             record = {
                 "status": "accepted" if accepted else "rejected",
-                "reason": None if accepted else f"basin signature {signature}",
+                "reason": reason,
                 "seed": seed_path.name,
                 "optimized": result_path.name,
                 "electronic_hartree": electronic,
@@ -221,6 +239,7 @@ def run_sweep(run_dir: Path, settings: DftSettings, *, max_steps: int) -> dict:
                 * HARTREE_TO_KJ,
                 "minimum_pair_distance_a": minimum_pair_distance(optimized),
                 "basin_signature": list(signature),
+                "n_imaginary": n_imaginary,
             }
         except Exception as exc:  # each bounded seed must not erase earlier evidence
             record = {
@@ -239,7 +258,7 @@ def run_sweep(run_dir: Path, settings: DftSettings, *, max_steps: int) -> dict:
     accepted = {
         label: record
         for label, record in manifest["candidates"].items()
-        if record["status"] == "accepted"
+        if record["status"] == "accepted" and record.get("n_imaginary") == 0
     }
     if "baseline" not in accepted:
         raise RuntimeError(

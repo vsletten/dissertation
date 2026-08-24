@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from quarry.clusters import aluminosilicate_dimer, hydrolysis_complex, water
+from quarry.pipeline import FrequencyResult
 from scripts import phase1_xiao_lasaga as phase1
 from scripts import task168_intermediate_sweep as sweep
 
@@ -76,6 +77,18 @@ def test_sweep_selects_only_significantly_lower_associative_candidate(
 
     monkeypatch.setattr(sweep, "optimize", lambda cluster, settings, max_steps: cluster)
 
+    def fake_frequencies(cluster, settings):
+        return FrequencyResult(
+            frequencies_cm=np.array([300.0, 700.0]),
+            imaginary_cm=np.array([]),
+            electronic_hartree=-99.95,
+            molar_mass_kg=0.1,
+            rotational_temperatures_k=(1.0, 2.0, 3.0),
+            linear=False,
+        )
+
+    monkeypatch.setattr(sweep, "frequencies", fake_frequencies)
+
     def fake_energy(cluster, settings):
         if cluster.name.endswith("terminal-oh-03-180"):
             return -99.96
@@ -98,3 +111,49 @@ def test_sweep_selects_only_significantly_lower_associative_candidate(
         (tmp_path / "task168-intermediate-sweep" / "manifest.json").read_text()
     )
     assert persisted["summary"] == summary
+    assert persisted["candidates"]["terminal-oh-03-180"]["n_imaginary"] == 0
+    assert persisted["candidates"]["baseline"]["n_imaginary"] == 0
+
+
+def test_sweep_rejects_associative_stationary_points_with_imaginary_modes(
+    monkeypatch, tmp_path
+):
+    intermediate, ow_index = associative_fixture()
+    reactant = replace(intermediate, name="reactant", coords=intermediate.coords.copy())
+    reactant.coords[ow_index] = reactant.coords[phase1.SI_INDEX] + np.array(
+        [0.0, 3.20, 0.0]
+    )
+    sweep.save_xyz(intermediate, tmp_path / "intermediate.xyz")
+    sweep.save_xyz(reactant, tmp_path / "complex.xyz")
+
+    monkeypatch.setattr(sweep, "optimize", lambda cluster, settings, max_steps: cluster)
+
+    def fake_energy(cluster, settings):
+        if cluster.name.endswith("terminal-oh-03-180"):
+            return -99.96
+        si_ow = np.linalg.norm(
+            cluster.coords[phase1.SI_INDEX] - cluster.coords[ow_index]
+        )
+        return -99.95 if si_ow < 2.3 else -100.0
+
+    def fake_frequencies(cluster, settings):
+        imaginary = (80.0,) if cluster.name.endswith("terminal-oh-03-180") else ()
+        return FrequencyResult(
+            frequencies_cm=np.array([300.0, 700.0]),
+            imaginary_cm=np.array(imaginary),
+            electronic_hartree=-99.95,
+            molar_mass_kg=0.1,
+            rotational_temperatures_k=(1.0, 2.0, 3.0),
+            linear=False,
+        )
+
+    monkeypatch.setattr(sweep, "energy", fake_energy)
+    monkeypatch.setattr(sweep, "frequencies", fake_frequencies)
+    manifest = sweep.run_sweep(tmp_path, sweep.DftSettings(), max_steps=10)
+
+    assert manifest["summary"]["selected_label"] == "baseline"
+    assert manifest["summary"]["lower_intermediate_found"] is False
+    saddle = manifest["candidates"]["terminal-oh-03-180"]
+    assert saddle["status"] == "rejected"
+    assert saddle["n_imaginary"] == 1
+    assert "imaginary modes" in saddle["reason"]
