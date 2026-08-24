@@ -156,6 +156,8 @@ ACID_MICROSOLVATION_FAMILIES = (
 )
 CONCERTED_ACID_WATER_COUNTS = (3, 4)
 CONCERTED_ACID_FAMILIES = ("bridge-donor-chain", "compact-cyclic-relay")
+SEPARATED_ACID_WATER_COUNT = 4
+SEPARATED_ACID_FAMILY = "separated-donor-neutral-attacker"
 
 
 def _validate_acid_water_count(n_water: int) -> None:
@@ -907,6 +909,232 @@ def concerted_acid_relay_endpoints(
         transferred_h_index=bridge_proton,
         relay_h_indices=relay_h_indices,
         solvent_oxygen_indices=solvent_oxygens,
+    )
+
+
+@dataclass(frozen=True)
+class SeparatedRelayEndpoints:
+    """Atom-matched endpoints with distinct acid donor and nucleophile roles."""
+
+    reactant: Cluster
+    product: Cluster
+    ow_index: int
+    donor_oxygen_index: int
+    relay_oxygen_index: int
+    spectator_oxygen_index: int
+    donor_h_index: int
+    transferred_h_index: int
+    relay_h_indices: tuple[int, ...]
+    solvent_oxygen_indices: tuple[int, ...]
+    solvent_h_indices: tuple[int, ...]
+
+
+def separated_acid_relay_endpoints(
+    dimer: Cluster,
+    *,
+    n_water: int = SEPARATED_ACID_WATER_COUNT,
+    family: str = SEPARATED_ACID_FAMILY,
+) -> SeparatedRelayEndpoints:
+    """Build A1f's one four-water donor/attacker-separated R/P pair.
+
+    Atom order remains the A1e order: dimer, H3O+ ``O/H/H/H``, then
+    three neutral-water ``O/H/H`` blocks.  The first neutral water occupies
+    A1e's measured flank and attacks Si; a second water relays the donor proton
+    to Obr; the last water solvates the donor/attacker edge.  No production
+    coordinate is frozen.
+    """
+    if n_water != SEPARATED_ACID_WATER_COUNT:
+        raise ValueError("separated acid relay requires exactly 4 waters")
+    if family != SEPARATED_ACID_FAMILY:
+        raise ValueError(f"separated acid relay family must be {SEPARATED_ACID_FAMILY}")
+
+    # Reuse A1e's non-colliding four-oxygen ring and exact atom order, but
+    # repartition its oxygen positions.  The old hydronium flank becomes the
+    # neutral attacker; the opposite shell oxygen becomes H3O+; the bridge-side
+    # shell water is the relay; and the remaining shell water is the spectator.
+    a1e = concerted_acid_relay_endpoints(
+        dimer,
+        n_water=SEPARATED_ACID_WATER_COUNT,
+        family="bridge-donor-chain",
+    )
+    donor_oxygen = len(dimer.symbols)
+    attacker_oxygen = donor_oxygen + 4
+    relay_oxygen = attacker_oxygen + 3
+    spectator_oxygen = relay_oxygen + 3
+    solvent_oxygens = (
+        donor_oxygen,
+        attacker_oxygen,
+        relay_oxygen,
+        spectator_oxygen,
+    )
+    solvent_hydrogens = (
+        donor_oxygen + 1,
+        donor_oxygen + 2,
+        donor_oxygen + 3,
+        attacker_oxygen + 1,
+        attacker_oxygen + 2,
+        relay_oxygen + 1,
+        relay_oxygen + 2,
+        spectator_oxygen + 1,
+        spectator_oxygen + 2,
+    )
+    donor_h = donor_oxygen + 1
+    bridge_h = relay_oxygen + 1
+
+    old_attacker, old_relay, old_donor, old_spectator = a1e.solvent_oxygen_indices
+    attacker_position = a1e.reactant.coords[old_attacker].copy()
+    relay_position = a1e.reactant.coords[old_relay].copy()
+    donor_position = a1e.reactant.coords[old_donor].copy()
+    spectator_position = a1e.reactant.coords[old_spectator].copy()
+    coords = a1e.reactant.coords.copy()
+
+    hydronium_seed = hydronium()
+    hydronium_relative = hydronium_seed.coords - hydronium_seed.coords[0]
+    donor_rotation = _rotation_between(
+        hydronium_relative[1], relay_position - donor_position
+    )
+    coords[donor_oxygen : donor_oxygen + 4] = (
+        hydronium_relative @ donor_rotation.T + donor_position
+    )
+    coords[attacker_oxygen : attacker_oxygen + 3] = _water_centered(
+        attacker_position,
+        attacker_position - coords[1],
+    )
+    coords[relay_oxygen : relay_oxygen + 3] = _water_donating_to(
+        relay_position,
+        coords[0],
+        np.array([0.0, 0.0, 1.0]),
+    )
+    coords[spectator_oxygen : spectator_oxygen + 3] = _water_centered(
+        spectator_position,
+        spectator_position - 0.5 * (donor_position + attacker_position),
+    )
+
+    reactant = Cluster(
+        name=f"{dimer.name}+{SEPARATED_ACID_FAMILY}-reactant",
+        symbols=list(a1e.reactant.symbols),
+        coords=coords,
+        charge=a1e.reactant.charge,
+        spin=a1e.reactant.spin,
+        frozen_indices=list(a1e.reactant.frozen_indices),
+        site_family=a1e.reactant.site_family,
+        note=(
+            "intact unprotonated bridge; H3O+ donor -> H2O relay -> Obr; "
+            "distinct neutral H2O attacks Si"
+        ),
+    )
+
+    product_coords = coords.copy()
+    old_si = product_coords[1].copy()
+    old_attacker_position = product_coords[attacker_oxygen].copy()
+    separation = 1.15 * _unit(old_si - product_coords[0])
+    for index in (1, 3, 4, 5, 6, 7, 8):
+        product_coords[index] += separation
+    attack_direction = _unit(old_attacker_position - old_si)
+    new_attacker_position = product_coords[1] + 1.70 * attack_direction
+    product_coords[attacker_oxygen] = new_attacker_position
+    normal = np.cross(product_coords[1] - product_coords[0], attack_direction)
+    if np.linalg.norm(normal) < 1.0e-8:
+        normal = np.array([0.0, 0.0, 1.0])
+    solvent_center = np.mean(
+        product_coords[[donor_oxygen, relay_oxygen, spectator_oxygen]], axis=0
+    )
+    candidate_directions = (
+        new_attacker_position - product_coords[7],
+        new_attacker_position - solvent_center,
+        new_attacker_position - product_coords[1],
+        normal,
+        -normal,
+    )
+    attacker_hydrogens = (attacker_oxygen + 1, attacker_oxygen + 2)
+    fixed = np.delete(
+        product_coords,
+        [attacker_oxygen, *attacker_hydrogens],
+        axis=0,
+    )
+    other_oxygen_indices = [
+        index
+        for index, symbol in enumerate(a1e.product.symbols)
+        if symbol == "O" and index != attacker_oxygen
+    ]
+    best_hydrogens = None
+    best_score = (-1, -math.inf)
+    for direction in candidate_directions:
+        water_block = _water_centered(new_attacker_position, direction)
+        hydrogens = np.asarray(water_block[1:])
+        clearance = min(
+            float(np.linalg.norm(hydrogens[0] - hydrogens[1])),
+            float(
+                np.min(
+                    np.linalg.norm(hydrogens[:, None, :] - fixed[None, :, :], axis=2)
+                )
+            ),
+        )
+        oxygen_clearance = float(
+            np.min(
+                np.linalg.norm(
+                    hydrogens[:, None, :]
+                    - product_coords[other_oxygen_indices][None, :, :],
+                    axis=2,
+                )
+            )
+        )
+        score = (int(oxygen_clearance >= 1.05), clearance)
+        if score > best_score:
+            best_score = score
+            best_hydrogens = hydrogens
+    assert best_hydrogens is not None
+    product_coords[list(attacker_hydrogens)] = best_hydrogens
+
+    # Physical-H relay: donor H1 becomes a relay-water H, while relay H1
+    # becomes Obr-H.  The distinct neutral attacker keeps both of its own H.
+    product_coords[bridge_h] = product_coords[0] + R_O_H * _unit(
+        product_coords[relay_oxygen] - product_coords[0]
+    )
+    donor_water = _water_centered(
+        product_coords[donor_oxygen],
+        product_coords[donor_oxygen] - product_coords[relay_oxygen],
+    )
+    product_coords[donor_oxygen + 2] = donor_water[1]
+    product_coords[donor_oxygen + 3] = donor_water[2]
+    relay_water = _water_centered(
+        product_coords[relay_oxygen],
+        product_coords[relay_oxygen] - product_coords[donor_oxygen],
+    )
+    product_coords[donor_h] = relay_water[1]
+    product_coords[relay_oxygen + 2] = relay_water[2]
+    spectator_water = _water_centered(
+        product_coords[spectator_oxygen],
+        product_coords[spectator_oxygen]
+        - 0.5 * (product_coords[donor_oxygen] + product_coords[attacker_oxygen]),
+    )
+    product_coords[spectator_oxygen + 1 : spectator_oxygen + 3] = spectator_water[1:]
+
+    product = Cluster(
+        name=f"{dimer.name}+{SEPARATED_ACID_FAMILY}-product",
+        symbols=list(a1e.product.symbols),
+        coords=product_coords,
+        charge=a1e.product.charge,
+        spin=a1e.product.spin,
+        frozen_indices=list(a1e.product.frozen_indices),
+        site_family=a1e.product.site_family,
+        note=(
+            "hydrolyzed product; neutral attacker remains Si-bound while "
+            "the donor/relay wire protonates Obr"
+        ),
+    )
+    return SeparatedRelayEndpoints(
+        reactant=reactant,
+        product=product,
+        ow_index=attacker_oxygen,
+        donor_oxygen_index=donor_oxygen,
+        relay_oxygen_index=relay_oxygen,
+        spectator_oxygen_index=spectator_oxygen,
+        donor_h_index=donor_h,
+        transferred_h_index=bridge_h,
+        relay_h_indices=(donor_h, bridge_h),
+        solvent_oxygen_indices=solvent_oxygens,
+        solvent_h_indices=solvent_hydrogens,
     )
 
 

@@ -6,7 +6,7 @@
 - machine: workstation (GPU campaign)
 - depends: — (TASK-164's scan-smoothness repair helps but is not required)
 - claimed-by: hermes-workstation (continuation: agents/A1b-acid-microsolvation)
-- blocked-on: A1f-acid-neutral-water-attacker-relay
+- blocked-on: A1g-acid-bridge-side-hydronium-neutral-attacker
 
 ## Objective
 Extend scripts/phase1_xiao_lasaga.py with the acid mechanism: H3O+ first
@@ -32,6 +32,15 @@ and the si-neutral 27.0 kcal/mol (acid must come out LOWER).
 - New clusters/driver code unit-tested; suite green; PR merged.
 
 ## Progress
+- 2026-08-24 16:09 PDT — A1f's exact separated donor/attacker Si path is a
+  conclusive reactant-family rejection, not a compute failure: its unconstrained
+  B3LYP/def2-SVP/DF endpoint moved physical H16 from outer donor O15 to
+  bridge-side relay O22, changing solvent occupancies `(3,2,2,2)` to
+  `(2,2,3,2)` while the distinct attacker remained neutral and the bridge stayed
+  intact. No Al/barrier/ordering was emitted. The blocker advances to executable
+  `A1g-acid-bridge-side-hydronium-neutral-attacker`, which tests that selected
+  relay-H3O+ topology directly under a new mechanism/gate identity; do not
+  relabel A1f or weaken physical-H ownership.
 - 2026-08-24 13:08 PDT — A1e's exact hydronium-as-nucleophile scope is
   model-valid NO-GO: all four Si paths are conclusive endpoint rejections with
   zero computational failures, so no Al or ordering was emitted. The blocker

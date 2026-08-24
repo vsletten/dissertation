@@ -208,22 +208,59 @@ production log is
 run manifest is
 `dfea131556fddf907ccabfc52945d390695f99d372cfdeac6859a4f2c0549982`.
 
+## Separated donor / neutral attacker result (A1f)
+
+A1f tested exactly one four-water
+`separated-donor-neutral-attacker` Si--O--Si topology at
+B3LYP/def2-SVP/DF. Atom order remained the A1e order, but the solvent roles were
+outer H3O+ donor, measured-flank neutral H2O attacker, bridge-side relay water,
+and spectator/solvator. The exact product preserved the attacker's two physical
+H while moving donor H through the relay onto Obr; neither endpoint held a
+production coordinate.
+
+The Si reactant converged after 68 optimizer steps and passed finite-coordinate,
+minimum-pair-distance (`0.964661 A`), connectivity, aggregate proton-count, and
+unique-ownership gates. It conclusively failed only the exact role identity:
+physical H16 moved from outer donor O15 to bridge-side relay O22. Solvent
+occupancies changed from required `(3,2,2,2)` to `(2,2,3,2)` for
+`(outer donor, neutral attacker, bridge-side relay, spectator)`. The neutral
+attacker remained H2O, the Si--O--Si bridge remained intact, and no proton moved
+to Obr or the framework.
+
+This is a typed `rejected` terminal at `optimize-reactant`, not an optimizer,
+NEB, Hessian, or IRC failure. The endpoint gate correctly stopped before path
+finding. No Al path, barrier, or ordering was emitted. The migrated proton is a
+new physical topology rather than permission to relabel A1f: executable A1g
+tests bridge-side H3O+ with the distinct neutral attacker directly under a new
+mechanism/gate identity.
+
+Durable evidence root:
+`/mnt/data/vsletten/dissertation-data/task201-a1f-acid-separated-20260824/`.
+The evidence manifest covers six files / 36,212 bytes and has SHA-256
+`940cd4b754f8b67244fd9e51812d4504a7872bb4cf1bb797bdc81776c7777d9c`;
+production log is
+`bcaa68f2c415653b235c61c9b537ea0fe8f8cae6f35911c3f500a9d40243073b`,
+run manifest is
+`3a72c6fdaef2ac8fe0730a91b44604e8b83dded4f9a5dfa7275818709dee9efb`,
+and terminal is
+`0b51c68336cf3dff739f51135664f6ac7918bd2374500f642c8f112bc1b5f095`.
+
 ## Required follow-up
 
-Do not retry A1e's water counts/topologies or use the hydronium oxygen as the
-nucleophile again. Executable board card
-`A1f-acid-neutral-water-attacker-relay` tests exactly one four-water topology
-with distinct roles: H3O+ is the acid donor, a separate neutral H2O attacks Si,
-one water relays the proton, and one solvates the network. Only a fully accepted
-Si path may trigger its exact matched Al path. Never hold Obr--H, Si--Ow, or
-Si--Obr to manufacture thermochemistry.
+Do not retry A1e's hydronium-as-nucleophile topologies, A1f's outer-donor role,
+or weaken the physical-H gate. Executable board card
+`A1g-acid-bridge-side-hydronium-neutral-attacker` promotes the exact topology
+selected by A1f: H3O+ begins on the bridge-side solvent oxygen, a distinct
+neutral water attacks Si, and the two other waters remain neutral solvators.
+Only a fully accepted Si path may trigger its exact matched Al path. Never hold
+Obr--H, Si--Ow, or Si--Obr to manufacture thermochemistry.
 
 Reproduction commands must clear inherited environments:
 
 ```bash
 env -u PYTHONPATH -u VIRTUAL_ENV \
   uv run --frozen --extra gpu --extra dev \
-  python scripts/concerted_acid_relay.py --gpu \
+  python scripts/separated_acid_relay.py --gpu \
   --run-dir <durable-run-dir> --threads 16 --nice 10 \
   --log <durable-log>
 ```
