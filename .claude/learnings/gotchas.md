@@ -84,6 +84,15 @@ minimum. Do not retry water counts or constrain Obr--H; the next scientific
 gate is a finite proton-relay conformer ensemble, with exact physical-H
 occupancy checks for attacker, each shell water, bridge, and framework OH.
 
+### Concerted acid needs distinct donor and nucleophile roles (2026-08-24)
+A1e retired the pre-equilibrium but still used the oxygen that began as H3O+
+as the eventual Si--Ow nucleophile. Both exact three-water products optimized
+to complete Si--Ow dissociation after Si--Obr cleavage; both four-water
+reactants redistributed the excess proton before path finding. Do not retry
+those counts/topologies or add an Obr--H constraint. The next finite hypothesis
+must keep hydronium as proton donor while a distinct neutral water attacks Si,
+with physical-H relay ownership and an unconstrained product-minimum gate.
+
 ### WebGL2 unavailable at boot kills module-top-level wiring silently (2026-08-22)
 A Chrome with a pending update can keep running with a dead GPU process, so
 `canvas.getContext('webgl2')` returns null on an otherwise healthy box (same
