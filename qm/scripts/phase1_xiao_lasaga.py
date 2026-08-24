@@ -1718,10 +1718,17 @@ def main() -> int:
         default=1,
         help="total explicit water oxygens for acid reactions (production: 3-6)",
     )
+    ap.add_argument(
+        "--reactant-only",
+        action="store_true",
+        help="stop after the microsolvated unconstrained-minimum gate",
+    )
     args = ap.parse_args()
     acid_path = args.reaction.endswith("-acid")
     if not acid_path and args.microsolvation_waters != 1:
         ap.error("--microsolvation-waters applies only to acid reactions")
+    if args.reactant_only and (not acid_path or args.microsolvation_waters == 1):
+        ap.error("--reactant-only requires an acid reaction with 3-6 waters")
 
     settings = DftSettings(
         xc=args.xc, basis=args.basis, density_fit=True, use_gpu=args.gpu
@@ -1844,6 +1851,14 @@ def main() -> int:
             )
             block_run(run_dir, detail)
             return 1
+        if args.reactant_only:
+            write_sequential_run_status(
+                run_dir,
+                "reactant-verified",
+                detail="microsolvated reactant passed connectivity and minimum gates",
+            )
+            log("reactant-only gate passed; TS search intentionally skipped")
+            return 0
 
     dimer_opt = checkpointed(
         run_dir / "dimer.xyz", dimer, lambda: optimize(dimer, settings)

@@ -342,6 +342,46 @@ def test_microsolvated_main_blocks_before_ts_when_reactant_is_not_minimum(
     assert "TS search forbidden" in status["detail"]
 
 
+def test_reactant_only_stops_after_verified_minimum(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        phase1.sys,
+        "argv",
+        [
+            "phase1_xiao_lasaga.py",
+            "--reaction",
+            "al-acid",
+            "--microsolvation-waters",
+            "4",
+            "--reactant-only",
+        ],
+    )
+    monkeypatch.setattr(phase1, "reaction_run_slug", lambda *args: tmp_path)
+    monkeypatch.setattr(phase1, "optimize", lambda cluster, settings: cluster)
+    monkeypatch.setattr(
+        phase1,
+        "frequencies",
+        lambda cluster, settings: FrequencyResult(
+            frequencies_cm=np.array([100.0, 200.0]),
+            imaginary_cm=np.array([]),
+            electronic_hartree=-100.0,
+            molar_mass_kg=0.1,
+            rotational_temperatures_k=(1.0, 2.0, 3.0),
+            linear=False,
+        ),
+    )
+    monkeypatch.setattr(
+        phase1,
+        "scan_to_maximum",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("reactant-only must skip the TS search")
+        ),
+    )
+
+    assert phase1.main() == 0
+    status = json.loads((tmp_path / "run_status.json").read_text())
+    assert status["status"] == "reactant-verified"
+
+
 @pytest.mark.parametrize("dimer_factory", [disilicate, aluminosilicate_dimer])
 def test_acid_speciation_guards_reject_lost_proton_bridge_or_water(dimer_factory):
     reactant, product, ow_index, proton_indices = acid_geometries(dimer_factory)
