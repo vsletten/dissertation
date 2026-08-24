@@ -31,11 +31,15 @@ terminal dies.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import math
 import os
+import struct
 import sys
 import time
 from pathlib import Path
+from typing import TypeGuard
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -785,6 +789,36 @@ def minimum_frequency_reason(label: str, freq: FrequencyResult) -> str | None:
     return None
 
 
+def _json_finite_number(value: object) -> TypeGuard[int | float]:
+    """True for JSON numbers only; bool is excluded because it subclasses int."""
+    return (type(value) is int or type(value) is float) and math.isfinite(value)
+
+
+def _json_positive_finite_numbers(value: object) -> TypeGuard[list[int | float]]:
+    return isinstance(value, list) and all(
+        _json_finite_number(item) and float(item) > 0.0 for item in value
+    )
+
+
+def reactant_minimum_result_fingerprint(
+    geometry_fingerprint: str,
+    settings_fingerprint: str,
+    frequencies_cm: object,
+    imaginary_cm: object,
+    electronic_hartree: float,
+) -> str:
+    """Bind a receipt to geometry, settings, Hessian identity, and energy."""
+    digest = hashlib.sha256()
+    digest.update(geometry_fingerprint.encode())
+    digest.update(b"\0")
+    digest.update(settings_fingerprint.encode())
+    digest.update(b"\0")
+    digest.update(np.ascontiguousarray(frequencies_cm, dtype="<f8").tobytes())
+    digest.update(np.ascontiguousarray(imaginary_cm, dtype="<f8").tobytes())
+    digest.update(struct.pack("<d", float(electronic_hartree)))
+    return digest.hexdigest()
+
+
 def write_reactant_minimum_receipt(
     path: Path,
     cluster: Cluster,
@@ -792,13 +826,26 @@ def write_reactant_minimum_receipt(
     frequency: FrequencyResult,
 ) -> None:
     """Atomically persist the pre-TS minimum gate for crash-safe resume."""
+    geometry_fp = frequency_geometry_fingerprint(cluster)
+    settings_fp = frequency_settings_fingerprint(settings)
+    frequencies_cm = [float(value) for value in frequency.frequencies_cm.tolist()]
+    imaginary_cm = [float(value) for value in frequency.imaginary_cm.tolist()]
+    electronic_hartree = float(frequency.electronic_hartree)
     payload = {
-        "geometry_fingerprint": frequency_geometry_fingerprint(cluster),
-        "settings_fingerprint": frequency_settings_fingerprint(settings),
+        "geometry_fingerprint": geometry_fp,
+        "settings_fingerprint": settings_fp,
         "n_imaginary": frequency.n_imaginary,
-        "imaginary_cm": frequency.imaginary_cm.tolist(),
-        "electronic_hartree": frequency.electronic_hartree,
+        "imaginary_cm": imaginary_cm,
+        "frequencies_cm": frequencies_cm,
+        "electronic_hartree": electronic_hartree,
         "passed": frequency.n_imaginary == 0,
+        "result_fingerprint": reactant_minimum_result_fingerprint(
+            geometry_fp,
+            settings_fp,
+            frequencies_cm,
+            imaginary_cm,
+            electronic_hartree,
+        ),
     }
     temporary = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
     temporary.write_text(json.dumps(payload, indent=2))
@@ -810,7 +857,7 @@ def load_reactant_minimum_receipt(
     cluster: Cluster,
     settings: DftSettings,
 ) -> dict[str, object] | None:
-    """Load only a geometry/settings-bound minimum receipt."""
+    """Load only a complete geometry/settings/Hessian-bound minimum receipt."""
     if not path.is_file():
         return None
     try:
@@ -819,18 +866,39 @@ def load_reactant_minimum_receipt(
         return None
     if not isinstance(payload, dict):
         return None
-    if payload.get("geometry_fingerprint") != frequency_geometry_fingerprint(cluster):
+    geometry_fp = frequency_geometry_fingerprint(cluster)
+    settings_fp = frequency_settings_fingerprint(settings)
+    if payload.get("geometry_fingerprint") != geometry_fp:
         return None
-    if payload.get("settings_fingerprint") != frequency_settings_fingerprint(settings):
+    if payload.get("settings_fingerprint") != settings_fp:
         return None
     n_imaginary = payload.get("n_imaginary")
     passed = payload.get("passed")
     imaginary_cm = payload.get("imaginary_cm")
+    frequencies_cm = payload.get("frequencies_cm")
+    electronic_hartree = payload.get("electronic_hartree")
+    result_fingerprint = payload.get("result_fingerprint")
     if type(n_imaginary) is not int or n_imaginary < 0:  # bool is not accepted
         return None
     if type(passed) is not bool or passed is not (n_imaginary == 0):
         return None
-    if not isinstance(imaginary_cm, list) or len(imaginary_cm) != n_imaginary:
+    if not _json_positive_finite_numbers(imaginary_cm):
+        return None
+    if len(imaginary_cm) != n_imaginary:
+        return None
+    if not _json_positive_finite_numbers(frequencies_cm) or not frequencies_cm:
+        return None
+    if not _json_finite_number(electronic_hartree):
+        return None
+    if not isinstance(result_fingerprint, str) or result_fingerprint != (
+        reactant_minimum_result_fingerprint(
+            geometry_fp,
+            settings_fp,
+            frequencies_cm,
+            imaginary_cm,
+            float(electronic_hartree),
+        )
+    ):
         return None
     return payload
 

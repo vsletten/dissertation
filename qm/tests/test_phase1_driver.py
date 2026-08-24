@@ -315,6 +315,9 @@ def test_reactant_minimum_receipt_is_geometry_and_settings_bound(tmp_path):
 
     receipt = phase1.load_reactant_minimum_receipt(path, cluster, settings)
     assert receipt is not None and receipt["passed"] is True
+    assert receipt["frequencies_cm"] == [100.0, 200.0]
+    assert receipt["electronic_hartree"] == -100.0
+    assert isinstance(receipt["result_fingerprint"], str)
     moved = replace(cluster, coords=cluster.coords.copy())
     moved.coords[0, 0] += 0.01
     assert phase1.load_reactant_minimum_receipt(path, moved, settings) is None
@@ -335,6 +338,50 @@ def test_reactant_minimum_receipt_is_geometry_and_settings_bound(tmp_path):
     tampered["passed"] = "false"
     path.write_text(json.dumps(tampered))
     assert phase1.load_reactant_minimum_receipt(path, cluster, settings) is None
+
+
+def test_reactant_minimum_receipt_rejects_truncated_or_edited_hessian(tmp_path):
+    cluster = protonated_bridge_complex(disilicate(), n_water=4)
+    settings = DftSettings(xc="b3lyp", basis="def2-svp", density_fit=True)
+    frequency = FrequencyResult(
+        frequencies_cm=np.array([100.0, 200.0]),
+        imaginary_cm=np.array([]),
+        electronic_hartree=-100.0,
+        molar_mass_kg=0.1,
+        rotational_temperatures_k=(1.0, 2.0, 3.0),
+        linear=False,
+    )
+    path = tmp_path / "reactant_minimum.json"
+    phase1.write_reactant_minimum_receipt(path, cluster, settings, frequency)
+    valid = json.loads(path.read_text())
+
+    gate_only = {
+        "geometry_fingerprint": valid["geometry_fingerprint"],
+        "settings_fingerprint": valid["settings_fingerprint"],
+        "n_imaginary": 0,
+        "passed": True,
+        "imaginary_cm": [],
+    }
+    path.write_text(json.dumps(gate_only))
+    assert phase1.load_reactant_minimum_receipt(path, cluster, settings) is None
+
+    missing_energy = dict(valid)
+    missing_energy.pop("electronic_hartree")
+    path.write_text(json.dumps(missing_energy))
+    assert phase1.load_reactant_minimum_receipt(path, cluster, settings) is None
+
+    empty_modes = dict(valid)
+    empty_modes["frequencies_cm"] = []
+    path.write_text(json.dumps(empty_modes))
+    assert phase1.load_reactant_minimum_receipt(path, cluster, settings) is None
+
+    edited_energy = dict(valid)
+    edited_energy["electronic_hartree"] = -99.0
+    path.write_text(json.dumps(edited_energy))
+    assert phase1.load_reactant_minimum_receipt(path, cluster, settings) is None
+
+    path.write_text(json.dumps(valid))
+    assert phase1.load_reactant_minimum_receipt(path, cluster, settings) is not None
 
 
 def test_microsolvated_main_blocks_before_ts_when_reactant_is_not_minimum(
