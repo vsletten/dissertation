@@ -12,11 +12,64 @@ The reactant-referenced profile barrier is **134.811 kJ/mol = 32.221 kcal/mol**
 at 298.15 K. This is **21.763 kJ/mol = 5.201 kcal/mol higher** than the
 validated free-dimer `si-neutral` reference, 113.048 kJ/mol = 27.019 kcal/mol.
 Xiao & Lasaga's predicted easier Si–O–Al ordering is therefore **not confirmed**
-at this model tier.
+at this neutral model tier; it is not a test of their catalyzed ordering.
 
 Absolute numbers remain flagged for the A2 re-tier. The mechanism and ordering
 are the defensible Phase-1 result; this free-dimer value must not be substituted
 for a lattice-embedded production barrier.
+
+## Prior work reconciliation
+
+### Victor's 1990s anionic dimer
+
+The old and new campaigns use the **same terminated dimer core and electronic
+state**: `(HO)3Si–O–Al(OH)3-`, formula `H6SiAlO7-`, with three terminal
+hydroxyls on each center, one Si–O–Al bridge, total charge -1, and singlet spin.
+TASK-168 constructed that core with `aluminosilicate_dimer()` and added one
+neutral water, so its reacting complex is `H8SiAlO8-` and remains charge -1.
+This identity follows both the current builder and the campaign's exact template,
+not an inference from the result label. [TASK-168 code: `qm/quarry/clusters.py`
+`aluminosilicate_dimer()` and `qm/scripts/task168_intermediate_sweep.py`
+`run_sweep()`, which builds the template from that dimer plus one water.
+The campaign tree is not in this repository; the durable `results.json`
+SHA-256 is `94ecd8ea45dbea17743d7ce9ad354beb4ed150ff97d988714e6f0dd895ccb148`
+in Durable receipts below.]
+
+Victor's thesis used Gaussian 94/B3LYP, B3LYP/3-21G(3d,2p) geometries, and
+6-31G(3d) single-point energies. Its dimer table reports **29.9267 kcal/mol**
+for the direct net reaction from `H6SiAlO7- + H2O·H2O` to silicic acid,
+`Al(OH)4-`, and a spectator water; the pre-adsorbed-water hydrolysis step is
+**35.7769 kcal/mol**. [Victor Sletten, *Playing Dice with the Universe*
+(~1999), ch. 4, “Computational Method” and “Reaction Model”; exact “Dimer
+Hydrolysis” values from the thesis dimer table. Those LaTeX sources live in
+the workstation thesis archive and are not yet ingested here; see
+`docs/program/cards/A8-thesis-archive-intake.md`.]
+
+The modern **32.221 kcal/mol** result is only **2.294 kcal/mol above** the old
+29.9267 number and therefore corroborates the energy scale Victor found in the
+1990s. The comparison is deliberately qualified: the thesis values are
+zero-point-corrected reaction energies (`ΔE*`), whereas TASK-168 reports a
+298.15 K quasi-RRHO activation free energy (`ΔG‡`); the old direct bookkeeping
+also carries a second, spectator water while TASK-168 has one explicit water.
+This is strong numerical continuity for the same anionic dimer core, not an
+apples-to-apples reproduction or a claim of 2.294-kcal method accuracy.
+
+### Catalyzed and embedded tiers
+
+Xiao & Lasaga's ~24 kcal/mol acid and ~19 kcal/mol base anchors—and the
+associated “Si–O–Al is easier than Si–O–Si” ordering—belong to catalyzed
+channels. The neutral free-dimer result therefore **narrows rather than
+refutes** that claim: neutral `al` is 5.201 kcal/mol higher than neutral `si`
+here, while the matched microsolvated A1b acid pair is the direct test of the
+catalyzed ordering. [Xiao & Lasaga, *Geochimica et Cosmochimica Acta* **58**
+(1994) 5379–5400 and **60** (1996) 2283–2295; `SURVEY.md` §§7.1 and 9.]
+
+The lattice-embedded ordering is a third, still-open tier. Periodic work reports
+Si–O–Al **86 kJ/mol** versus Si–O–Si **169 kJ/mol** in metakaolinite, but a
+free terminated dimer cannot confirm or overturn that lattice result. The
+program must carry the question into the embedded barrier-ladder rungs.
+[Izadifar et al., *Nanomaterials* **13** (2023) 1196 and *Nanoscale Advances*
+**7** (2025); `SURVEY.md` §7.2.]
 
 ## Intermediate diagnostic
 

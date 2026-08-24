@@ -17,7 +17,7 @@ in the store), `landed` (the number is in a merged deck).
 |---|---|---|---|---|
 | CALC-001 | Kaolinite interlayer H-bond energy (per OH···O bond, inner-surface OH → basal siloxane O) | `petra/examples/kaolinite-multilayer.toml` — `e_hb` in the two desorption `per_match` modifiers | **needed** | placeholder 5.0 kcal/mol (generic OH···O; deck header flags it) |
 | CALC-002 | Si–O–Si hydrolysis barrier, neutral/acid/base (Xiao & Lasaga reproduction) | kaolinite decks R0/R1; quarry Phase 1 validation | **computed** (neutral, embedded pilot; acid/base pending) | free dimer ΔG‡ 113.05 kJ/mol; embedded n4 cell **205.7 kJ/mol** (sequential, TS2 rate-limiting, +92.7 lattice shift) @ b3lyp/def2-svp/df — provenance in `qm/runs/phase2/oss-neutral-n4-s2-b3lyp-def2-svp/store.sqlite`; A2 re-tiers |
-| CALC-003 | Si–O–Al hydrolysis barrier, both protonation sides | kaolinite decks R2–R13 family | **computed** (free-dimer neutral + one-water Al-acid; matched microsolvated acid pair pending) | al-neutral sequential uphill-slide profile **134.811 kJ/mol (32.221 kcal/mol)**, cleavage TS rate-limiting; Xiao–Lasaga easier-Si–O–Al ordering not confirmed vs si-neutral 113.048 kJ/mol. One-water al-acid checkpoint 82.193 kJ/mol is not the matched acid comparison. B3LYP/def2-SVP/DF; `AL_NEUTRAL_MECHANISM.md` + `ACID_MECHANISMS.md`; A2 re-tiers |
+| CALC-003 | Si–O–Al hydrolysis barrier, both protonation sides | kaolinite decks R2–R13 family | **computed** (free-dimer neutral + one-water Al-acid; matched microsolvated acid pair pending) | al-neutral sequential uphill-slide profile **134.811 kJ/mol (32.221 kcal/mol)**, cleavage TS rate-limiting. Same `H6SiAlO7-` / `(HO)3Si–O–Al(OH)3-` core and charge as Victor's 1990s calculation: 29.9267 kcal/mol direct `ΔE*` (35.7769 pre-adsorbed step), numerically corroborative but not the same observable. Neutral non-confirmation narrows rather than refutes Xiao–Lasaga's catalyzed ordering; matched A1b acids test it directly; Izadifar's embedded 86-vs-169 kJ/mol ordering remains open for embedded rungs. B3LYP/def2-SVP/DF; `AL_NEUTRAL_MECHANISM.md` + `ACID_MECHANISMS.md`; A2 re-tiers |
 | CALC-004 | Al–OH–Al hydrolysis barrier ± protonation state | kaolinite decks R14/R15 | needed | legacy relative rates |
 | CALC-005 | Si and Al attachment/detachment energetics vs coordination (the `by_count` ladders) | kaolinite decks desorb/adsorb modifiers | needed | legacy 6/12 kcal-per-bucket heuristic tables |
 | CALC-006 | Quartz Q1/Q2/Q3 per-connectivity dissolution barriers | planned quartz framework deck (handoff deck #3) | **literature** | Liu & Ruiz Pestana 2024: 54/71/81 kJ/mol — drops straight into a `by_count` table |
@@ -48,3 +48,26 @@ legacy flat tables (every variant of a reaction shares one number —
 DESIGN.md §10.2). These entries are the qm/HANDOFF.md Phase 1–2 targets:
 connectivity- and protonation-resolved barriers for the five site
 families, emitted as Petra `by_count`/`when` tables with provenance.
+
+### CALC-003 — prior-work reconciliation
+
+- **Charge and termination match:** TASK-168 uses exactly
+  `(HO)3Si–O–Al(OH)3-` (`H6SiAlO7-`, charge -1, singlet), then adds one neutral
+  attacking water. That is the same terminated anionic dimer core documented in
+  Victor's thesis; the old direct reaction additionally carried a spectator
+  water through `H2O·H2O` bookkeeping.
+- **Victor's number:** the thesis reports 29.9267 kcal/mol for the direct net
+  neutral-water `ΔE*` and 35.7769 kcal/mol for the pre-adsorbed-water hydrolysis
+  step (B3LYP/3-21G(3d,2p) geometries, 6-31G(3d) energies). TASK-168's 32.221
+  kcal/mol is a 298.15 K `ΔG‡`, so the 2.294-kcal numerical agreement
+  corroborates scale, not equality of observables. Sources: Victor Sletten
+  dissertation ch. 4 (“Computational Method” / “Reaction Model”) and the
+  thesis dimer table (workstation archive; not yet ingested — see
+  `docs/program/cards/A8-thesis-archive-intake.md`); current provenance is
+  in `AL_NEUTRAL_MECHANISM.md` and the TASK-168 durable receipt hashes there.
+- **Three-tier interpretation:** neutral free-dimer `al > si` does not directly
+  test Xiao & Lasaga's catalyzed ~24/~19 kcal/mol channels; matched A1b acids do.
+  Izadifar's embedded Si–O–Al 86 versus Si–O–Si 169 kJ/mol ordering remains an
+  embedded-rung question. Citations: Xiao & Lasaga, *GCA* 58 (1994) 5379–5400
+  and 60 (1996) 2283–2295; Izadifar et al., *Nanomaterials* 13 (2023) 1196 and
+  *Nanoscale Advances* 7 (2025); `SURVEY.md` §§7.1–7.2.
