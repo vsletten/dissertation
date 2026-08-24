@@ -189,6 +189,20 @@ class TestElectronicStructure:
 
 
 class TestOptimization:
+    def test_exhausted_step_bound_is_rejected(self, monkeypatch):
+        from pyscf.geomopt import geometric_solver
+
+        monkeypatch.setattr(pipeline, "build_mol", lambda cluster, settings: object())
+        monkeypatch.setattr(pipeline, "_make_scf", lambda mol, settings: object())
+        monkeypatch.setattr(
+            geometric_solver,
+            "kernel",
+            lambda method, **kwargs: (False, object()),
+        )
+
+        with pytest.raises(RuntimeError, match="did not converge within 7 steps"):
+            pipeline.optimize(water(), CHEAP, max_steps=7)
+
     def test_energy_decreases(self, opt_water):
         assert energy(opt_water, CHEAP) < energy(water(), CHEAP)
 

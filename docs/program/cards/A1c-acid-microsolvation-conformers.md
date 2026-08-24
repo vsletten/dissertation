@@ -1,11 +1,11 @@
 # A1c-acid-microsolvation-conformers — finite matched proton-relay ensemble
 
-- status: ready
+- status: active
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaign)
 - depends: A1b microsolvation driver/receipt hardening merged
-- claimed-by:
+- claimed-by: hermes-workstation
 
 ## Objective
 
@@ -53,6 +53,19 @@ ensemble**, not another single-shell or water-count retry.
 
 ## Progress
 
+- 2026-08-24 — implementation checkpoint: four deterministic 3--6-water
+  families now carry explicit connected donor/acceptor graphs, stable O/H/H
+  indices, collision gates, and exact physical-H ownership. The finite Si-first
+  ensemble journals every bounded optimization, requires real geomeTRIC
+  convergence, validates Hessian receipts, deduplicates by heavy-atom RMSD plus
+  finite energy, and only emits an Al/barrier handoff when both exact minima are
+  hash-bound in one matched receipt. A cold adversarial review found and the
+  branch fixed optimizer-exhaustion, NaN/weak-receipt, ambiguous-proton,
+  disconnected-family, Al-failure-verdict, lowest-energy-canonical, and
+  unmatched-barrier false greens. Pre-campaign verification: 293 QM tests,
+  whole-tree Ruff, changed-file format, both CLI help smokes, and diff check
+  pass. Implementation campaign checkpoint is committed/pushed next; production
+  GPU screening has not started yet.
 - 2026-08-23 — created from A1b's 3--6-water deterministic-shell NO-GO. The
   count sweep proved four seeds fail but explicitly did not claim the complete
   microsolvated potential-energy surface was exhausted.

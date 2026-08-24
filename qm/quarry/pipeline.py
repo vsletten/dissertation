@@ -123,8 +123,8 @@ def constraints_file(text: str):
 def optimize(
     cluster: Cluster, settings: DftSettings, *, max_steps: int = 100
 ) -> Cluster:
-    """Minimum-energy geometry via geomeTRIC (frozen atoms respected)."""
-    from pyscf.geomopt.geometric_solver import optimize as geometric_optimize
+    """Minimum-energy geometry via geomeTRIC; reject an exhausted step bound."""
+    from pyscf.geomopt.geometric_solver import kernel as geometric_kernel
 
     mf = _make_scf(build_mol(cluster, settings), settings)
     if cluster.frozen_indices:
@@ -132,9 +132,17 @@ def optimize(
         # (the lattice-resistance contract, SURVEY.md §6.2).
         atoms = ",".join(str(i + 1) for i in sorted(cluster.frozen_indices))
         with constraints_file(f"$freeze\nxyz {atoms}\n") as path:
-            mol_opt = geometric_optimize(mf, maxsteps=max_steps, constraints=path)
+            converged, mol_opt = geometric_kernel(
+                mf,
+                maxsteps=max_steps,
+                constraints=path,
+            )
     else:
-        mol_opt = geometric_optimize(mf, maxsteps=max_steps)
+        converged, mol_opt = geometric_kernel(mf, maxsteps=max_steps)
+    if not converged:
+        raise RuntimeError(
+            f"geometry optimization did not converge within {max_steps} steps"
+        )
     return replace(
         cluster,
         symbols=[mol_opt.atom_symbol(i) for i in range(mol_opt.natm)],

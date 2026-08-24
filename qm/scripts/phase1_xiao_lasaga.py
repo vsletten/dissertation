@@ -35,9 +35,11 @@ import hashlib
 import json
 import math
 import os
+import shutil
 import struct
 import sys
 import time
+from dataclasses import asdict
 from pathlib import Path
 from typing import TypeGuard
 
@@ -54,6 +56,7 @@ if __name__ == "__main__":
 import numpy as np  # noqa: E402
 
 from quarry.clusters import (  # noqa: E402
+    ACID_MICROSOLVATION_FAMILIES,
     Cluster,
     aluminosilicate_dimer,
     disilicate,
@@ -117,6 +120,8 @@ ACID_HYDROLYZED_BASINS = {
 }
 ACID_MECHANISM_VERSION = 2
 ACID_MICROSOLVATION_VERSION = 1
+ACID_CONFORMER_VERSION = 2
+ACID_CONFORMER_GATE_VERSION = 1
 
 
 def acid_mobile_indices(
@@ -180,9 +185,15 @@ def reaction_run_slug(
     basis: str,
     approach: str,
     n_water: int = 1,
+    conformer_family: str | None = None,
 ) -> str:
-    """Return a checkpoint namespace that cannot mix old and new acid mechanisms."""
-    if reaction.endswith("-acid") and n_water > 1:
+    """Return a checkpoint namespace that cannot mix acid gate versions."""
+    if reaction.endswith("-acid") and n_water > 1 and conformer_family is not None:
+        reaction_slug = (
+            f"{reaction}-microsolvated-{n_water}w-{conformer_family}-"
+            f"v{ACID_CONFORMER_VERSION}-g{ACID_CONFORMER_GATE_VERSION}"
+        )
+    elif reaction.endswith("-acid") and n_water > 1:
         reaction_slug = (
             f"{reaction}-microsolvated-{n_water}w-v{ACID_MICROSOLVATION_VERSION}"
         )
@@ -191,6 +202,125 @@ def reaction_run_slug(
     else:
         reaction_slug = reaction
     return f"{reaction_slug}-{xc}-{basis}-{approach}"
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _receipt_artifact_path(root: Path, relative: object) -> Path:
+    if not isinstance(relative, str):
+        raise ValueError("matched receipt artifact path is not a string")
+    path = (root / relative).resolve()
+    if not path.is_relative_to(root.resolve()):
+        raise ValueError("matched receipt artifact escapes its run directory")
+    if not path.is_file():
+        raise ValueError(f"matched receipt artifact is missing: {relative}")
+    return path
+
+
+def validate_matched_ensemble_receipt(
+    path: Path,
+    *,
+    reaction: str,
+    n_water: int,
+    family: str,
+    settings: DftSettings,
+) -> tuple[Cluster, Path]:
+    """Load one exact screened Si/Al pair before family-mode TS work."""
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError(f"matched ensemble receipt is unreadable: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("matched ensemble receipt must be a JSON object")
+    if payload.get("schema_version") != 1:
+        raise ValueError("matched ensemble receipt schema version mismatch")
+    if payload.get("conformer_version") != ACID_CONFORMER_VERSION:
+        raise ValueError("matched ensemble conformer version mismatch")
+    if payload.get("gate_version") != ACID_CONFORMER_GATE_VERSION:
+        raise ValueError("matched ensemble gate version mismatch")
+    if payload.get("settings") != asdict(settings):
+        raise ValueError("matched ensemble settings mismatch")
+    root = path.resolve().parent
+    manifest_path = _receipt_artifact_path(root, payload.get("manifest_path"))
+    if sha256_file(manifest_path) != payload.get("manifest_sha256"):
+        raise ValueError("matched ensemble manifest hash mismatch")
+    candidates = payload.get("candidates")
+    if not isinstance(candidates, list):
+        raise ValueError("matched ensemble candidates must be a list")
+    matches = [
+        candidate
+        for candidate in candidates
+        if isinstance(candidate, dict)
+        and candidate.get("water_count") == n_water
+        and candidate.get("family") == family
+    ]
+    if len(matches) != 1:
+        raise ValueError("matched ensemble receipt lacks one exact topology")
+    models = matches[0].get("models")
+    if not isinstance(models, dict) or set(models) != {"si-acid", "al-acid"}:
+        raise ValueError("matched ensemble receipt must bind both Si and Al models")
+
+    selected_cluster = None
+    selected_minimum = None
+    for model_reaction, dimer_factory in (
+        ("si-acid", disilicate),
+        ("al-acid", aluminosilicate_dimer),
+    ):
+        model = models.get(model_reaction)
+        if not isinstance(model, dict):
+            raise ValueError(f"matched ensemble model {model_reaction} is invalid")
+        expected_key = f"{model_reaction}:{n_water}w:{family}"
+        if model.get("seed_key") != expected_key:
+            raise ValueError(
+                f"matched ensemble model key mismatch for {model_reaction}"
+            )
+        optimized_path = _receipt_artifact_path(root, model.get("optimized_path"))
+        minimum_path = _receipt_artifact_path(root, model.get("minimum_path"))
+        if sha256_file(optimized_path) != model.get("optimized_sha256"):
+            raise ValueError(
+                f"matched optimized geometry hash mismatch for {model_reaction}"
+            )
+        if sha256_file(minimum_path) != model.get("minimum_sha256"):
+            raise ValueError(
+                f"matched minimum receipt hash mismatch for {model_reaction}"
+            )
+        dimer = dimer_factory()
+        template = protonated_bridge_complex(
+            dimer,
+            n_water=n_water,
+            conformer_family=family,
+        )
+        cluster = load_xyz(optimized_path, template)
+        minimum = load_reactant_minimum_receipt(minimum_path, cluster, settings)
+        if minimum is None or minimum.get("passed") is not True:
+            raise ValueError(f"matched minimum receipt is invalid for {model_reaction}")
+        if minimum.get("electronic_hartree") != model.get("electronic_hartree"):
+            raise ValueError(f"matched minimum energy mismatch for {model_reaction}")
+        ow_index = len(dimer.symbols)
+        proton_indices, solvent_oxygen_indices = acid_mobile_indices(ow_index, n_water)
+        if reason := protonated_bridge_reason(
+            cluster,
+            ow_index,
+            proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
+        ):
+            raise ValueError(
+                f"matched topology failed {model_reaction} basin: {reason}"
+            )
+        if model_reaction == reaction:
+            selected_cluster = cluster
+            selected_minimum = minimum_path
+    if selected_cluster is None or selected_minimum is None:
+        raise ValueError(
+            f"matched ensemble receipt does not support reaction {reaction}"
+        )
+    return selected_cluster, selected_minimum
 
 
 def log(msg: str) -> None:
@@ -288,29 +418,76 @@ def hydrolysis_basin_signature(
     )
 
 
+ACID_COVALENT_OWNERSHIP_A = 1.25
+ACID_AMBIGUOUS_OWNERSHIP_A = 1.05
+
+
+def _acid_oxygen_candidates(
+    cluster: Cluster,
+    proton_indices: tuple[int, ...],
+) -> list[tuple[int, ...]]:
+    oxygen_indices = tuple(
+        index for index, symbol in enumerate(cluster.symbols) if symbol == "O"
+    )
+    candidates = []
+    for proton_index in proton_indices:
+        distances = sorted(
+            (
+                float(
+                    np.linalg.norm(
+                        cluster.coords[oxygen_index] - cluster.coords[proton_index]
+                    )
+                ),
+                oxygen_index,
+            )
+            for oxygen_index in oxygen_indices
+        )
+        ambiguous = tuple(
+            oxygen_index
+            for distance, oxygen_index in distances
+            if distance < ACID_AMBIGUOUS_OWNERSHIP_A
+        )
+        if len(ambiguous) > 1:
+            candidates.append(ambiguous)
+        elif distances[0][0] < ACID_COVALENT_OWNERSHIP_A:
+            candidates.append((distances[0][1],))
+        else:
+            candidates.append(())
+    return candidates
+
+
+def acid_hydrogen_ownership_reason(
+    cluster: Cluster,
+    proton_indices: tuple[int, ...],
+) -> str | None:
+    """Require every physical H to have exactly one oxygen owner."""
+    candidates = _acid_oxygen_candidates(cluster, proton_indices)
+    unassigned = [
+        proton
+        for proton, owners in zip(proton_indices, candidates, strict=True)
+        if not owners
+    ]
+    ambiguous = {
+        proton: owners
+        for proton, owners in zip(proton_indices, candidates, strict=True)
+        if len(owners) > 1
+    }
+    if unassigned:
+        return f"acid hydrogens unassigned to oxygen: {unassigned}"
+    if ambiguous:
+        return f"acid hydrogens have ambiguous oxygen owners: {ambiguous}"
+    return None
+
+
 def _acid_mobile_assignments(
     cluster: Cluster,
     proton_indices: tuple[int, ...],
 ) -> list[int | None]:
-    """Assign each tracked mobile proton to one nearby oxygen, if any."""
-    oxygen_indices = [
-        index for index, symbol in enumerate(cluster.symbols) if symbol == "O"
+    """Assign tracked H only when exactly one oxygen is within the ownership cut."""
+    return [
+        owners[0] if len(owners) == 1 else None
+        for owners in _acid_oxygen_candidates(cluster, proton_indices)
     ]
-    assignments: list[int | None] = []
-    for proton_index in proton_indices:
-        nearest_oxygen = min(
-            oxygen_indices,
-            key=lambda oxygen_index: np.linalg.norm(
-                cluster.coords[oxygen_index] - cluster.coords[proton_index]
-            ),
-        )
-        distance = float(
-            np.linalg.norm(
-                cluster.coords[nearest_oxygen] - cluster.coords[proton_index]
-            )
-        )
-        assignments.append(nearest_oxygen if distance < 1.25 else None)
-    return assignments
 
 
 def _all_hydrogen_assignments(cluster: Cluster) -> list[int | None]:
@@ -335,6 +512,11 @@ def acid_occupancy_reason(
         ow_index,
         *(oxygen for oxygen in solvent_oxygen_indices if oxygen != ow_index),
     )
+    hydrogen_indices = tuple(
+        index for index, symbol in enumerate(cluster.symbols) if symbol == "H"
+    )
+    if ownership_failure := acid_hydrogen_ownership_reason(cluster, hydrogen_indices):
+        return ownership_failure
     assignments = _all_hydrogen_assignments(cluster)
     actual_solvent = tuple(assignments.count(oxygen) for oxygen in ordered_solvent)
     expected_solvent = (attacker_h_count, *(2 for _ in ordered_solvent[1:]))
@@ -848,7 +1030,7 @@ def write_reactant_minimum_receipt(
         ),
     }
     temporary = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
-    temporary.write_text(json.dumps(payload, indent=2))
+    temporary.write_text(json.dumps(payload, indent=2, allow_nan=False))
     temporary.replace(path)
 
 
@@ -1383,6 +1565,7 @@ def finish_al_neutral_sequential(
     proton_indices: tuple[int, ...] = (),
     solvent_oxygen_indices: tuple[int, ...] = (),
     n_water: int = 1,
+    conformer_family: str | None = None,
     reactant_frequency: FrequencyResult | None = None,
 ) -> int:
     """Close a proven R → associative I → hydrolyzed P mechanism."""
@@ -1712,8 +1895,18 @@ def finish_al_neutral_sequential(
         ),
         "mechanism_version": ACID_MECHANISM_VERSION if acid_path else 1,
         "microsolvation_waters": n_water if acid_path else 0,
+        "microsolvation_family": conformer_family if acid_path else None,
         "microsolvation_version": (
-            ACID_MICROSOLVATION_VERSION if acid_path and n_water > 1 else None
+            ACID_CONFORMER_VERSION
+            if acid_path and conformer_family is not None
+            else ACID_MICROSOLVATION_VERSION
+            if acid_path and n_water > 1
+            else None
+        ),
+        "microsolvation_gate_version": (
+            ACID_CONFORMER_GATE_VERSION
+            if acid_path and conformer_family is not None
+            else None
         ),
         "method": f"{settings.xc}/{settings.basis}/df",
         "temperature_k": temperature,
@@ -1847,6 +2040,16 @@ def main() -> int:
         help="total explicit water oxygens for acid reactions (production: 3-6)",
     )
     ap.add_argument(
+        "--microsolvation-family",
+        choices=ACID_MICROSOLVATION_FAMILIES,
+        help="deterministic proton-relay conformer family (requires 3-6 waters)",
+    )
+    ap.add_argument(
+        "--matched-ensemble-receipt",
+        type=Path,
+        help="tamper-evident Si/Al minimum handoff required for family-mode TS work",
+    )
+    ap.add_argument(
         "--reactant-only",
         action="store_true",
         help="stop after the microsolvated unconstrained-minimum gate",
@@ -1855,12 +2058,34 @@ def main() -> int:
     acid_path = args.reaction.endswith("-acid")
     if not acid_path and args.microsolvation_waters != 1:
         ap.error("--microsolvation-waters applies only to acid reactions")
+    if not acid_path and args.microsolvation_family is not None:
+        ap.error("--microsolvation-family applies only to acid reactions")
+    if args.microsolvation_family is not None and args.microsolvation_waters == 1:
+        ap.error("--microsolvation-family requires 3-6 waters")
+    if args.microsolvation_family is not None and args.matched_ensemble_receipt is None:
+        ap.error("--microsolvation-family requires --matched-ensemble-receipt")
+    if args.matched_ensemble_receipt is not None and args.microsolvation_family is None:
+        ap.error("--matched-ensemble-receipt requires --microsolvation-family")
     if args.reactant_only and (not acid_path or args.microsolvation_waters == 1):
         ap.error("--reactant-only requires an acid reaction with 3-6 waters")
 
     settings = DftSettings(
         xc=args.xc, basis=args.basis, density_fit=True, use_gpu=args.gpu
     )
+    matched_complex: Cluster | None = None
+    matched_minimum_path: Path | None = None
+    if args.microsolvation_family is not None:
+        assert args.matched_ensemble_receipt is not None
+        try:
+            matched_complex, matched_minimum_path = validate_matched_ensemble_receipt(
+                args.matched_ensemble_receipt,
+                reaction=args.reaction,
+                n_water=args.microsolvation_waters,
+                family=args.microsolvation_family,
+                settings=settings,
+            )
+        except ValueError as exc:
+            ap.error(str(exc))
 
     run_dir = (
         Path(__file__).resolve().parent.parent
@@ -1872,6 +2097,7 @@ def main() -> int:
             args.basis,
             args.approach,
             args.microsolvation_waters,
+            args.microsolvation_family,
         )
     )
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -1888,10 +2114,11 @@ def main() -> int:
     if acid_path:
         if not args.reactant_only:
             begin_gated_run(run_dir)
-        complex_guess = protonated_bridge_complex(
+        complex_guess = matched_complex or protonated_bridge_complex(
             dimer,
             mode=args.approach,
             n_water=args.microsolvation_waters,
+            conformer_family=args.microsolvation_family,
         )
     else:
         complex_guess = hydrolysis_complex(dimer, attacker, mode=args.approach)
@@ -1924,27 +2151,56 @@ def main() -> int:
             )
         return proton_neb_guess(seed, complex_opt, settings, run_dir, ow_index)
 
-    # Stage 0 — cheap, robust pre-optimization of the hand-built guess.
-    # HF/STO-3G converges where a hybrid at a strained guess may not;
-    # the production method then starts from a relaxed structure.
-    log("stage 0: HF/STO-3G pre-optimization of the complex guess")
-    preopt_settings = DftSettings(xc="hf", basis="sto-3g")
-    complex_pre = checkpointed(
-        run_dir / "complex_preopt.xyz",
-        complex_guess,
-        lambda: optimize(complex_guess, preopt_settings),
-    )
+    # Stage 0/1 — a family-mode barrier is provenance-bound to the exact
+    # screened minimum. Ordinary routes retain the HF -> production optimization.
+    if matched_complex is not None:
+        assert matched_minimum_path is not None
+        log("stage 0/1: installing exact matched ensemble minimum")
+        for checkpoint_path in (
+            run_dir / "complex_preopt.xyz",
+            run_dir / "complex.xyz",
+        ):
+            if checkpoint_path.exists():
+                archived = load_xyz(checkpoint_path, matched_complex)
+                if frequency_geometry_fingerprint(
+                    archived
+                ) != frequency_geometry_fingerprint(matched_complex):
+                    checkpoint_path.replace(
+                        checkpoint_path.with_name(
+                            f"{checkpoint_path.stem}.stale-{time.time_ns()}.xyz"
+                        )
+                    )
+            save_xyz(matched_complex, checkpoint_path)
+        complex_pre = load_xyz(run_dir / "complex_preopt.xyz", matched_complex)
+        complex_opt = load_xyz(run_dir / "complex.xyz", matched_complex)
+        minimum_path = run_dir / "reactant_minimum.json"
+        if minimum_path.exists() and sha256_file(minimum_path) != sha256_file(
+            matched_minimum_path
+        ):
+            minimum_path.replace(
+                minimum_path.with_name(f"reactant_minimum.stale-{time.time_ns()}.json")
+            )
+        shutil.copy2(matched_minimum_path, minimum_path)
+    else:
+        # HF/STO-3G converges where a hybrid at a strained guess may not;
+        # the production method then starts from a relaxed structure.
+        log("stage 0: HF/STO-3G pre-optimization of the complex guess")
+        preopt_settings = DftSettings(xc="hf", basis="sto-3g")
+        complex_pre = checkpointed(
+            run_dir / "complex_preopt.xyz",
+            complex_guess,
+            lambda: optimize(complex_guess, preopt_settings),
+        )
 
-    # Stage 1 — optimize reactant complex and separated fragments.
-    log("stage 1: optimizing reactant complex + fragments")
-    complex_opt = checkpointed(
-        run_dir / "complex.xyz",
-        complex_pre,
-        lambda: optimize(complex_pre, settings),
-    )
-    # Every downstream gate consumes the exact archived coordinates. This keeps
-    # geometry fingerprints stable across a crash/restart despite XYZ rounding.
-    complex_opt = load_xyz(run_dir / "complex.xyz", complex_pre)
+        log("stage 1: optimizing reactant complex + fragments")
+        complex_opt = checkpointed(
+            run_dir / "complex.xyz",
+            complex_pre,
+            lambda: optimize(complex_pre, settings),
+        )
+        # Every downstream gate consumes the exact archived coordinates. This keeps
+        # geometry fingerprints stable across a crash/restart despite XYZ rounding.
+        complex_opt = load_xyz(run_dir / "complex.xyz", complex_pre)
     if acid_path:
         pre_equilibrium_failure = protonated_bridge_reason(
             complex_opt,
@@ -2221,6 +2477,7 @@ def main() -> int:
             proton_indices=proton_indices,
             solvent_oxygen_indices=solvent_oxygen_indices,
             n_water=args.microsolvation_waters,
+            conformer_family=args.microsolvation_family,
             reactant_frequency=reactant_frequency,
         )
     if args.reaction == "al-neutral":
@@ -2279,9 +2536,17 @@ def main() -> int:
         ),
         "mechanism_version": ACID_MECHANISM_VERSION if acid_path else 1,
         "microsolvation_waters": args.microsolvation_waters if acid_path else 0,
+        "microsolvation_family": args.microsolvation_family if acid_path else None,
         "microsolvation_version": (
-            ACID_MICROSOLVATION_VERSION
+            ACID_CONFORMER_VERSION
+            if acid_path and args.microsolvation_family is not None
+            else ACID_MICROSOLVATION_VERSION
             if acid_path and args.microsolvation_waters > 1
+            else None
+        ),
+        "microsolvation_gate_version": (
+            ACID_CONFORMER_GATE_VERSION
+            if acid_path and args.microsolvation_family is not None
             else None
         ),
         "method": f"{args.xc}/{args.basis}/df",
