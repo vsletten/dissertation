@@ -356,6 +356,8 @@ def terminal_record_is_reusable(
     key: str,
     settings: DftSettings,
     bounds: Bounds,
+    mechanism_version: int = MECHANISM_VERSION,
+    gate_version: int = GATE_VERSION,
 ) -> bool:
     terminal = path_dir / "terminal.json"
     if not terminal.is_file():
@@ -366,8 +368,8 @@ def terminal_record_is_reusable(
         return False
     expected = {
         "schema_version": SCHEMA_VERSION,
-        "mechanism_version": MECHANISM_VERSION,
-        "gate_version": GATE_VERSION,
+        "mechanism_version": mechanism_version,
+        "gate_version": gate_version,
         "key": key,
         "settings": asdict(settings),
         "bounds": asdict(bounds),
@@ -419,18 +421,33 @@ def run_path(
     model: str,
     n_water: int,
     family: str,
+    mechanism_version: int = MECHANISM_VERSION,
+    gate_version: int = GATE_VERSION,
+    mechanism_name: str = "concerted-hydronium-nucleophile-relay",
+    endpoint_builder: Callable[..., Any] = concerted_acid_relay_endpoints,
+    endpoint_gate: Callable[..., str | None] = endpoint_gate_reason,
+    mode_gate: Callable[..., dict[str, Any]] = coupled_mode_components,
+    irc_gate: Callable[..., str | None] = irc_channel_reason,
 ) -> dict[str, Any]:
     key = path_key(model, n_water, family)
     path_dir = path_directory(run_dir, model, n_water, family)
-    if terminal_record_is_reusable(path_dir, key=key, settings=settings, bounds=bounds):
+    if terminal_record_is_reusable(
+        path_dir,
+        key=key,
+        settings=settings,
+        bounds=bounds,
+        mechanism_version=mechanism_version,
+        gate_version=gate_version,
+    ):
         return json.loads((path_dir / "terminal.json").read_text())
     if path_dir.exists():
         path_dir.rename(path_dir.with_name(f"{path_dir.name}.stale-{time.time_ns()}"))
     path_dir.mkdir(parents=True)
     base = {
         "schema_version": SCHEMA_VERSION,
-        "mechanism_version": MECHANISM_VERSION,
-        "gate_version": GATE_VERSION,
+        "mechanism_version": mechanism_version,
+        "gate_version": gate_version,
+        "mechanism": mechanism_name,
         "key": key,
         "model": model,
         "water_count": n_water,
@@ -440,9 +457,7 @@ def run_path(
     }
     stage = "build-endpoints"
     try:
-        ends = concerted_acid_relay_endpoints(
-            SI_MODELS[model](), n_water=n_water, family=family
-        )
+        ends = endpoint_builder(SI_MODELS[model](), n_water=n_water, family=family)
         save_xyz(ends.reactant, path_dir / "reactant-seed.xyz")
         save_xyz(ends.product, path_dir / "product-seed.xyz")
 
@@ -453,7 +468,7 @@ def run_path(
         save_xyz(reactant_result.cluster, path_dir / "reactant-optimized.xyz")
         if not reactant_result.converged:
             raise RuntimeError("reactant geometry optimization exhausted its bound")
-        if reason := endpoint_gate_reason(
+        if reason := endpoint_gate(
             reactant_result.cluster, ends, n_water=n_water, endpoint="reactant"
         ):
             return _terminal(
@@ -483,7 +498,7 @@ def run_path(
         save_xyz(product_result.cluster, path_dir / "product-optimized.xyz")
         if not product_result.converged:
             raise RuntimeError("product geometry optimization exhausted its bound")
-        if reason := endpoint_gate_reason(
+        if reason := endpoint_gate(
             product_result.cluster, ends, n_water=n_water, endpoint="product"
         ):
             return _terminal(
@@ -551,7 +566,7 @@ def run_path(
         saddle_frequency = cached_frequency(
             path_dir / "saddle-hessian.npz", saddle, settings
         )
-        mode_receipt = coupled_mode_components(saddle, saddle_frequency, ends)
+        mode_receipt = mode_gate(saddle, saddle_frequency, ends)
         atomic_json(path_dir / "coupled-mode.json", mode_receipt)
         if not mode_receipt["accepted"]:
             return _terminal(
@@ -572,7 +587,7 @@ def run_path(
         )
         save_xyz(backward, path_dir / "irc-backward.xyz")
         save_xyz(forward, path_dir / "irc-forward.xyz")
-        if reason := irc_channel_reason(backward, forward, ends, n_water=n_water):
+        if reason := irc_gate(backward, forward, ends, n_water=n_water):
             return _terminal(
                 path_dir, base=base, status="rejected", stage=stage, reason=reason
             )

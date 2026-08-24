@@ -5,7 +5,7 @@
 - priority: P1
 - machine: workstation (GPU campaign)
 - depends: A1e's four-path model-valid rejection
-- claimed-by:
+- claimed-by: hermes-workstation
 
 ## Objective
 
@@ -70,6 +70,15 @@ those four topologies.
 
 ## Progress
 
+- 2026-08-24 16:00 PDT — implementation checkpoint: atomically claimed branch
+  `agents/A1f-acid-neutral-water-attacker-relay`; added the exact four-water
+  `separated-donor-neutral-attacker` R/P builder with A1e atom order, distinct
+  H3O+ donor and neutral H2O attacker, one physical-H relay, spectator water,
+  and unconstrained typed endpoints. Mechanism-v2/gate-v2 reuses A1e's bounded,
+  hash-journaled CI-NEB/saddle/full-IRC driver while refusing v1 checkpoints and
+  requiring all six donor/relay/attack/cleavage mode components. New and A1e/TS
+  regressions are green (**86 passed**); targeted Ruff/format, CLI help, and
+  diff check pass. No production DFT has started.
 - 2026-08-24 — filed from A1e's exact four-path result. The narrower hypothesis
   is not “more waters”: it separates acid donor from neutral nucleophile so the
   attacking oxygen need not be the oxygen that began as H3O+.
