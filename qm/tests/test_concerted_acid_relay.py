@@ -1,4 +1,4 @@
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 import numpy as np
 import pytest
@@ -153,6 +153,50 @@ def test_coupled_mode_gate_rejects_a_water_wag():
 
     assert result["accepted"] is False
     assert "does not couple" in result["reason"]
+
+
+def _same_owner_hydrogen_collision(cluster: Cluster) -> Cluster:
+    hydrogens = [
+        index for index, symbol in enumerate(cluster.symbols) if symbol == "H"
+    ]
+    owners = phase1._acid_mobile_assignments(cluster, tuple(hydrogens))
+    by_owner: dict[int, list[int]] = {}
+    for hydrogen, owner in zip(hydrogens, owners, strict=True):
+        if owner is None:
+            continue
+        by_owner.setdefault(owner, []).append(hydrogen)
+    pair = next(group for group in by_owner.values() if len(group) >= 2)
+    collided = cluster.coords.copy()
+    collided[pair[0]] = collided[pair[1]]
+    return replace(cluster, coords=collided)
+
+
+def test_full_irc_gate_rejects_framework_collision_with_correct_basins():
+    ends = concerted_acid_relay_endpoints(
+        disilicate(), n_water=3, family="bridge-donor-chain"
+    )
+    collided = _same_owner_hydrogen_collision(ends.product)
+    protons = relay.proton_indices(ends, 3)
+
+    assert (
+        phase1.acid_basin_signature(
+            collided,
+            ends.ow_index,
+            protons,
+            solvent_oxygen_indices=ends.solvent_oxygen_indices,
+        )
+        == relay.expected_basin(3, "product")
+    )
+    assert phase1.acid_hydrogen_ownership_reason(
+        collided,
+        tuple(index for index, symbol in enumerate(collided.symbols) if symbol == "H"),
+    ) is None
+    assert relay.minimum_pair_distance(collided) < relay.MIN_PAIR_DISTANCE_A
+
+    reason = relay.irc_channel_reason(ends.reactant, collided, ends, n_water=3)
+
+    assert reason is not None
+    assert "minimum pair distance" in reason
 
 
 def test_full_irc_reuses_one_optimizer_for_both_directions(monkeypatch, tmp_path):

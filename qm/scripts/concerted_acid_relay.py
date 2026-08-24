@@ -304,8 +304,7 @@ def irc_channel_reason(
     *,
     n_water: int,
 ) -> str | None:
-    actual: list[tuple[bool, bool, bool, int, int, int]] = []
-    protons = proton_indices(ends, n_water)
+    matched: list[str] = []
     for endpoint in (backward, forward):
         ownership = phase1.acid_hydrogen_ownership_reason(
             endpoint,
@@ -315,17 +314,23 @@ def irc_channel_reason(
         )
         if ownership:
             return f"IRC endpoint {ownership}"
-        actual.append(
-            phase1.acid_basin_signature(
-                endpoint,
-                ends.ow_index,
-                protons,
-                solvent_oxygen_indices=ends.solvent_oxygen_indices,
+        label = None
+        fallback = None
+        for candidate in ("reactant", "product"):
+            reason = endpoint_gate_reason(
+                endpoint, ends, n_water=n_water, endpoint=candidate
             )
-        )
-    expected = {expected_basin(n_water, "reactant"), expected_basin(n_water, "product")}
-    if set(actual) != expected:
-        return f"full IRC endpoint basins {sorted(actual)} != {sorted(expected)}"
+            if reason is None:
+                label = candidate
+                break
+            if fallback is None or "basin" not in reason:
+                fallback = reason
+        if label is None:
+            return fallback
+        matched.append(label)
+    expected = {"reactant", "product"}
+    if set(matched) != expected:
+        return f"full IRC endpoint basins {sorted(matched)} != {sorted(expected)}"
     return None
 
 
