@@ -65,6 +65,17 @@ along the same elementary path as water attack and Si--Obr weakening/cleavage.
 
 ## Progress
 
+- 2026-08-24 14:28 PDT — **POST-MERGE ACTIVATION CLOSEOUT:** independently
+  verified squash merge `f5a3accf9668f6d3eb96fdff319e9530ebd97414`, the
+  exact four terminal receipts, and all 24 archived evidence files (286,860
+  bytes; every declared size and SHA-256 exact). The customer outcome remains
+  4/4 typed endpoint rejections, zero failed/blocked/running paths, no admitted
+  Al run, and READY narrower card A1f. Fresh merged-tree verification exposed
+  one source gate missed by PR CI: Sourcery's review-fix regression additions
+  left `test_concerted_acid_relay.py` inconsistent with whole-tree Ruff lint and
+  formatting. This follow-up normalizes that test file without changing the
+  scientific result. Fresh post-fix gates: **341 QM tests passed**, whole-tree
+  Ruff check/format, CLI help, and diff check all green.
 - 2026-08-24 13:08 PDT — **DONE / four-path model-valid rejection.** The exact
   mechanism-v1/gate-v1 B3LYP/def2-SVP/DF campaign finished with four terminal
   Si records: **4 rejected / 0 accepted / 0 failed / 0 blocked**, and no
@@ -97,6 +108,15 @@ along the same elementary path as water attack and Si--Obr weakening/cleavage.
 
 ## Result
 
+- Post-merge live acceptance reconfirmed the archived campaign rather than
+  rerunning expensive DFT: evidence manifest SHA-256
+  `3162e39f2f0f263444741b03e0a023b1209bf515a9f8291c330ca9995811e622`,
+  run-manifest SHA-256
+  `dfea131556fddf907ccabfc52945d390695f99d372cfdeac6859a4f2c0549982`,
+  and production-log SHA-256
+  `627914bbb22ee655932508ea974f006a503389198f656b173fe225607a8ca784`
+  all match. The follow-up branch only closes the merged review regression's
+  Ruff format/lint gate; terminal scientific evidence and verdict are unchanged.
 - Added `concerted_acid_relay_endpoints()` and the finite
   `scripts/concerted_acid_relay.py` campaign. The builder preserves A1c atom
   order and exact physical-H ownership; bridge chains shift every relay proton

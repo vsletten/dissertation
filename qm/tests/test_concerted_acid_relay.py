@@ -156,9 +156,7 @@ def test_coupled_mode_gate_rejects_a_water_wag():
 
 
 def _same_owner_hydrogen_collision(cluster: Cluster) -> Cluster:
-    hydrogens = [
-        index for index, symbol in enumerate(cluster.symbols) if symbol == "H"
-    ]
+    hydrogens = [index for index, symbol in enumerate(cluster.symbols) if symbol == "H"]
     owners = phase1._acid_mobile_assignments(cluster, tuple(hydrogens))
     by_owner: dict[int, list[int]] = {}
     for hydrogen, owner in zip(hydrogens, owners, strict=True):
@@ -178,19 +176,21 @@ def test_full_irc_gate_rejects_framework_collision_with_correct_basins():
     collided = _same_owner_hydrogen_collision(ends.product)
     protons = relay.proton_indices(ends, 3)
 
-    assert (
-        phase1.acid_basin_signature(
-            collided,
-            ends.ow_index,
-            protons,
-            solvent_oxygen_indices=ends.solvent_oxygen_indices,
-        )
-        == relay.expected_basin(3, "product")
-    )
-    assert phase1.acid_hydrogen_ownership_reason(
+    assert phase1.acid_basin_signature(
         collided,
-        tuple(index for index, symbol in enumerate(collided.symbols) if symbol == "H"),
-    ) is None
+        ends.ow_index,
+        protons,
+        solvent_oxygen_indices=ends.solvent_oxygen_indices,
+    ) == relay.expected_basin(3, "product")
+    assert (
+        phase1.acid_hydrogen_ownership_reason(
+            collided,
+            tuple(
+                index for index, symbol in enumerate(collided.symbols) if symbol == "H"
+            ),
+        )
+        is None
+    )
     assert relay.minimum_pair_distance(collided) < relay.MIN_PAIR_DISTANCE_A
 
     reason = relay.irc_channel_reason(ends.reactant, collided, ends, n_water=3)
@@ -396,7 +396,8 @@ def test_campaign_is_incomplete_when_required_matched_al_fails_or_is_blocked(
     monkeypatch, tmp_path, al_status
 ):
     def fake_run(run_dir, settings, bounds, *, model, n_water, family):
-        accepted_si = model == "si" and n_water == 3 and family == "compact-cyclic-relay"
+        is_matched_family = family == "compact-cyclic-relay"
+        accepted_si = model == "si" and n_water == 3 and is_matched_family
         if accepted_si:
             status = "accepted"
         elif model == "al":
