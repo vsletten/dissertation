@@ -20,6 +20,14 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+if __name__ == "__main__":
+    from quarry.etiquette import bootstrap_cli
+
+    bootstrap_cli(
+        "task168_intermediate_sweep",
+        default_run_root=Path(__file__).resolve().parent.parent / "runs",
+    )
+
 import numpy as np  # noqa: E402
 
 from quarry.clusters import (  # noqa: E402
@@ -271,6 +279,9 @@ def run_sweep(run_dir: Path, settings: DftSettings, *, max_steps: int) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--threads", type=int, default=16)
+    parser.add_argument("--nice", type=int, default=10)
+    parser.add_argument("--log")
     parser.add_argument("--run-dir", type=Path, default=DEFAULT_RUN_DIR)
     parser.add_argument("--xc", default="b3lyp")
     parser.add_argument("--basis", default="def2-svp")
