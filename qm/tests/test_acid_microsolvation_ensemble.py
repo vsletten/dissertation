@@ -132,6 +132,22 @@ def test_terminal_record_requires_hash_bound_artifacts(tmp_path):
     assert not ensemble.terminal_record_is_reusable(tmp_path, record)
 
 
+def test_strict_xyz_loader_refuses_atom_symbol_or_order_drift(tmp_path):
+    template = ensemble._template("si-acid", 3, "bridge-donor-chain")
+    path = tmp_path / "endpoint.xyz"
+    ensemble.phase1.save_xyz(template, path)
+    loaded = ensemble.load_xyz_strict(path, template)
+    np.testing.assert_allclose(loaded.coords, template.coords, atol=1e-8)
+
+    lines = path.read_text().splitlines()
+    fields = lines[2].split()
+    fields[0] = "Xe"
+    lines[2] = " ".join(fields)
+    path.write_text("\n".join(lines) + "\n")
+    with pytest.raises(ValueError, match="atom-order or symbol mismatch"):
+        ensemble.load_xyz_strict(path, template)
+
+
 def test_accepted_terminal_record_requires_minimum_receipt_and_finite_energy(tmp_path):
     optimized = tmp_path / "optimized.xyz"
     optimized.write_text("geometry")

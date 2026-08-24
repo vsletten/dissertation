@@ -98,6 +98,29 @@ def sha256_path(path: Path) -> str:
     return digest.hexdigest()
 
 
+def load_xyz_strict(path: Path, template: Cluster) -> Cluster:
+    """Load XYZ only when atom count, order, symbols, and coordinates are exact."""
+    try:
+        lines = path.read_text().splitlines()
+        n_atoms = int(lines[0])
+        atom_lines = lines[2 : 2 + n_atoms]
+        fields = [line.split() for line in atom_lines]
+        symbols = [field[0] for field in fields]
+        coords = np.asarray(
+            [[float(value) for value in field[1:4]] for field in fields],
+            dtype=float,
+        )
+    except (OSError, UnicodeDecodeError, ValueError, IndexError) as exc:
+        raise ValueError(f"XYZ artifact is unreadable: {path}: {exc}") from exc
+    if n_atoms != len(template.symbols) or len(fields) != n_atoms:
+        raise ValueError(f"XYZ atom-count mismatch: {path}")
+    if any(len(field) < 4 for field in fields) or symbols != template.symbols:
+        raise ValueError(f"XYZ atom-order or symbol mismatch: {path}")
+    if coords.shape != template.coords.shape or not np.all(np.isfinite(coords)):
+        raise ValueError(f"XYZ coordinates are malformed or non-finite: {path}")
+    return phase1.load_xyz(path, template)
+
+
 def terminal_record_is_reusable(root: Path, record: object) -> bool:
     if not isinstance(record, dict) or record.get("status") not in TERMINAL_STATUSES:
         return False
@@ -220,7 +243,7 @@ def accepted_record_receipt_is_valid(
     ):
         return False
     try:
-        cluster = phase1.load_xyz(seed_dir / "optimized.xyz", template)
+        cluster = load_xyz_strict(seed_dir / "optimized.xyz", template)
     except (OSError, ValueError, IndexError):
         return False
     receipt = phase1.load_reactant_minimum_receipt(
@@ -389,7 +412,7 @@ def validate_refinement_source(
     reaction, water_token, family = target_key.split(":", maxsplit=2)
     n_water = int(water_token.removesuffix("w"))
     target_dir = _seed_dir(source_root, reaction, n_water, family)
-    endpoint = phase1.load_xyz(
+    endpoint = load_xyz_strict(
         target_dir / "optimized.xyz", _template(reaction, n_water, family)
     )
     if not np.all(np.isfinite(endpoint.coords)):
@@ -625,7 +648,7 @@ def screen_seed(
             optimized = production_result.cluster
             optimized_path = seed_dir / "optimized.xyz"
             phase1.save_xyz(optimized, optimized_path)
-            optimized = phase1.load_xyz(optimized_path, preopt)
+            optimized = load_xyz_strict(optimized_path, preopt)
             if not production_converged:
                 raise RuntimeError(
                     f"geometry optimization did not converge within {max_steps} steps"
@@ -692,7 +715,7 @@ def _load_candidate(
 ) -> BasinCandidate:
     template = _template(reaction, n_water, family)
     seed_dir = _seed_dir(run_dir, reaction, n_water, family)
-    cluster = phase1.load_xyz(seed_dir / "optimized.xyz", template)
+    cluster = load_xyz_strict(seed_dir / "optimized.xyz", template)
     if not accepted_record_receipt_is_valid(
         seed_dir,
         record,
@@ -941,7 +964,7 @@ def run_failed_endpoint_refinement(
     source_endpoint_sha256 = source.target_record["artifacts"]["optimized.xyz"]
     if sha256_path(input_path) != source_endpoint_sha256:
         raise RuntimeError("copied refinement input is not byte-identical to source")
-    input_cluster = phase1.load_xyz(input_path, _template(reaction, n_water, family))
+    input_cluster = load_xyz_strict(input_path, _template(reaction, n_water, family))
 
     resolution: dict[str, Any] = {
         "schema_version": REFINEMENT_SCHEMA_VERSION,
@@ -984,7 +1007,7 @@ def run_failed_endpoint_refinement(
         production_converged = result.converged
         output_path = attempt_root / "optimized.xyz"
         phase1.save_xyz(result.cluster, output_path)
-        optimized = phase1.load_xyz(output_path, input_cluster)
+        optimized = load_xyz_strict(output_path, input_cluster)
         if result.converged:
             try:
                 record = evaluate_optimized_endpoint(
