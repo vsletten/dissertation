@@ -7,6 +7,8 @@ imaginary-mode verification, quick-IRC basin check — without touching
 anything silicate-sized.
 """
 
+import json
+
 import numpy as np
 import pytest
 
@@ -359,6 +361,83 @@ class TestNebConvergence:
                 0.1,
                 5,
             )
+
+    def test_failed_climb_preserves_pre_relaxed_band_for_resume(
+        self, monkeypatch, tmp_path
+    ):
+        import ase.mep
+        import ase.optimize
+
+        stage_results = iter([True, False])
+        optimizer_calls = []
+
+        class FakeNeb:
+            def __init__(self, images, **kwargs):
+                self.images = images
+                self.climb = kwargs["climb"]
+
+            def interpolate(self, *, method):
+                assert method == "idpp"
+
+        class FakeMdMin:
+            def __init__(self, neb, **kwargs):
+                self.neb = neb
+                self.nsteps = 0
+                optimizer_calls.append((neb.climb, kwargs))
+
+            def run(self, *, fmax, steps):
+                self.nsteps = 1
+                return next(stage_results)
+
+        monkeypatch.setattr(ase.mep, "NEB", FakeNeb)
+        monkeypatch.setattr(ase.optimize, "MDMin", FakeMdMin)
+        reactant, product = self._endpoints()
+        checkpoint_root = tmp_path / "attempt"
+
+        with pytest.raises(RuntimeError, match="climbing-image"):
+            from quarry.ts import neb_ts_guess
+
+            neb_ts_guess(
+                reactant,
+                product,
+                CHEAP,
+                n_images=3,
+                pre_relax_steps=4,
+                max_steps=5,
+                checkpoint_dir=checkpoint_root,
+            )
+
+        manifests = {
+            manifest["stage"]: (path, manifest)
+            for path in checkpoint_root.iterdir()
+            if path.is_dir()
+            for manifest in [json.loads((path / "manifest.json").read_text())]
+        }
+        pre_path, pre_manifest = manifests["pre-relax-final"]
+        assert pre_manifest["converged"] is True
+        assert pre_manifest["optimizer"] == "mdmin"
+        assert len(pre_manifest["images"]) == 3
+        assert all(
+            (pre_path / filename).is_file() for filename in pre_manifest["images"]
+        )
+        assert manifests["climb-final"][1]["converged"] is False
+        latest = json.loads((checkpoint_root / "latest.json").read_text())
+        assert latest["checkpoint"] == manifests["climb-final"][0].name
+
+        stage_results = iter([False])
+        optimizer_calls.clear()
+        with pytest.raises(RuntimeError, match="climbing-image"):
+            neb_ts_guess(
+                reactant,
+                product,
+                CHEAP,
+                n_images=3,
+                pre_relax_steps=4,
+                max_steps=5,
+                checkpoint_dir=tmp_path / "resumed",
+                resume_from=pre_path,
+            )
+        assert optimizer_calls == [(True, {"dt": 0.05, "maxstep": 0.05})]
 
     def test_unconverged_ode_climb_is_rejected(self, monkeypatch):
         import ase.mep
