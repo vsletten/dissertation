@@ -180,6 +180,47 @@ def test_acid_quick_irc_requires_full_pre_equilibrium_and_product_speciation(
     )
 
 
+@pytest.mark.parametrize("n_water", [3, 4, 5, 6])
+def test_microsolvated_acid_basin_counts_all_mobile_solvent_protons(n_water):
+    dimer = disilicate()
+    reactant = protonated_bridge_complex(dimer, n_water=n_water)
+    ow_index = len(dimer.symbols)
+    proton_indices, solvent_oxygen_indices = phase1.acid_mobile_indices(
+        ow_index, n_water
+    )
+
+    expected = phase1.acid_reactant_basin(proton_indices)
+    assert expected == (False, True, True, 1, 2 * n_water, 0)
+    assert (
+        phase1.acid_basin_signature(
+            reactant,
+            ow_index,
+            proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
+        )
+        == expected
+    )
+    assert (
+        phase1.protonated_bridge_reason(
+            reactant,
+            ow_index,
+            proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
+        )
+        is None
+    )
+
+
+def test_microsolvation_run_slug_is_checkpoint_isolated():
+    assert phase1.reaction_run_slug("si-acid", "b3lyp", "def2-svp", "flank") == (
+        "si-acid-preprotonated-v2-b3lyp-def2-svp-flank"
+    )
+    assert (
+        phase1.reaction_run_slug("si-acid", "b3lyp", "def2-svp", "flank", n_water=4)
+        == "si-acid-microsolvated-4w-v1-b3lyp-def2-svp-flank"
+    )
+
+
 @pytest.mark.parametrize("dimer_factory", [disilicate, aluminosilicate_dimer])
 def test_acid_speciation_guards_reject_lost_proton_bridge_or_water(dimer_factory):
     reactant, product, ow_index, proton_indices = acid_geometries(dimer_factory)

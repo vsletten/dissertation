@@ -147,6 +147,41 @@ def hydronium() -> Cluster:
     )
 
 
+ACID_MICROSOLVATION_WATER_COUNTS = frozenset({1, 3, 4, 5, 6})
+
+
+def _validate_acid_water_count(n_water: int) -> None:
+    if n_water not in ACID_MICROSOLVATION_WATER_COUNTS:
+        allowed = ", ".join(
+            str(value) for value in sorted(ACID_MICROSOLVATION_WATER_COUNTS)
+        )
+        raise ValueError(f"n_water must be one of {allowed}")
+
+
+def hydronium_hydrate(n_water: int) -> Cluster:
+    """H3O+ · (n-1)H2O fragment used by matched acid calculations.
+
+    ``n_water=1`` preserves the historical one-water model. Production
+    microsolvation uses 3--6 total explicit water oxygens. The extra waters
+    form a deterministic first shell around hydronium; geometry optimization,
+    not this seed, establishes the stationary point.
+    """
+    _validate_acid_water_count(n_water)
+    base = hydronium()
+    symbols = list(base.symbols)
+    coords = list(base.coords)
+    for direction in _shell_directions(n_water - 1):
+        symbols += ["O", "H", "H"]
+        coords += _water_at(direction, 2.75)
+    return Cluster(
+        name=f"hydronium-{n_water}w",
+        symbols=symbols,
+        coords=np.array(coords),
+        charge=1,
+        note=f"H3O+ with {n_water - 1} first-shell waters",
+    )
+
+
 def hydroxide() -> Cluster:
     """OH- — the base-pathway attacking species."""
     return Cluster(
@@ -358,15 +393,18 @@ def protonated_bridge_complex(
     *,
     approach_a: float = 3.2,
     mode: str = "flank",
+    n_water: int = 1,
 ) -> Cluster:
-    """Pre-equilibrated acid complex: protonated bridge + attacking water.
+    """Pre-equilibrated acid complex with one or 3--6 explicit waters.
 
     Acid hydrolysis is not neutral hydrolysis with hydronium used as the
-    nucleophile.  H3O+ first transfers one proton to the bridging oxygen; the
-    water left behind then attacks the weakened Si-O(bridge) bond.  Preserve the
-    hydronium atom order (attacker O followed by three H atoms) so the Phase-1
-    driver can track both the water and transferred proton without an index map.
+    nucleophile. H3O+ first transfers one proton to the bridging oxygen; the
+    water left behind then attacks the weakened Si-O(bridge) bond. Preserve the
+    hydronium atom order (attacker O followed by three H atoms), then append
+    each additional solvent water as O/H/H so the Phase-1 driver can derive a
+    stable mobile-proton/solvent index map.
     """
+    _validate_acid_water_count(n_water)
     complex_ = hydrolysis_complex(
         dimer,
         hydronium(),
@@ -391,9 +429,42 @@ def protonated_bridge_complex(
         coords[water_h] = coords[ow_index] + R_O_H * _unit(
             coords[water_h] - coords[ow_index]
         )
+
+    symbols = list(complex_.symbols)
+    if n_water > 1:
+        # Put the transferred proton into a deterministic solvent-facing
+        # orientation, then seed a compact network above and below the reactive
+        # plane. The first added water accepts the Obr-H hydrogen bond; the
+        # others solvate the residual attacker. Optimization establishes the
+        # actual microsolvated minimum.
+        attacker_vector = coords[ow_index] - coords[0]
+        normal_raw = np.cross(bridge_to_si, attacker_vector)
+        if np.linalg.norm(normal_raw) < 1.0e-8:
+            reference = np.array([0.0, 0.0, 1.0])
+            if abs(np.dot(reference, bridge_to_si)) > 0.9:
+                reference = np.array([0.0, 1.0, 0.0])
+            normal_raw = np.cross(bridge_to_si, reference)
+        normal = _unit(normal_raw)
+        coords[bridge_proton] = coords[0] + R_O_H * normal
+        midpoint = 0.5 * (coords[0] + coords[ow_index])
+        outward = _unit(attacker_vector)
+        in_plane = _unit(np.cross(normal, outward))
+        placements = [
+            (coords[0], normal, 2.75),
+            (coords[ow_index], normal, 2.75),
+            (coords[ow_index], -normal, 2.75),
+            (coords[0], -normal, 2.75),
+            (midpoint, in_plane + 0.75 * normal, 3.10),
+        ]
+        expanded = list(coords)
+        for origin, direction, radius in placements[: n_water - 1]:
+            symbols += ["O", "H", "H"]
+            expanded += [origin + point for point in _water_at(direction, radius)]
+        coords = np.array(expanded)
+
     return Cluster(
-        name=f"{dimer.name}+protonated-bridge+water",
-        symbols=list(complex_.symbols),
+        name=f"{dimer.name}+protonated-bridge+{n_water}water",
+        symbols=symbols,
         coords=coords,
         charge=complex_.charge,
         spin=complex_.spin,
@@ -401,7 +472,7 @@ def protonated_bridge_complex(
         site_family=complex_.site_family,
         note=(
             "H3O+ pre-equilibrated to a protonated bridging oxygen; "
-            "the residual H2O is the attacker"
+            f"the residual H2O is the attacker in {n_water} explicit waters"
         ),
     )
 

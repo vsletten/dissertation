@@ -10,6 +10,7 @@ from quarry.clusters import (
     aluminosilicate_dimer,
     disilicate,
     hydronium,
+    hydronium_hydrate,
     protonated_bridge_complex,
     silicic_acid,
     silicic_acid_hydrate,
@@ -91,6 +92,46 @@ class TestBasics:
             for index in (ow_index + 2, ow_index + 3)
         )
         assert _min_interatomic(complex_) > 0.85
+
+    @pytest.mark.parametrize("n_water", [3, 4, 5, 6])
+    @pytest.mark.parametrize(
+        ("dimer_factory", "charge", "family"),
+        [
+            (disilicate, 1, SiteFamily.SI_O_SI),
+            (aluminosilicate_dimer, 0, SiteFamily.SI_O_AL2),
+        ],
+    )
+    def test_microsolvated_protonated_bridge_has_sane_deterministic_shell(
+        self, n_water, dimer_factory, charge, family
+    ):
+        dimer = dimer_factory()
+        complex_ = protonated_bridge_complex(dimer, n_water=n_water)
+        repeated = protonated_bridge_complex(dimer, n_water=n_water)
+        ow_index = len(dimer.symbols)
+
+        assert len(complex_.symbols) == len(dimer.symbols) + 4 + 3 * (n_water - 1)
+        assert complex_.charge == charge
+        assert complex_.site_family is family
+        assert complex_.symbols[ow_index : ow_index + 4] == ["O", "H", "H", "H"]
+        assert np.array_equal(complex_.coords, repeated.coords)
+        assert _min_interatomic(complex_) > 0.85
+        assert f"{n_water} explicit waters" in complex_.note
+
+    @pytest.mark.parametrize("n_water", [3, 4, 5, 6])
+    def test_hydronium_hydrate_matches_complex_fragment_stoichiometry(self, n_water):
+        reagent = hydronium_hydrate(n_water)
+
+        assert len(reagent.symbols) == 4 + 3 * (n_water - 1)
+        assert reagent.formula == f"H{2 * n_water + 1}O{n_water}"
+        assert reagent.charge == 1
+        assert _min_interatomic(reagent) > 0.85
+
+    @pytest.mark.parametrize("n_water", [0, 2, 7])
+    def test_microsolvation_rejects_unsupported_shell_sizes(self, n_water):
+        with pytest.raises(ValueError, match="n_water"):
+            hydronium_hydrate(n_water)
+        with pytest.raises(ValueError, match="n_water"):
+            protonated_bridge_complex(disilicate(), n_water=n_water)
 
     def test_no_atom_collisions_in_any_benchmark(self):
         for factory in BENCHMARKS.values():
