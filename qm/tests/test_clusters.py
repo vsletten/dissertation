@@ -4,9 +4,11 @@ import numpy as np
 import pytest
 
 from quarry.clusters import (
+    ACID_MICROSOLVATION_FAMILIES,
     BENCHMARKS,
     Cluster,
     SiteFamily,
+    acid_microsolvation_hbond_edges,
     aluminosilicate_dimer,
     disilicate,
     hydronium,
@@ -116,6 +118,91 @@ class TestBasics:
         assert np.array_equal(complex_.coords, repeated.coords)
         assert _min_interatomic(complex_) > 0.85
         assert f"{n_water} explicit waters" in complex_.note
+
+    @pytest.mark.parametrize("n_water", [3, 4, 5, 6])
+    @pytest.mark.parametrize("family", ACID_MICROSOLVATION_FAMILIES)
+    @pytest.mark.parametrize("dimer_factory", [disilicate, aluminosilicate_dimer])
+    def test_acid_conformer_families_preserve_atom_contract_without_collisions(
+        self, n_water, family, dimer_factory
+    ):
+        dimer = dimer_factory()
+        complex_ = protonated_bridge_complex(
+            dimer, n_water=n_water, conformer_family=family
+        )
+        repeated = protonated_bridge_complex(
+            dimer, n_water=n_water, conformer_family=family
+        )
+        ow_index = len(dimer.symbols)
+
+        assert complex_.symbols == repeated.symbols
+        assert np.array_equal(complex_.coords, repeated.coords)
+        assert complex_.symbols[ow_index : ow_index + 4] == ["O", "H", "H", "H"]
+        assert all(
+            complex_.symbols[ow_index + 4 + 3 * i : ow_index + 7 + 3 * i]
+            == ["O", "H", "H"]
+            for i in range(n_water - 1)
+        )
+        assert _min_interatomic(complex_) > 0.85
+        assert family in complex_.name
+        assert family in complex_.note
+
+        edges = acid_microsolvation_hbond_edges(ow_index, n_water, family)
+        nodes = {0, ow_index, *(ow_index + 4 + 3 * i for i in range(n_water - 1))}
+        adjacency = {node: set() for node in nodes}
+        for donor, acceptor in edges:
+            adjacency[donor].add(acceptor)
+            adjacency[acceptor].add(donor)
+            donor_hydrogens = [
+                index
+                for index, symbol in enumerate(complex_.symbols)
+                if symbol == "H"
+                and np.linalg.norm(complex_.coords[index] - complex_.coords[donor])
+                < 1.25
+            ]
+            assert donor_hydrogens
+            assert (
+                min(
+                    np.linalg.norm(complex_.coords[index] - complex_.coords[acceptor])
+                    for index in donor_hydrogens
+                )
+                < 2.45
+            )
+            assert (
+                np.linalg.norm(complex_.coords[donor] - complex_.coords[acceptor])
+                < 3.40
+            )
+        visited = {next(iter(nodes))}
+        frontier = list(visited)
+        while frontier:
+            frontier.extend(adjacency[frontier.pop()] - visited)
+            visited.update(frontier)
+        assert visited == nodes
+
+    @pytest.mark.parametrize("n_water", [3, 4, 5, 6])
+    def test_acid_conformer_families_are_distinct_at_each_water_count(self, n_water):
+        dimer = disilicate()
+        ow_index = len(dimer.symbols)
+        extra_oxygen_indices = [ow_index + 4 + 3 * i for i in range(n_water - 1)]
+        solvent_shapes = {
+            family: protonated_bridge_complex(
+                dimer, n_water=n_water, conformer_family=family
+            ).coords[extra_oxygen_indices]
+            for family in ACID_MICROSOLVATION_FAMILIES
+        }
+
+        for index, family in enumerate(ACID_MICROSOLVATION_FAMILIES):
+            for other in ACID_MICROSOLVATION_FAMILIES[index + 1 :]:
+                assert not np.allclose(solvent_shapes[family], solvent_shapes[other])
+
+    def test_acid_conformer_family_validation(self):
+        with pytest.raises(ValueError, match="conformer_family"):
+            protonated_bridge_complex(
+                disilicate(), n_water=4, conformer_family="random-shell"
+            )
+        with pytest.raises(ValueError, match="n_water=1"):
+            protonated_bridge_complex(
+                disilicate(), n_water=1, conformer_family="bridge-donor-chain"
+            )
 
     @pytest.mark.parametrize("n_water", [3, 4, 5, 6])
     def test_hydronium_hydrate_matches_complex_fragment_stoichiometry(self, n_water):

@@ -4,6 +4,14 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-24 — hermes-workstation — A1c's finite 16-seed Si conformer
+  campaign is honestly BLOCKED, not falsely NO-GO: 15 B3LYP/def2-SVP/DF
+  endpoints converged and failed exact protonated-bridge occupancy, while the
+  three-water bridge-donor chain exhausted its 160-step bound. The hardened
+  ensemble driver, hash-bound external archive, and executable A1d one-seed
+  convergence closeout are in `A1c-acid-microsolvation-conformers`; no Al
+  screen, barrier, or acid ordering was emitted.
+
 - 2026-08-23 — hermes-workstation — A1b matched 3--6-water Si-acid
   deterministic-shell survey is honestly BLOCKED: all four converged
   B3LYP/def2-SVP/DF endpoints deprotonate Obr before any Hessian/TS work.

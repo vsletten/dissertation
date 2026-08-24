@@ -148,6 +148,12 @@ def hydronium() -> Cluster:
 
 
 ACID_MICROSOLVATION_WATER_COUNTS = frozenset({1, 3, 4, 5, 6})
+ACID_MICROSOLVATION_FAMILIES = (
+    "bridge-donor-chain",
+    "attacker-centered-ring",
+    "split-bridge-attacker",
+    "compact-cyclic-relay",
+)
 
 
 def _validate_acid_water_count(n_water: int) -> None:
@@ -226,15 +232,226 @@ def _water_at(direction: np.ndarray, radius: float) -> list[np.ndarray]:
     outward (dipole bisector along the shell normal) so shell waters never
     reach back toward the core."""
     d = _unit(direction)
+    return _water_centered(radius * d, d)
+
+
+def _water_centered(oxygen: np.ndarray, direction: np.ndarray) -> list[np.ndarray]:
+    """Return O/H/H coordinates with the HOH bisector along ``direction``."""
+    d = _unit(direction)
     ref = np.array([1.0, 0.0, 0.0])
     if abs(np.dot(ref, d)) > 0.9:
         ref = np.array([0.0, 1.0, 0.0])
     e1 = _unit(np.cross(d, ref))
     half = math.radians(104.5 / 2.0)
-    o = radius * d
+    o = np.asarray(oxygen, dtype=float)
     h1 = o + R_O_H * (math.cos(half) * d + math.sin(half) * e1)
     h2 = o + R_O_H * (math.cos(half) * d - math.sin(half) * e1)
     return [o, h1, h2]
+
+
+def _water_donating_to(
+    oxygen: np.ndarray,
+    acceptor: np.ndarray,
+    plane_hint: np.ndarray,
+) -> list[np.ndarray]:
+    """Return O/H/H with one O-H bond aimed at an H-bond acceptor."""
+    donor = np.asarray(oxygen, dtype=float)
+    direction = _unit(np.asarray(acceptor, dtype=float) - donor)
+    perpendicular = np.asarray(plane_hint, dtype=float)
+    perpendicular -= np.dot(perpendicular, direction) * direction
+    if np.linalg.norm(perpendicular) < 1.0e-8:
+        reference = np.array([1.0, 0.0, 0.0])
+        if abs(np.dot(reference, direction)) > 0.9:
+            reference = np.array([0.0, 1.0, 0.0])
+        perpendicular = np.cross(direction, reference)
+    perpendicular = _unit(perpendicular)
+    angle = math.radians(104.5)
+    h1 = donor + R_O_H * direction
+    h2 = donor + R_O_H * (math.cos(angle) * direction + math.sin(angle) * perpendicular)
+    return [donor, h1, h2]
+
+
+def _rotate_vector(vector: np.ndarray, axis: np.ndarray, angle: float) -> np.ndarray:
+    unit_axis = _unit(axis)
+    return (
+        vector * math.cos(angle)
+        + np.cross(unit_axis, vector) * math.sin(angle)
+        + unit_axis * np.dot(unit_axis, vector) * (1.0 - math.cos(angle))
+    )
+
+
+def _relay_arc_oxygens(
+    start: np.ndarray,
+    end: np.ndarray,
+    count: int,
+    *,
+    segment_a: float,
+    plane: np.ndarray,
+) -> list[np.ndarray]:
+    """Internal points on a major circular arc with fixed adjacent spacing."""
+    chord = np.asarray(end, dtype=float) - np.asarray(start, dtype=float)
+    chord_length = float(np.linalg.norm(chord))
+    segments = count + 1
+    if segment_a <= chord_length / segments:
+        raise ValueError("relay segment is too short for the endpoint chord")
+
+    def spacing(theta: float) -> float:
+        return chord_length * math.sin(theta / (2.0 * segments)) / math.sin(theta / 2.0)
+
+    low, high = 1.0e-8, 2.0 * math.pi - 1.0e-8
+    for _ in range(100):
+        midpoint_angle = 0.5 * (low + high)
+        if spacing(midpoint_angle) < segment_a:
+            low = midpoint_angle
+        else:
+            high = midpoint_angle
+    theta = 0.5 * (low + high)
+    radius = chord_length / (2.0 * math.sin(theta / 2.0))
+    edge = chord / chord_length
+    radial = np.asarray(plane, dtype=float)
+    radial -= np.dot(radial, edge) * edge
+    radial = _unit(radial)
+    chord_midpoint = 0.5 * (
+        np.asarray(start, dtype=float) + np.asarray(end, dtype=float)
+    )
+    center = chord_midpoint - radius * math.cos(theta / 2.0) * radial
+    return [
+        center
+        + radius
+        * (
+            math.cos(-theta / 2.0 + index * theta / segments) * radial
+            + math.sin(-theta / 2.0 + index * theta / segments) * edge
+        )
+        for index in range(1, segments)
+    ]
+
+
+def _attacker_ring_oxygens(
+    bridge: np.ndarray,
+    attacker: np.ndarray,
+    count: int,
+    *,
+    normal: np.ndarray,
+    in_plane: np.ndarray,
+) -> list[np.ndarray]:
+    """Complete a regular solvent ring whose first water also accepts Obr-H."""
+    total_waters = count + 1
+    side = 2.85
+    chord = np.asarray(attacker, dtype=float) - np.asarray(bridge, dtype=float)
+    chord_length = float(np.linalg.norm(chord))
+    if chord_length >= 2.0 * side:
+        raise ValueError("bridge and attacker are too far apart for the relay ring")
+    ring_radial = _unit(normal + in_plane)
+    first = (
+        0.5 * (np.asarray(bridge, dtype=float) + np.asarray(attacker, dtype=float))
+        + math.sqrt(side**2 - (0.5 * chord_length) ** 2) * ring_radial
+    )
+    edge = first - attacker
+    edge_midpoint = 0.5 * (first + attacker)
+    perpendicular = np.asarray(in_plane, dtype=float)
+    perpendicular -= np.dot(perpendicular, edge) / np.dot(edge, edge) * edge
+    perpendicular = _unit(perpendicular)
+    apothem = side / (2.0 * math.tan(math.pi / total_waters))
+    center = edge_midpoint + apothem * perpendicular
+    first_vector = np.asarray(attacker, dtype=float) - center
+    second_vector = first - center
+    axis = _unit(np.cross(first_vector, second_vector))
+    step = 2.0 * math.pi / total_waters
+    vertices = [
+        center + _rotate_vector(first_vector, axis, index * step)
+        for index in range(total_waters)
+    ]
+    if not np.allclose(vertices[1], first, atol=1.0e-8):
+        raise RuntimeError("regular relay ring construction lost its first edge")
+    return vertices[1:]
+
+
+def acid_microsolvation_hbond_edges(
+    ow_index: int,
+    n_water: int,
+    family: str,
+) -> tuple[tuple[int, int], ...]:
+    """Directed donor-O -> acceptor-O graph encoded by one seed family."""
+    if family not in ACID_MICROSOLVATION_FAMILIES:
+        allowed = ", ".join(ACID_MICROSOLVATION_FAMILIES)
+        raise ValueError(f"conformer_family must be one of {allowed}")
+    extra = tuple(ow_index + 4 + 3 * index for index in range(n_water - 1))
+    chain = tuple(zip(extra, extra[1:], strict=False))
+    if family == "attacker-centered-ring":
+        return ((0, extra[0]), (ow_index, extra[0]), *chain, (extra[-1], ow_index))
+    if family == "split-bridge-attacker":
+        return ((0, extra[0]), *chain, (ow_index, extra[-1]))
+    if family == "compact-cyclic-relay":
+        return ((0, extra[0]), *chain, (extra[-1], ow_index), (ow_index, 0))
+    return ((0, extra[0]), *chain, (extra[-1], ow_index))
+
+
+def _acid_conformer_waters(
+    coords: np.ndarray,
+    *,
+    ow_index: int,
+    n_water: int,
+    family: str,
+) -> tuple[list[np.ndarray], np.ndarray, np.ndarray | None]:
+    """Return O/H/H blocks plus bridge/attacker H-bond targets."""
+    if family not in ACID_MICROSOLVATION_FAMILIES:
+        allowed = ", ".join(ACID_MICROSOLVATION_FAMILIES)
+        raise ValueError(f"conformer_family must be one of {allowed}")
+    count = n_water - 1
+    bridge = coords[0]
+    attacker = coords[ow_index]
+    bridge_to_si = _unit(coords[1] - bridge)
+    outward = _unit(attacker - bridge)
+    normal_raw = np.cross(bridge_to_si, outward)
+    if np.linalg.norm(normal_raw) < 1.0e-8:
+        reference = np.array([0.0, 0.0, 1.0])
+        if abs(np.dot(reference, bridge_to_si)) > 0.9:
+            reference = np.array([0.0, 1.0, 0.0])
+        normal_raw = np.cross(bridge_to_si, reference)
+    normal = _unit(normal_raw)
+    in_plane = _unit(np.cross(normal, outward))
+
+    if family == "attacker-centered-ring":
+        oxygens = _attacker_ring_oxygens(
+            bridge,
+            attacker,
+            count,
+            normal=normal,
+            in_plane=in_plane,
+        )
+        attacker_target: np.ndarray | None = oxygens[0]
+        bridge_target = oxygens[0] + in_plane
+        targets = [*oxygens[1:], attacker]
+    else:
+        bridge_target = None
+        plane = normal
+        segment = 2.75
+        if family == "split-bridge-attacker":
+            plane = normal + 0.40 * in_plane
+        elif family == "compact-cyclic-relay":
+            plane = normal - 2.0 * in_plane
+            segment = 2.60
+        oxygens = _relay_arc_oxygens(
+            bridge,
+            attacker,
+            count,
+            segment_a=segment,
+            plane=plane,
+        )
+        bridge_target = oxygens[0]
+        if family == "split-bridge-attacker":
+            attacker_target = oxygens[-1]
+            targets = [*oxygens[1:], oxygens[-1] + normal]
+        else:
+            attacker_target = bridge if family == "compact-cyclic-relay" else None
+            targets = [*oxygens[1:], attacker]
+
+    waters = [
+        point
+        for oxygen, target in zip(oxygens, targets, strict=True)
+        for point in _water_donating_to(oxygen, target, normal)
+    ]
+    return waters, bridge_target, attacker_target
 
 
 def silicic_acid_hydrate(n_water: int) -> Cluster:
@@ -394,6 +611,7 @@ def protonated_bridge_complex(
     approach_a: float = 3.2,
     mode: str = "flank",
     n_water: int = 1,
+    conformer_family: str | None = None,
 ) -> Cluster:
     """Pre-equilibrated acid complex with one or 3--6 explicit waters.
 
@@ -405,6 +623,14 @@ def protonated_bridge_complex(
     stable mobile-proton/solvent index map.
     """
     _validate_acid_water_count(n_water)
+    if n_water == 1 and conformer_family is not None:
+        raise ValueError("conformer_family is not valid for n_water=1")
+    if (
+        conformer_family is not None
+        and conformer_family not in ACID_MICROSOLVATION_FAMILIES
+    ):
+        allowed = ", ".join(ACID_MICROSOLVATION_FAMILIES)
+        raise ValueError(f"conformer_family must be one of {allowed}")
     complex_ = hydrolysis_complex(
         dimer,
         hydronium(),
@@ -449,21 +675,42 @@ def protonated_bridge_complex(
         midpoint = 0.5 * (coords[0] + coords[ow_index])
         outward = _unit(attacker_vector)
         in_plane = _unit(np.cross(normal, outward))
-        placements = [
-            (coords[0], normal, 2.75),
-            (coords[ow_index], normal, 2.75),
-            (coords[ow_index], -normal, 2.75),
-            (coords[0], -normal, 2.75),
-            (midpoint, in_plane + 0.75 * normal, 3.10),
-        ]
         expanded = list(coords)
-        for origin, direction, radius in placements[: n_water - 1]:
-            symbols += ["O", "H", "H"]
-            expanded += [origin + point for point in _water_at(direction, radius)]
+        if conformer_family is None:
+            placements = [
+                (coords[0], normal, 2.75),
+                (coords[ow_index], normal, 2.75),
+                (coords[ow_index], -normal, 2.75),
+                (coords[0], -normal, 2.75),
+                (midpoint, in_plane + 0.75 * normal, 3.10),
+            ]
+            for origin, direction, radius in placements[: n_water - 1]:
+                symbols += ["O", "H", "H"]
+                expanded += [origin + point for point in _water_at(direction, radius)]
+        else:
+            symbols += ["O", "H", "H"] * (n_water - 1)
+            waters, bridge_target, attacker_target = _acid_conformer_waters(
+                coords,
+                ow_index=ow_index,
+                n_water=n_water,
+                family=conformer_family,
+            )
+            coords[bridge_proton] = coords[0] + R_O_H * _unit(bridge_target - coords[0])
+            if attacker_target is not None:
+                attacker_water = _water_donating_to(
+                    coords[ow_index], attacker_target, normal
+                )
+                coords[ow_index + 2] = attacker_water[1]
+                coords[ow_index + 3] = attacker_water[2]
+            expanded = [*coords, *waters]
         coords = np.array(expanded)
 
+    family_suffix = f"+{conformer_family}" if conformer_family else ""
+    family_note = (
+        f"; microsolvation family {conformer_family}" if conformer_family else ""
+    )
     return Cluster(
-        name=f"{dimer.name}+protonated-bridge+{n_water}water",
+        name=f"{dimer.name}+protonated-bridge+{n_water}water{family_suffix}",
         symbols=symbols,
         coords=coords,
         charge=complex_.charge,
@@ -473,6 +720,7 @@ def protonated_bridge_complex(
         note=(
             "H3O+ pre-equilibrated to a protonated bridging oxygen; "
             f"the residual H2O is the attacker in {n_water} explicit waters"
+            f"{family_note}"
         ),
     )
 

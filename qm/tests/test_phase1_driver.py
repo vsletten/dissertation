@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from quarry.clusters import (
+    ACID_MICROSOLVATION_FAMILIES,
     Cluster,
     aluminosilicate_dimer,
     disilicate,
@@ -211,6 +212,53 @@ def test_microsolvated_acid_basin_counts_all_mobile_solvent_protons(n_water):
     )
 
 
+@pytest.mark.parametrize("n_water", [3, 4, 5, 6])
+@pytest.mark.parametrize("family", ACID_MICROSOLVATION_FAMILIES)
+def test_acid_conformer_families_preserve_exact_physical_h_ownership(n_water, family):
+    dimer = disilicate()
+    reactant = protonated_bridge_complex(
+        dimer, n_water=n_water, conformer_family=family
+    )
+    ow_index = len(dimer.symbols)
+    proton_indices, solvent_oxygen_indices = phase1.acid_mobile_indices(
+        ow_index, n_water
+    )
+
+    assert (
+        phase1.protonated_bridge_reason(
+            reactant,
+            ow_index,
+            proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
+        )
+        is None
+    )
+
+
+def test_acid_hydrogen_ownership_rejects_unassigned_and_ambiguous_protons():
+    dimer = disilicate()
+    reactant = protonated_bridge_complex(
+        dimer, n_water=4, conformer_family="bridge-donor-chain"
+    )
+    ow_index = len(dimer.symbols)
+    bridge_proton = ow_index + 1
+
+    unassigned = replace(reactant, coords=reactant.coords.copy())
+    unassigned.coords[bridge_proton] = np.array([100.0, 100.0, 100.0])
+    reason = phase1.acid_hydrogen_ownership_reason(unassigned, (bridge_proton,))
+    assert reason is not None and "unassigned" in reason
+
+    ambiguous = replace(reactant, coords=reactant.coords.copy())
+    first_shell_oxygen = ow_index + 4
+    direction = ambiguous.coords[first_shell_oxygen] - ambiguous.coords[bridge_proton]
+    direction /= np.linalg.norm(direction)
+    ambiguous.coords[first_shell_oxygen] = (
+        ambiguous.coords[bridge_proton] + 1.04 * direction
+    )
+    reason = phase1.acid_hydrogen_ownership_reason(ambiguous, (bridge_proton,))
+    assert reason is not None and "ambiguous" in reason
+
+
 def test_microsolvated_basin_rejects_hidden_hydroxide_hydronium_pair():
     dimer = disilicate()
     reactant = protonated_bridge_complex(dimer, n_water=4)
@@ -288,6 +336,24 @@ def test_microsolvated_basin_equivalence_includes_every_solvent_oxygen():
     assert reason is not None and "RMSD" in reason
 
 
+def test_family_mode_cli_requires_matched_ensemble_receipt(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "phase1_xiao_lasaga.py",
+            "--reaction",
+            "si-acid",
+            "--microsolvation-waters",
+            "3",
+            "--microsolvation-family",
+            "bridge-donor-chain",
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        phase1.main()
+
+
 def test_microsolvation_run_slug_is_checkpoint_isolated():
     assert phase1.reaction_run_slug("si-acid", "b3lyp", "def2-svp", "flank") == (
         "si-acid-preprotonated-v2-b3lyp-def2-svp-flank"
@@ -296,6 +362,14 @@ def test_microsolvation_run_slug_is_checkpoint_isolated():
         phase1.reaction_run_slug("si-acid", "b3lyp", "def2-svp", "flank", n_water=4)
         == "si-acid-microsolvated-4w-v1-b3lyp-def2-svp-flank"
     )
+    assert phase1.reaction_run_slug(
+        "si-acid",
+        "b3lyp",
+        "def2-svp",
+        "flank",
+        n_water=4,
+        conformer_family="bridge-donor-chain",
+    ) == ("si-acid-microsolvated-4w-bridge-donor-chain-v2-g1-b3lyp-def2-svp-flank")
 
 
 def test_reactant_minimum_receipt_is_geometry_and_settings_bound(tmp_path):

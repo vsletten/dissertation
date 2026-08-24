@@ -34,7 +34,8 @@ on main). Priority P0 > P1 > P2 within READY.
 | [E2-muscovite-full-mechanism](cards/E2-muscovite-full-mechanism.md) | E | P1 | any | done | B5 ✅ |
 | [A8-thesis-archive-intake](cards/A8-thesis-archive-intake.md) | A | P1 | workstation | ready | — |
 | [A1b-acid-mechanisms](cards/A1b-acid-mechanisms.md) | A | P1 | workstation | blocked | matched proton-relay conformer ensemble / mechanism decision |
-| [A1c-acid-microsolvation-conformers](cards/A1c-acid-microsolvation-conformers.md) | A | P1 | workstation | ready | A1b driver/receipt hardening in this merge |
+| [A1c-acid-microsolvation-conformers](cards/A1c-acid-microsolvation-conformers.md) | A | P1 | workstation | blocked: A1d | A1d sole-seed convergence closeout |
+| [A1d-acid-3w-bridge-convergence](cards/A1d-acid-3w-bridge-convergence.md) | A | P1 | workstation | ready | A1c infrastructure + archived receipts in this merge |
 | [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | ready | — |
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
 | [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | ready | — |

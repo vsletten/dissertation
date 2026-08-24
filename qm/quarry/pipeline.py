@@ -120,11 +120,18 @@ def constraints_file(text: str):
         os.unlink(path)
 
 
-def optimize(
+@dataclass(frozen=True)
+class OptimizationResult:
+    cluster: Cluster
+    converged: bool
+    max_steps: int
+
+
+def optimize_bounded(
     cluster: Cluster, settings: DftSettings, *, max_steps: int = 100
-) -> Cluster:
-    """Minimum-energy geometry via geomeTRIC (frozen atoms respected)."""
-    from pyscf.geomopt.geometric_solver import optimize as geometric_optimize
+) -> OptimizationResult:
+    """Run a bounded geomeTRIC relaxation while preserving its convergence bit."""
+    from pyscf.geomopt.geometric_solver import kernel as geometric_kernel
 
     mf = _make_scf(build_mol(cluster, settings), settings)
     if cluster.frozen_indices:
@@ -132,14 +139,31 @@ def optimize(
         # (the lattice-resistance contract, SURVEY.md §6.2).
         atoms = ",".join(str(i + 1) for i in sorted(cluster.frozen_indices))
         with constraints_file(f"$freeze\nxyz {atoms}\n") as path:
-            mol_opt = geometric_optimize(mf, maxsteps=max_steps, constraints=path)
+            converged, mol_opt = geometric_kernel(
+                mf,
+                maxsteps=max_steps,
+                constraints=path,
+            )
     else:
-        mol_opt = geometric_optimize(mf, maxsteps=max_steps)
-    return replace(
+        converged, mol_opt = geometric_kernel(mf, maxsteps=max_steps)
+    optimized = replace(
         cluster,
         symbols=[mol_opt.atom_symbol(i) for i in range(mol_opt.natm)],
         coords=mol_opt.atom_coords() * BOHR_TO_ANGSTROM,
     )
+    return OptimizationResult(optimized, bool(converged), max_steps)
+
+
+def optimize(
+    cluster: Cluster, settings: DftSettings, *, max_steps: int = 100
+) -> Cluster:
+    """Minimum-energy geometry via geomeTRIC; reject an exhausted step bound."""
+    result = optimize_bounded(cluster, settings, max_steps=max_steps)
+    if not result.converged:
+        raise RuntimeError(
+            f"geometry optimization did not converge within {max_steps} steps"
+        )
+    return result.cluster
 
 
 @dataclass(frozen=True)
