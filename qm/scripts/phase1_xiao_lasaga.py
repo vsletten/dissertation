@@ -65,6 +65,8 @@ from quarry.pipeline import (  # noqa: E402
     FrequencyResult,
     energy,
     frequencies,
+    frequency_geometry_fingerprint,
+    frequency_settings_fingerprint,
     optimize,
 )
 from quarry.rates import Thermo, rate_from_thermo, thermo_from_frequencies  # noqa: E402
@@ -648,6 +650,42 @@ def minimum_frequency_reason(label: str, freq: FrequencyResult) -> str | None:
     return None
 
 
+def write_reactant_minimum_receipt(
+    path: Path,
+    cluster: Cluster,
+    settings: DftSettings,
+    frequency: FrequencyResult,
+) -> None:
+    """Atomically persist the pre-TS minimum gate for crash-safe resume."""
+    payload = {
+        "geometry_fingerprint": frequency_geometry_fingerprint(cluster),
+        "settings_fingerprint": frequency_settings_fingerprint(settings),
+        "n_imaginary": frequency.n_imaginary,
+        "imaginary_cm": frequency.imaginary_cm.tolist(),
+        "electronic_hartree": frequency.electronic_hartree,
+        "passed": frequency.n_imaginary == 0,
+    }
+    temporary = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
+    temporary.write_text(json.dumps(payload, indent=2))
+    temporary.replace(path)
+
+
+def load_reactant_minimum_receipt(
+    path: Path,
+    cluster: Cluster,
+    settings: DftSettings,
+) -> dict[str, object] | None:
+    """Load only a geometry/settings-bound minimum receipt."""
+    if not path.is_file():
+        return None
+    payload = json.loads(path.read_text())
+    if payload.get("geometry_fingerprint") != frequency_geometry_fingerprint(cluster):
+        return None
+    if payload.get("settings_fingerprint") != frequency_settings_fingerprint(settings):
+        return None
+    return payload
+
+
 def comparison_against_si_neutral(
     reaction: str,
     *,
@@ -1111,6 +1149,7 @@ def finish_al_neutral_sequential(
     proton_indices: tuple[int, ...] = (),
     solvent_oxygen_indices: tuple[int, ...] = (),
     n_water: int = 1,
+    reactant_frequency: FrequencyResult | None = None,
 ) -> int:
     """Close a proven R → associative I → hydrolyzed P mechanism."""
     begin_sequential_run(run_dir)
@@ -1322,7 +1361,7 @@ def finish_al_neutral_sequential(
 
     trim_gpu_pool()
     log("stage 5: sequential thermochemistry")
-    complex_freq = frequencies(complex_opt, settings)
+    complex_freq = reactant_frequency or frequencies(complex_opt, settings)
     intermediate_freq = frequencies(intermediate, settings)
     for label, freq in (
         ("reactant", complex_freq),
@@ -1671,6 +1710,35 @@ def main() -> int:
         if pre_equilibrium_failure:
             block_run(run_dir, pre_equilibrium_failure)
             raise RuntimeError(pre_equilibrium_failure)
+
+    reactant_frequency: FrequencyResult | None = None
+    if acid_path and args.microsolvation_waters > 1:
+        minimum_path = run_dir / "reactant_minimum.json"
+        minimum_receipt = load_reactant_minimum_receipt(
+            minimum_path, complex_opt, settings
+        )
+        if minimum_receipt is None:
+            trim_gpu_pool()
+            log("stage 1b: proving microsolvated reactant is an unconstrained minimum")
+            reactant_frequency = frequencies(complex_opt, settings)
+            write_reactant_minimum_receipt(
+                minimum_path, complex_opt, settings, reactant_frequency
+            )
+            minimum_receipt = load_reactant_minimum_receipt(
+                minimum_path, complex_opt, settings
+            )
+            assert minimum_receipt is not None
+        else:
+            log("  resume: geometry/settings-bound reactant minimum receipt exists")
+        if not bool(minimum_receipt["passed"]):
+            detail = (
+                "microsolvated reactant minimum has "
+                f"{minimum_receipt['n_imaginary']} imaginary modes; "
+                "TS search forbidden"
+            )
+            block_run(run_dir, detail)
+            return 1
+
     dimer_opt = checkpointed(
         run_dir / "dimer.xyz", dimer, lambda: optimize(dimer, settings)
     )
@@ -1890,6 +1958,7 @@ def main() -> int:
             proton_indices=proton_indices,
             solvent_oxygen_indices=solvent_oxygen_indices,
             n_water=args.microsolvation_waters,
+            reactant_frequency=reactant_frequency,
         )
     if args.reaction == "al-neutral":
         assert cleavage_failure is not None
@@ -1903,7 +1972,7 @@ def main() -> int:
 
     # Stage 5 — thermochemistry.
     log("stage 5: thermochemistry")
-    cx_freq = frequencies(complex_opt, settings)
+    cx_freq = reactant_frequency or frequencies(complex_opt, settings)
     if detail := minimum_frequency_reason("reactant", cx_freq):
         return abort_campaign(f"{detail}; aborting before thermochemistry")
     t = args.temperature
