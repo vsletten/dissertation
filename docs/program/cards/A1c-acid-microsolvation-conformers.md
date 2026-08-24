@@ -53,6 +53,14 @@ ensemble**, not another single-shell or water-count retry.
 
 ## Progress
 
+- 2026-08-24 04:21 PDT — bounded worker handoff from the live production
+  campaign. PID `4160112` remains healthy on exact pushed code; the atomic
+  manifest now has five terminal Si records (four connectivity/occupancy
+  rejections and one 160-step optimizer failure) while
+  `si-acid:4w:attacker-centered-ring` is running. No Al screen or scientific
+  verdict has started. The durable run root/log and 13:37 PDT dead-man remain
+  unchanged; do not launch a competing campaign. The current partial population
+  cannot support the final matched-minimum or model-valid NO-GO claim.
 - 2026-08-24 — production campaign launched from pushed head `6e4cd646` with
   exact run root `qm/runs/phase1/acid-microsolvation-ensemble-v2-g1-b3lyp-
   def2-svp`, durable `ensemble.log`, advisory HF bound 40, load-bearing B3LYP
