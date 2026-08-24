@@ -21,13 +21,47 @@ from typing import Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+A1D_SOURCE_MANIFEST_PATH = Path(
+    "/mnt/data/vsletten/dissertation-data/"
+    "task197-a1c-acid-conformers-20260824/"
+    "acid-microsolvation-ensemble-v2-g1-b3lyp-def2-svp/manifest.json"
+)
+A1D_SOURCE_MANIFEST_SHA256 = (
+    "471a099c01c3fd8107409fd087e033bdd5da167cc6d41f09475a6a661cae5ac6"
+)
+A1D_SOURCE_LOG_SHA256 = (
+    "80729b9ed1dd61728f4959f29e3adb8151341a5764a779559ded1610005af312"
+)
+A1D_TARGET_SEED = "si-acid:3w:bridge-donor-chain"
+A1D_ATTEMPT_PARENT_NAME = "task199-a1d-acid-3w-bridge-20260824"
+A1D_ATTEMPT_NAME = "acid-3w-bridge-refinement-b3lyp-def2-svp"
+A1D_LOG_PATH = (
+    A1D_SOURCE_MANIFEST_PATH.parent.parent.parent
+    / A1D_ATTEMPT_PARENT_NAME
+    / "a1d-refinement.log"
+)
+
 _ETIQUETTE_SESSION = None
 if __name__ == "__main__":
     from quarry.etiquette import bootstrap_cli
 
+    refinement_requested = any(
+        argument == "--refine-failed-endpoint"
+        or argument.startswith("--refine-failed-endpoint=")
+        for argument in sys.argv[1:]
+    )
+    if refinement_requested and any(
+        argument == "--log" or argument.startswith("--log=")
+        for argument in sys.argv[1:]
+    ):
+        raise SystemExit("refinement log path is fixed; --log is forbidden")
+    bootstrap_argv = None
+    if refinement_requested:
+        bootstrap_argv = [*sys.argv[1:], "--log", str(A1D_LOG_PATH)]
     _ETIQUETTE_SESSION = bootstrap_cli(
         "acid_microsolvation_ensemble",
         default_run_root=Path(__file__).resolve().parent.parent / "runs",
+        argv=bootstrap_argv,
     )
 
 import numpy as np  # noqa: E402
@@ -57,6 +91,7 @@ REFINEMENT_ATTEMPT = "attempt-001"
 OPTIMIZER_EXHAUSTION_REASON = (
     "RuntimeError: geometry optimization did not converge within 160 steps"
 )
+FINALIZATION_RESERVE_BYTES = 64 * 1024
 
 
 @dataclass(frozen=True)
@@ -454,6 +489,25 @@ def assert_refinement_source_unchanged(source: RefinementSource) -> None:
             or sha256_path(path) != expected_hash
         ):
             raise RuntimeError(f"source artifact drifted during refinement: {relative}")
+
+
+def refinement_attempt_dir(manifest_path: Path) -> Path:
+    """Return the one card-owned attempt namespace for the pinned source."""
+    source_root = manifest_path.expanduser().resolve().parent
+    return source_root.parent.parent / A1D_ATTEMPT_PARENT_NAME / A1D_ATTEMPT_NAME
+
+
+def load_a1d_refinement_source(*, max_steps: int) -> RefinementSource:
+    """Load only the card-pinned A1c source; no caller chooses authority."""
+    attempt_dir = refinement_attempt_dir(A1D_SOURCE_MANIFEST_PATH)
+    return validate_refinement_source(
+        A1D_SOURCE_MANIFEST_PATH,
+        expected_manifest_sha256=A1D_SOURCE_MANIFEST_SHA256,
+        expected_log_sha256=A1D_SOURCE_LOG_SHA256,
+        target_key=A1D_TARGET_SEED,
+        attempt_dir=attempt_dir,
+        max_steps=max_steps,
+    )
 
 
 def _record_running(
@@ -857,10 +911,10 @@ def _refinement_summary(
                 }
             ]
             verdict = "matched-minimum-ready-for-barrier-ladder"
-        elif al_record.get("status") in {"failed", "blocked"}:
+        elif al_record.get("status") in {"failed", "blocked", "rejected"}:
             verdict = "incomplete-matched-screen"
         else:
-            verdict = "si-minimum-without-matched-al-minimum"
+            raise RuntimeError("matched Al screen produced an invalid status")
     elif counts["rejected"] == len(si_records):
         verdict = "model-valid-no-go-pre-equilibrated-bridge"
     else:
@@ -935,6 +989,46 @@ def _write_refinement_matched_receipt(
     return path
 
 
+def _emergency_atomic_json(path: Path, payload: dict[str, Any]) -> None:
+    """Independent last-ditch writer used after releasing reserved disk space."""
+    temporary = path.with_name(f".{path.name}.emergency-{time.time_ns()}.tmp")
+    temporary.write_text(
+        json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    )
+    temporary.replace(path)
+
+
+def _finalize_incomplete_resolution(
+    resolution_path: Path,
+    reserve_path: Path,
+    resolution: dict[str, Any],
+    exc: BaseException,
+) -> dict[str, Any]:
+    """Persist a spent-budget, non-success verdict after recoverable I/O failure."""
+    reserve_path.unlink(missing_ok=True)
+    finished_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    incomplete = {
+        **resolution,
+        "status": "incomplete-artifact-persistence",
+        "attempt": {
+            **resolution["attempt"],
+            "status": "incomplete-artifact-persistence",
+            "budget_spent": True,
+            "finished_at": finished_at,
+        },
+        "summary": {
+            "verdict": "incomplete-artifact-persistence",
+            "completed_at": finished_at,
+        },
+        "finalization_error": f"{type(exc).__name__}: {exc}",
+    }
+    try:
+        atomic_json(resolution_path, incomplete)
+    except Exception:
+        _emergency_atomic_json(resolution_path, incomplete)
+    return incomplete
+
+
 def run_failed_endpoint_refinement(
     source: RefinementSource,
     *,
@@ -945,6 +1039,11 @@ def run_failed_endpoint_refinement(
     """Spend one bounded fresh optimizer attempt on the pinned failed endpoint."""
     max_steps = _require_refinement_bound(max_steps)
     attempt_dir = attempt_dir.expanduser().resolve()
+    expected_attempt_dir = refinement_attempt_dir(source.manifest_path)
+    if attempt_dir != expected_attempt_dir:
+        raise RuntimeError(
+            f"refinement attempt directory is fixed at {expected_attempt_dir}"
+        )
     if attempt_dir.exists():
         raise RuntimeError(
             "refinement attempt directory already exists; refusing a second step budget"
@@ -993,6 +1092,8 @@ def run_failed_endpoint_refinement(
             "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         },
     }
+    reserve_path = attempt_dir / ".finalization-reserve"
+    reserve_path.write_bytes(b"\0" * FINALIZATION_RESERVE_BYTES)
     atomic_json(resolution_path, resolution)
     print(
         f"A1D_START seed={source.target_key} attempt={REFINEMENT_ATTEMPT} "
@@ -1089,84 +1190,129 @@ def run_failed_endpoint_refinement(
         "settings": asdict(source.settings),
         "record": record,
     }
-    atomic_json(receipt_path, receipt)
-    receipt_sha256 = sha256_path(receipt_path)
+    try:
+        atomic_json(receipt_path, receipt)
+        receipt_sha256 = sha256_path(receipt_path)
 
-    effective_records = {
-        key: dict(source_record)
-        for key, source_record in source.manifest["seeds"].items()
-    }
-    effective_records[source.target_key] = record
-    al_record = None
-    al_manifest_path = None
-    if record["status"] == "accepted":
-        al_manifest_path = attempt_dir / "al-screen" / "manifest.json"
-        al_manifest_path.parent.mkdir()
-        al_manifest: dict[str, Any] = {"seeds": {}}
-        al_record = screen_seed(
-            al_manifest,
-            al_manifest_path,
-            reaction="al-acid",
-            n_water=n_water,
-            family=family,
-            settings=source.settings,
-            max_steps=source.manifest["max_steps"],
-        )
-        assert_refinement_source_unchanged(source)
-
-    summary = _refinement_summary(effective_records, source=source, al_record=al_record)
-    resolution.update(
-        {
-            "status": "completed",
-            "attempt": {
-                **resolution["attempt"],
-                "status": record["status"],
-                "receipt_path": str(receipt_path.relative_to(attempt_dir)),
-                "receipt_sha256": receipt_sha256,
-                "finished_at": record["finished_at"],
-            },
-            "effective_seed_refs": {
-                key: (
-                    {
-                        "source": "a1d-refinement",
-                        "receipt_path": str(receipt_path.relative_to(attempt_dir)),
-                        "receipt_sha256": receipt_sha256,
-                    }
-                    if key == source.target_key
-                    else {
-                        "source": "a1c-manifest",
-                        "manifest_sha256": source.manifest_sha256,
-                        "record_key": key,
-                    }
-                )
-                for key in sorted(effective_records)
-            },
-            "al_screen": (
-                None
-                if al_record is None or al_manifest_path is None
-                else {
-                    "manifest_path": str(al_manifest_path.relative_to(attempt_dir)),
-                    "manifest_sha256": sha256_path(al_manifest_path),
-                    "record": al_record,
-                }
-            ),
-            "summary": summary,
+        effective_records = {
+            key: dict(source_record)
+            for key, source_record in source.manifest["seeds"].items()
         }
-    )
-    atomic_json(resolution_path, resolution)
-    if summary["matched_candidates"]:
-        if al_record is None:
-            raise RuntimeError("matched summary lacks an Al record")
-        _write_refinement_matched_receipt(
-            attempt_dir,
-            resolution_path,
-            source=source,
-            si_record=record,
-            al_record=al_record,
+        effective_records[source.target_key] = record
+        al_record = None
+        al_manifest_path = None
+        if record["status"] == "accepted":
+            al_manifest_path = attempt_dir / "al-screen" / "manifest.json"
+            al_manifest_path.parent.mkdir()
+            al_manifest: dict[str, Any] = {"seeds": {}}
+            try:
+                al_record = screen_seed(
+                    al_manifest,
+                    al_manifest_path,
+                    reaction="al-acid",
+                    n_water=n_water,
+                    family=family,
+                    settings=source.settings,
+                    max_steps=source.manifest["max_steps"],
+                )
+            except Exception as exc:
+                al_manifest_path = None
+                al_record = {
+                    "status": "failed",
+                    "reaction": "al-acid",
+                    "water_count": n_water,
+                    "family": family,
+                    "reason": f"{type(exc).__name__}: {exc}",
+                    "failure_kind": "matched-al-screen-error",
+                }
+            assert_refinement_source_unchanged(source)
+
+        summary = _refinement_summary(
+            effective_records, source=source, al_record=al_record
         )
-    assert_refinement_source_unchanged(source)
+        al_screen = None
+        if al_record is not None:
+            al_screen = {
+                "manifest_path": (
+                    None
+                    if al_manifest_path is None
+                    else str(al_manifest_path.relative_to(attempt_dir))
+                ),
+                "manifest_sha256": (
+                    None if al_manifest_path is None else sha256_path(al_manifest_path)
+                ),
+                "record": al_record,
+            }
+        resolution.update(
+            {
+                "status": "evidence-complete",
+                "attempt": {
+                    **resolution["attempt"],
+                    "status": record["status"],
+                    "receipt_path": str(receipt_path.relative_to(attempt_dir)),
+                    "receipt_sha256": receipt_sha256,
+                    "finished_at": record["finished_at"],
+                },
+                "effective_seed_refs": {
+                    key: (
+                        {
+                            "source": "a1d-refinement",
+                            "receipt_path": str(receipt_path.relative_to(attempt_dir)),
+                            "receipt_sha256": receipt_sha256,
+                        }
+                        if key == source.target_key
+                        else {
+                            "source": "a1c-manifest",
+                            "manifest_sha256": source.manifest_sha256,
+                            "record_key": key,
+                        }
+                    )
+                    for key in sorted(effective_records)
+                },
+                "al_screen": al_screen,
+                "summary": summary,
+            }
+        )
+        evidence_path = attempt_dir / "evidence-manifest.json"
+        atomic_json(evidence_path, resolution)
+        matched_receipt = None
+        if summary["matched_candidates"]:
+            if al_record is None:
+                raise RuntimeError("matched summary lacks an Al record")
+            matched_path = _write_refinement_matched_receipt(
+                attempt_dir,
+                evidence_path,
+                source=source,
+                si_record=record,
+                al_record=al_record,
+            )
+            matched_receipt = {
+                "path": str(matched_path.relative_to(attempt_dir)),
+                "sha256": sha256_path(matched_path),
+            }
+        assert_refinement_source_unchanged(source)
+        final_resolution = {
+            **resolution,
+            "status": "completed",
+            "evidence_manifest": {
+                "path": evidence_path.name,
+                "sha256": sha256_path(evidence_path),
+            },
+            "matched_receipt": matched_receipt,
+        }
+        atomic_json(resolution_path, final_resolution)
+    except Exception as exc:
+        incomplete = _finalize_incomplete_resolution(
+            resolution_path, reserve_path, resolution, exc
+        )
+        print(
+            "A1D_SUMMARY " + json.dumps(incomplete["summary"], sort_keys=True),
+            flush=True,
+        )
+        return incomplete
+    reserve_path.unlink(missing_ok=True)
     print("A1D_SUMMARY " + json.dumps(summary, sort_keys=True), flush=True)
-    return resolution
+    return final_resolution
 
 
 def run_ensemble(
@@ -1327,28 +1473,12 @@ def main() -> int:
     parser.add_argument("--gpu", action="store_true")
     parser.add_argument("--max-steps", type=int, default=100)
     parser.add_argument("--run-dir", type=Path)
-    parser.add_argument("--refine-failed-endpoint")
-    parser.add_argument("--source-manifest", type=Path)
-    parser.add_argument("--expected-source-manifest-sha256")
-    parser.add_argument("--expected-source-log-sha256")
-    parser.add_argument("--attempt-dir", type=Path)
+    parser.add_argument("--refine-failed-endpoint", choices=(A1D_TARGET_SEED,))
     parser.add_argument(
         "--refinement-max-steps", type=int, default=REFINEMENT_MAX_STEPS
     )
     args = parser.parse_args()
-    refinement_companions = (
-        args.source_manifest,
-        args.expected_source_manifest_sha256,
-        args.expected_source_log_sha256,
-        args.attempt_dir,
-    )
     if args.refine_failed_endpoint:
-        if any(value is None for value in refinement_companions):
-            parser.error(
-                "refinement requires --source-manifest, "
-                "--expected-source-manifest-sha256, --expected-source-log-sha256, "
-                "and --attempt-dir"
-            )
         if (
             args.run_dir is not None
             or args.xc != "b3lyp"
@@ -1363,17 +1493,11 @@ def main() -> int:
         if _ETIQUETTE_SESSION is None:
             raise RuntimeError("campaign etiquette was not initialized")
         try:
-            source = validate_refinement_source(
-                args.source_manifest,
-                expected_manifest_sha256=args.expected_source_manifest_sha256,
-                expected_log_sha256=args.expected_source_log_sha256,
-                target_key=args.refine_failed_endpoint,
-                attempt_dir=args.attempt_dir,
-                max_steps=args.refinement_max_steps,
-            )
+            source = load_a1d_refinement_source(max_steps=args.refinement_max_steps)
+            attempt_dir = refinement_attempt_dir(source.manifest_path)
             resolution = run_failed_endpoint_refinement(
                 source,
-                attempt_dir=args.attempt_dir,
+                attempt_dir=attempt_dir,
                 max_steps=args.refinement_max_steps,
                 log_path=str(_ETIQUETTE_SESSION.log_path),
             )
@@ -1389,8 +1513,6 @@ def main() -> int:
             }
             else 1
         )
-    if any(value is not None for value in refinement_companions):
-        parser.error("refinement companion arguments require --refine-failed-endpoint")
     if args.max_steps <= 0 or args.max_steps > 240:
         parser.error("--max-steps must be in 1..240")
     settings = DftSettings(

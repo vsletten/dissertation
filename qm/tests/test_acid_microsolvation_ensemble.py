@@ -2,7 +2,10 @@
 
 import json
 import shutil
+import subprocess
+import sys
 from dataclasses import asdict, replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -16,8 +19,8 @@ TARGET_SEED = "si-acid:3w:bridge-donor-chain"
 
 
 def _build_refinement_source(tmp_path):
-    root = tmp_path / "source"
-    root.mkdir()
+    root = tmp_path / "task197" / "source"
+    root.mkdir(parents=True)
     settings = DftSettings(xc="b3lyp", basis="def2-svp", density_fit=True, use_gpu=True)
     manifest = ensemble._expected_manifest(settings, 160, "/retired/ensemble.log")
     for n_water in ensemble.WATER_COUNTS:
@@ -72,6 +75,10 @@ def _load_refinement_source(tmp_path):
         max_steps=160,
     )
     return source, manifest_path
+
+
+def _attempt_dir(source):
+    return ensemble.refinement_attempt_dir(source.manifest_path)
 
 
 def test_deduplicate_basins_uses_heavy_atom_rmsd_and_energy():
@@ -544,7 +551,7 @@ def test_refinement_restarts_exact_endpoint_once_and_preserves_source(
 
     monkeypatch.setattr(ensemble, "optimize_bounded", fake_optimize)
     monkeypatch.setattr(ensemble, "evaluate_optimized_endpoint", fake_gate)
-    attempt_dir = tmp_path / "attempt"
+    attempt_dir = _attempt_dir(source)
     resolution = ensemble.run_failed_endpoint_refinement(
         source,
         attempt_dir=attempt_dir,
@@ -586,6 +593,13 @@ def test_refinement_restarts_exact_endpoint_once_and_preserves_source(
             max_steps=160,
             log_path="refinement.log",
         )
+    with pytest.raises(RuntimeError, match="attempt directory is fixed"):
+        ensemble.run_failed_endpoint_refinement(
+            source,
+            attempt_dir=attempt_dir.parent / "alternate-budget",
+            max_steps=160,
+            log_path="refinement.log",
+        )
     assert len(optimizer_calls) == 1
 
 
@@ -601,7 +615,7 @@ def test_refinement_exhaustion_remains_incomplete(tmp_path, monkeypatch):
 
     resolution = ensemble.run_failed_endpoint_refinement(
         source,
-        attempt_dir=tmp_path / "attempt",
+        attempt_dir=_attempt_dir(source),
         max_steps=160,
         log_path="refinement.log",
     )
@@ -632,18 +646,78 @@ def test_refinement_gate_failure_does_not_relabel_optimizer_exhaustion(
 
     resolution = ensemble.run_failed_endpoint_refinement(
         source,
-        attempt_dir=tmp_path / "attempt",
+        attempt_dir=_attempt_dir(source),
         max_steps=160,
         log_path="refinement.log",
     )
 
     receipt = json.loads(
-        (tmp_path / "attempt" / resolution["attempt"]["receipt_path"]).read_text()
+        (_attempt_dir(source) / resolution["attempt"]["receipt_path"]).read_text()
     )
     record = receipt["record"]
     assert record["production_converged"] is True
     assert record["failure_kind"] == "endpoint-evaluation-error"
     assert record["status"] == "failed"
+
+
+def test_refinement_finalization_failure_persists_incomplete_without_retry(
+    tmp_path, monkeypatch
+):
+    source, _manifest_path = _load_refinement_source(tmp_path)
+    optimizer_calls = 0
+
+    def fake_optimize(cluster, _settings, *, max_steps):
+        nonlocal optimizer_calls
+        optimizer_calls += 1
+        return SimpleNamespace(cluster=cluster, converged=False, max_steps=max_steps)
+
+    real_atomic_json = ensemble.atomic_json
+
+    def fail_receipt(path, payload):
+        if path.name == "receipt.json":
+            raise OSError("simulated receipt I/O failure")
+        real_atomic_json(path, payload)
+
+    monkeypatch.setattr(ensemble, "optimize_bounded", fake_optimize)
+    monkeypatch.setattr(ensemble, "atomic_json", fail_receipt)
+    resolution = ensemble.run_failed_endpoint_refinement(
+        source,
+        attempt_dir=_attempt_dir(source),
+        max_steps=160,
+        log_path="refinement.log",
+    )
+
+    assert optimizer_calls == 1
+    assert resolution["status"] == "incomplete-artifact-persistence"
+    assert resolution["attempt"]["budget_spent"] is True
+    persisted = json.loads(
+        (_attempt_dir(source) / "refinement-manifest.json").read_text()
+    )
+    assert persisted["status"] == "incomplete-artifact-persistence"
+
+
+def test_refinement_log_override_is_rejected_before_open(tmp_path):
+    protected = tmp_path / "protected-source.json"
+    protected.write_text("immutable\n")
+    before = ensemble.sha256_path(protected)
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path(ensemble.__file__)),
+            "--refine-failed-endpoint",
+            TARGET_SEED,
+            "--log",
+            str(protected),
+            "--help",
+        ],
+        cwd=Path(ensemble.__file__).resolve().parent.parent,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "--log is forbidden" in result.stderr
+    assert ensemble.sha256_path(protected) == before
 
 
 def test_accepted_refinement_screens_only_exact_matched_al(tmp_path, monkeypatch):
@@ -687,7 +761,7 @@ def test_accepted_refinement_screens_only_exact_matched_al(tmp_path, monkeypatch
     monkeypatch.setattr(ensemble, "screen_seed", fake_al_screen)
     resolution = ensemble.run_failed_endpoint_refinement(
         source,
-        attempt_dir=tmp_path / "attempt",
+        attempt_dir=_attempt_dir(source),
         max_steps=160,
         log_path="refinement.log",
     )
@@ -696,5 +770,68 @@ def test_accepted_refinement_screens_only_exact_matched_al(tmp_path, monkeypatch
     assert al_calls[0]["reaction"] == "al-acid"
     assert al_calls[0]["n_water"] == 3
     assert al_calls[0]["family"] == "bridge-donor-chain"
-    assert resolution["summary"]["verdict"] == ("si-minimum-without-matched-al-minimum")
+    assert resolution["summary"]["verdict"] == "incomplete-matched-screen"
     assert resolution["summary"]["matched_receipt"] is None
+
+
+def test_matched_handoff_failure_cannot_publish_completed_verdict(
+    tmp_path, monkeypatch
+):
+    source, _manifest_path = _load_refinement_source(tmp_path)
+    monkeypatch.setattr(
+        ensemble,
+        "optimize_bounded",
+        lambda cluster, _settings, *, max_steps: SimpleNamespace(
+            cluster=cluster, converged=True, max_steps=max_steps
+        ),
+    )
+    monkeypatch.setattr(
+        ensemble,
+        "evaluate_optimized_endpoint",
+        lambda *_args, **_kwargs: {
+            "status": "accepted",
+            "reason": None,
+            "basin_signature": [False, True, True, 1, 6, 0],
+            "n_imaginary": 0,
+            "electronic_hartree": -100.0,
+            "minimum_pair_distance_a": 1.0,
+        },
+    )
+
+    def fake_al_screen(manifest, manifest_path, **kwargs):
+        record = {
+            "status": "accepted",
+            "reaction": kwargs["reaction"],
+            "water_count": kwargs["n_water"],
+            "family": kwargs["family"],
+            "reason": None,
+            "electronic_hartree": -101.0,
+            "artifacts": {},
+        }
+        manifest["seeds"][
+            ensemble._seed_key(kwargs["reaction"], kwargs["n_water"], kwargs["family"])
+        ] = record
+        ensemble.atomic_json(manifest_path, manifest)
+        return record
+
+    monkeypatch.setattr(ensemble, "screen_seed", fake_al_screen)
+    monkeypatch.setattr(
+        ensemble,
+        "_write_refinement_matched_receipt",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("matched receipt validation failed")
+        ),
+    )
+    resolution = ensemble.run_failed_endpoint_refinement(
+        source,
+        attempt_dir=_attempt_dir(source),
+        max_steps=160,
+        log_path="refinement.log",
+    )
+
+    assert resolution["status"] == "incomplete-artifact-persistence"
+    persisted = json.loads(
+        (_attempt_dir(source) / "refinement-manifest.json").read_text()
+    )
+    assert persisted["status"] == "incomplete-artifact-persistence"
+    assert persisted["summary"]["verdict"] == "incomplete-artifact-persistence"
