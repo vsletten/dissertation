@@ -153,17 +153,35 @@ Durable ignored-state receipts:
 | 5 | `7f006d12573e64b1be7f27c223f56732b45cc507a74faaef04bb20ff678e326c` | `9f6312781701d6a2d0ac7d96f0cc529de31ddc75a59814daf261f4ce7dcf211c` | `c0cccbc3d96aa98aae84aab1bbdeb1f839e7f4efa3a01c794b03897b1fc7fe99` |
 | 6 | `3fac28ca17c83c15a4161964de6d21d91de99ea97e5e2050350d05871563c95f` | `a238bc65ee782f28ae2e182231d9171057dd3a9b68c5a66fb53eb40871a8e5a9` | `dbc8d6bc1f3eedfbf4530ef847640009ce773d8f36e28522ec8917045c904ebf` |
 
+## Finite conformer closeout (A1c/A1d)
+
+A1c then ran four explicit proton-relay families at every water count 3--6.
+Fifteen B3LYP/def2-SVP/DF endpoints converged and failed the same exact
+physical-H/connectivity/solvent-occupancy basin; only
+`si-acid:3w:bridge-donor-chain` exhausted its original 160-step bound. A1d
+restarted from that exact archived production endpoint with a fresh geomeTRIC
+state and one additional bound of 160 steps. It converged after 54 steps to
+signature `(False, True, True, 0, 7, 0)`, again placing zero mobile H on Obr
+instead of the required `(False, True, True, 1, 6, 0)`.
+
+The hash-bound effective population is therefore exactly **16 rejected / 0
+accepted / 0 failed / 0 blocked**. This is the predeclared finite-ensemble gate:
+the pre-equilibrated protonated-bridge assumption is now a **model-valid NO-GO**
+for Si--O--Si at this tier. No Al screen or unmatched acid ordering was emitted.
+The immutable A1c manifest remains
+`471a099c01c3fd8107409fd087e033bdd5da167cc6d41f09475a6a661cae5ac6`;
+A1d's resolution manifest is
+`6b02432f4920b2ff8406de5cd22d379ebc54ceed66800b1db8149efff7df62cf`
+under `/mnt/data/vsletten/dissertation-data/task199-a1d-acid-3w-bridge-20260824/`.
+
 ## Required follow-up
 
-The card remains scientifically blocked. The next bounded move is a
-microsolvation **conformer ensemble**, not another water-count retry: generate
-multiple proton-relay topologies at 3--6 waters, deduplicate optimized basins,
-and require a zero-imaginary protonated-bridge minimum for both Si and Al under
-one matched topology before any TS search. If that finite ensemble also
-returns H3O+/terminal protonation for every Si seed, retire the
-pre-equilibrated-bridge assumption and redesign the acid path as a concerted
-microsolvated hydronium/proton-relay mechanism. Never hold Obr--H by constraint
-to manufacture thermochemistry.
+Retire the pre-equilibrium rather than retrying counts, conformers, or an Obr--H
+constraint. Executable board card `A1e-acid-concerted-hydronium-relay` owns a
+finite matched concerted pathway: hydronium proton transfer occurs during
+nucleophilic attack/bridge cleavage, with double-ended path finding, a coupled
+one-imaginary-mode saddle, and full IRC endpoint proof before any Si/Al ordering
+is published. Never hold Obr--H by constraint to manufacture thermochemistry.
 
 Reproduction commands must clear inherited environments:
 

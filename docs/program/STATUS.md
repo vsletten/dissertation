@@ -4,6 +4,14 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-24 — hermes-workstation — A1d closes A1c's sole inconclusive
+  three-water seed and the finite pre-equilibrium: one hash-pinned fresh
+  B3LYP/def2-SVP/DF continuation converged after 54 steps, then failed the exact
+  protonated-bridge occupancy gate. Effective result is 16/16 conclusive Si
+  rejections, so the pre-equilibrated acid bridge is model-valid NO-GO; no Al
+  screen or unmatched ordering was emitted. A1c/A1d are done and executable
+  `A1e-acid-concerted-hydronium-relay` is ready.
+
 - 2026-08-24 — hermes-workstation — A1c's finite 16-seed Si conformer
   campaign is honestly BLOCKED, not falsely NO-GO: 15 B3LYP/def2-SVP/DF
   endpoints converged and failed exact protonated-bridge occupancy, while the

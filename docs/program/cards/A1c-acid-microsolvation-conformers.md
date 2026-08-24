@@ -1,12 +1,12 @@
 # A1c-acid-microsolvation-conformers — finite matched proton-relay ensemble
 
-- status: blocked
+- status: done
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaign)
 - depends: A1b microsolvation driver/receipt hardening merged
 - claimed-by: hermes-workstation
-- blocked-on: A1d-acid-3w-bridge-convergence
+
 
 ## Objective
 
@@ -54,6 +54,14 @@ ensemble**, not another single-shell or water-count retry.
 
 ## Progress
 
+- 2026-08-24 10:15 PDT — A1d resolved the sole optimizer-exhausted seed.
+  `si-acid:3w:bridge-donor-chain` converged under its one fresh 160-step
+  continuation and was rejected by the same exact occupancy gate with signature
+  `(False, True, True, 0, 7, 0)`. The effective finite ensemble is now 16/16
+  conclusive Si rejections, zero accepted/failed/blocked, so this card's bounded
+  pre-equilibrated-bridge model is a **model-valid NO-GO**. No Al screen or
+  unmatched ordering was emitted. `A1e-acid-concerted-hydronium-relay` is the
+  executable redesign card.
 - 2026-08-24 05:59 PDT — **DEVIATION / SCIENTIFIC BLOCKER:** the finite
   production campaign completed all 16 Si seeds, but its exact final verdict is
   `incomplete-si-screen`, not a matched minimum and not a model-valid NO-GO.
@@ -144,3 +152,9 @@ ensemble**, not another single-shell or water-count retry.
   `80729b9ed1dd61728f4959f29e3adb8151341a5764a779559ded1610005af312`).
 - Final verification and PR/teardown receipts are recorded in the associated
   mission-control TASK-197 Result.
+- A1d final resolution closed the scientific blocker with one hash-bound
+  refinement receipt. The immutable 15 original rejections plus A1d's rejected
+  continuation yield exactly 16 conclusive Si rejections and verdict
+  `model-valid-no-go-pre-equilibrated-bridge`; A1c is therefore done. The
+  concerted hydronium/proton-relay mechanism is real follow-through in card
+  `A1e-acid-concerted-hydronium-relay`, not a note parked in this Result.

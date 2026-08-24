@@ -1,6 +1,11 @@
 """Finite matched proton-relay ensemble orchestration gates."""
 
-from dataclasses import replace
+import json
+import shutil
+import subprocess
+import sys
+from dataclasses import asdict, replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -9,6 +14,71 @@ import pytest
 from quarry.clusters import disilicate, protonated_bridge_complex
 from quarry.pipeline import DftSettings, FrequencyResult
 from scripts import acid_microsolvation_ensemble as ensemble
+
+TARGET_SEED = "si-acid:3w:bridge-donor-chain"
+
+
+def _build_refinement_source(tmp_path):
+    root = tmp_path / "task197" / "source"
+    root.mkdir(parents=True)
+    settings = DftSettings(xc="b3lyp", basis="def2-svp", density_fit=True, use_gpu=True)
+    manifest = ensemble._expected_manifest(settings, 160, "/retired/ensemble.log")
+    for n_water in ensemble.WATER_COUNTS:
+        for family in ensemble.ACID_MICROSOLVATION_FAMILIES:
+            key = ensemble._seed_key("si-acid", n_water, family)
+            seed_dir = ensemble._seed_dir(root, "si-acid", n_water, family)
+            seed_dir.mkdir(parents=True)
+            cluster = ensemble._template("si-acid", n_water, family)
+            for name in ("seed.xyz", "preoptimized.xyz", "optimized.xyz"):
+                ensemble.phase1.save_xyz(cluster, seed_dir / name)
+            is_target = key == TARGET_SEED
+            manifest["seeds"][key] = {
+                "status": "failed" if is_target else "rejected",
+                "reaction": "si-acid",
+                "water_count": n_water,
+                "family": family,
+                "reason": (
+                    ensemble.OPTIMIZER_EXHAUSTION_REASON
+                    if is_target
+                    else "bridge proton transferred"
+                ),
+                "preoptimization_converged": False,
+                "production_converged": not is_target,
+                "artifacts": ensemble._artifact_hashes(
+                    seed_dir, ("seed.xyz", "preoptimized.xyz", "optimized.xyz")
+                ),
+            }
+    manifest["summary"] = {
+        "verdict": "incomplete-si-screen",
+        "si_seed_count": 16,
+        "si_status_counts": {
+            "accepted": 0,
+            "blocked": 0,
+            "failed": 1,
+            "rejected": 15,
+        },
+    }
+    manifest_path = root / "manifest.json"
+    ensemble.atomic_json(manifest_path, manifest)
+    (root / "ensemble.log").write_text("immutable source log\n")
+    return manifest_path, ensemble.sha256_path(manifest_path)
+
+
+def _load_refinement_source(tmp_path):
+    manifest_path, manifest_sha256 = _build_refinement_source(tmp_path)
+    source = ensemble.validate_refinement_source(
+        manifest_path,
+        expected_manifest_sha256=manifest_sha256,
+        expected_log_sha256=ensemble.sha256_path(manifest_path.parent / "ensemble.log"),
+        target_key=TARGET_SEED,
+        attempt_dir=tmp_path / "attempt",
+        max_steps=160,
+    )
+    return source, manifest_path
+
+
+def _attempt_dir(source):
+    return ensemble.refinement_attempt_dir(source.manifest_path)
 
 
 def test_deduplicate_basins_uses_heavy_atom_rmsd_and_energy():
@@ -67,6 +137,22 @@ def test_terminal_record_requires_hash_bound_artifacts(tmp_path):
     assert ensemble.terminal_record_is_reusable(tmp_path, record)
     artifact.write_text("tampered")
     assert not ensemble.terminal_record_is_reusable(tmp_path, record)
+
+
+def test_strict_xyz_loader_refuses_atom_symbol_or_order_drift(tmp_path):
+    template = ensemble._template("si-acid", 3, "bridge-donor-chain")
+    path = tmp_path / "endpoint.xyz"
+    ensemble.phase1.save_xyz(template, path)
+    loaded = ensemble.load_xyz_strict(path, template)
+    np.testing.assert_allclose(loaded.coords, template.coords, atol=1e-8)
+
+    lines = path.read_text().splitlines()
+    fields = lines[2].split()
+    fields[0] = "Xe"
+    lines[2] = " ".join(fields)
+    path.write_text("\n".join(lines) + "\n")
+    with pytest.raises(ValueError, match="atom-order or symbol mismatch"):
+        ensemble.load_xyz_strict(path, template)
 
 
 def test_accepted_terminal_record_requires_minimum_receipt_and_finite_energy(tmp_path):
@@ -352,3 +438,404 @@ def test_matched_receipt_binds_both_models_and_refuses_tampering(tmp_path):
             family=family,
             settings=settings,
         )
+
+
+@pytest.mark.parametrize("bound", [True, 0, -1, 1, 159, 161, 1.5])
+def test_refinement_bound_is_exactly_160(bound):
+    with pytest.raises(ValueError, match="must be exactly 160"):
+        ensemble._require_refinement_bound(bound)
+
+
+def test_refinement_bound_accepts_the_card_budget():
+    assert ensemble._require_refinement_bound(160) == 160
+
+
+def test_refinement_source_requires_pinned_hash_and_exact_artifacts(tmp_path):
+    manifest_path, manifest_sha256 = _build_refinement_source(tmp_path)
+    with pytest.raises(ValueError, match="manifest SHA-256 mismatch"):
+        ensemble.validate_refinement_source(
+            manifest_path,
+            expected_manifest_sha256="0" * 64,
+            expected_log_sha256=ensemble.sha256_path(
+                manifest_path.parent / "ensemble.log"
+            ),
+            target_key=TARGET_SEED,
+            attempt_dir=tmp_path / "attempt",
+            max_steps=160,
+        )
+
+    target = (
+        ensemble._seed_dir(manifest_path.parent, "si-acid", 3, "bridge-donor-chain")
+        / "optimized.xyz"
+    )
+    target.write_text(target.read_text() + "\n")
+    with pytest.raises(ValueError, match="artifact SHA-256 mismatch"):
+        ensemble.validate_refinement_source(
+            manifest_path,
+            expected_manifest_sha256=manifest_sha256,
+            expected_log_sha256=ensemble.sha256_path(
+                manifest_path.parent / "ensemble.log"
+            ),
+            target_key=TARGET_SEED,
+            attempt_dir=tmp_path / "attempt",
+            max_steps=160,
+        )
+
+
+def test_refinement_source_refuses_settings_and_population_drift(tmp_path):
+    manifest_path, _manifest_sha256 = _build_refinement_source(tmp_path)
+    manifest = json.loads(manifest_path.read_text())
+    manifest["settings"] = {**asdict(DftSettings()), "xc": "pbe"}
+    ensemble.atomic_json(manifest_path, manifest)
+    with pytest.raises(ValueError, match="settings mismatch"):
+        ensemble.validate_refinement_source(
+            manifest_path,
+            expected_manifest_sha256=ensemble.sha256_path(manifest_path),
+            expected_log_sha256=ensemble.sha256_path(
+                manifest_path.parent / "ensemble.log"
+            ),
+            target_key=TARGET_SEED,
+            attempt_dir=tmp_path / "attempt",
+            max_steps=160,
+        )
+
+    source_root = manifest_path.parent
+    shutil.rmtree(source_root)
+    manifest_path, _manifest_sha256 = _build_refinement_source(tmp_path)
+    manifest = json.loads(manifest_path.read_text())
+    other_key = "si-acid:4w:bridge-donor-chain"
+    manifest["seeds"][other_key]["status"] = "failed"
+    ensemble.atomic_json(manifest_path, manifest)
+    with pytest.raises(ValueError, match="sole failed"):
+        ensemble.validate_refinement_source(
+            manifest_path,
+            expected_manifest_sha256=ensemble.sha256_path(manifest_path),
+            expected_log_sha256=ensemble.sha256_path(
+                manifest_path.parent / "ensemble.log"
+            ),
+            target_key=TARGET_SEED,
+            attempt_dir=tmp_path / "attempt",
+            max_steps=160,
+        )
+
+
+def test_refinement_restarts_exact_endpoint_once_and_preserves_source(
+    tmp_path, monkeypatch
+):
+    source, manifest_path = _load_refinement_source(tmp_path)
+    before = {
+        path.relative_to(manifest_path.parent): ensemble.sha256_path(path)
+        for path in manifest_path.parent.rglob("*")
+        if path.is_file()
+    }
+    source_endpoint = (
+        ensemble._seed_dir(manifest_path.parent, "si-acid", 3, "bridge-donor-chain")
+        / "optimized.xyz"
+    )
+    expected = ensemble.phase1.load_xyz(
+        source_endpoint, ensemble._template("si-acid", 3, "bridge-donor-chain")
+    )
+    optimizer_calls = []
+    gate_calls = []
+
+    def fake_optimize(cluster, settings, *, max_steps):
+        optimizer_calls.append((cluster.coords.copy(), settings, max_steps))
+        return SimpleNamespace(cluster=cluster, converged=True)
+
+    def fake_gate(seed_dir, optimized, settings, **identity):
+        gate_calls.append((seed_dir, optimized, settings, identity))
+        return {
+            "status": "rejected",
+            "reason": "bridge proton transferred",
+            "basin_signature": [False],
+            "n_imaginary": None,
+            "electronic_hartree": None,
+            "minimum_pair_distance_a": ensemble.minimum_pair_distance(optimized),
+        }
+
+    monkeypatch.setattr(ensemble, "optimize_bounded", fake_optimize)
+    monkeypatch.setattr(ensemble, "evaluate_optimized_endpoint", fake_gate)
+    attempt_dir = _attempt_dir(source)
+    resolution = ensemble.run_failed_endpoint_refinement(
+        source,
+        attempt_dir=attempt_dir,
+        max_steps=160,
+        log_path="refinement.log",
+    )
+
+    assert len(optimizer_calls) == 1
+    np.testing.assert_allclose(optimizer_calls[0][0], expected.coords)
+    assert optimizer_calls[0][1] == source.settings
+    assert optimizer_calls[0][2] == 160
+    assert len(gate_calls) == 1
+    assert gate_calls[0][3] == {
+        "reaction": "si-acid",
+        "n_water": 3,
+        "family": "bridge-donor-chain",
+    }
+    assert resolution["summary"]["si_seed_count"] == 16
+    assert resolution["summary"]["si_status_counts"]["rejected"] == 16
+    assert resolution["summary"]["verdict"] == (
+        "model-valid-no-go-pre-equilibrated-bridge"
+    )
+    assert len(resolution["effective_seed_refs"]) == 16
+    assert resolution["effective_seed_refs"][TARGET_SEED]["source"] == (
+        "a1d-refinement"
+    )
+    receipt = attempt_dir / resolution["attempt"]["receipt_path"]
+    assert ensemble.sha256_path(receipt) == resolution["attempt"]["receipt_sha256"]
+    after = {
+        path.relative_to(manifest_path.parent): ensemble.sha256_path(path)
+        for path in manifest_path.parent.rglob("*")
+        if path.is_file()
+    }
+    assert after == before
+    with pytest.raises(RuntimeError, match="second step budget"):
+        ensemble.run_failed_endpoint_refinement(
+            source,
+            attempt_dir=attempt_dir,
+            max_steps=160,
+            log_path="refinement.log",
+        )
+    with pytest.raises(RuntimeError, match="attempt directory is fixed"):
+        ensemble.run_failed_endpoint_refinement(
+            source,
+            attempt_dir=attempt_dir.parent / "alternate-budget",
+            max_steps=160,
+            log_path="refinement.log",
+        )
+    assert len(optimizer_calls) == 1
+
+
+def test_refinement_exhaustion_remains_incomplete(tmp_path, monkeypatch):
+    source, _manifest_path = _load_refinement_source(tmp_path)
+    monkeypatch.setattr(
+        ensemble,
+        "optimize_bounded",
+        lambda cluster, _settings, *, max_steps: SimpleNamespace(
+            cluster=cluster, converged=False, max_steps=max_steps
+        ),
+    )
+
+    resolution = ensemble.run_failed_endpoint_refinement(
+        source,
+        attempt_dir=_attempt_dir(source),
+        max_steps=160,
+        log_path="refinement.log",
+    )
+
+    assert resolution["attempt"]["status"] == "failed"
+    assert resolution["summary"]["si_status_counts"]["failed"] == 1
+    assert resolution["summary"]["verdict"] == "incomplete-si-screen"
+
+
+def test_refinement_gate_failure_does_not_relabel_optimizer_exhaustion(
+    tmp_path, monkeypatch
+):
+    source, _manifest_path = _load_refinement_source(tmp_path)
+    monkeypatch.setattr(
+        ensemble,
+        "optimize_bounded",
+        lambda cluster, _settings, *, max_steps: SimpleNamespace(
+            cluster=cluster, converged=True, max_steps=max_steps
+        ),
+    )
+    monkeypatch.setattr(
+        ensemble,
+        "evaluate_optimized_endpoint",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("frequency receipt invalid")
+        ),
+    )
+
+    resolution = ensemble.run_failed_endpoint_refinement(
+        source,
+        attempt_dir=_attempt_dir(source),
+        max_steps=160,
+        log_path="refinement.log",
+    )
+
+    receipt = json.loads(
+        (_attempt_dir(source) / resolution["attempt"]["receipt_path"]).read_text()
+    )
+    record = receipt["record"]
+    assert record["production_converged"] is True
+    assert record["failure_kind"] == "endpoint-evaluation-error"
+    assert record["status"] == "failed"
+
+
+def test_refinement_finalization_failure_persists_incomplete_without_retry(
+    tmp_path, monkeypatch
+):
+    source, _manifest_path = _load_refinement_source(tmp_path)
+    optimizer_calls = 0
+
+    def fake_optimize(cluster, _settings, *, max_steps):
+        nonlocal optimizer_calls
+        optimizer_calls += 1
+        return SimpleNamespace(cluster=cluster, converged=False, max_steps=max_steps)
+
+    real_atomic_json = ensemble.atomic_json
+
+    def fail_receipt(path, payload):
+        if path.name == "receipt.json":
+            raise OSError("simulated receipt I/O failure")
+        real_atomic_json(path, payload)
+
+    monkeypatch.setattr(ensemble, "optimize_bounded", fake_optimize)
+    monkeypatch.setattr(ensemble, "atomic_json", fail_receipt)
+    resolution = ensemble.run_failed_endpoint_refinement(
+        source,
+        attempt_dir=_attempt_dir(source),
+        max_steps=160,
+        log_path="refinement.log",
+    )
+
+    assert optimizer_calls == 1
+    assert resolution["status"] == "incomplete-artifact-persistence"
+    assert resolution["attempt"]["budget_spent"] is True
+    persisted = json.loads(
+        (_attempt_dir(source) / "refinement-manifest.json").read_text()
+    )
+    assert persisted["status"] == "incomplete-artifact-persistence"
+
+
+def test_refinement_log_override_is_rejected_before_open(tmp_path):
+    protected = tmp_path / "protected-source.json"
+    protected.write_text("immutable\n")
+    before = ensemble.sha256_path(protected)
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path(ensemble.__file__)),
+            "--refine-failed-endpoint",
+            TARGET_SEED,
+            "--log",
+            str(protected),
+            "--help",
+        ],
+        cwd=Path(ensemble.__file__).resolve().parent.parent,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "--log is forbidden" in result.stderr
+    assert ensemble.sha256_path(protected) == before
+
+
+def test_accepted_refinement_screens_only_exact_matched_al(tmp_path, monkeypatch):
+    source, _manifest_path = _load_refinement_source(tmp_path)
+    monkeypatch.setattr(
+        ensemble,
+        "optimize_bounded",
+        lambda cluster, _settings, *, max_steps: SimpleNamespace(
+            cluster=cluster, converged=True, max_steps=max_steps
+        ),
+    )
+    monkeypatch.setattr(
+        ensemble,
+        "evaluate_optimized_endpoint",
+        lambda *_args, **_kwargs: {
+            "status": "accepted",
+            "reason": None,
+            "basin_signature": [False, True, True, 1, 6, 0],
+            "n_imaginary": 0,
+            "electronic_hartree": -100.0,
+            "minimum_pair_distance_a": 1.0,
+        },
+    )
+    al_calls = []
+
+    def fake_al_screen(manifest, manifest_path, **kwargs):
+        al_calls.append(kwargs)
+        record = {
+            "status": "rejected",
+            "reaction": kwargs["reaction"],
+            "water_count": kwargs["n_water"],
+            "family": kwargs["family"],
+            "reason": "matched Al basin rejected",
+        }
+        manifest["seeds"][
+            ensemble._seed_key(kwargs["reaction"], kwargs["n_water"], kwargs["family"])
+        ] = record
+        ensemble.atomic_json(manifest_path, manifest)
+        return record
+
+    monkeypatch.setattr(ensemble, "screen_seed", fake_al_screen)
+    resolution = ensemble.run_failed_endpoint_refinement(
+        source,
+        attempt_dir=_attempt_dir(source),
+        max_steps=160,
+        log_path="refinement.log",
+    )
+
+    assert len(al_calls) == 1
+    assert al_calls[0]["reaction"] == "al-acid"
+    assert al_calls[0]["n_water"] == 3
+    assert al_calls[0]["family"] == "bridge-donor-chain"
+    assert resolution["summary"]["verdict"] == "incomplete-matched-screen"
+    assert resolution["summary"]["matched_receipt"] is None
+
+
+def test_matched_handoff_failure_cannot_publish_completed_verdict(
+    tmp_path, monkeypatch
+):
+    source, _manifest_path = _load_refinement_source(tmp_path)
+    monkeypatch.setattr(
+        ensemble,
+        "optimize_bounded",
+        lambda cluster, _settings, *, max_steps: SimpleNamespace(
+            cluster=cluster, converged=True, max_steps=max_steps
+        ),
+    )
+    monkeypatch.setattr(
+        ensemble,
+        "evaluate_optimized_endpoint",
+        lambda *_args, **_kwargs: {
+            "status": "accepted",
+            "reason": None,
+            "basin_signature": [False, True, True, 1, 6, 0],
+            "n_imaginary": 0,
+            "electronic_hartree": -100.0,
+            "minimum_pair_distance_a": 1.0,
+        },
+    )
+
+    def fake_al_screen(manifest, manifest_path, **kwargs):
+        record = {
+            "status": "accepted",
+            "reaction": kwargs["reaction"],
+            "water_count": kwargs["n_water"],
+            "family": kwargs["family"],
+            "reason": None,
+            "electronic_hartree": -101.0,
+            "artifacts": {},
+        }
+        manifest["seeds"][
+            ensemble._seed_key(kwargs["reaction"], kwargs["n_water"], kwargs["family"])
+        ] = record
+        ensemble.atomic_json(manifest_path, manifest)
+        return record
+
+    monkeypatch.setattr(ensemble, "screen_seed", fake_al_screen)
+    monkeypatch.setattr(
+        ensemble,
+        "_write_refinement_matched_receipt",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("matched receipt validation failed")
+        ),
+    )
+    resolution = ensemble.run_failed_endpoint_refinement(
+        source,
+        attempt_dir=_attempt_dir(source),
+        max_steps=160,
+        log_path="refinement.log",
+    )
+
+    assert resolution["status"] == "incomplete-artifact-persistence"
+    persisted = json.loads(
+        (_attempt_dir(source) / "refinement-manifest.json").read_text()
+    )
+    assert persisted["status"] == "incomplete-artifact-persistence"
+    assert persisted["summary"]["verdict"] == "incomplete-artifact-persistence"
