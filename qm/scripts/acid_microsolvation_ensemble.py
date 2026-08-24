@@ -50,6 +50,7 @@ SCHEMA_VERSION = 1
 WATER_COUNTS = (3, 4, 5, 6)
 TERMINAL_STATUSES = frozenset({"accepted", "rejected", "failed", "blocked"})
 MIN_PAIR_DISTANCE_A = 0.85
+HF_PREOPT_MAX_STEPS = 40
 
 
 @dataclass(frozen=True)
@@ -313,7 +314,7 @@ def screen_seed(
             preopt_result = optimize_bounded(
                 seed,
                 DftSettings(xc="hf", basis="sto-3g"),
-                max_steps=max_steps,
+                max_steps=HF_PREOPT_MAX_STEPS,
             )
             preoptimization_converged = preopt_result.converged
             preopt = preopt_result.cluster
@@ -457,7 +458,12 @@ def _expected_manifest(settings: DftSettings, max_steps: int, log_path: str) -> 
         "conformer_version": phase1.ACID_CONFORMER_VERSION,
         "gate_version": phase1.ACID_CONFORMER_GATE_VERSION,
         "settings": asdict(settings),
-        "preoptimization": {"xc": "hf", "basis": "sto-3g"},
+        "preoptimization": {
+            "xc": "hf",
+            "basis": "sto-3g",
+            "max_steps": HF_PREOPT_MAX_STEPS,
+            "convergence_is_advisory": True,
+        },
         "max_steps": max_steps,
         "water_counts": list(WATER_COUNTS),
         "families": list(ACID_MICROSOLVATION_FAMILIES),
