@@ -53,6 +53,15 @@ ensemble**, not another single-shell or water-count retry.
 
 ## Progress
 
+- 2026-08-24 — production campaign launched from pushed head `6e4cd646` with
+  exact run root `qm/runs/phase1/acid-microsolvation-ensemble-v2-g1-b3lyp-
+  def2-svp`, durable `ensemble.log`, advisory HF bound 40, load-bearing B3LYP
+  bound 160, OMP/MKL/OpenBLAS 16, nice 10, and process-scoped 16 GiB memlock.
+  OS PID `4160112` is live under the GPU-isolated lane; both email extraction
+  pipelines and Honcho inference containers are stopped, with bounded systemd
+  dead-man `a1c-qm-deadman-restart.timer` due 2026-08-24 13:37 PDT. The
+  manifest is atomic and every completed seed is hash-receipted, so the next
+  worker must inspect this PID/manifest/log and never launch a competing copy.
 - 2026-08-24 — campaign preflight correction: the first GPU-isolated launch was
   deliberately stopped during seed 1's HF pre-relaxation at step 76/100, before
   any production B3LYP result or accepted receipt. geomeTRIC convergence remains
