@@ -154,6 +154,8 @@ ACID_MICROSOLVATION_FAMILIES = (
     "split-bridge-attacker",
     "compact-cyclic-relay",
 )
+CONCERTED_ACID_WATER_COUNTS = (3, 4)
+CONCERTED_ACID_FAMILIES = ("bridge-donor-chain", "compact-cyclic-relay")
 
 
 def _validate_acid_water_count(n_water: int) -> None:
@@ -722,6 +724,189 @@ def protonated_bridge_complex(
             f"the residual H2O is the attacker in {n_water} explicit waters"
             f"{family_note}"
         ),
+    )
+
+
+@dataclass(frozen=True)
+class ConcertedRelayEndpoints:
+    """Atom-matched endpoints for one concerted hydronium relay path."""
+
+    reactant: Cluster
+    product: Cluster
+    ow_index: int
+    transferred_h_index: int
+    relay_h_indices: tuple[int, ...]
+    solvent_oxygen_indices: tuple[int, ...]
+
+
+def concerted_acid_relay_endpoints(
+    dimer: Cluster,
+    *,
+    n_water: int,
+    family: str,
+) -> ConcertedRelayEndpoints:
+    """Build unconstrained R/P seeds for concerted acid hydrolysis.
+
+    Atom order matches the A1c contract: dimer atoms, hydronium ``O/H/H/H``,
+    then ``O/H/H`` shell waters. The reactant has an intact, unprotonated
+    bridge and H3O+. The product transfers exactly H1 to Obr, forms Si--Ow,
+    and cleaves Si--Obr. These are seeds; no production coordinate is frozen.
+    """
+    if n_water not in CONCERTED_ACID_WATER_COUNTS:
+        raise ValueError("concerted acid relay requires exactly 3 or 4 waters")
+    if family not in CONCERTED_ACID_FAMILIES:
+        allowed = ", ".join(CONCERTED_ACID_FAMILIES)
+        raise ValueError(f"concerted acid relay family must be one of {allowed}")
+
+    # Reuse A1c's non-colliding oxygen topology and atom order, then reverse its
+    # proton wire: hydronium -> shell -> Obr. Returning H1 from Obr to Ow is the
+    # load-bearing distinction from the retired pre-equilibrium mechanism.
+    template = protonated_bridge_complex(
+        dimer,
+        n_water=n_water,
+        conformer_family=family,
+    )
+    ow_index = len(dimer.symbols)
+    transferred_h = ow_index + 1
+    shell_oxygens = tuple(ow_index + 4 + 3 * index for index in range(n_water - 1))
+    solvent_oxygens = (ow_index, *shell_oxygens)
+    coords = template.coords.copy()
+
+    attacker = coords[ow_index]
+    donor_target = 0 if family == "compact-cyclic-relay" else shell_oxygens[-1]
+    hydronium_seed = hydronium()
+    relative = hydronium_seed.coords - hydronium_seed.coords[0]
+    rotation = _rotation_between(relative[1], coords[donor_target] - attacker)
+    oriented_hydronium = relative @ rotation.T + attacker
+    coords[ow_index + 1 : ow_index + 4] = oriented_hydronium[1:]
+    if family == "bridge-donor-chain":
+        for position, oxygen_index in enumerate(shell_oxygens):
+            target_index = 0 if position == 0 else shell_oxygens[position - 1]
+            water_block = _water_donating_to(
+                coords[oxygen_index], coords[target_index], np.array([0.0, 0.0, 1.0])
+            )
+            coords[oxygen_index + 1] = water_block[1]
+            coords[oxygen_index + 2] = water_block[2]
+
+    reactant = Cluster(
+        name=f"{dimer.name}+concerted-acid-{n_water}w-{family}-reactant",
+        symbols=list(template.symbols),
+        coords=coords,
+        charge=template.charge,
+        spin=template.spin,
+        frozen_indices=list(template.frozen_indices),
+        site_family=template.site_family,
+        note="intact unprotonated bridge; H3O+ -> solvent relay -> Obr",
+    )
+
+    product_coords = (
+        coords.copy() if family == "bridge-donor-chain" else template.coords.copy()
+    )
+    # Dimer atom order is fixed: 1,3..8 are the attacked Si(OH)3 fragment.
+    old_si = product_coords[1].copy()
+    old_attacker = product_coords[ow_index].copy()
+    separation = 1.15 * _unit(old_si - product_coords[0])
+    for index in (1, 3, 4, 5, 6, 7, 8):
+        product_coords[index] += separation
+    attack_direction = _unit(old_attacker - old_si)
+    new_attacker = product_coords[1] + 1.70 * attack_direction
+    solvent_shift = new_attacker - old_attacker
+    product_coords[ow_index:] += solvent_shift
+    if family == "bridge-donor-chain":
+        # Grotthuss-style physical-H relay: H1 moves from H3O+ to the last
+        # shell water, and each shell donor proton moves one owner toward Obr.
+        bridge_proton = shell_oxygens[0] + 1
+        product_coords[bridge_proton] = product_coords[0] + R_O_H * _unit(
+            product_coords[shell_oxygens[0]] - product_coords[0]
+        )
+        for position, oxygen_index in enumerate(shell_oxygens):
+            previous_owner = 0 if position == 0 else shell_oxygens[position - 1]
+            incoming_proton = (
+                shell_oxygens[position + 1] + 1
+                if position + 1 < len(shell_oxygens)
+                else transferred_h
+            )
+            water_block = _water_centered(
+                product_coords[oxygen_index],
+                product_coords[oxygen_index] - product_coords[previous_owner],
+            )
+            product_coords[incoming_proton] = water_block[1]
+            product_coords[oxygen_index + 2] = water_block[2]
+        relay_h_indices = (transferred_h, *(oxygen + 1 for oxygen in shell_oxygens))
+    else:
+        product_coords[transferred_h] = product_coords[0] + R_O_H * _unit(
+            product_coords[shell_oxygens[0]] - product_coords[0]
+        )
+        bridge_proton = transferred_h
+        relay_h_indices = (transferred_h,)
+
+    # Reorient the product Ow hydrogens away from both the attacked framework
+    # and the translated shell. Pick the deterministic candidate with the
+    # largest nearest-neighbor clearance; this is a geometry seed, not a gate.
+    normal = np.cross(product_coords[1] - product_coords[0], attack_direction)
+    if np.linalg.norm(normal) < 1.0e-8:
+        normal = np.array([0.0, 0.0, 1.0])
+    shell_center = np.mean(product_coords[list(shell_oxygens)], axis=0)
+    candidate_directions = (
+        new_attacker - product_coords[7],
+        new_attacker - shell_center,
+        new_attacker - product_coords[1],
+        normal,
+        -normal,
+    )
+    h2, h3 = ow_index + 2, ow_index + 3
+    fixed = np.delete(product_coords, [ow_index, h2, h3], axis=0)
+    other_oxygen_indices = [
+        index
+        for index, symbol in enumerate(template.symbols)
+        if symbol == "O" and index != ow_index
+    ]
+    best_hydrogens = None
+    best_score = (-1, -math.inf)
+    for direction in candidate_directions:
+        water_block = _water_centered(new_attacker, direction)
+        hydrogens = np.asarray(water_block[1:])
+        clearance = min(
+            float(np.linalg.norm(hydrogens[0] - hydrogens[1])),
+            float(
+                np.min(
+                    np.linalg.norm(hydrogens[:, None, :] - fixed[None, :, :], axis=2)
+                )
+            ),
+        )
+        oxygen_clearance = float(
+            np.min(
+                np.linalg.norm(
+                    hydrogens[:, None, :]
+                    - product_coords[other_oxygen_indices][None, :, :],
+                    axis=2,
+                )
+            )
+        )
+        score = (int(oxygen_clearance >= 1.05), clearance)
+        if score > best_score:
+            best_score = score
+            best_hydrogens = hydrogens
+    assert best_hydrogens is not None
+    product_coords[[h2, h3]] = best_hydrogens
+
+    product = Cluster(
+        name=f"{dimer.name}+concerted-acid-{n_water}w-{family}-product",
+        symbols=list(template.symbols),
+        coords=product_coords,
+        charge=template.charge,
+        spin=template.spin,
+        frozen_indices=list(template.frozen_indices),
+        site_family=template.site_family,
+        note="hydrolyzed product; hydronium proton delivered to Obr during attack",
+    )
+    return ConcertedRelayEndpoints(
+        reactant=reactant,
+        product=product,
+        ow_index=ow_index,
+        transferred_h_index=bridge_proton,
+        relay_h_indices=relay_h_indices,
+        solvent_oxygen_indices=solvent_oxygens,
     )
 
 

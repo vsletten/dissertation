@@ -3,11 +3,11 @@
 The stack per SURVEY.md §4.1: Sella does partitioned-RFO saddle-point
 optimization over any ASE calculator; PySCF supplies energies/forces
 (CPU or GPU via ``DftSettings.use_gpu``). Verification is quarry's own:
-a TS must have exactly one imaginary mode, and the quick-IRC check
-(displace ± along that mode, relax to minima) must connect reactant and
-product basins. Full Gonzalez-Schlegel IRC can land later if a reaction
-needs it; for hydrolysis barriers the displace-and-relax check is the
-standard first line.
+a TS must have exactly one imaginary mode.
+Most campaigns use the cheap quick-IRC check (displace ± along that mode,
+then relax to minima). Mechanisms whose contract requires the actual
+mass-weighted path use :func:`full_irc`, backed by Sella's
+Gonzalez--Schlegel integrator.
 """
 
 from __future__ import annotations
@@ -415,6 +415,68 @@ def quick_irc(
         displaced = replace(ts, coords=ts.coords + sign * step, name=f"{ts.name}-{tag}")
         ends.append(optimize(displaced, settings, max_steps=max_steps))
     return ends[0], ends[1]
+
+
+def full_irc(
+    ts: Cluster,
+    settings: DftSettings,
+    *,
+    fmax_ev_a: float = 0.05,
+    fmax_inner_ev_a: float = 0.01,
+    max_steps: int = 400,
+    step_size_a: float = 0.10,
+    trajectory: str | Path | None = None,
+    logfile: str | Path | None = None,
+) -> tuple[Cluster, Cluster]:
+    """Trace both Gonzalez--Schlegel IRC directions to true minima.
+
+    One :class:`sella.IRC` instance is deliberately reused for ``forward`` and
+    ``reverse``. Sella caches the transition-state Hessian and restores it when
+    the second direction starts; constructing two unrelated optimizers would
+    lose that shared path identity. Both directions are bounded and must report
+    convergence. The returned clusters preserve the input atom order,
+    electronic state, and frozen-atom contract.
+    """
+
+    from ase import Atoms
+    from ase.constraints import FixAtoms
+    from sella import IRC
+
+    if max_steps <= 0:
+        raise ValueError("full IRC max_steps must be positive")
+    if fmax_ev_a <= 0.0 or fmax_inner_ev_a <= 0.0:
+        raise ValueError("full IRC force tolerances must be positive")
+    if step_size_a <= 0.0:
+        raise ValueError("full IRC step size must be positive")
+
+    atoms = Atoms(symbols=ts.symbols, positions=ts.coords)
+    atoms.calc = make_ase_calculator(settings, ts.charge, ts.spin)
+    if ts.frozen_indices:
+        atoms.set_constraint(FixAtoms(indices=ts.frozen_indices))
+
+    irc = IRC(
+        atoms,
+        trajectory=str(trajectory) if trajectory is not None else None,
+        logfile=str(logfile) if logfile is not None else "-",
+        dx=step_size_a,
+    )
+    endpoints: list[Cluster] = []
+    for direction, suffix in (("forward", "irc-forward"), ("reverse", "irc-reverse")):
+        converged = irc.run(
+            fmax=fmax_ev_a,
+            fmax_inner=fmax_inner_ev_a,
+            steps=max_steps,
+            direction=direction,
+        )
+        if not converged:
+            raise RuntimeError(
+                f"full IRC {direction} direction did not converge within "
+                f"{max_steps} steps"
+            )
+        endpoints.append(
+            replace(ts, coords=atoms.positions.copy(), name=f"{ts.name}-{suffix}")
+        )
+    return endpoints[0], endpoints[1]
 
 
 def constrained_scan(

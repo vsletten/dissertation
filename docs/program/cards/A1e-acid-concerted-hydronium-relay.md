@@ -65,6 +65,15 @@ along the same elementary path as water attack and Si--Obr weakening/cleavage.
 
 ## Progress
 
+- 2026-08-24 12:41 PDT — implementation checkpoint: added mechanism-v1/gate-v1
+  unconstrained concerted endpoint builders for the exact 3/4-water ×
+  bridge-chain/compact-cycle scope, including stable A1c atom order and an
+  explicit physical-H Grotthuss relay. The finite driver now fail-closes every
+  bounded stage, persists CI-NEB pre-climb/climb checkpoints, requires a fresh
+  directed saddle, a coupled relay/attack/cleavage one-mode Hessian, and Sella's
+  full bidirectional Gonzalez–Schlegel IRC before barrier admission. Twenty-seven
+  new regressions plus the cluster/TS suites are green (**132 passed**); targeted
+  Ruff/format/diff and CLI-help gates pass. No production QM path has started.
 - 2026-08-24 — created from A1c/A1d's model-valid finite-ensemble NO-GO. All 16
   unconstrained pre-equilibrated Si bridge seeds are conclusive rejections; the
   concerted hydronium/proton-relay path is now the only authorized acid-mechanism
