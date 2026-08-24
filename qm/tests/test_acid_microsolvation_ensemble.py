@@ -100,9 +100,6 @@ def test_screen_seed_rejects_exhausted_optimization_without_frequency(
     manifest = {"seeds": {}}
     frequency_called = False
 
-    def exhausted(*_args, **_kwargs):
-        raise RuntimeError("geometry optimization did not converge within 1 steps")
-
     def forbidden_frequency(*_args, **_kwargs):
         nonlocal frequency_called
         frequency_called = True
@@ -115,7 +112,6 @@ def test_screen_seed_rejects_exhausted_optimization_without_frequency(
             cluster=cluster, converged=False
         ),
     )
-    monkeypatch.setattr(ensemble, "optimize", exhausted)
     monkeypatch.setattr(ensemble, "frequencies", forbidden_frequency)
 
     record = ensemble.screen_seed(
@@ -143,9 +139,6 @@ def test_screen_seed_rejects_malformed_frequency_receipt(tmp_path, monkeypatch):
         lambda cluster, _settings, max_steps: SimpleNamespace(
             cluster=cluster, converged=True
         ),
-    )
-    monkeypatch.setattr(
-        ensemble, "optimize", lambda cluster, _settings, max_steps: cluster
     )
     monkeypatch.setattr(
         ensemble,

@@ -41,7 +41,6 @@ from quarry.clusters import (  # noqa: E402
 from quarry.pipeline import (  # noqa: E402
     DftSettings,
     frequencies,
-    optimize,
     optimize_bounded,
 )
 from scripts import phase1_xiao_lasaga as phase1  # noqa: E402
@@ -310,6 +309,7 @@ def screen_seed(
         }
     else:
         preoptimization_converged = None
+        production_converged = None
         try:
             preopt_result = optimize_bounded(
                 seed,
@@ -319,10 +319,16 @@ def screen_seed(
             preoptimization_converged = preopt_result.converged
             preopt = preopt_result.cluster
             phase1.save_xyz(preopt, seed_dir / "preoptimized.xyz")
-            optimized = optimize(preopt, settings, max_steps=max_steps)
+            production_result = optimize_bounded(preopt, settings, max_steps=max_steps)
+            production_converged = production_result.converged
+            optimized = production_result.cluster
             optimized_path = seed_dir / "optimized.xyz"
             phase1.save_xyz(optimized, optimized_path)
             optimized = phase1.load_xyz(optimized_path, preopt)
+            if not production_converged:
+                raise RuntimeError(
+                    f"geometry optimization did not converge within {max_steps} steps"
+                )
             dimer = disilicate() if reaction == "si-acid" else aluminosilicate_dimer()
             ow_index = len(dimer.symbols)
             proton_indices, solvent_oxygen_indices = phase1.acid_mobile_indices(
@@ -378,6 +384,7 @@ def screen_seed(
                 "family": family,
                 "reason": reason,
                 "preoptimization_converged": preoptimization_converged,
+                "production_converged": production_converged,
                 "basin_signature": list(signature),
                 "n_imaginary": n_imaginary,
                 "electronic_hartree": electronic_hartree,
@@ -395,6 +402,7 @@ def screen_seed(
                 "family": family,
                 "reason": f"{type(exc).__name__}: {exc}",
                 "preoptimization_converged": preoptimization_converged,
+                "production_converged": production_converged,
                 "artifacts": _artifact_hashes(
                     seed_dir,
                     ("seed.xyz", "preoptimized.xyz", "optimized.xyz", "minimum.json"),

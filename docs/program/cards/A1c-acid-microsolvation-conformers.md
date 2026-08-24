@@ -61,7 +61,12 @@ ensemble**, not another single-shell or water-count retry.
   its bounded last geometry to the production optimizer instead of burning the
   entire ensemble on a non-load-bearing precondition. Fresh
   293-test/Ruff/format/diff gates pass; the stopped
-  seed's running checkpoint will be quarantined automatically on relaunch.
+  seed's running checkpoint was quarantined before relaunch. A second launch
+  proved the first production endpoint was close but unconverged at step 100
+  (RMS gradient `6.018e-4`, max `1.663e-3`) and was stopped during seed 2;
+  the runner now preserves every bounded production endpoint plus its explicit
+  convergence bit before failing closed, so a larger bounded retry has durable
+  evidence instead of terminal scrollback.
 - 2026-08-24 — implementation checkpoint: four deterministic 3--6-water
   families now carry explicit connected donor/acceptor graphs, stable O/H/H
   indices, collision gates, and exact physical-H ownership. The finite Si-first
