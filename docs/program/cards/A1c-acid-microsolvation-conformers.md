@@ -1,11 +1,12 @@
 # A1c-acid-microsolvation-conformers — finite matched proton-relay ensemble
 
-- status: active
+- status: blocked
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaign)
 - depends: A1b microsolvation driver/receipt hardening merged
 - claimed-by: hermes-workstation
+- blocked-on: A1d-acid-3w-bridge-convergence
 
 ## Objective
 
@@ -53,6 +54,26 @@ ensemble**, not another single-shell or water-count retry.
 
 ## Progress
 
+- 2026-08-24 05:59 PDT — **DEVIATION / SCIENTIFIC BLOCKER:** the finite
+  production campaign completed all 16 Si seeds, but its exact final verdict is
+  `incomplete-si-screen`, not a matched minimum and not a model-valid NO-GO.
+  Fifteen B3LYP/def2-SVP/DF optimizations converged and were rejected by the
+  exact protonated-bridge/physical-H occupancy gates. The sole exception,
+  `si-acid:3w:bridge-donor-chain`, exhausted the 160-step production bound and
+  remains a hash-receipted `failed` endpoint. Summary: accepted 0, rejected 15,
+  failed 1, blocked 0; no Si basin, Al screen, Hessian, matched barrier, or acid
+  ordering was emitted. The ignored run tree was copied byte-for-byte before
+  teardown risk to
+  `/mnt/data/vsletten/dissertation-data/task197-a1c-acid-conformers-20260824/acid-microsolvation-ensemble-v2-g1-b3lyp-def2-svp`;
+  manifest SHA-256 is
+  `471a099c01c3fd8107409fd087e033bdd5da167cc6d41f09475a6a661cae5ac6`
+  and log SHA-256 is
+  `80729b9ed1dd61728f4959f29e3adb8151341a5764a779559ded1610005af312`.
+  Email pipelines and both Honcho inference containers were restored immediately
+  after process exit; the 13:37 dead-man was cancelled. Executable card
+  `A1d-acid-3w-bridge-convergence` owns the one-seed fresh-optimizer refinement
+  and strict final-verdict closeout. A1c remains blocked rather than laundering
+  optimizer exhaustion into the redesign-triggering all-seed NO-GO.
 - 2026-08-24 04:21 PDT — bounded worker handoff from the live production
   campaign. PID `4160112` remains healthy on exact pushed code; the atomic
   manifest now has five terminal Si records (four connectivity/occupancy
@@ -100,3 +121,26 @@ ensemble**, not another single-shell or water-count retry.
 - 2026-08-23 — created from A1b's 3--6-water deterministic-shell NO-GO. The
   count sweep proved four seeds fail but explicitly did not claim the complete
   microsolvated potential-energy surface was exhausted.
+
+## Result
+
+- Implementation is complete and remotely durable on branch
+  `agents/A1c-acid-microsolvation-conformers`: four deterministic connected
+  proton-relay families for each water count 3--6; exact atom/H ownership;
+  collision/connectivity/occupancy gates; bounded optimization and frequency
+  sequencing; atomic hash-bound receipts; heavy-atom-RMSD plus energy basin
+  deduplication; and fail-closed matched Si/Al barrier handoff.
+- Production ran the exact finite 16-seed Si ensemble at
+  B3LYP/def2-SVP/DF. The machine result is `15 rejected / 1 failed / 0
+  accepted`; the single failure is optimizer exhaustion for the three-water
+  bridge-donor chain. Therefore A1c is blocked on
+  `A1d-acid-3w-bridge-convergence`. No Al minimum, barrier, acid ordering, or
+  concerted-mechanism redesign claim was fabricated.
+- Durable external evidence:
+  `/mnt/data/vsletten/dissertation-data/task197-a1c-acid-conformers-20260824/acid-microsolvation-ensemble-v2-g1-b3lyp-def2-svp`
+  (1.3 MiB; manifest SHA-256
+  `471a099c01c3fd8107409fd087e033bdd5da167cc6d41f09475a6a661cae5ac6`;
+  log SHA-256
+  `80729b9ed1dd61728f4959f29e3adb8151341a5764a779559ded1610005af312`).
+- Final verification and PR/teardown receipts are recorded in the associated
+  mission-control TASK-197 Result.
