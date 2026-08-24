@@ -7,6 +7,7 @@ optimization at r(Si-Obr)=2.46 with the new bonds held, then run the
 directed Cartesian Sella (#40 machinery: reaction_path_vector over the
 reactive core) and leave ts.xyz for the campaign driver to verify.
 """
+
 import os
 import sys
 from pathlib import Path
@@ -44,6 +45,7 @@ RUN = (
 BR, SI, OW = 0, 1, 63
 ACTIVE = [0, 1, 63, 64, 65]  # bridge O, attacked Si, water O + H's
 
+
 def _cli():
     import argparse
 
@@ -72,7 +74,11 @@ if crest_path.exists():
 else:
     log("rebuilding TS2 crest: constrained opt at r(Si-Obr)=2.46, new bonds held")
     pts = constrained_scan(
-        product, settings, atom_i=SI, atom_j=BR, distances_a=[2.46],
+        product,
+        settings,
+        atom_i=SI,
+        atom_j=BR,
+        distances_a=[2.46],
         fixed_distances=[(SI, OW, 1.70), (BR, 64, 0.98)],
     )
     crest = pts[0][2]
@@ -84,8 +90,10 @@ log(
 )
 mode = reaction_path_vector(intermediate, product, active_indices=ACTIVE)
 ts = find_ts(
-    crest, settings,
-    initial_mode=mode, internal=False,
+    crest,
+    settings,
+    initial_mode=mode,
+    internal=False,
     trajectory=str(RUN / "sella.ts2.traj"),
 )
 save_xyz(ts, RUN / "ts.xyz")
