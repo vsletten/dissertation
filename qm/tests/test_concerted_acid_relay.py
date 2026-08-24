@@ -347,6 +347,31 @@ def test_campaign_triggers_only_the_exact_al_match_after_accepted_si(
     ]
 
 
+@pytest.mark.parametrize("al_status", ["failed", "blocked"])
+def test_campaign_is_incomplete_when_required_matched_al_fails_or_is_blocked(
+    monkeypatch, tmp_path, al_status
+):
+    def fake_run(run_dir, settings, bounds, *, model, n_water, family):
+        accepted_si = model == "si" and n_water == 3 and family == "compact-cyclic-relay"
+        if accepted_si:
+            status = "accepted"
+        elif model == "al":
+            status = al_status
+        else:
+            status = "rejected"
+        return _write_fake_terminal(run_dir, model, n_water, family, status)
+
+    monkeypatch.setattr(relay, "run_path", fake_run)
+    manifest = relay.run_campaign(
+        tmp_path, CHEAP, relay.Bounds(), log_path=str(tmp_path / "run.log")
+    )
+
+    assert manifest["summary"]["verdict"] == "incomplete-matched-al-campaign"
+    assert manifest["summary"]["al_status_counts"][al_status] == 1
+    assert manifest["summary"]["matched"] == []
+    assert not manifest["summary"]["verdict"].startswith("si-path-accepted")
+
+
 def test_existing_manifest_refuses_mechanism_version_drift(tmp_path):
     bounds = relay.Bounds()
     payload = relay._expected_manifest(CHEAP, bounds, str(tmp_path / "run.log"))

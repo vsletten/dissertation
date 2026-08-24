@@ -654,6 +654,7 @@ def run_campaign(
         atomic_json(manifest_path, manifest)
 
     si_records: list[dict[str, Any]] = []
+    al_records: list[dict[str, Any]] = []
     matched: list[dict[str, Any]] = []
     for n_water in CONCERTED_ACID_WATER_COUNTS:
         for family in CONCERTED_ACID_FAMILIES:
@@ -700,6 +701,7 @@ def run_campaign(
                 "status": al_record["status"],
             }
             atomic_json(manifest_path, manifest)
+            al_records.append(al_record)
             if al_record["status"] == "accepted":
                 si_barrier = float(si_record["barrier_kj_mol"])
                 al_barrier = float(al_record["barrier_kj_mol"])
@@ -723,7 +725,13 @@ def run_campaign(
         status: sum(record["status"] == status for record in si_records)
         for status in sorted(TERMINAL_STATUSES)
     }
-    if matched:
+    al_counts = {
+        status: sum(record["status"] == status for record in al_records)
+        for status in sorted(TERMINAL_STATUSES)
+    }
+    if al_counts["failed"] or al_counts["blocked"]:
+        verdict = "incomplete-matched-al-campaign"
+    elif matched:
         verdict = "matched-si-al-barrier-ready"
     elif si_counts["rejected"] == 4:
         verdict = "all-four-si-paths-conclusive-rejection"
@@ -735,6 +743,7 @@ def run_campaign(
         "verdict": verdict,
         "si_path_count": len(si_records),
         "si_status_counts": si_counts,
+        "al_status_counts": al_counts,
         "matched": matched,
         "next_mechanism_card_required": verdict
         == "all-four-si-paths-conclusive-rejection",
