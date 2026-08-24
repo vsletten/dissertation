@@ -275,6 +275,7 @@ def validate_refinement_source(
     manifest_path: Path,
     *,
     expected_manifest_sha256: str,
+    expected_log_sha256: str,
     target_key: str,
     attempt_dir: Path,
     max_steps: int,
@@ -399,11 +400,14 @@ def validate_refinement_source(
     log_path = source_root / "ensemble.log"
     if log_path.is_symlink() or not log_path.is_file():
         raise ValueError("archived source log is missing or symlinked")
+    log_sha256 = sha256_path(log_path)
+    if log_sha256 != expected_log_sha256:
+        raise ValueError("source log SHA-256 mismatch")
     return RefinementSource(
         manifest_path=manifest_path,
         manifest_sha256=manifest_sha256,
         log_path=log_path,
-        log_sha256=sha256_path(log_path),
+        log_sha256=log_sha256,
         manifest=manifest,
         settings=settings,
         target_key=target_key,
@@ -973,21 +977,36 @@ def run_failed_endpoint_refinement(
         flush=True,
     )
 
+    production_converged = False
+    failure_kind = None
     try:
         result = optimize_bounded(input_cluster, source.settings, max_steps=max_steps)
+        production_converged = result.converged
         output_path = attempt_root / "optimized.xyz"
         phase1.save_xyz(result.cluster, output_path)
         optimized = phase1.load_xyz(output_path, input_cluster)
         if result.converged:
-            record = evaluate_optimized_endpoint(
-                attempt_root,
-                optimized,
-                source.settings,
-                reaction=reaction,
-                n_water=n_water,
-                family=family,
-            )
+            try:
+                record = evaluate_optimized_endpoint(
+                    attempt_root,
+                    optimized,
+                    source.settings,
+                    reaction=reaction,
+                    n_water=n_water,
+                    family=family,
+                )
+            except Exception as exc:
+                failure_kind = "endpoint-evaluation-error"
+                record = {
+                    "status": "failed",
+                    "reason": f"{type(exc).__name__}: {exc}",
+                    "basin_signature": None,
+                    "n_imaginary": None,
+                    "electronic_hartree": None,
+                    "minimum_pair_distance_a": minimum_pair_distance(optimized),
+                }
         else:
+            failure_kind = "optimizer-exhaustion"
             record = {
                 "status": "failed",
                 "reason": (
@@ -999,9 +1018,8 @@ def run_failed_endpoint_refinement(
                 "electronic_hartree": None,
                 "minimum_pair_distance_a": minimum_pair_distance(optimized),
             }
-        production_converged = result.converged
     except Exception as exc:
-        production_converged = False
+        failure_kind = "optimizer-error"
         record = {
             "status": "failed",
             "reason": f"{type(exc).__name__}: {exc}",
@@ -1019,9 +1037,7 @@ def run_failed_endpoint_refinement(
             "family": family,
             "preoptimization_converged": None,
             "production_converged": production_converged,
-            "failure_kind": (
-                "optimizer-exhaustion" if not production_converged else None
-            ),
+            "failure_kind": failure_kind,
             "refinement_attempt": REFINEMENT_ATTEMPT,
             "source_optimized_sha256": source_endpoint_sha256,
             "artifacts": _artifact_hashes(
@@ -1291,6 +1307,7 @@ def main() -> int:
     parser.add_argument("--refine-failed-endpoint")
     parser.add_argument("--source-manifest", type=Path)
     parser.add_argument("--expected-source-manifest-sha256")
+    parser.add_argument("--expected-source-log-sha256")
     parser.add_argument("--attempt-dir", type=Path)
     parser.add_argument(
         "--refinement-max-steps", type=int, default=REFINEMENT_MAX_STEPS
@@ -1299,13 +1316,15 @@ def main() -> int:
     refinement_companions = (
         args.source_manifest,
         args.expected_source_manifest_sha256,
+        args.expected_source_log_sha256,
         args.attempt_dir,
     )
     if args.refine_failed_endpoint:
         if any(value is None for value in refinement_companions):
             parser.error(
                 "refinement requires --source-manifest, "
-                "--expected-source-manifest-sha256, and --attempt-dir"
+                "--expected-source-manifest-sha256, --expected-source-log-sha256, "
+                "and --attempt-dir"
             )
         if (
             args.run_dir is not None
@@ -1324,6 +1343,7 @@ def main() -> int:
             source = validate_refinement_source(
                 args.source_manifest,
                 expected_manifest_sha256=args.expected_source_manifest_sha256,
+                expected_log_sha256=args.expected_source_log_sha256,
                 target_key=args.refine_failed_endpoint,
                 attempt_dir=args.attempt_dir,
                 max_steps=args.refinement_max_steps,

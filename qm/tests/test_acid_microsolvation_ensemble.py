@@ -66,6 +66,7 @@ def _load_refinement_source(tmp_path):
     source = ensemble.validate_refinement_source(
         manifest_path,
         expected_manifest_sha256=manifest_sha256,
+        expected_log_sha256=ensemble.sha256_path(manifest_path.parent / "ensemble.log"),
         target_key=TARGET_SEED,
         attempt_dir=tmp_path / "attempt",
         max_steps=160,
@@ -428,6 +429,9 @@ def test_refinement_source_requires_pinned_hash_and_exact_artifacts(tmp_path):
         ensemble.validate_refinement_source(
             manifest_path,
             expected_manifest_sha256="0" * 64,
+            expected_log_sha256=ensemble.sha256_path(
+                manifest_path.parent / "ensemble.log"
+            ),
             target_key=TARGET_SEED,
             attempt_dir=tmp_path / "attempt",
             max_steps=160,
@@ -442,6 +446,9 @@ def test_refinement_source_requires_pinned_hash_and_exact_artifacts(tmp_path):
         ensemble.validate_refinement_source(
             manifest_path,
             expected_manifest_sha256=manifest_sha256,
+            expected_log_sha256=ensemble.sha256_path(
+                manifest_path.parent / "ensemble.log"
+            ),
             target_key=TARGET_SEED,
             attempt_dir=tmp_path / "attempt",
             max_steps=160,
@@ -457,6 +464,9 @@ def test_refinement_source_refuses_settings_and_population_drift(tmp_path):
         ensemble.validate_refinement_source(
             manifest_path,
             expected_manifest_sha256=ensemble.sha256_path(manifest_path),
+            expected_log_sha256=ensemble.sha256_path(
+                manifest_path.parent / "ensemble.log"
+            ),
             target_key=TARGET_SEED,
             attempt_dir=tmp_path / "attempt",
             max_steps=160,
@@ -473,6 +483,9 @@ def test_refinement_source_refuses_settings_and_population_drift(tmp_path):
         ensemble.validate_refinement_source(
             manifest_path,
             expected_manifest_sha256=ensemble.sha256_path(manifest_path),
+            expected_log_sha256=ensemble.sha256_path(
+                manifest_path.parent / "ensemble.log"
+            ),
             target_key=TARGET_SEED,
             attempt_dir=tmp_path / "attempt",
             max_steps=160,
@@ -580,6 +593,41 @@ def test_refinement_exhaustion_remains_incomplete(tmp_path, monkeypatch):
     assert resolution["attempt"]["status"] == "failed"
     assert resolution["summary"]["si_status_counts"]["failed"] == 1
     assert resolution["summary"]["verdict"] == "incomplete-si-screen"
+
+
+def test_refinement_gate_failure_does_not_relabel_optimizer_exhaustion(
+    tmp_path, monkeypatch
+):
+    source, _manifest_path = _load_refinement_source(tmp_path)
+    monkeypatch.setattr(
+        ensemble,
+        "optimize_bounded",
+        lambda cluster, _settings, *, max_steps: SimpleNamespace(
+            cluster=cluster, converged=True, max_steps=max_steps
+        ),
+    )
+    monkeypatch.setattr(
+        ensemble,
+        "evaluate_optimized_endpoint",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("frequency receipt invalid")
+        ),
+    )
+
+    resolution = ensemble.run_failed_endpoint_refinement(
+        source,
+        attempt_dir=tmp_path / "attempt",
+        max_steps=160,
+        log_path="refinement.log",
+    )
+
+    receipt = json.loads(
+        (tmp_path / "attempt" / resolution["attempt"]["receipt_path"]).read_text()
+    )
+    record = receipt["record"]
+    assert record["production_converged"] is True
+    assert record["failure_kind"] == "endpoint-evaluation-error"
+    assert record["status"] == "failed"
 
 
 def test_accepted_refinement_screens_only_exact_matched_al(tmp_path, monkeypatch):
