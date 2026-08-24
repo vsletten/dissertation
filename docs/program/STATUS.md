@@ -4,6 +4,14 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-23 — hermes-workstation — A1b matched 3--6-water Si-acid
+  deterministic-shell survey is honestly BLOCKED: all four converged
+  B3LYP/def2-SVP/DF endpoints deprotonate Obr before any Hessian/TS work.
+  Driver support, physical-H/shell identity gates, non-destructive reactant
+  receipts, hashes, and executable follow-up card
+  `A1c-acid-microsolvation-conformers` are in `qm/ACID_MECHANISMS.md` and
+  the A1b card; no unmatched Al ordering was emitted.
+
 - 2026-08-23 — fable — A2 unblocked: ORCA descoped from the platform
   (Victor's call, licensing). Calibration layer is now Psi4 1.11
   DLPNO-CCSD(T) + ByteQC canonical GPU CCSD(T), cross-validating; both

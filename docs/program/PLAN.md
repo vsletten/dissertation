@@ -33,7 +33,8 @@ on main). Priority P0 > P1 > P2 within READY.
 | [E1-muscovite-deck](cards/E1-muscovite-deck.md) | E | P1 | any | done | — (phase 1 isothermal) |
 | [E2-muscovite-full-mechanism](cards/E2-muscovite-full-mechanism.md) | E | P1 | any | done | B5 ✅ |
 | [A8-thesis-archive-intake](cards/A8-thesis-archive-intake.md) | A | P1 | workstation | ready | — |
-| [A1b-acid-mechanisms](cards/A1b-acid-mechanisms.md) | A | P1 | workstation | ready | — |
+| [A1b-acid-mechanisms](cards/A1b-acid-mechanisms.md) | A | P1 | workstation | blocked | matched proton-relay conformer ensemble / mechanism decision |
+| [A1c-acid-microsolvation-conformers](cards/A1c-acid-microsolvation-conformers.md) | A | P1 | workstation | ready | A1b driver/receipt hardening in this merge |
 | [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | ready | — |
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
 | [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | ready | — |
@@ -58,7 +59,8 @@ QI3-fenwick-total-cancellation (PR #52), B1-schema-rfc (PR #25),
 B2-engine-refactor (PR #33),
 D2a-astro-rate-reproduction (PR #31 — verdict: GO gas-phase /
 NO-GO surface-LH), A7-kinetics-database (PR #27 — 36 minerals, 74
-mechanisms, validator green). **Active claim**: A1b-acid-mechanisms.
+mechanisms, validator green). **Blocked closeout branch**:
+`agents/A1b-acid-microsolvation` for A1b-acid-mechanisms.
 A3-barrier-ladder is ready for its remaining family campaigns after its
 pilot result merged in PR #67.
 

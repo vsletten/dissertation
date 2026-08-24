@@ -75,6 +75,15 @@ minimum. The anionic Si-O-Al cluster *does* stabilize this state and closes as
 a sequential addition/cleavage mechanism; receipts are in
 `qm/ACID_MECHANISMS.md`.
 
+### Water count is not a microsolvation conformer search (2026-08-23)
+A matched deterministic-shell survey at B3LYP/def2-SVP/DF added 3, 4, 5,
+and 6 total explicit waters to Si--O--Si; every converged production endpoint
+still transferred the bridge proton to solvent or a terminal framework O
+before any Hessian/TS work. This rules out those four seeds, not every local
+minimum. Do not retry water counts or constrain Obr--H; the next scientific
+gate is a finite proton-relay conformer ensemble, with exact physical-H
+occupancy checks for attacker, each shell water, bridge, and framework OH.
+
 ### WebGL2 unavailable at boot kills module-top-level wiring silently (2026-08-22)
 A Chrome with a pending update can keep running with a dead GPU process, so
 `canvas.getContext('webgl2')` returns null on an otherwise healthy box (same

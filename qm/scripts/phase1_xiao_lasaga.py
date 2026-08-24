@@ -31,11 +31,15 @@ terminal dies.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import math
 import os
+import struct
 import sys
 import time
 from pathlib import Path
+from typing import TypeGuard
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -55,6 +59,7 @@ from quarry.clusters import (  # noqa: E402
     disilicate,
     hydrolysis_complex,
     hydronium,
+    hydronium_hydrate,
     protonated_bridge_complex,
     water,
 )
@@ -64,6 +69,8 @@ from quarry.pipeline import (  # noqa: E402
     FrequencyResult,
     energy,
     frequencies,
+    frequency_geometry_fingerprint,
+    frequency_settings_fingerprint,
     optimize,
 )
 from quarry.rates import Thermo, rate_from_thermo, thermo_from_frequencies  # noqa: E402
@@ -109,15 +116,80 @@ ACID_HYDROLYZED_BASINS = {
     (True, False, True, 1, 1, 1),
 }
 ACID_MECHANISM_VERSION = 2
+ACID_MICROSOLVATION_VERSION = 1
 
 
-def reaction_run_slug(reaction: str, xc: str, basis: str, approach: str) -> str:
-    """Return a checkpoint namespace that cannot mix old and new acid mechanisms."""
-    reaction_slug = (
-        f"{reaction}-preprotonated-v{ACID_MECHANISM_VERSION}"
-        if reaction.endswith("-acid")
-        else reaction
+def acid_mobile_indices(
+    ow_index: int, n_water: int
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Return all mobile H and solvent O indices for the acid atom order."""
+    if n_water not in {1, 3, 4, 5, 6}:
+        raise ValueError("n_water must be one of 1, 3, 4, 5, 6")
+    extra_oxygen_indices = tuple(ow_index + 4 + 3 * i for i in range(n_water - 1))
+    proton_indices = (
+        ow_index + 1,
+        ow_index + 2,
+        ow_index + 3,
+        *(
+            index
+            for oxygen in extra_oxygen_indices
+            for index in (oxygen + 1, oxygen + 2)
+        ),
     )
+    return proton_indices, (ow_index, *extra_oxygen_indices)
+
+
+def acid_basin_equivalence_indices(
+    solvent_oxygen_indices: tuple[int, ...],
+) -> list[int]:
+    """Heavy atoms that must identify one microsolvated basin conformer."""
+    return sorted({BR_INDEX, SI_INDEX, *solvent_oxygen_indices})
+
+
+def acid_reactant_basin(
+    proton_indices: tuple[int, ...],
+) -> tuple[bool, bool, bool, int, int, int]:
+    return (False, True, True, 1, len(proton_indices) - 1, 0)
+
+
+def acid_associative_basin(
+    proton_indices: tuple[int, ...],
+) -> tuple[bool, bool, bool, int, int, int]:
+    return (True, True, True, 1, len(proton_indices) - 1, 0)
+
+
+def acid_product_basin(
+    proton_indices: tuple[int, ...],
+) -> tuple[bool, bool, bool, int, int, int]:
+    return (True, False, True, 2, len(proton_indices) - 2, 0)
+
+
+def acid_hydrolyzed_basins(
+    proton_indices: tuple[int, ...],
+) -> set[tuple[bool, bool, bool, int, int, int]]:
+    solvent_after_transfer = len(proton_indices) - 2
+    return {
+        acid_product_basin(proton_indices),
+        (True, False, True, 1, solvent_after_transfer, 1),
+    }
+
+
+def reaction_run_slug(
+    reaction: str,
+    xc: str,
+    basis: str,
+    approach: str,
+    n_water: int = 1,
+) -> str:
+    """Return a checkpoint namespace that cannot mix old and new acid mechanisms."""
+    if reaction.endswith("-acid") and n_water > 1:
+        reaction_slug = (
+            f"{reaction}-microsolvated-{n_water}w-v{ACID_MICROSOLVATION_VERSION}"
+        )
+    elif reaction.endswith("-acid"):
+        reaction_slug = f"{reaction}-preprotonated-v{ACID_MECHANISM_VERSION}"
+    else:
+        reaction_slug = reaction
     return f"{reaction_slug}-{xc}-{basis}-{approach}"
 
 
@@ -216,17 +288,11 @@ def hydrolysis_basin_signature(
     )
 
 
-def acid_basin_signature(
+def _acid_mobile_assignments(
     cluster: Cluster,
-    ow_index: int,
     proton_indices: tuple[int, ...],
-) -> tuple[bool, bool, bool, int, int, int]:
-    """Return acid connectivity and unique proton assignments.
-
-    Each tracked acid proton is assigned to its nearest oxygen. Explicit
-    bridge, attacker, and terminal-framework counts prevent a missing or
-    dissociated proton from masquerading as a valid hydrolysis rotamer.
-    """
+) -> list[int | None]:
+    """Assign each tracked mobile proton to one nearby oxygen, if any."""
     oxygen_indices = [
         index for index, symbol in enumerate(cluster.symbols) if symbol == "O"
     ]
@@ -244,10 +310,80 @@ def acid_basin_signature(
             )
         )
         assignments.append(nearest_oxygen if distance < 1.25 else None)
+    return assignments
+
+
+def _all_hydrogen_assignments(cluster: Cluster) -> list[int | None]:
+    """Assign every physical hydrogen, including framework OH protons."""
+    hydrogen_indices = tuple(
+        index for index, symbol in enumerate(cluster.symbols) if symbol == "H"
+    )
+    return _acid_mobile_assignments(cluster, hydrogen_indices)
+
+
+def acid_occupancy_reason(
+    cluster: Cluster,
+    ow_index: int,
+    *,
+    solvent_oxygen_indices: tuple[int, ...] = (),
+    attacker_h_count: int,
+    bridge_h_count: int,
+    extra_framework_h_count: int,
+) -> str | None:
+    """Reject hidden proton swaps across attacker, shell, and framework OH."""
+    ordered_solvent = (
+        ow_index,
+        *(oxygen for oxygen in solvent_oxygen_indices if oxygen != ow_index),
+    )
+    assignments = _all_hydrogen_assignments(cluster)
+    actual_solvent = tuple(assignments.count(oxygen) for oxygen in ordered_solvent)
+    expected_solvent = (attacker_h_count, *(2 for _ in ordered_solvent[1:]))
+    if actual_solvent != expected_solvent:
+        return (
+            f"acid solvent occupancies {actual_solvent} != {expected_solvent} "
+            "(attacker, shell waters)"
+        )
+    actual_bridge = assignments.count(BR_INDEX)
+    if actual_bridge != bridge_h_count:
+        return f"acid bridge occupancy {actual_bridge} != {bridge_h_count}"
+    solvent_set = set(ordered_solvent)
+    framework_oxygens = [
+        index
+        for index, symbol in enumerate(cluster.symbols)
+        if symbol == "O" and index not in {BR_INDEX, *solvent_set}
+    ]
+    actual_framework = sorted(assignments.count(oxygen) for oxygen in framework_oxygens)
+    expected_framework = sorted(
+        [1] * (len(framework_oxygens) - extra_framework_h_count)
+        + [2] * extra_framework_h_count
+    )
+    if actual_framework != expected_framework:
+        return f"acid framework occupancies {actual_framework} != {expected_framework}"
+    return None
+
+
+def acid_basin_signature(
+    cluster: Cluster,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+    *,
+    solvent_oxygen_indices: tuple[int, ...] = (),
+) -> tuple[bool, bool, bool, int, int, int]:
+    """Return acid connectivity and aggregate mobile-proton assignments.
+
+    The aggregate tuple preserves the one-water wire contract. Every acceptance
+    gate separately calls :func:`acid_solvent_occupancy_reason`, which rejects
+    hidden OH-/H3O+ pairs inside a microsolvated shell.
+    """
+    assignments = _acid_mobile_assignments(cluster, proton_indices)
+    solvent_oxygens = {ow_index, *solvent_oxygen_indices}
     bridge_h_count = assignments.count(BR_INDEX)
-    water_h_count = assignments.count(ow_index)
+    solvent_h_count = sum(
+        oxygen_index in solvent_oxygens for oxygen_index in assignments
+    )
     framework_h_count = sum(
-        oxygen_index not in {None, BR_INDEX, ow_index} for oxygen_index in assignments
+        oxygen_index not in {None, BR_INDEX, *solvent_oxygens}
+        for oxygen_index in assignments
     )
     return (
         float(np.linalg.norm(cluster.coords[SI_INDEX] - cluster.coords[ow_index]))
@@ -257,7 +393,7 @@ def acid_basin_signature(
         float(np.linalg.norm(cluster.coords[AL_INDEX] - cluster.coords[BR_INDEX]))
         < 2.3,
         bridge_h_count,
-        water_h_count,
+        solvent_h_count,
         framework_h_count,
     )
 
@@ -266,26 +402,95 @@ def protonated_bridge_reason(
     cluster: Cluster,
     ow_index: int,
     proton_indices: tuple[int, ...],
+    *,
+    solvent_oxygen_indices: tuple[int, ...] = (),
 ) -> str | None:
     """Explain why an optimized acid reactant left its pre-equilibrium basin."""
-    signature = acid_basin_signature(cluster, ow_index, proton_indices)
-    if signature != ACID_REACTANT_BASIN:
+    signature = acid_basin_signature(
+        cluster,
+        ow_index,
+        proton_indices,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+    )
+    expected = acid_reactant_basin(proton_indices)
+    if signature != expected:
         return (
-            f"acid reactant basin {signature} != {ACID_REACTANT_BASIN} "
-            "(protonated intact bridge + H2O attacker)"
+            f"acid reactant basin {signature} != {expected} "
+            "(protonated intact bridge + microsolvated H2O attacker)"
         )
-    return None
+    return acid_occupancy_reason(
+        cluster,
+        ow_index,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+        attacker_h_count=2,
+        bridge_h_count=1,
+        extra_framework_h_count=0,
+    )
 
 
 def acid_product_reason(
     cluster: Cluster,
     ow_index: int,
     proton_indices: tuple[int, ...],
+    *,
+    solvent_oxygen_indices: tuple[int, ...] = (),
 ) -> str | None:
     """Explain why a putative acid product has wrong bonding/speciation."""
-    signature = acid_basin_signature(cluster, ow_index, proton_indices)
-    if signature != ACID_PRODUCT_BASIN:
-        return f"acid product basin {signature} != {ACID_PRODUCT_BASIN}"
+    signature = acid_basin_signature(
+        cluster,
+        ow_index,
+        proton_indices,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+    )
+    expected = acid_product_basin(proton_indices)
+    if signature != expected:
+        return f"acid product basin {signature} != {expected}"
+    return acid_occupancy_reason(
+        cluster,
+        ow_index,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+        attacker_h_count=1,
+        bridge_h_count=2,
+        extra_framework_h_count=0,
+    )
+
+
+def acid_irc_solvent_reason(
+    back: Cluster,
+    fwd: Cluster,
+    ow_index: int,
+    proton_indices: tuple[int, ...],
+    *,
+    solvent_oxygen_indices: tuple[int, ...] = (),
+) -> str | None:
+    """Require the attacker/shell partition at both accepted IRC endpoints."""
+    two_hydrogen_basins = {
+        acid_reactant_basin(proton_indices),
+        acid_associative_basin(proton_indices),
+    }
+    one_hydrogen_basins = acid_hydrolyzed_basins(proton_indices)
+    for endpoint in (back, fwd):
+        signature = acid_basin_signature(
+            endpoint,
+            ow_index,
+            proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
+        )
+        if signature in two_hydrogen_basins:
+            attacker_h_count = 2
+        elif signature in one_hydrogen_basins:
+            attacker_h_count = 1
+        else:
+            return f"acid IRC endpoint has unsupported basin {signature}"
+        if reason := acid_occupancy_reason(
+            endpoint,
+            ow_index,
+            solvent_oxygen_indices=solvent_oxygen_indices,
+            attacker_h_count=attacker_h_count,
+            bridge_h_count=signature[3],
+            extra_framework_h_count=signature[5],
+        ):
+            return reason
     return None
 
 
@@ -294,16 +499,32 @@ def acid_quick_irc_channel_reason(
     fwd: Cluster,
     ow_index: int,
     proton_indices: tuple[int, ...],
+    *,
+    solvent_oxygen_indices: tuple[int, ...] = (),
 ) -> str | None:
     """Require protonated reactant ↔ protonated hydrolysis product connectivity."""
     actual = {
-        acid_basin_signature(back, ow_index, proton_indices),
-        acid_basin_signature(fwd, ow_index, proton_indices),
+        acid_basin_signature(
+            endpoint,
+            ow_index,
+            proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
+        )
+        for endpoint in (back, fwd)
     }
-    expected = {ACID_REACTANT_BASIN, ACID_PRODUCT_BASIN}
+    expected = {
+        acid_reactant_basin(proton_indices),
+        acid_product_basin(proton_indices),
+    }
     if actual != expected:
         return f"acid quick-IRC basin signatures {sorted(actual)} != {sorted(expected)}"
-    return None
+    return acid_irc_solvent_reason(
+        back,
+        fwd,
+        ow_index,
+        proton_indices,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+    )
 
 
 def acid_quick_irc_addition_reason(
@@ -311,18 +532,34 @@ def acid_quick_irc_addition_reason(
     fwd: Cluster,
     ow_index: int,
     proton_indices: tuple[int, ...],
+    *,
+    solvent_oxygen_indices: tuple[int, ...] = (),
 ) -> str | None:
     """Require pre-protonated reactant ↔ associative-intermediate connectivity."""
     actual = {
-        acid_basin_signature(back, ow_index, proton_indices),
-        acid_basin_signature(fwd, ow_index, proton_indices),
+        acid_basin_signature(
+            endpoint,
+            ow_index,
+            proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
+        )
+        for endpoint in (back, fwd)
     }
-    expected = {ACID_REACTANT_BASIN, ACID_ASSOCIATIVE_BASIN}
+    expected = {
+        acid_reactant_basin(proton_indices),
+        acid_associative_basin(proton_indices),
+    }
     if actual != expected:
         return (
             f"acid addition IRC basin signatures {sorted(actual)} != {sorted(expected)}"
         )
-    return None
+    return acid_irc_solvent_reason(
+        back,
+        fwd,
+        ow_index,
+        proton_indices,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+    )
 
 
 def acid_quick_irc_cleavage_reason(
@@ -330,20 +567,33 @@ def acid_quick_irc_cleavage_reason(
     fwd: Cluster,
     ow_index: int,
     proton_indices: tuple[int, ...],
+    *,
+    solvent_oxygen_indices: tuple[int, ...] = (),
 ) -> str | None:
     """Require associative intermediate ↔ protonated hydrolysis product."""
     actual = [
-        acid_basin_signature(back, ow_index, proton_indices),
-        acid_basin_signature(fwd, ow_index, proton_indices),
+        acid_basin_signature(
+            endpoint,
+            ow_index,
+            proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
+        )
+        for endpoint in (back, fwd)
     ]
-    if actual.count(ACID_ASSOCIATIVE_BASIN) != 1:
+    associative = acid_associative_basin(proton_indices)
+    if actual.count(associative) != 1:
         return f"acid cleavage IRC lacks one associative endpoint: {sorted(actual)}"
-    hydrolyzed = [
-        signature for signature in actual if signature in ACID_HYDROLYZED_BASINS
-    ]
+    accepted_hydrolyzed = acid_hydrolyzed_basins(proton_indices)
+    hydrolyzed = [signature for signature in actual if signature in accepted_hydrolyzed]
     if len(hydrolyzed) != 1:
         return f"acid cleavage IRC lacks one hydrolyzed endpoint: {sorted(actual)}"
-    return None
+    return acid_irc_solvent_reason(
+        back,
+        fwd,
+        ow_index,
+        proton_indices,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+    )
 
 
 def acid_endpoint_in_basins(
@@ -352,12 +602,20 @@ def acid_endpoint_in_basins(
     ow_index: int,
     proton_indices: tuple[int, ...],
     signatures: set[tuple[bool, bool, bool, int, int, int]],
+    *,
+    solvent_oxygen_indices: tuple[int, ...] = (),
 ) -> Cluster:
     """Return the unique acid quick-IRC endpoint in one accepted basin."""
     matches = [
         endpoint
         for endpoint in (back, fwd)
-        if acid_basin_signature(endpoint, ow_index, proton_indices) in signatures
+        if acid_basin_signature(
+            endpoint,
+            ow_index,
+            proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
+        )
+        in signatures
     ]
     if len(matches) != 1:
         detail = f"acid basins {sorted(signatures)}, found {len(matches)}"
@@ -531,6 +789,120 @@ def minimum_frequency_reason(label: str, freq: FrequencyResult) -> str | None:
     return None
 
 
+def _json_finite_number(value: object) -> TypeGuard[int | float]:
+    """True for JSON numbers only; bool is excluded because it subclasses int."""
+    return (type(value) is int or type(value) is float) and math.isfinite(value)
+
+
+def _json_positive_finite_numbers(value: object) -> TypeGuard[list[int | float]]:
+    return isinstance(value, list) and all(
+        _json_finite_number(item) and float(item) > 0.0 for item in value
+    )
+
+
+def reactant_minimum_result_fingerprint(
+    geometry_fingerprint: str,
+    settings_fingerprint: str,
+    frequencies_cm: object,
+    imaginary_cm: object,
+    electronic_hartree: float,
+) -> str:
+    """Bind a receipt to geometry, settings, Hessian identity, and energy."""
+    digest = hashlib.sha256()
+    digest.update(geometry_fingerprint.encode())
+    digest.update(b"\0")
+    digest.update(settings_fingerprint.encode())
+    digest.update(b"\0")
+    digest.update(np.ascontiguousarray(frequencies_cm, dtype="<f8").tobytes())
+    digest.update(np.ascontiguousarray(imaginary_cm, dtype="<f8").tobytes())
+    digest.update(struct.pack("<d", float(electronic_hartree)))
+    return digest.hexdigest()
+
+
+def write_reactant_minimum_receipt(
+    path: Path,
+    cluster: Cluster,
+    settings: DftSettings,
+    frequency: FrequencyResult,
+) -> None:
+    """Atomically persist the pre-TS minimum gate for crash-safe resume."""
+    geometry_fp = frequency_geometry_fingerprint(cluster)
+    settings_fp = frequency_settings_fingerprint(settings)
+    frequencies_cm = [float(value) for value in frequency.frequencies_cm.tolist()]
+    imaginary_cm = [float(value) for value in frequency.imaginary_cm.tolist()]
+    electronic_hartree = float(frequency.electronic_hartree)
+    payload = {
+        "geometry_fingerprint": geometry_fp,
+        "settings_fingerprint": settings_fp,
+        "n_imaginary": frequency.n_imaginary,
+        "imaginary_cm": imaginary_cm,
+        "frequencies_cm": frequencies_cm,
+        "electronic_hartree": electronic_hartree,
+        "passed": frequency.n_imaginary == 0,
+        "result_fingerprint": reactant_minimum_result_fingerprint(
+            geometry_fp,
+            settings_fp,
+            frequencies_cm,
+            imaginary_cm,
+            electronic_hartree,
+        ),
+    }
+    temporary = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
+    temporary.write_text(json.dumps(payload, indent=2))
+    temporary.replace(path)
+
+
+def load_reactant_minimum_receipt(
+    path: Path,
+    cluster: Cluster,
+    settings: DftSettings,
+) -> dict[str, object] | None:
+    """Load only a complete geometry/settings/Hessian-bound minimum receipt."""
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    geometry_fp = frequency_geometry_fingerprint(cluster)
+    settings_fp = frequency_settings_fingerprint(settings)
+    if payload.get("geometry_fingerprint") != geometry_fp:
+        return None
+    if payload.get("settings_fingerprint") != settings_fp:
+        return None
+    n_imaginary = payload.get("n_imaginary")
+    passed = payload.get("passed")
+    imaginary_cm = payload.get("imaginary_cm")
+    frequencies_cm = payload.get("frequencies_cm")
+    electronic_hartree = payload.get("electronic_hartree")
+    result_fingerprint = payload.get("result_fingerprint")
+    if type(n_imaginary) is not int or n_imaginary < 0:  # bool is not accepted
+        return None
+    if type(passed) is not bool or passed is not (n_imaginary == 0):
+        return None
+    if not _json_positive_finite_numbers(imaginary_cm):
+        return None
+    if len(imaginary_cm) != n_imaginary:
+        return None
+    if not _json_positive_finite_numbers(frequencies_cm) or not frequencies_cm:
+        return None
+    if not _json_finite_number(electronic_hartree):
+        return None
+    if not isinstance(result_fingerprint, str) or result_fingerprint != (
+        reactant_minimum_result_fingerprint(
+            geometry_fp,
+            settings_fp,
+            frequencies_cm,
+            imaginary_cm,
+            float(electronic_hartree),
+        )
+    ):
+        return None
+    return payload
+
+
 def comparison_against_si_neutral(
     reaction: str,
     *,
@@ -570,6 +942,23 @@ def write_sequential_run_status(
         payload["detail"] = detail
     path = run_dir / "run_status.json"
     temporary = run_dir / "run_status.json.tmp"
+    temporary.write_text(json.dumps(payload, indent=2))
+    temporary.replace(path)
+
+
+def write_reactant_survey_status(
+    run_dir: Path,
+    status: str,
+    detail: str,
+) -> None:
+    """Publish a reactant-only result without touching canonical campaign state."""
+    payload = {
+        "status": status,
+        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "detail": detail,
+    }
+    path = run_dir / "reactant_status.json"
+    temporary = run_dir / "reactant_status.json.tmp"
     temporary.write_text(json.dumps(payload, indent=2))
     temporary.replace(path)
 
@@ -767,6 +1156,7 @@ def acid_neb_guess(
     run_dir: Path,
     ow_index: int,
     proton_indices: tuple[int, ...],
+    solvent_oxygen_indices: tuple[int, ...] = (),
 ) -> Cluster:
     """Build the protonated-bridge water-attack product and CI-NEB guess.
 
@@ -789,7 +1179,12 @@ def acid_neb_guess(
             "  resume: acid product.xyz exists; "
             f"r(Si-Ow)={r_prod_ow:.2f} A, r(Si-Obr)={r_prod_br:.2f} A"
         )
-        product_failure = acid_product_reason(product, ow_index, proton_indices)
+        product_failure = acid_product_reason(
+            product,
+            ow_index,
+            proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
+        )
         if product_failure is None:
             return neb_ts_guess(
                 complex_opt,
@@ -872,7 +1267,12 @@ def acid_neb_guess(
         np.linalg.norm(product.coords[SI_INDEX] - product.coords[BR_INDEX])
     )
     log(f"  acid product r(Si-Ow)={r_prod_ow:.2f} A, r(Si-Obr)={r_prod_br:.2f} A")
-    product_failure = acid_product_reason(product, ow_index, proton_indices)
+    product_failure = acid_product_reason(
+        product,
+        ow_index,
+        proton_indices,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+    )
     if product_failure:
         raise RuntimeError(product_failure)
     return neb_ts_guess(
@@ -899,6 +1299,7 @@ def refine_phase1_saddle(
     run_dir: Path,
     ow_index: int,
     proton_indices: tuple[int, ...],
+    solvent_oxygen_indices: tuple[int, ...] = (),
 ) -> Cluster:
     """Refine a crest, directing acid Sella along the complete hydrolysis path."""
     if acid_path and route == "acid-neb":
@@ -907,7 +1308,14 @@ def refine_phase1_saddle(
             raise RuntimeError("acid-neb saddle refinement requires product.xyz")
         product = load_xyz(product_path, complex_opt)
         reactive_core = sorted(
-            {BR_INDEX, SI_INDEX, AL_INDEX, ow_index, *proton_indices}
+            {
+                BR_INDEX,
+                SI_INDEX,
+                AL_INDEX,
+                ow_index,
+                *solvent_oxygen_indices,
+                *proton_indices,
+            }
         )
         mode = reaction_path_vector(
             complex_opt,
@@ -973,6 +1381,9 @@ def finish_al_neutral_sequential(
     reaction: str = "al-neutral",
     acid_path: bool = False,
     proton_indices: tuple[int, ...] = (),
+    solvent_oxygen_indices: tuple[int, ...] = (),
+    n_water: int = 1,
+    reactant_frequency: FrequencyResult | None = None,
 ) -> int:
     """Close a proven R → associative I → hydrolyzed P mechanism."""
     begin_sequential_run(run_dir)
@@ -988,6 +1399,7 @@ def finish_al_neutral_sequential(
             cleavage_fwd,
             ow_index,
             proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
         )
     else:
         cleavage_failure = quick_irc_cleavage_reason(
@@ -1002,14 +1414,16 @@ def finish_al_neutral_sequential(
             cleavage_fwd,
             ow_index,
             proton_indices,
-            {ACID_ASSOCIATIVE_BASIN},
+            {acid_associative_basin(proton_indices)},
+            solvent_oxygen_indices=solvent_oxygen_indices,
         )
         hydrolyzed = acid_endpoint_in_basins(
             cleavage_back,
             cleavage_fwd,
             ow_index,
             proton_indices,
-            ACID_HYDROLYZED_BASINS,
+            acid_hydrolyzed_basins(proton_indices),
+            solvent_oxygen_indices=solvent_oxygen_indices,
         )
     else:
         intermediate = endpoint_in_basin(
@@ -1100,7 +1514,16 @@ def finish_al_neutral_sequential(
         addition_ts_path = run_dir / "addition_directed_ts.xyz"
         addition_trajectory_path = run_dir / "addition_directed_sella.traj"
     core_protons = proton_indices if acid_path else (ow_index + 1, ow_index + 2)
-    reactive_core = sorted({BR_INDEX, SI_INDEX, AL_INDEX, ow_index, *core_protons})
+    reactive_core = sorted(
+        {
+            BR_INDEX,
+            SI_INDEX,
+            AL_INDEX,
+            ow_index,
+            *solvent_oxygen_indices,
+            *core_protons,
+        }
+    )
     trim_gpu_pool()
     addition_ts = checkpointed(
         addition_ts_path,
@@ -1152,7 +1575,11 @@ def finish_al_neutral_sequential(
         save_xyz(fwd, run_dir / f"addition_irc_fwd_{tag}.xyz")
         if acid_path:
             failure = acid_quick_irc_addition_reason(
-                back, fwd, ow_index, proton_indices
+                back,
+                fwd,
+                ow_index,
+                proton_indices,
+                solvent_oxygen_indices=solvent_oxygen_indices,
             )
         else:
             failure = quick_irc_addition_reason(back, fwd, ow_index)
@@ -1168,7 +1595,7 @@ def finish_al_neutral_sequential(
 
     trim_gpu_pool()
     log("stage 5: sequential thermochemistry")
-    complex_freq = frequencies(complex_opt, settings)
+    complex_freq = reactant_frequency or frequencies(complex_opt, settings)
     intermediate_freq = frequencies(intermediate, settings)
     for label, freq in (
         ("reactant", complex_freq),
@@ -1183,14 +1610,16 @@ def finish_al_neutral_sequential(
             addition_fwd,
             ow_index,
             proton_indices,
-            {ACID_REACTANT_BASIN},
+            {acid_reactant_basin(proton_indices)},
+            solvent_oxygen_indices=solvent_oxygen_indices,
         )
         addition_intermediate = acid_endpoint_in_basins(
             addition_back,
             addition_fwd,
             ow_index,
             proton_indices,
-            {ACID_ASSOCIATIVE_BASIN},
+            {acid_associative_basin(proton_indices)},
+            solvent_oxygen_indices=solvent_oxygen_indices,
         )
     else:
         addition_reactant = endpoint_in_basin(
@@ -1203,7 +1632,7 @@ def finish_al_neutral_sequential(
     # Connectivity gates already prove their speciation, so compare the heavy
     # reaction center and allow the measured <10 kJ/mol rotamer spread.
     reactive_core = (
-        [BR_INDEX, SI_INDEX, ow_index]
+        acid_basin_equivalence_indices(solvent_oxygen_indices)
         if acid_path
         else sorted({BR_INDEX, SI_INDEX, ow_index, *core_protons})
     )
@@ -1282,6 +1711,10 @@ def finish_al_neutral_sequential(
             "sequential-associative-acid" if acid_path else "sequential-associative"
         ),
         "mechanism_version": ACID_MECHANISM_VERSION if acid_path else 1,
+        "microsolvation_waters": n_water if acid_path else 0,
+        "microsolvation_version": (
+            ACID_MICROSOLVATION_VERSION if acid_path and n_water > 1 else None
+        ),
         "method": f"{settings.xc}/{settings.basis}/df",
         "temperature_k": temperature,
         "dE_elec_vs_complex_kj": de_kj,
@@ -1406,7 +1839,24 @@ def main() -> int:
         "bridging O), backside = SN2-like (no concerted transfer)",
     )
     ap.add_argument("--temperature", type=float, default=298.15)
+    ap.add_argument(
+        "--microsolvation-waters",
+        type=int,
+        choices=[1, 3, 4, 5, 6],
+        default=1,
+        help="total explicit water oxygens for acid reactions (production: 3-6)",
+    )
+    ap.add_argument(
+        "--reactant-only",
+        action="store_true",
+        help="stop after the microsolvated unconstrained-minimum gate",
+    )
     args = ap.parse_args()
+    acid_path = args.reaction.endswith("-acid")
+    if not acid_path and args.microsolvation_waters != 1:
+        ap.error("--microsolvation-waters applies only to acid reactions")
+    if args.reactant_only and (not acid_path or args.microsolvation_waters == 1):
+        ap.error("--reactant-only requires an acid reaction with 3-6 waters")
 
     settings = DftSettings(
         xc=args.xc, basis=args.basis, density_fit=True, use_gpu=args.gpu
@@ -1416,22 +1866,43 @@ def main() -> int:
         Path(__file__).resolve().parent.parent
         / "runs"
         / "phase1"
-        / reaction_run_slug(args.reaction, args.xc, args.basis, args.approach)
+        / reaction_run_slug(
+            args.reaction,
+            args.xc,
+            args.basis,
+            args.approach,
+            args.microsolvation_waters,
+        )
     )
     run_dir.mkdir(parents=True, exist_ok=True)
     log(f"run dir: {run_dir}")
     log(f"settings: {settings}")
 
     dimer_factory, attacker_factory = REACTIONS[args.reaction]
-    dimer, attacker = dimer_factory(), attacker_factory()
-    acid_path = args.reaction.endswith("-acid")
+    dimer = dimer_factory()
+    attacker = (
+        hydronium_hydrate(args.microsolvation_waters)
+        if acid_path
+        else attacker_factory()
+    )
     if acid_path:
-        begin_gated_run(run_dir)
-        complex_guess = protonated_bridge_complex(dimer, mode=args.approach)
+        if not args.reactant_only:
+            begin_gated_run(run_dir)
+        complex_guess = protonated_bridge_complex(
+            dimer,
+            mode=args.approach,
+            n_water=args.microsolvation_waters,
+        )
     else:
         complex_guess = hydrolysis_complex(dimer, attacker, mode=args.approach)
     ow_index = len(dimer.symbols)  # attacker O
-    proton_indices = tuple(range(ow_index + 1, ow_index + (4 if acid_path else 3)))
+    if acid_path:
+        proton_indices, solvent_oxygen_indices = acid_mobile_indices(
+            ow_index, args.microsolvation_waters
+        )
+    else:
+        proton_indices = tuple(range(ow_index + 1, ow_index + 3))
+        solvent_oxygen_indices = ()
     product_route = "acid-neb" if acid_path else "proton-neb"
 
     def abort_campaign(detail: str) -> int:
@@ -1449,6 +1920,7 @@ def main() -> int:
                 run_dir,
                 ow_index,
                 proton_indices,
+                solvent_oxygen_indices,
             )
         return proton_neb_guess(seed, complex_opt, settings, run_dir, ow_index)
 
@@ -1470,15 +1942,66 @@ def main() -> int:
         complex_pre,
         lambda: optimize(complex_pre, settings),
     )
+    # Every downstream gate consumes the exact archived coordinates. This keeps
+    # geometry fingerprints stable across a crash/restart despite XYZ rounding.
+    complex_opt = load_xyz(run_dir / "complex.xyz", complex_pre)
     if acid_path:
         pre_equilibrium_failure = protonated_bridge_reason(
             complex_opt,
             ow_index,
             proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
         )
         if pre_equilibrium_failure:
+            if args.reactant_only:
+                write_reactant_survey_status(
+                    run_dir,
+                    "blocked",
+                    pre_equilibrium_failure,
+                )
+                return 1
             block_run(run_dir, pre_equilibrium_failure)
             raise RuntimeError(pre_equilibrium_failure)
+
+    reactant_frequency: FrequencyResult | None = None
+    if acid_path and args.microsolvation_waters > 1:
+        minimum_path = run_dir / "reactant_minimum.json"
+        minimum_receipt = load_reactant_minimum_receipt(
+            minimum_path, complex_opt, settings
+        )
+        if minimum_receipt is None:
+            trim_gpu_pool()
+            log("stage 1b: proving microsolvated reactant is an unconstrained minimum")
+            reactant_frequency = frequencies(complex_opt, settings)
+            write_reactant_minimum_receipt(
+                minimum_path, complex_opt, settings, reactant_frequency
+            )
+            minimum_receipt = load_reactant_minimum_receipt(
+                minimum_path, complex_opt, settings
+            )
+            assert minimum_receipt is not None
+        else:
+            log("  resume: geometry/settings-bound reactant minimum receipt exists")
+        if minimum_receipt["passed"] is not True:
+            detail = (
+                "microsolvated reactant minimum has "
+                f"{minimum_receipt['n_imaginary']} imaginary modes; "
+                "TS search forbidden"
+            )
+            if args.reactant_only:
+                write_reactant_survey_status(run_dir, "blocked", detail)
+            else:
+                block_run(run_dir, detail)
+            return 1
+        if args.reactant_only:
+            write_reactant_survey_status(
+                run_dir,
+                "verified",
+                "microsolvated reactant passed connectivity and minimum gates",
+            )
+            log("reactant-only gate passed; TS search intentionally skipped")
+            return 0
+
     dimer_opt = checkpointed(
         run_dir / "dimer.xyz", dimer, lambda: optimize(dimer, settings)
     )
@@ -1584,6 +2107,7 @@ def main() -> int:
             run_dir=run_dir,
             ow_index=ow_index,
             proton_indices=proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
         ),
     )
 
@@ -1627,6 +2151,7 @@ def main() -> int:
                 run_dir=run_dir,
                 ow_index=ow_index,
                 proton_indices=proton_indices,
+                solvent_oxygen_indices=solvent_oxygen_indices,
             ),
         )
         r_guess = float(
@@ -1661,6 +2186,7 @@ def main() -> int:
             fwd,
             ow_index,
             proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
         )
     else:
         irc_failure = quick_irc_channel_reason(back, fwd, ow_index)
@@ -1671,6 +2197,7 @@ def main() -> int:
             fwd,
             ow_index,
             proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
         )
     elif args.reaction == "al-neutral":
         cleavage_failure = quick_irc_cleavage_reason(back, fwd, ow_index)
@@ -1692,6 +2219,9 @@ def main() -> int:
             reaction=args.reaction,
             acid_path=acid_path,
             proton_indices=proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
+            n_water=args.microsolvation_waters,
+            reactant_frequency=reactant_frequency,
         )
     if args.reaction == "al-neutral":
         assert cleavage_failure is not None
@@ -1705,7 +2235,7 @@ def main() -> int:
 
     # Stage 5 — thermochemistry.
     log("stage 5: thermochemistry")
-    cx_freq = frequencies(complex_opt, settings)
+    cx_freq = reactant_frequency or frequencies(complex_opt, settings)
     if detail := minimum_frequency_reason("reactant", cx_freq):
         return abort_campaign(f"{detail}; aborting before thermochemistry")
     t = args.temperature
@@ -1748,6 +2278,12 @@ def main() -> int:
             else "concerted-neutral-hydrolysis"
         ),
         "mechanism_version": ACID_MECHANISM_VERSION if acid_path else 1,
+        "microsolvation_waters": args.microsolvation_waters if acid_path else 0,
+        "microsolvation_version": (
+            ACID_MICROSOLVATION_VERSION
+            if acid_path and args.microsolvation_waters > 1
+            else None
+        ),
         "method": f"{args.xc}/{args.basis}/df",
         "temperature_k": t,
         "dE_elec_vs_complex_kj": de_kj,

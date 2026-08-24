@@ -180,6 +180,304 @@ def test_acid_quick_irc_requires_full_pre_equilibrium_and_product_speciation(
     )
 
 
+@pytest.mark.parametrize("n_water", [3, 4, 5, 6])
+def test_microsolvated_acid_basin_counts_all_mobile_solvent_protons(n_water):
+    dimer = disilicate()
+    reactant = protonated_bridge_complex(dimer, n_water=n_water)
+    ow_index = len(dimer.symbols)
+    proton_indices, solvent_oxygen_indices = phase1.acid_mobile_indices(
+        ow_index, n_water
+    )
+
+    expected = phase1.acid_reactant_basin(proton_indices)
+    assert expected == (False, True, True, 1, 2 * n_water, 0)
+    assert (
+        phase1.acid_basin_signature(
+            reactant,
+            ow_index,
+            proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
+        )
+        == expected
+    )
+    assert (
+        phase1.protonated_bridge_reason(
+            reactant,
+            ow_index,
+            proton_indices,
+            solvent_oxygen_indices=solvent_oxygen_indices,
+        )
+        is None
+    )
+
+
+def test_microsolvated_basin_rejects_hidden_hydroxide_hydronium_pair():
+    dimer = disilicate()
+    reactant = protonated_bridge_complex(dimer, n_water=4)
+    ow_index = len(dimer.symbols)
+    proton_indices, solvent_oxygen_indices = phase1.acid_mobile_indices(ow_index, 4)
+    corrupted = replace(reactant, coords=reactant.coords.copy())
+    attacker_h = ow_index + 2
+    first_shell_oxygen = solvent_oxygen_indices[1]
+    corrupted.coords[attacker_h] = corrupted.coords[first_shell_oxygen] + np.array(
+        [0.0, 0.0, 0.96]
+    )
+
+    # The aggregate tuple is intentionally backward-compatible and cannot see
+    # this OH-/H3O+ pair; the acceptance gate must reject its per-water shape.
+    assert phase1.acid_basin_signature(
+        corrupted,
+        ow_index,
+        proton_indices,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+    ) == phase1.acid_reactant_basin(proton_indices)
+    reason = phase1.protonated_bridge_reason(
+        corrupted,
+        ow_index,
+        proton_indices,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+    )
+    assert reason is not None and "solvent occupancies" in reason
+
+
+def test_microsolvated_basin_rejects_untracked_framework_proton_theft():
+    dimer = disilicate()
+    reactant = protonated_bridge_complex(dimer, n_water=4)
+    ow_index = len(dimer.symbols)
+    proton_indices, solvent_oxygen_indices = phase1.acid_mobile_indices(ow_index, 4)
+    corrupted = replace(reactant, coords=reactant.coords.copy())
+    framework_h = next(
+        index for index in range(len(dimer.symbols)) if dimer.symbols[index] == "H"
+    )
+    shell_oxygen = solvent_oxygen_indices[1]
+    corrupted.coords[framework_h] = corrupted.coords[shell_oxygen] + np.array(
+        [0.0, 0.0, 0.96]
+    )
+
+    # Mobile-proton bookkeeping is unchanged, but the physical shell is H3O+
+    # and one terminal framework oxygen is bare.
+    assert phase1.acid_basin_signature(
+        corrupted,
+        ow_index,
+        proton_indices,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+    ) == phase1.acid_reactant_basin(proton_indices)
+    reason = phase1.protonated_bridge_reason(
+        corrupted,
+        ow_index,
+        proton_indices,
+        solvent_oxygen_indices=solvent_oxygen_indices,
+    )
+    assert reason is not None and "solvent occupancies" in reason
+
+
+def test_microsolvated_basin_equivalence_includes_every_solvent_oxygen():
+    canonical = protonated_bridge_complex(disilicate(), n_water=4)
+    ow_index = len(disilicate().symbols)
+    _protons, solvent_oxygen_indices = phase1.acid_mobile_indices(ow_index, 4)
+    candidate = replace(canonical, coords=canonical.coords.copy())
+    candidate.coords[solvent_oxygen_indices[-1]] += np.array([0.0, 0.0, 2.0])
+
+    reason = phase1.basin_equivalence_reason(
+        candidate,
+        canonical,
+        phase1.acid_basin_equivalence_indices(solvent_oxygen_indices),
+        candidate_energy_hartree=-100.0,
+        canonical_energy_hartree=-100.0,
+    )
+    assert reason is not None and "RMSD" in reason
+
+
+def test_microsolvation_run_slug_is_checkpoint_isolated():
+    assert phase1.reaction_run_slug("si-acid", "b3lyp", "def2-svp", "flank") == (
+        "si-acid-preprotonated-v2-b3lyp-def2-svp-flank"
+    )
+    assert (
+        phase1.reaction_run_slug("si-acid", "b3lyp", "def2-svp", "flank", n_water=4)
+        == "si-acid-microsolvated-4w-v1-b3lyp-def2-svp-flank"
+    )
+
+
+def test_reactant_minimum_receipt_is_geometry_and_settings_bound(tmp_path):
+    cluster = protonated_bridge_complex(disilicate(), n_water=4)
+    settings = DftSettings(xc="b3lyp", basis="def2-svp", density_fit=True)
+    frequency = FrequencyResult(
+        frequencies_cm=np.array([100.0, 200.0]),
+        imaginary_cm=np.array([]),
+        electronic_hartree=-100.0,
+        molar_mass_kg=0.1,
+        rotational_temperatures_k=(1.0, 2.0, 3.0),
+        linear=False,
+    )
+    path = tmp_path / "reactant_minimum.json"
+
+    phase1.write_reactant_minimum_receipt(path, cluster, settings, frequency)
+
+    receipt = phase1.load_reactant_minimum_receipt(path, cluster, settings)
+    assert receipt is not None and receipt["passed"] is True
+    assert receipt["frequencies_cm"] == [100.0, 200.0]
+    assert receipt["electronic_hartree"] == -100.0
+    assert isinstance(receipt["result_fingerprint"], str)
+    moved = replace(cluster, coords=cluster.coords.copy())
+    moved.coords[0, 0] += 0.01
+    assert phase1.load_reactant_minimum_receipt(path, moved, settings) is None
+    assert (
+        phase1.load_reactant_minimum_receipt(
+            path,
+            cluster,
+            DftSettings(xc="pbe", basis="def2-svp", density_fit=True),
+        )
+        is None
+    )
+    xyz_path = tmp_path / "complex.xyz"
+    phase1.save_xyz(cluster, xyz_path)
+    archived = phase1.load_xyz(xyz_path, cluster)
+    phase1.write_reactant_minimum_receipt(path, archived, settings, frequency)
+    assert phase1.load_reactant_minimum_receipt(path, archived, settings) is not None
+    tampered = json.loads(path.read_text())
+    tampered["passed"] = "false"
+    path.write_text(json.dumps(tampered))
+    assert phase1.load_reactant_minimum_receipt(path, cluster, settings) is None
+
+
+def test_reactant_minimum_receipt_rejects_truncated_or_edited_hessian(tmp_path):
+    cluster = protonated_bridge_complex(disilicate(), n_water=4)
+    settings = DftSettings(xc="b3lyp", basis="def2-svp", density_fit=True)
+    frequency = FrequencyResult(
+        frequencies_cm=np.array([100.0, 200.0]),
+        imaginary_cm=np.array([]),
+        electronic_hartree=-100.0,
+        molar_mass_kg=0.1,
+        rotational_temperatures_k=(1.0, 2.0, 3.0),
+        linear=False,
+    )
+    path = tmp_path / "reactant_minimum.json"
+    phase1.write_reactant_minimum_receipt(path, cluster, settings, frequency)
+    valid = json.loads(path.read_text())
+
+    gate_only = {
+        "geometry_fingerprint": valid["geometry_fingerprint"],
+        "settings_fingerprint": valid["settings_fingerprint"],
+        "n_imaginary": 0,
+        "passed": True,
+        "imaginary_cm": [],
+    }
+    path.write_text(json.dumps(gate_only))
+    assert phase1.load_reactant_minimum_receipt(path, cluster, settings) is None
+
+    missing_energy = dict(valid)
+    missing_energy.pop("electronic_hartree")
+    path.write_text(json.dumps(missing_energy))
+    assert phase1.load_reactant_minimum_receipt(path, cluster, settings) is None
+
+    empty_modes = dict(valid)
+    empty_modes["frequencies_cm"] = []
+    path.write_text(json.dumps(empty_modes))
+    assert phase1.load_reactant_minimum_receipt(path, cluster, settings) is None
+
+    edited_energy = dict(valid)
+    edited_energy["electronic_hartree"] = -99.0
+    path.write_text(json.dumps(edited_energy))
+    assert phase1.load_reactant_minimum_receipt(path, cluster, settings) is None
+
+    path.write_text(json.dumps(valid))
+    assert phase1.load_reactant_minimum_receipt(path, cluster, settings) is not None
+
+
+def test_microsolvated_main_blocks_before_ts_when_reactant_is_not_minimum(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        phase1.sys,
+        "argv",
+        [
+            "phase1_xiao_lasaga.py",
+            "--reaction",
+            "si-acid",
+            "--microsolvation-waters",
+            "4",
+        ],
+    )
+    monkeypatch.setattr(phase1, "reaction_run_slug", lambda *args: tmp_path)
+    monkeypatch.setattr(phase1, "optimize", lambda cluster, settings: cluster)
+    monkeypatch.setattr(
+        phase1,
+        "frequencies",
+        lambda cluster, settings: FrequencyResult(
+            frequencies_cm=np.array([100.0, 200.0]),
+            imaginary_cm=np.array([45.0]),
+            electronic_hartree=-100.0,
+            molar_mass_kg=0.1,
+            rotational_temperatures_k=(1.0, 2.0, 3.0),
+            linear=False,
+        ),
+    )
+    monkeypatch.setattr(
+        phase1,
+        "scan_to_maximum",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("TS search must not run before the minimum gate")
+        ),
+    )
+
+    assert phase1.main() == 1
+    receipt = json.loads((tmp_path / "reactant_minimum.json").read_text())
+    status = json.loads((tmp_path / "run_status.json").read_text())
+    assert receipt["passed"] is False
+    assert receipt["n_imaginary"] == 1
+    assert status["status"] == "blocked"
+    assert "TS search forbidden" in status["detail"]
+
+
+def test_reactant_only_stops_after_verified_minimum(monkeypatch, tmp_path):
+    (tmp_path / "results.json").write_text('{"durable": true}')
+    (tmp_path / "store.sqlite").write_bytes(b"durable-store")
+    (tmp_path / "run_status.json").write_text(
+        json.dumps({"status": "completed", "detail": "existing accepted campaign"})
+    )
+    monkeypatch.setattr(
+        phase1.sys,
+        "argv",
+        [
+            "phase1_xiao_lasaga.py",
+            "--reaction",
+            "al-acid",
+            "--microsolvation-waters",
+            "4",
+            "--reactant-only",
+        ],
+    )
+    monkeypatch.setattr(phase1, "reaction_run_slug", lambda *args: tmp_path)
+    monkeypatch.setattr(phase1, "optimize", lambda cluster, settings: cluster)
+    monkeypatch.setattr(
+        phase1,
+        "frequencies",
+        lambda cluster, settings: FrequencyResult(
+            frequencies_cm=np.array([100.0, 200.0]),
+            imaginary_cm=np.array([]),
+            electronic_hartree=-100.0,
+            molar_mass_kg=0.1,
+            rotational_temperatures_k=(1.0, 2.0, 3.0),
+            linear=False,
+        ),
+    )
+    monkeypatch.setattr(
+        phase1,
+        "scan_to_maximum",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("reactant-only must skip the TS search")
+        ),
+    )
+
+    assert phase1.main() == 0
+    survey = json.loads((tmp_path / "reactant_status.json").read_text())
+    canonical = json.loads((tmp_path / "run_status.json").read_text())
+    assert survey["status"] == "verified"
+    assert canonical["status"] == "completed"
+    assert json.loads((tmp_path / "results.json").read_text()) == {"durable": True}
+    assert (tmp_path / "store.sqlite").read_bytes() == b"durable-store"
+
+
 @pytest.mark.parametrize("dimer_factory", [disilicate, aluminosilicate_dimer])
 def test_acid_speciation_guards_reject_lost_proton_bridge_or_water(dimer_factory):
     reactant, product, ow_index, proton_indices = acid_geometries(dimer_factory)

@@ -110,22 +110,70 @@ This is a model-validity failure, not a compute failure. Holding Obr–H by a
 constraint would make the requested reactant exist but would invalidate the
 unconstrained frequencies and ΔG‡ comparison.
 
+## Matched microsolvation survey (3--6 waters)
+
+Victor selected matched microsolvation for both dimers on 2026-08-23. The
+continuation driver now supports 3--6 total explicit waters, isolates every
+water count in its own checkpoint namespace, counts the attacker and each shell
+water separately, checks every physical H atom (including framework OH), and
+refuses all TS work until the unconstrained reactant passes connectivity and
+zero-imaginary-mode gates.
+
+The first bounded Si--O--Si survey tested one deterministic hydrogen-bond shell
+seed at every requested water count. Every production B3LYP/def2-SVP/DF
+geometry endpoint lost the bridge proton **before** a Hessian or TS search:
+
+| total waters | production geometry | acid signature after optimization | disposition |
+|---:|---|---|---|
+| 3 | converged | `(False, True, True, 0, 7, 0)` | proton moved into the solvent network |
+| 4 | converged after continuing the original 100-step endpoint | `(False, True, True, 0, 9, 0)` | residual water became H3O+ |
+| 5 | converged | `(False, True, True, 0, 10, 1)` | proton moved to a terminal framework O |
+| 6 | converged | `(False, True, True, 0, 12, 1)` | proton moved to a terminal framework O |
+
+The signature is `(Si--Ow bonded, Si--Obr bonded, opposite-center--Obr bonded,
+bridge mobile-H count, solvent mobile-H count, terminal-framework mobile-H
+count)`. All four endpoints retain the intact Si--O--Si bridge but have zero
+protons on Obr. The strict reactant gate requires `(False, True, True, 1, 2n,
+0)` plus exact physical occupancies: attacking H2O, neutral two-H shell waters,
+one H on Obr, and one baseline H on every terminal framework oxygen.
+
+This is a bounded conformer survey, not a proof that no protonated-bridge local
+minimum exists anywhere on the microsolvated potential-energy surface. It does
+prove that merely adding 3--6 waters to the settled deterministic shell does
+**not** rescue the pre-equilibrium assumed by this card. Running the matched Al
+barrier would not produce a reportable pair while every Si count is red, so no
+Al TS campaign was launched and no unsupported ordering was published.
+
+Durable ignored-state receipts:
+
+| waters | optimized `complex.xyz` SHA-256 | reactant-status SHA-256 | teed production log SHA-256 |
+|---:|---|---|---|
+| 3 | `785d6ea430f41e20ab1245c2539877779216f38a2a66fb72301274754812f971` | `c38114b0b2b18d66583e9c4156aa17be9a95713e6832cdf6d8399f7f26e1be51` | `cc9a702bd1ee449917a0441644f9a96c7b60a56dc305be181a581b2c0ebedeaa` |
+| 4 | `e4dc46a999d3330a55574b3741e2e0b3b7483724a25c9a7300ed4da73b96a11d` | `6519337ce38565541af9efc4302da15e74e3d46ed0714b66eda9f4d148c0ac68` | refinement: `19f7ff2078d06d4302e0f60aa6c8aed64db1cb1462c72138a1c3d9542792a924` |
+| 5 | `7f006d12573e64b1be7f27c223f56732b45cc507a74faaef04bb20ff678e326c` | `9f6312781701d6a2d0ac7d96f0cc529de31ddc75a59814daf261f4ce7dcf211c` | `c0cccbc3d96aa98aae84aab1bbdeb1f839e7f4efa3a01c794b03897b1fc7fe99` |
+| 6 | `3fac28ca17c83c15a4161964de6d21d91de99ea97e5e2050350d05871563c95f` | `a238bc65ee782f28ae2e182231d9171057dd3a9b68c5a66fb53eb40871a8e5a9` | `dbc8d6bc1f3eedfbf4530ef847640009ce773d8f36e28522ec8917045c904ebf` |
+
 ## Required follow-up
 
-Build a **3–6 explicit-water microsolvated Si-acid cluster**, as already
-recommended by `HANDOFF.md`, and prove the protonated-bridge reactant is an
-unconstrained minimum before any TS search. Then run the same validated
-addition/cleavage gates for both Si–O–Si and Si–O–Al under like-for-like
-microsolvation. Only that paired result can close the acid ordering claim.
+The card remains scientifically blocked. The next bounded move is a
+microsolvation **conformer ensemble**, not another water-count retry: generate
+multiple proton-relay topologies at 3--6 waters, deduplicate optimized basins,
+and require a zero-imaginary protonated-bridge minimum for both Si and Al under
+one matched topology before any TS search. If that finite ensemble also
+returns H3O+/terminal protonation for every Si seed, retire the
+pre-equilibrated-bridge assumption and redesign the acid path as a concerted
+microsolvated hydronium/proton-relay mechanism. Never hold Obr--H by constraint
+to manufacture thermochemistry.
 
 Reproduction commands must clear inherited environments:
 
 ```bash
 env -u PYTHONPATH -u VIRTUAL_ENV \
   uv run --frozen --extra gpu --extra dev \
-  python scripts/phase1_xiao_lasaga.py --reaction al-acid --gpu \
+  python scripts/phase1_xiao_lasaga.py --reaction si-acid --gpu \
+  --microsolvation-waters 4 --reactant-only \
   --threads 16 --nice 10 --log <durable-log>
 ```
 
 The RTX 4090 must be isolated from both email extraction and Honcho memory
-inference during GPU4PySCF Hessians; see `.claude/learnings/gotchas.md`.
+inference during GPU4PySCF work; see `.claude/learnings/gotchas.md`.
