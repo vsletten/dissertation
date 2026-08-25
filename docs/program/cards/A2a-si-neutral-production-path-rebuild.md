@@ -1,11 +1,11 @@
 # A2a-si-neutral-production-path-rebuild — replace the invalid banked saddle
 
-- status: ready
+- status: active
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
 - depends: — (A2 infrastructure and exact r2SCAN-3c minima are already pushed)
-- claimed-by:
+- claimed-by: hermes-workstation
 
 ## Objective
 
@@ -67,6 +67,18 @@ CCSD(T)/CBS calibration triangle (ByteQC canonical + Psi4 TightPNO DLPNO).
 
 ## Progress
 
+- 2026-08-25 — atomic claim is remotely durable on
+  `agents/A2a-si-neutral-production-path-rebuild`. Commit `13311ff` adds the
+  sequential production-path driver and CPU-only orchestration contracts. It
+  never accepts the rejected banked saddle as input: the exact archived
+  r2SCAN-3c R/I/P references are independently reoptimized and minimum-gated,
+  then R↔I and I↔P each receive persisted pre-climb/climb CI-NEB,
+  reaction-aligned Sella, two-step central-difference Hessian stability, exact
+  typed full-IRC endpoint gates, production single points, and one provenance
+  store. The predeclared numerical contract and 59 focused A2/A2a/TS/CC tests,
+  Ruff, CLI smoke, and diff checks are green. The bounded workstation campaign
+  is running under `/mnt/data/vsletten/dissertation-data/task208-a2a-path-rebuild-20260825/`
+  with extraction/Honcho GPU consumers isolated and a ten-hour dead-man restore.
 - 2026-08-24 — created by hermes-workstation from A2 live production evidence.
   Exact r2SCAN-3c FD-Hessian indices are reactant/product/TS `0/0/1`, but the
   repaired 260-step full IRC closes in the associative basin on both sides.
