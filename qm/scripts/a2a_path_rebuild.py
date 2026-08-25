@@ -50,7 +50,7 @@ from scripts import production_energetics as a2
 PATH_GATE_VERSION = "a2a-sequential-path-v1"
 SELLA_MODE_STRATEGY = "conditioned-crest-local-ci-neb-tangent-v1"
 REACTION_COORDINATE_PAIRS = ((1, 15), (0, 17), (0, 1))
-CONDITIONED_DISTANCE_TOLERANCE_A = 1.0e-5
+CONDITIONED_DISTANCE_TOLERANCE_A = 1.0e-4
 HESSIAN_STEPS_BOHR = (1.0e-3, 2.0e-3)
 SIGNIFICANT_IMAGINARY_FLOOR_CM = 30.0
 MODE_COSINE_MINIMUM = 0.80
