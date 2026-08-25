@@ -15,7 +15,10 @@ def receipt(engine: str, basis: str, scf: float, correlation: float) -> dict:
     return {
         "engine": engine,
         "basis": basis,
+        "identity": {"engine": engine, "basis": basis},
         "input_sha256": "abc",
+        "charge": 0,
+        "spin_2s": 0,
         "scf_hartree": scf,
         "correlation_hartree": correlation,
         "total_hartree": scf + correlation,
@@ -57,14 +60,14 @@ def test_receipt_grid_requires_complete_role_basis_matrix():
 
 def test_existing_receipt_fails_closed_on_identity_drift(tmp_path):
     path = tmp_path / "receipt.json"
-    path.write_text(
-        json.dumps(receipt("byteqc-canonical-ccsd(t)", "cc-pVTZ", -10.0, -1.0))
-    )
+    payload = receipt("byteqc-canonical-ccsd(t)", "cc-pVTZ", -10.0, -1.0)
+    path.write_text(json.dumps(payload))
     assert cc.existing_receipt(
         path,
         engine="byteqc-canonical-ccsd(t)",
         basis="cc-pVTZ",
         input_sha256="abc",
+        identity=payload["identity"],
     )
     with pytest.raises(ValueError, match="identity drift"):
         cc.existing_receipt(
@@ -72,7 +75,17 @@ def test_existing_receipt_fails_closed_on_identity_drift(tmp_path):
             engine="byteqc-canonical-ccsd(t)",
             basis="cc-pVQZ",
             input_sha256="abc",
+            identity=payload["identity"],
         )
+    with pytest.raises(ValueError, match="expected basis cc-pVQZ"):
+        cc.load_receipt(path, "byteqc-canonical-ccsd(t)", "cc-pVQZ")
+
+
+def test_calibration_engines_refuse_open_shell_before_import():
+    with pytest.raises(ValueError, match="closed-shell spin=0 only"):
+        cc.byteqc_job(argparse.Namespace(spin=1))
+    with pytest.raises(ValueError, match="supports spin=0 only"):
+        cc.psi4_job(argparse.Namespace(spin=1))
 
 
 def test_summarize_reports_barrier_delta_and_gate(tmp_path):
@@ -109,3 +122,16 @@ def test_summarize_reports_barrier_delta_and_gate(tmp_path):
     )
     assert result["gate_pass"] is True
     assert json.loads(output.read_text()) == result
+
+    drift_path = paths["dlpno"]["ts"]["qz"]
+    drift = json.loads(drift_path.read_text())
+    drift["input_sha256"] = "different-geometry"
+    drift_path.write_text(json.dumps(drift))
+    with pytest.raises(ValueError, match="do not share one exact geometry"):
+        cc.summarize(
+            argparse.Namespace(
+                canonical=paths["canonical"],
+                dlpno=paths["dlpno"],
+                output=output,
+            )
+        )

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -30,6 +31,8 @@ def neutral_pair(name: str, *, product: bool = False) -> Cluster:
                 [4.8, 0.0, 0.0],
                 [0.9, 0.0, 0.0],
                 [5.4, 0.7, 0.0],
+                [0.0, 5.0, 0.0],
+                [0.9, 5.0, 0.0],
             ]
         )
     else:
@@ -40,9 +43,11 @@ def neutral_pair(name: str, *, product: bool = False) -> Cluster:
                 [5.0, 0.0, 0.0],
                 [5.9, 0.0, 0.0],
                 [4.7, 0.9, 0.0],
+                [0.0, 5.0, 0.0],
+                [0.9, 5.0, 0.0],
             ]
         )
-    return Cluster(name, ["O", "Si", "O", "H", "H"], coords)
+    return Cluster(name, ["O", "Si", "O", "H", "H", "O", "H"], coords)
 
 
 def fake_frequency(cluster: Cluster, settings, *, transition_state: bool):
@@ -116,6 +121,42 @@ def test_source_store_loader_checks_geometry_hash(tmp_path):
         a2.load_store_structure(path, reactant_id)
 
 
+def test_cluster_checkpoint_is_exact_and_bound_to_source(tmp_path):
+    source = neutral_pair("source")
+    computed = replace(source, coords=source.coords.copy())
+    computed.coords[1, 0] = 1.6000000010879999
+    path = tmp_path / "minimum.xyz"
+    identity = {"stage": "minimum", "settings": "exact"}
+
+    first = a2.checkpoint_cluster(
+        path,
+        source,
+        lambda: computed,
+        identity=identity,
+    )
+    second = a2.checkpoint_cluster(
+        path,
+        source,
+        lambda: pytest.fail("checkpoint recomputed"),
+        identity=identity,
+    )
+    assert np.array_equal(first.coords, computed.coords)
+    assert np.array_equal(second.coords, computed.coords)
+    assert a2.frequency_geometry_fingerprint(
+        first
+    ) == a2.frequency_geometry_fingerprint(second)
+
+    changed_source = replace(source, coords=source.coords.copy())
+    changed_source.coords[0, 0] += 0.01
+    with pytest.raises(ValueError, match="source geometry drift"):
+        a2.checkpoint_cluster(
+            path,
+            changed_source,
+            lambda: computed,
+            identity=identity,
+        )
+
+
 def test_full_irc_gate_requires_both_neutral_basins():
     reactant = neutral_pair("reactant")
     product = neutral_pair("product", product=True)
@@ -127,6 +168,19 @@ def test_full_irc_gate_requires_both_neutral_basins():
     with pytest.raises(RuntimeError, match="do not match"):
         a2.require_si_neutral_irc(
             (reactant, reactant), reactant, product, attacker_index=2
+        )
+
+    wrong_ownership = replace(product, coords=product.coords.copy())
+    wrong_ownership.coords[6] = np.array([5.0, -0.9, 0.0])
+    assert a2.si_neutral_signature(wrong_ownership, 2) == a2.si_neutral_signature(
+        product, 2
+    )
+    with pytest.raises(RuntimeError, match="exact H ownership"):
+        a2.require_si_neutral_irc(
+            (reactant, wrong_ownership),
+            reactant,
+            product,
+            attacker_index=2,
         )
 
 
@@ -211,12 +265,16 @@ def test_end_to_end_driver_journals_results_without_recompute(monkeypatch, tmp_p
         irc_steps=5,
         imaginary_floor=30.0,
     )
-    assert a2.run(args) == 0
+    assert a2.execute_with_status(args) == 0
     result = json.loads((run_dir / "results.json").read_text())
     assert result["reaction"] == "si-neutral"
     assert result["full_irc"]["actual"] == result["full_irc"]["expected"]
     assert result["barrier_electronic_kj"][a2.PRODUCTION_METHOD] > 0.0
     assert (run_dir / "store.sqlite").exists()
+    status = json.loads((run_dir / "run_status.json").read_text())
+    assert status["status"] == "completed"
+    assert status["results_sha256"] == a2.sha256_path(run_dir / "results.json")
+    assert status["store_sha256"] == a2.sha256_path(run_dir / "store.sqlite")
     assert len(frequency_calls) == 3
     assert len(ts_calls) == 1
     assert ts_calls[0][0].shape == transition_state.coords.shape
@@ -238,4 +296,19 @@ def test_end_to_end_driver_journals_results_without_recompute(monkeypatch, tmp_p
         "energy",
         lambda *unused, **kwargs: pytest.fail("single point recomputed"),
     )
-    assert a2.run(args) == 0
+    assert a2.execute_with_status(args) == 0
+
+
+def test_execute_with_status_records_failure(monkeypatch, tmp_path):
+    args = argparse.Namespace(run_dir=tmp_path / "failed", reaction="si-neutral")
+
+    def fail(current):
+        raise RuntimeError("scientific gate red")
+
+    monkeypatch.setattr(a2, "run", fail)
+    with pytest.raises(RuntimeError, match="scientific gate red"):
+        a2.execute_with_status(args)
+    status = json.loads((args.run_dir / "run_status.json").read_text())
+    assert status["status"] == "failed"
+    assert status["error_type"] == "RuntimeError"
+    assert status["error"] == "scientific gate red"

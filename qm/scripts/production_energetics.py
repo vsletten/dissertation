@@ -70,6 +70,20 @@ def sha256_path(path: Path) -> str:
     return digest.hexdigest()
 
 
+def exact_xyz(cluster: Cluster) -> str:
+    """Round-trip-safe XYZ for scientific checkpoints and cache identities."""
+    lines = [str(len(cluster.symbols)), cluster.name]
+    lines.extend(
+        f"{symbol} {x:.17g} {y:.17g} {z:.17g}"
+        for symbol, (x, y, z) in zip(
+            cluster.symbols,
+            cluster.coords,
+            strict=True,
+        )
+    )
+    return "\n".join(lines)
+
+
 def parse_xyz(text: str, *, name: str, charge: int, spin: int) -> Cluster:
     lines = text.splitlines()
     if len(lines) < 2:
@@ -137,16 +151,47 @@ def checkpoint_cluster(
     path: Path,
     template: Cluster,
     compute: Callable[[], Cluster],
+    *,
+    identity: dict[str, Any],
 ) -> Cluster:
-    if path.exists():
-        return load_xyz_like(path, template, name=path.stem)
+    receipt_path = path.with_name(f"{path.name}.checkpoint.json")
+    expected = {
+        "source_geometry_fingerprint": frequency_geometry_fingerprint(template),
+        "identity": identity,
+    }
+    if path.exists() or receipt_path.exists():
+        if not path.exists() or not receipt_path.exists():
+            raise ValueError(f"{path.name}: incomplete checkpoint pair")
+        receipt = json.loads(receipt_path.read_text())
+        if (
+            receipt.get("source_geometry_fingerprint")
+            != expected["source_geometry_fingerprint"]
+        ):
+            raise ValueError(f"{path.name}: checkpoint source geometry drift")
+        if receipt.get("identity") != identity:
+            raise ValueError(f"{path.name}: checkpoint stage identity drift")
+        loaded = load_xyz_like(path, template, name=path.stem)
+        if receipt.get("output_geometry_fingerprint") != frequency_geometry_fingerprint(
+            loaded
+        ):
+            raise ValueError(f"{path.name}: checkpoint output geometry drift")
+        return loaded
     result = compute()
     if result.symbols != template.symbols:
         raise ValueError(f"{path.name}: computed atom order drift")
     temporary = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
-    temporary.write_text(result.to_xyz())
+    temporary.write_text(exact_xyz(result))
     temporary.replace(path)
-    return result
+    loaded = load_xyz_like(path, template, name=path.stem)
+    atomic_json(
+        receipt_path,
+        {
+            **expected,
+            "output_geometry_fingerprint": frequency_geometry_fingerprint(loaded),
+            "output_sha256": sha256_path(path),
+        },
+    )
+    return loaded
 
 
 def optimize_minimum(
@@ -339,25 +384,87 @@ def si_neutral_signature(
     )
 
 
+def endpoint_identity(
+    cluster: Cluster,
+    attacker_index: int,
+) -> tuple[
+    tuple[bool, bool, bool],
+    tuple[tuple[int, int], ...],
+    tuple[tuple[int, int], ...],
+]:
+    """Typed neutral endpoint identity: basin, physical-H owners, heavy graph."""
+    from ase.data import atomic_numbers, covalent_radii
+
+    deltas = cluster.coords[:, None, :] - cluster.coords[None, :, :]
+    distances = np.linalg.norm(deltas, axis=2)
+    nonzero = distances[np.triu_indices(len(cluster.symbols), k=1)]
+    if not np.all(np.isfinite(nonzero)) or float(np.min(nonzero)) < 0.55:
+        raise ValueError(
+            "endpoint has non-finite coordinates or a sub-0.55 A collision"
+        )
+
+    oxygen_indices = [
+        index for index, symbol in enumerate(cluster.symbols) if symbol == "O"
+    ]
+    hydrogen_owners: list[tuple[int, int]] = []
+    for hydrogen in (
+        index for index, symbol in enumerate(cluster.symbols) if symbol == "H"
+    ):
+        candidates = sorted(
+            (float(distances[hydrogen, oxygen]), oxygen) for oxygen in oxygen_indices
+        )
+        if candidates[0][0] >= 1.25:
+            raise ValueError(f"hydrogen {hydrogen} is unassigned")
+        if len(candidates) > 1 and candidates[1][0] < 1.05:
+            raise ValueError(f"hydrogen {hydrogen} has ambiguous oxygen ownership")
+        hydrogen_owners.append((hydrogen, candidates[0][1]))
+
+    heavy = [index for index, symbol in enumerate(cluster.symbols) if symbol != "H"]
+    heavy_bonds = []
+    for position, left in enumerate(heavy):
+        for right in heavy[position + 1 :]:
+            cutoff = 1.25 * (
+                covalent_radii[atomic_numbers[cluster.symbols[left]]]
+                + covalent_radii[atomic_numbers[cluster.symbols[right]]]
+            )
+            if distances[left, right] < cutoff:
+                heavy_bonds.append((left, right))
+    return (
+        si_neutral_signature(cluster, attacker_index),
+        tuple(hydrogen_owners),
+        tuple(heavy_bonds),
+    )
+
+
 def require_si_neutral_irc(
     endpoints: tuple[Cluster, Cluster],
     reactant: Cluster,
     product: Cluster,
     attacker_index: int,
 ) -> dict[str, Any]:
+    for endpoint in (*endpoints, reactant, product):
+        if endpoint.symbols != reactant.symbols:
+            raise ValueError("IRC endpoint atom order differs from the reactant")
+        if endpoint.charge != reactant.charge or endpoint.spin != reactant.spin:
+            raise ValueError("IRC endpoint electronic state differs from the reactant")
     expected = {
-        si_neutral_signature(reactant, attacker_index),
-        si_neutral_signature(product, attacker_index),
+        endpoint_identity(reactant, attacker_index),
+        endpoint_identity(product, attacker_index),
     }
-    actual = {si_neutral_signature(endpoint, attacker_index) for endpoint in endpoints}
+    actual = {endpoint_identity(endpoint, attacker_index) for endpoint in endpoints}
     if len(expected) != 2 or actual != expected:
+        expected_basins = sorted(identity[0] for identity in expected)
+        actual_basins = sorted(identity[0] for identity in actual)
         raise RuntimeError(
-            f"full IRC endpoints {sorted(actual)} do not match reactant/product "
-            f"basins {sorted(expected)}"
+            f"full IRC endpoints {actual_basins} do not match reactant/product "
+            f"basins {expected_basins} with exact H ownership/heavy topology"
         )
     return {
-        "expected": [list(value) for value in sorted(expected)],
-        "actual": [list(value) for value in sorted(actual)],
+        "expected": [
+            list(value) for value in sorted(identity[0] for identity in expected)
+        ],
+        "actual": [list(value) for value in sorted(identity[0] for identity in actual)],
+        "typed_identity": "basin+physical-hydrogen-owners+heavy-atom-bonds",
     }
 
 
@@ -378,7 +485,7 @@ def record_store(
             structure_ids[role] = store.add_structure(
                 f"{reaction}-{role}",
                 cluster.formula,
-                cluster.to_xyz(),
+                exact_xyz(cluster),
                 charge=cluster.charge,
                 spin=cluster.spin,
             )
@@ -458,6 +565,7 @@ def run(args: argparse.Namespace) -> int:
         },
     )
 
+    r2scan_identity = frequency_settings_fingerprint(r2scan3c)
     reactant = checkpoint_cluster(
         run_dir / "reactant.r2scan3c.xyz",
         reactant_source,
@@ -467,6 +575,13 @@ def run(args: argparse.Namespace) -> int:
             max_steps=args.minimum_steps,
             trajectory=run_dir / "reactant.r2scan3c.traj",
         ),
+        identity={
+            "stage": "minimum",
+            "role": "reactant",
+            "algorithm": "ase-bfgs-v1",
+            "settings": r2scan_identity,
+            "max_steps": args.minimum_steps,
+        },
     )
     product = checkpoint_cluster(
         run_dir / "product.r2scan3c.xyz",
@@ -477,6 +592,13 @@ def run(args: argparse.Namespace) -> int:
             max_steps=args.minimum_steps,
             trajectory=run_dir / "product.r2scan3c.traj",
         ),
+        identity={
+            "stage": "minimum",
+            "role": "product",
+            "algorithm": "ase-bfgs-v1",
+            "settings": r2scan_identity,
+            "max_steps": args.minimum_steps,
+        },
     )
     transition_state = checkpoint_cluster(
         run_dir / "transition-state.r2scan3c.xyz",
@@ -489,6 +611,14 @@ def run(args: argparse.Namespace) -> int:
             initial_mode=reaction_path_vector(reactant, product),
             internal=False,
         ),
+        identity={
+            "stage": "transition-state",
+            "algorithm": "sella-directed-cartesian-v1",
+            "settings": r2scan_identity,
+            "max_steps": args.saddle_steps,
+            "reactant_geometry": frequency_geometry_fingerprint(reactant),
+            "product_geometry": frequency_geometry_fingerprint(product),
+        },
     )
 
     reactant_freq = checkpoint_frequency(
@@ -533,8 +663,8 @@ def run(args: argparse.Namespace) -> int:
             trajectory=run_dir / "full-irc.r2scan3c.traj",
             logfile=run_dir / "full-irc.r2scan3c.log",
         )
-        irc_forward_path.write_text(irc_endpoints[0].to_xyz())
-        irc_reverse_path.write_text(irc_endpoints[1].to_xyz())
+        irc_forward_path.write_text(exact_xyz(irc_endpoints[0]))
+        irc_reverse_path.write_text(exact_xyz(irc_endpoints[1]))
     irc_receipt = require_si_neutral_irc(
         irc_endpoints, reactant, product, args.attacker_index
     )
@@ -596,7 +726,8 @@ def run(args: argparse.Namespace) -> int:
         "ts_imaginary_cm": float(significant[0]),
         "full_irc": irc_receipt,
         "geometry_hashes": {
-            role: geometry_hash(cluster.to_xyz()) for role, cluster in clusters.items()
+            role: geometry_hash(exact_xyz(cluster))
+            for role, cluster in clusters.items()
         },
     }
     atomic_json(run_dir / "results.json", summary)
@@ -618,7 +749,7 @@ def run(args: argparse.Namespace) -> int:
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument("--reaction", required=True)
+    result.add_argument("--reaction", choices=("si-neutral",), required=True)
     result.add_argument("--source-store", type=Path, required=True)
     result.add_argument("--reactant-id", type=int, required=True)
     result.add_argument("--ts-id", type=int, required=True)
@@ -638,6 +769,43 @@ def parser() -> argparse.ArgumentParser:
     return result
 
 
+def execute_with_status(args: argparse.Namespace) -> int:
+    status_path = args.run_dir.resolve() / "run_status.json"
+    atomic_json(
+        status_path,
+        {
+            "status": "running",
+            "reaction": args.reaction,
+            "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        },
+    )
+    try:
+        result = run(args)
+    except Exception as exc:
+        atomic_json(
+            status_path,
+            {
+                "status": "failed",
+                "reaction": args.reaction,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "failed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            },
+        )
+        raise
+    atomic_json(
+        status_path,
+        {
+            "status": "completed",
+            "reaction": args.reaction,
+            "completed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "results_sha256": sha256_path(args.run_dir.resolve() / "results.json"),
+            "store_sha256": sha256_path(args.run_dir.resolve() / "store.sqlite"),
+        },
+    )
+    return result
+
+
 def main() -> int:
     args = parser().parse_args()
     for name in ("minimum_steps", "saddle_steps", "irc_steps"):
@@ -645,7 +813,7 @@ def main() -> int:
             raise ValueError(f"{name.replace('_', '-')} must be positive")
     if args.attacker_index < 0:
         raise ValueError("attacker-index must be non-negative")
-    return run(args)
+    return execute_with_status(args)
 
 
 if __name__ == "__main__":

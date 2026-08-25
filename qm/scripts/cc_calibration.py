@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,8 @@ if __name__ == "__main__":
         "cc-calibration",
         default_run_root="/mnt/data/vsletten/dissertation-data/task207-a2-production",
     )
+
+import numpy as np
 
 HARTREE_TO_KJ = 2625.4996394798254
 HF_CBS_ALPHA = 1.63
@@ -41,6 +44,23 @@ def atomic_json(path: Path, payload: dict[str, Any]) -> None:
     temporary = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
     temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     temporary.replace(path)
+
+
+def clean_git_head(path: Path) -> str:
+    status = subprocess.run(
+        ["git", "-C", str(path), "status", "--porcelain", "--untracked-files=no"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if status:
+        raise RuntimeError(f"engine source checkout has tracked changes: {path}")
+    return subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
 
 
 def xyz_rows(path: Path) -> list[tuple[str, float, float, float]]:
@@ -81,15 +101,17 @@ def existing_receipt(
     engine: str,
     basis: str,
     input_sha256: str,
+    identity: dict[str, Any],
 ) -> dict[str, Any] | None:
     if not path.exists():
         return None
     payload = json.loads(path.read_text())
-    expected = (engine, basis.lower(), input_sha256)
+    expected = (engine, basis.lower(), input_sha256, identity)
     actual = (
         payload.get("engine"),
         str(payload.get("basis", "")).lower(),
         payload.get("input_sha256"),
+        payload.get("identity"),
     )
     if actual != expected:
         raise ValueError(f"{path}: existing receipt identity drift")
@@ -97,15 +119,29 @@ def existing_receipt(
 
 
 def psi4_job(args: argparse.Namespace) -> dict[str, Any]:
+    if args.spin != 0:
+        raise ValueError("Psi4 DLPNO calibration currently supports spin=0 only")
+
     import psi4
 
     source = args.xyz.resolve()
     source_sha = sha256_path(source)
+    identity = {
+        "engine_version": psi4.__version__,
+        "method": "dlpno-ccsd(t)",
+        "basis": args.basis,
+        "pno_convergence": "tight",
+        "freeze_core": True,
+        "scf_type": "df",
+        "charge": args.charge,
+        "spin_2s": args.spin,
+    }
     if cached := existing_receipt(
         args.output,
         engine="psi4-dlpno-ccsd(t)",
         basis=args.basis,
         input_sha256=source_sha,
+        identity=identity,
     ):
         return cached
     rows = xyz_rows(source)
@@ -131,6 +167,7 @@ def psi4_job(args: argparse.Namespace) -> dict[str, Any]:
     payload = {
         "engine": "psi4-dlpno-ccsd(t)",
         "engine_version": psi4.__version__,
+        "identity": identity,
         "basis": args.basis,
         "pno_convergence": "tight",
         "freeze_core": True,
@@ -151,6 +188,12 @@ def psi4_job(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def byteqc_job(args: argparse.Namespace) -> dict[str, Any]:
+    if args.spin != 0:
+        raise ValueError(
+            "ByteQC calibration currently supports closed-shell spin=0 only"
+        )
+
+    import byteqc
     import cupy
     import pyscf
     from byteqc import cucc
@@ -159,15 +202,31 @@ def byteqc_job(args: argparse.Namespace) -> dict[str, Any]:
 
     source = args.xyz.resolve()
     source_sha = sha256_path(source)
+    rows = xyz_rows(source)
+    symbols = [row[0] for row in rows]
+    frozen = frozen_core_orbitals(symbols)
+    if byteqc.__file__ is None:
+        raise RuntimeError("ByteQC module has no source path")
+    byteqc_root = Path(byteqc.__file__).resolve().parent
+    byteqc_commit = clean_git_head(byteqc_root)
+    identity = {
+        "engine_commit": byteqc_commit,
+        "pyscf_version": pyscf.__version__,
+        "method": "canonical-ccsd(t)",
+        "basis": args.basis,
+        "freeze_core_orbitals": frozen,
+        "density_fit": True,
+        "charge": args.charge,
+        "spin_2s": args.spin,
+    }
     if cached := existing_receipt(
         args.output,
         engine="byteqc-canonical-ccsd(t)",
         basis=args.basis,
         input_sha256=source_sha,
+        identity=identity,
     ):
         return cached
-    rows = xyz_rows(source)
-    symbols = [row[0] for row in rows]
     lib.num_threads(args.threads)
     molecule = gto.M(
         atom=[(symbol, (x, y, z)) for symbol, x, y, z in rows],
@@ -185,7 +244,6 @@ def byteqc_job(args: argparse.Namespace) -> dict[str, Any]:
     scf_energy = float(mean_field.kernel())
     if not mean_field.converged:
         raise RuntimeError("ByteQC calibration RHF did not converge")
-    frozen = frozen_core_orbitals(symbols)
     coupled_cluster = cucc.CCSD(
         mean_field,
         frozen=frozen,
@@ -203,7 +261,8 @@ def byteqc_job(args: argparse.Namespace) -> dict[str, Any]:
     elapsed = time.time() - started
     payload = {
         "engine": "byteqc-canonical-ccsd(t)",
-        "engine_version": "source checkout",
+        "engine_version": byteqc_commit,
+        "identity": identity,
         "pyscf_version": pyscf.__version__,
         "cupy_version": cupy.__version__,
         "basis": args.basis,
@@ -229,7 +288,7 @@ def byteqc_job(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def extrapolate_hf(tz: float, qz: float, alpha: float = HF_CBS_ALPHA) -> float:
-    ratio = pow(2.718281828459045, -alpha)
+    ratio = float(np.exp(-alpha))
     return (qz - ratio * tz) / (1.0 - ratio)
 
 
@@ -245,28 +304,49 @@ def cbs_total(tz: dict[str, Any], qz: dict[str, Any]) -> float:
     )
 
 
-def load_receipt(path: Path, engine: str) -> dict[str, Any]:
+def load_receipt(
+    path: Path,
+    engine: str,
+    expected_basis: str,
+) -> dict[str, Any]:
     payload = json.loads(path.read_text())
     if payload.get("engine") != engine:
         raise ValueError(f"{path}: expected engine {engine}")
-    if str(payload.get("basis", "")).lower() not in {"cc-pvtz", "cc-pvqz"}:
-        raise ValueError(f"{path}: expected cc-pVTZ or cc-pVQZ")
+    if str(payload.get("basis", "")).lower() != expected_basis.lower():
+        raise ValueError(f"{path}: expected basis {expected_basis}")
+    if not isinstance(payload.get("identity"), dict):
+        raise ValueError(f"{path}: missing engine/settings identity")
     return payload
 
 
 def summarize(args: argparse.Namespace) -> dict[str, Any]:
     canonical_engine = "byteqc-canonical-ccsd(t)"
     dlpno_engine = "psi4-dlpno-ccsd(t)"
+    basis_names = {"tz": "cc-pVTZ", "qz": "cc-pVQZ"}
     canonical = {
         role: {
-            basis: load_receipt(path, canonical_engine) for basis, path in paths.items()
+            basis: load_receipt(path, canonical_engine, basis_names[basis])
+            for basis, path in paths.items()
         }
         for role, paths in args.canonical.items()
     }
     dlpno = {
-        role: {basis: load_receipt(path, dlpno_engine) for basis, path in paths.items()}
+        role: {
+            basis: load_receipt(path, dlpno_engine, basis_names[basis])
+            for basis, path in paths.items()
+        }
         for role, paths in args.dlpno.items()
     }
+    for role in ("reactant", "ts"):
+        receipts = [*canonical[role].values(), *dlpno[role].values()]
+        input_hashes = {receipt.get("input_sha256") for receipt in receipts}
+        states = {
+            (receipt.get("charge"), receipt.get("spin_2s")) for receipt in receipts
+        }
+        if None in input_hashes or len(input_hashes) != 1:
+            raise ValueError(f"{role} receipts do not share one exact geometry")
+        if len(states) != 1:
+            raise ValueError(f"{role} receipts do not share one electronic state")
     canonical_barrier = (
         cbs_total(canonical["ts"]["tz"], canonical["ts"]["qz"])
         - cbs_total(canonical["reactant"]["tz"], canonical["reactant"]["qz"])
