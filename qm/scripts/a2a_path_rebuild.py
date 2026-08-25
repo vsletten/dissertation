@@ -326,6 +326,13 @@ def reaction_coordinate_targets(cluster: Cluster) -> list[tuple[int, int, float]
     ]
 
 
+def serialized_distance_targets(
+    targets: list[tuple[int, int, float]],
+) -> list[list[int | float]]:
+    """JSON-stable checkpoint identity for fixed-distance tuples."""
+    return [[atom_i, atom_j, target] for atom_i, atom_j, target in targets]
+
+
 def endpoint_displacement(ts: Cluster, endpoint: Cluster) -> float:
     if ts.symbols != endpoint.symbols:
         raise ValueError("IRC endpoint atom order differs from the transition state")
@@ -414,7 +421,7 @@ def run_segment(
             "stage": "three-coordinate-conditioned-crest",
             "segment": spec.slug,
             "settings": settings_identity,
-            "fixed_distances": coordinate_targets,
+            "fixed_distances": serialized_distance_targets(coordinate_targets),
             "fmax_ev_a": 0.02,
             "max_steps": 120,
             "optimizer_maxstep": 0.03,

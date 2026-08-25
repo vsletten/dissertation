@@ -325,3 +325,10 @@ def test_active_indices_fail_closed():
         a2a.active_indices("0,0", 5)
     with pytest.raises(ValueError, match="out-of-range"):
         a2a.active_indices("0,5", 5)
+
+
+def test_fixed_distance_checkpoint_identity_survives_json_roundtrip():
+    targets = [(1, 15, 1.75), (0, 17, 0.99)]
+    serialized = a2a.serialized_distance_targets(targets)
+    assert json.loads(json.dumps(serialized)) == serialized
+    assert serialized == [[1, 15, 1.75], [0, 17, 0.99]]
