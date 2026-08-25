@@ -269,6 +269,48 @@ def test_full_route_records_two_independent_segments_and_rate_limiting_cc_roles(
     assert status["status"] == "completed"
 
 
+def test_local_neb_tangent_comes_from_neighbors_of_exact_peak(tmp_path):
+    template = state("reactant", "reactant")
+    checkpoint_root = tmp_path / "checkpoints"
+    checkpoint = checkpoint_root / "climb-final"
+    checkpoint.mkdir(parents=True)
+    images = []
+    for index in range(5):
+        current = replace(template, coords=template.coords.copy())
+        current.coords[0, 0] += index * 0.1
+        current.coords[1, 1] += index * index * 0.05
+        path = checkpoint / f"image-{index:02d}.xyz"
+        write_xyz(path, current)
+        images.append(current)
+    (checkpoint / "manifest.json").write_text(
+        json.dumps(
+            {
+                "stage": "climb-final",
+                "converged": True,
+                "images": [f"image-{index:02d}.xyz" for index in range(5)],
+            }
+        )
+    )
+    (checkpoint_root / "latest.json").write_text(
+        json.dumps({"checkpoint": checkpoint.name})
+    )
+
+    tangent, receipt = a2a.final_neb_tangent(
+        checkpoint_root,
+        images[2],
+        template,
+        [0, 1],
+    )
+
+    expected = images[3].coords - images[1].coords
+    masked = np.zeros_like(expected)
+    masked[[0, 1]] = expected[[0, 1]]
+    expected = masked / np.linalg.norm(masked)
+    assert np.allclose(tangent, expected)
+    assert receipt["peak_index"] == 2
+    assert receipt["strategy"] == a2a.SELLA_MODE_STRATEGY
+
+
 def asdict_segment(spec: a2a.SegmentSpec) -> dict[str, str]:
     return {
         "slug": spec.slug,

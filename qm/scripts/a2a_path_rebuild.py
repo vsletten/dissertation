@@ -39,10 +39,17 @@ from quarry.pipeline import (
 )
 from quarry.rates import rate_from_thermo
 from quarry.store import Store, geometry_hash
-from quarry.ts import find_ts, full_irc, neb_ts_guess, reaction_path_vector
+from quarry.ts import (
+    find_ts,
+    full_irc,
+    neb_ts_guess,
+    relax_at_fixed_distances,
+)
 from scripts import production_energetics as a2
 
 PATH_GATE_VERSION = "a2a-sequential-path-v1"
+SELLA_MODE_STRATEGY = "conditioned-crest-local-ci-neb-tangent-v1"
+REACTION_COORDINATE_PAIRS = ((1, 15), (0, 17), (0, 1))
 HESSIAN_STEPS_BOHR = (1.0e-3, 2.0e-3)
 SIGNIFICANT_IMAGINARY_FLOOR_CM = 30.0
 MODE_COSINE_MINIMUM = 0.80
@@ -259,6 +266,65 @@ def newest_pre_relaxed_checkpoint(root: Path) -> Path | None:
     return max(candidates, key=lambda value: value.stat().st_mtime_ns, default=None)
 
 
+def final_neb_tangent(
+    checkpoint_root: Path,
+    crest: Cluster,
+    template: Cluster,
+    active_indices: list[int],
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Recover the local converged CI-NEB tangent around the exact peak image."""
+    latest = json.loads((checkpoint_root / "latest.json").read_text())
+    checkpoint = checkpoint_root / str(latest["checkpoint"])
+    manifest = json.loads((checkpoint / "manifest.json").read_text())
+    if manifest.get("stage") != "climb-final" or manifest.get("converged") is not True:
+        raise ValueError("Sella refinement requires a converged climb-final NEB band")
+    image_paths = [checkpoint / str(name) for name in manifest.get("images", [])]
+    if len(image_paths) < 3:
+        raise ValueError("climb-final checkpoint does not contain a complete NEB band")
+    images = [
+        a2.load_xyz_like(path, template, name=f"neb-image-{index}")
+        for index, path in enumerate(image_paths)
+    ]
+    distances = [
+        float(np.sqrt(np.mean((image.coords - crest.coords) ** 2))) for image in images
+    ]
+    peak = int(np.argmin(distances))
+    if distances[peak] > 1.0e-8:
+        raise ValueError("saved NEB crest does not match any climb-final image")
+    if peak in (0, len(images) - 1):
+        raise ValueError("saved NEB crest is not an interior image")
+    tangent = images[peak + 1].coords - images[peak - 1].coords
+    masked = np.zeros_like(tangent)
+    masked[np.asarray(active_indices, dtype=int)] = tangent[
+        np.asarray(active_indices, dtype=int)
+    ]
+    if template.frozen_indices:
+        masked[np.asarray(template.frozen_indices, dtype=int)] = 0.0
+    norm = float(np.linalg.norm(masked))
+    if not np.isfinite(norm) or norm < 1.0e-12:
+        raise ValueError("local CI-NEB tangent is non-finite or zero")
+    return masked / norm, {
+        "strategy": SELLA_MODE_STRATEGY,
+        "checkpoint": str(checkpoint),
+        "peak_index": peak,
+        "peak_rms_to_saved_crest_a": distances[peak],
+        "left_image": image_paths[peak - 1].name,
+        "right_image": image_paths[peak + 1].name,
+        "active_indices": active_indices,
+    }
+
+
+def reaction_coordinate_targets(cluster: Cluster) -> list[tuple[int, int, float]]:
+    return [
+        (
+            atom_i,
+            atom_j,
+            float(np.linalg.norm(cluster.coords[atom_i] - cluster.coords[atom_j])),
+        )
+        for atom_i, atom_j in REACTION_COORDINATE_PAIRS
+    ]
+
+
 def endpoint_displacement(ts: Cluster, endpoint: Cluster) -> float:
     if ts.symbols != endpoint.symbols:
         raise ValueError("IRC endpoint atom order differs from the transition state")
@@ -283,7 +349,6 @@ def run_segment(
     segment_dir = run_dir / spec.slug
     segment_dir.mkdir(parents=True, exist_ok=True)
     settings_identity = frequency_settings_fingerprint(settings)
-    reaction_vector = reaction_path_vector(start, end, active_indices=active_indices)
     neb_root = segment_dir / "neb-checkpoints"
     resume_from = newest_pre_relaxed_checkpoint(neb_root)
 
@@ -321,15 +386,47 @@ def run_segment(
             "climb_optimizer": "ode",
         },
     )
+    local_tangent, tangent_receipt = final_neb_tangent(
+        neb_root,
+        crest,
+        start,
+        active_indices,
+    )
+    atomic_json(segment_dir / "local-neb-tangent.receipt.json", tangent_receipt)
+    coordinate_targets = reaction_coordinate_targets(crest)
+    conditioned_crest = a2.checkpoint_cluster(
+        segment_dir / "conditioned-crest.xyz",
+        crest,
+        lambda: relax_at_fixed_distances(
+            crest,
+            settings,
+            fixed_distances=coordinate_targets,
+            fmax_ev_a=0.02,
+            max_steps=120,
+            optimizer_maxstep=0.03,
+            trajectory=str(segment_dir / "conditioned-crest.traj"),
+            logfile=str(segment_dir / "conditioned-crest.log"),
+        ),
+        identity={
+            "gate_version": PATH_GATE_VERSION,
+            "stage": "three-coordinate-conditioned-crest",
+            "segment": spec.slug,
+            "settings": settings_identity,
+            "fixed_distances": coordinate_targets,
+            "fmax_ev_a": 0.02,
+            "max_steps": 120,
+            "optimizer_maxstep": 0.03,
+        },
+    )
     transition_state = a2.checkpoint_cluster(
         segment_dir / "transition-state.xyz",
-        crest,
+        conditioned_crest,
         lambda: find_ts(
-            crest,
+            conditioned_crest,
             settings,
             max_steps=saddle_steps,
             trajectory=str(segment_dir / "transition-state.sella.traj"),
-            initial_mode=reaction_vector,
+            initial_mode=local_tangent,
             internal=False,
         ),
         identity={
@@ -341,6 +438,11 @@ def run_segment(
             "settings": settings_identity,
             "max_steps": saddle_steps,
             "active_indices": active_indices,
+            "initial_mode_strategy": SELLA_MODE_STRATEGY,
+            "local_tangent": tangent_receipt,
+            "conditioned_crest_geometry": frequency_geometry_fingerprint(
+                conditioned_crest
+            ),
         },
     )
     primary_frequency = checkpoint_fd_frequency(
@@ -358,7 +460,7 @@ def run_segment(
     stability = require_hessian_step_stability(
         primary_frequency,
         secondary_frequency,
-        reaction_vector,
+        local_tangent,
     )
     irc_endpoints = a2.checkpoint_irc_endpoints(
         segment_dir,
@@ -409,6 +511,10 @@ def run_segment(
         "artifacts": {
             "neb_checkpoints": str(neb_root),
             "neb_crest": str(segment_dir / "neb-crest.xyz"),
+            "conditioned_crest": str(segment_dir / "conditioned-crest.xyz"),
+            "local_tangent_receipt": str(
+                segment_dir / "local-neb-tangent.receipt.json"
+            ),
             "transition_state": str(segment_dir / "transition-state.xyz"),
             "primary_frequency": str(
                 segment_dir / "transition-state.fd-1e-3.frequency.json"
