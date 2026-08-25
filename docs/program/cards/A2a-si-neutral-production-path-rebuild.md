@@ -102,6 +102,25 @@ CCSD(T)/CBS calibration triangle (ByteQC canonical + Psi4 TightPNO DLPNO).
   coordinate reaction-mode refinement. Do not rerun the rejected banked TS,
   recompute the loose band, weaken the mode gate, or start I↔P/high-level/CC
   work before R↔I closes.
+- 2026-08-25 12:13 PDT — **second bounded continuation remains fail-closed.**
+  Commits `b61efb6`, `630de91`, and `6778824` add and test an explicit
+  active-subspace Sella seed, spectator-space reconditioning, and final
+  full-system Sella release; 49 focused A2a/TS tests, Ruff, format, and diff
+  checks passed. Three isolated GPU launches reused the exact minima and the
+  converged loose band, but all stopped before active-subspace Sella: the
+  three shared-atom `FixBondLengths` constraints reported final distance
+  residuals `1.186e-4`, `1.216e-4`, and `1.749e-4 A`, above the predeclared
+  `1.0e-4 A` gate. Reapplying ASE's coupled projection did not close the
+  residual, so the gate was not loosened and no new TS/Hessian/IRC,
+  I↔P, production single point, or CC job ran. Shared extraction/Honcho
+  services are restored, Ollama is empty, and no QM process remains. Evidence
+  is **266 files / 1,074,740 bytes**; manifest SHA-256
+  `c8d143a849e6e225ab79844dadedeabb28ce7607dd3f866446363d22dd00042c`.
+  **Continuation order:** replace the shared-atom Cartesian bond projector
+  with independently residual-gated internal-coordinate conditioning, or
+  hash-bind and reuse the previously accepted conditioned crest; then exercise
+  the active-subspace→spectator-relaxation→full-release chain. Do not loosen
+  the distance/mode gates or restart the loose NEB.
 - 2026-08-24 — created by hermes-workstation from A2 live production evidence.
   Exact r2SCAN-3c FD-Hessian indices are reactant/product/TS `0/0/1`, but the
   repaired 260-step full IRC closes in the associative basin on both sides.

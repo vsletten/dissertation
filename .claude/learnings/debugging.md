@@ -47,3 +47,12 @@ step zero in both directions. Signature: a four-line IRC log containing only
 `IRC: 0`, identical forward/reverse coordinates, and a falsely successful
 return. Bridge `gradient_converged()` to Sella's `converged()` and regression
 assert both directions reject the initial force-only decision.
+
+### Shared-atom FixBondLengths residuals need an independent gate (2026-08-25)
+ASE 3.29's `FixBondLengths` can report a converged projected optimization while
+three coupled distances sharing atoms still miss their requested values by
+`1.2e-4--1.7e-4 A`. Repeated `set_positions()` projection did not monotonically
+close the residual in the A2a crest conditioner. Keep an independent final
+distance check and fail closed; use a residual-controlled internal-coordinate
+conditioner (or a hash-bound previously accepted crest) rather than loosening
+the scientific gate.
