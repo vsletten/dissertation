@@ -16,6 +16,8 @@ import json
 import time
 from dataclasses import asdict, replace
 from pathlib import Path
+from types import MethodType
+from typing import Any
 
 import numpy as np
 
@@ -461,6 +463,16 @@ def full_irc(
         logfile=str(logfile) if logfile is not None else "-",
         dx=step_size_a,
     )
+    # Sella 2.5 implements its IRC stop rule in ``converged()``, but ASE 3.29
+    # changed Optimizer.irun() to call ``gradient_converged()`` directly.  Left
+    # unbridged, a force-converged transition state returns success at step zero
+    # in both directions without ever taking the mass-weighted IRC kick.
+    if hasattr(irc, "gradient_converged") and hasattr(irc, "converged"):
+
+        def gradient_converged(method: Any, gradient: np.ndarray) -> bool:
+            return bool(method.converged())
+
+        irc.gradient_converged = MethodType(gradient_converged, irc)
     endpoints: list[Cluster] = []
     for direction, suffix in (("forward", "irc-forward"), ("reverse", "irc-reverse")):
         converged = irc.run(
