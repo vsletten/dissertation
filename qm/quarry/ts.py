@@ -343,6 +343,10 @@ def relax_at_fixed_distances(
         fmax=fmax_ev_a,
         steps=max_steps,
     )
+    # Reapply the holonomic projection at the release boundary. Optimizer force
+    # queries can leave only solver-tolerance coordinate residue; acceptance
+    # must measure the exact geometry that is returned, not the pre-query cache.
+    atoms.set_positions(atoms.positions.copy())
     projected_forces = np.asarray(atoms.get_forces(), dtype=float)
     projected_fmax = float(np.linalg.norm(projected_forces, axis=1).max())
     if not optimizer_reported_convergence:
