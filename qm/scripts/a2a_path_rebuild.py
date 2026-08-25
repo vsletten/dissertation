@@ -50,6 +50,7 @@ from scripts import production_energetics as a2
 PATH_GATE_VERSION = "a2a-sequential-path-v1"
 SELLA_MODE_STRATEGY = "conditioned-crest-local-ci-neb-tangent-v1"
 REACTION_COORDINATE_PAIRS = ((1, 15), (0, 17), (0, 1))
+CONDITIONED_DISTANCE_TOLERANCE_A = 1.0e-5
 HESSIAN_STEPS_BOHR = (1.0e-3, 2.0e-3)
 SIGNIFICANT_IMAGINARY_FLOOR_CM = 30.0
 MODE_COSINE_MINIMUM = 0.80
@@ -404,6 +405,7 @@ def run_segment(
             fmax_ev_a=0.02,
             max_steps=120,
             optimizer_maxstep=0.03,
+            distance_tolerance_a=CONDITIONED_DISTANCE_TOLERANCE_A,
             trajectory=str(segment_dir / "conditioned-crest.traj"),
             logfile=str(segment_dir / "conditioned-crest.log"),
         ),
@@ -416,6 +418,7 @@ def run_segment(
             "fmax_ev_a": 0.02,
             "max_steps": 120,
             "optimizer_maxstep": 0.03,
+            "distance_tolerance_a": CONDITIONED_DISTANCE_TOLERANCE_A,
         },
     )
     transition_state = a2.checkpoint_cluster(
