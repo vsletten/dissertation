@@ -205,6 +205,24 @@ def test_full_irc_requires_exact_typed_endpoints():
     assert "full IRC endpoint basins" in reason
 
 
+def test_irc_rejects_when_both_candidate_basins_fail(monkeypatch):
+    ends = bridge_side_hydronium_endpoints(disilicate())
+
+    def basin_only(_cluster, _ends, *, n_water, endpoint):
+        expected = relay.expected_basin(n_water, endpoint)
+        return f"{endpoint} basin (False, False, True, 0, 9, 0) != {expected}"
+
+    monkeypatch.setattr(relay, "endpoint_gate_reason", basin_only)
+    reason = relay.irc_channel_reason(
+        ends.reactant,
+        ends.product,
+        ends,
+        n_water=BRIDGE_SIDE_ACID_WATER_COUNT,
+    )
+    assert reason is not None
+    assert "basin" in reason
+
+
 @pytest.mark.parametrize(
     ("mechanism_version", "gate_version"),
     [
@@ -286,6 +304,7 @@ def test_run_path_forwards_a1g_identity_builder_gates_and_source(monkeypatch, tm
     assert captured["endpoint_gate"] is relay.endpoint_gate_reason
     assert captured["mode_gate"] is relay.coupled_mode_components
     assert captured["irc_gate"] is relay.irc_channel_reason
+    assert captured["mechanism_name"] == relay.MECHANISM_NAME
     assert captured["identity_extra"] == {
         "source_reactant_sha256": digest,
         "parent_si_terminal_sha256": None,

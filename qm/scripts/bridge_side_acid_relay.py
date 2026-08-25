@@ -238,7 +238,7 @@ def irc_channel_reason(
             if fallback is None or "basin" not in reason:
                 fallback = reason
         if label is None:
-            return fallback
+            return fallback or "IRC endpoint matches neither reactant nor product basin"
         matched.append(label)
     if set(matched) != {"reactant", "product"}:
         return f"full IRC endpoint basins {sorted(matched)} != ['product', 'reactant']"

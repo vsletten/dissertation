@@ -358,6 +358,7 @@ def terminal_record_is_reusable(
     bounds: Bounds,
     mechanism_version: int = MECHANISM_VERSION,
     gate_version: int = GATE_VERSION,
+    mechanism_name: str | None = None,
     identity_extra: dict[str, Any] | None = None,
 ) -> bool:
     terminal = path_dir / "terminal.json"
@@ -375,6 +376,8 @@ def terminal_record_is_reusable(
         "settings": asdict(settings),
         "bounds": asdict(bounds),
     }
+    if mechanism_name is not None:
+        expected["mechanism"] = mechanism_name
     if identity_extra:
         expected.update(identity_extra)
     if any(record.get(field) != value for field, value in expected.items()):
@@ -442,6 +445,7 @@ def run_path(
         bounds=bounds,
         mechanism_version=mechanism_version,
         gate_version=gate_version,
+        mechanism_name=mechanism_name,
         identity_extra=identity_extra,
     ):
         return json.loads((path_dir / "terminal.json").read_text())

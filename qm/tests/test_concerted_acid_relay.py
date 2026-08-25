@@ -296,6 +296,41 @@ def test_terminal_resume_binds_versions_settings_bounds_and_artifact_hash(tmp_pa
     )
 
 
+def test_terminal_reuse_requires_matching_mechanism_name(tmp_path):
+    bounds = relay.Bounds()
+    path_dir = tmp_path / "path"
+    path_dir.mkdir()
+    artifact = path_dir / "endpoint.xyz"
+    artifact.write_text("proof\n")
+    payload = {
+        "schema_version": relay.SCHEMA_VERSION,
+        "mechanism_version": relay.MECHANISM_VERSION,
+        "gate_version": relay.GATE_VERSION,
+        "mechanism": "concerted-hydronium-nucleophile-relay",
+        "key": "si:3w:bridge-donor-chain",
+        "settings": asdict(CHEAP),
+        "bounds": asdict(bounds),
+        "status": "rejected",
+        "artifacts": {"endpoint.xyz": relay.sha256_path(artifact)},
+    }
+    relay.atomic_json(path_dir / "terminal.json", payload)
+
+    assert relay.terminal_record_is_reusable(
+        path_dir,
+        key="si:3w:bridge-donor-chain",
+        settings=CHEAP,
+        bounds=bounds,
+        mechanism_name="concerted-hydronium-nucleophile-relay",
+    )
+    assert not relay.terminal_record_is_reusable(
+        path_dir,
+        key="si:3w:bridge-donor-chain",
+        settings=CHEAP,
+        bounds=bounds,
+        mechanism_name="bridge-side-hydronium-neutral-water-attacker-direct-transfer",
+    )
+
+
 def test_optimizer_failure_is_incomplete_not_scientific_rejection(
     monkeypatch, tmp_path
 ):
