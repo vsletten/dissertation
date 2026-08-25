@@ -746,11 +746,12 @@ def _load_neb_checkpoint(
     for key, value in expected.items():
         if manifest.get(key) != value:
             raise ValueError(f"NEB checkpoint {key} does not match this run")
-    if (
-        manifest.get("stage") != "pre-relax-final"
-        or manifest.get("converged") is not True
+    if manifest.get("stage") not in {"pre-relax-final", "climb-final"} or (
+        manifest.get("converged") is not True
     ):
-        raise ValueError("NEB resume requires a converged pre-relax-final checkpoint")
+        raise ValueError(
+            "NEB resume requires a converged pre-relax-final or climb-final checkpoint"
+        )
     coords = []
     for filename in manifest["images"]:
         lines = (checkpoint / filename).read_text().splitlines()

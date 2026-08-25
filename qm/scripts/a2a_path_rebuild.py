@@ -394,19 +394,53 @@ def run_segment(
             "climb_optimizer": "ode",
         },
     )
+    tight_neb_root = segment_dir / "tight-neb-checkpoints"
+    tight_crest = a2.checkpoint_cluster(
+        segment_dir / "tight-neb-crest.xyz",
+        start,
+        lambda: neb_ts_guess(
+            start,
+            end,
+            settings,
+            n_images=neb_images,
+            fmax_ev_a=0.02,
+            max_steps=240,
+            pre_relax_fmax_ev_a=0.20,
+            pre_relax_steps=neb_pre_steps,
+            optimizer_dt=0.02,
+            optimizer_maxstep=0.03,
+            climb_optimizer="ode",
+            checkpoint_dir=tight_neb_root,
+            checkpoint_interval=5,
+            resume_from=neb_root,
+        ),
+        identity={
+            "gate_version": PATH_GATE_VERSION,
+            "stage": "tight-climb-ci-neb",
+            "segment": spec.slug,
+            "start_geometry": frequency_geometry_fingerprint(start),
+            "end_geometry": frequency_geometry_fingerprint(end),
+            "loose_crest_geometry": frequency_geometry_fingerprint(crest),
+            "settings": settings_identity,
+            "n_images": neb_images,
+            "fmax_ev_a": 0.02,
+            "climb_steps": 240,
+            "climb_optimizer": "ode",
+        },
+    )
     local_tangent, tangent_receipt = final_neb_tangent(
-        neb_root,
-        crest,
+        tight_neb_root,
+        tight_crest,
         start,
         active_indices,
     )
     atomic_json(segment_dir / "local-neb-tangent.receipt.json", tangent_receipt)
-    coordinate_targets = reaction_coordinate_targets(crest)
+    coordinate_targets = reaction_coordinate_targets(tight_crest)
     conditioned_crest = a2.checkpoint_cluster(
         segment_dir / "conditioned-crest.xyz",
-        crest,
+        tight_crest,
         lambda: relax_at_fixed_distances(
-            crest,
+            tight_crest,
             settings,
             fixed_distances=coordinate_targets,
             fmax_ev_a=0.02,
@@ -521,6 +555,8 @@ def run_segment(
         "artifacts": {
             "neb_checkpoints": str(neb_root),
             "neb_crest": str(segment_dir / "neb-crest.xyz"),
+            "tight_neb_checkpoints": str(tight_neb_root),
+            "tight_neb_crest": str(segment_dir / "tight-neb-crest.xyz"),
             "conditioned_crest": str(segment_dir / "conditioned-crest.xyz"),
             "local_tangent_receipt": str(
                 segment_dir / "local-neb-tangent.receipt.json"
