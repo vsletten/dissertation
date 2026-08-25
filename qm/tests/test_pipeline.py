@@ -50,6 +50,58 @@ def test_r2scan3c_settings_refuse_partial_or_double_counted_variants():
         )
 
 
+def test_r2scan3c_d4_set_param_uses_official_keyword_tuple(monkeypatch):
+    """Pin the real pyscf-dispersion set_param contract, not (s6, s8, a1, a2).
+
+    Official r2SCAN-3c D4: s6=1.0, s8=0.0, a1=0.42, a2=5.65, s9=2.0
+    (Grimme et al., J. Chem. Phys. 154, 064103 (2021)).
+    """
+    import sys
+    import types
+
+    init_kwargs: dict[str, object] = {}
+    set_args: tuple[object, ...] = ()
+    set_kwargs: dict[str, object] = {}
+
+    class FakeD4:
+        def __init__(self, *args, **kwargs):
+            init_kwargs.update(kwargs)
+
+        def set_param(self, *args, **kwargs):
+            nonlocal set_args, set_kwargs
+            set_args = args
+            set_kwargs = kwargs
+
+        def get_dispersion(self, grad=False):
+            return {"energy": 0.0}
+
+    class FakeGcp:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def get_counterpoise(self, grad=False):
+            return {"energy": 0.0}
+
+    fake_dftd4 = types.SimpleNamespace(DFTD4Dispersion=FakeD4)
+    fake_gcp = types.SimpleNamespace(GCP=FakeGcp)
+    fake_disp = types.SimpleNamespace(dftd4=fake_dftd4, gcp=fake_gcp)
+    monkeypatch.setitem(sys.modules, "pyscf.dispersion", fake_disp)
+    monkeypatch.setitem(sys.modules, "pyscf.dispersion.dftd4", fake_dftd4)
+    monkeypatch.setitem(sys.modules, "pyscf.dispersion.gcp", fake_gcp)
+
+    pipeline._r2scan3c_correction(object(), gradient=False, use_gpu=False)
+
+    assert set_args == ()
+    assert set_kwargs == {
+        "s6": 1.0,
+        "s8": 0.0,
+        "a1": 0.42,
+        "a2": 5.65,
+        "s9": 2.0,
+    }
+    assert init_kwargs["xc"] == "r2scan-3c"
+
+
 def test_r2scan3c_energy_includes_exact_d4_and_gcp_terms():
     pytest.importorskip("pyscf.dispersion.gcp")
     composite = energy(water(), R2SCAN3C)
