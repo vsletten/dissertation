@@ -125,6 +125,32 @@ def _attach_composite_energy(mf: Any, settings: DftSettings) -> Any:
     # ``to_gpu`` in ``_make_scf``.
     mf.get_dispersion = MethodType(get_dispersion, mf)
     mf.do_disp = lambda: True
+
+    # PySCF's geomeTRIC bridge calls ``mf.nuc_grad_method()`` directly.  Patch
+    # that factory too; otherwise optimization sees plain r2SCAN forces while
+    # energies carry D4+gCP, a mixed surface that can "converge" far from a
+    # stationary point of the advertised composite method.
+    original_nuc_grad_method = mf.nuc_grad_method
+
+    def nuc_grad_method(method: Any) -> Any:
+        gradient = original_nuc_grad_method()
+
+        def get_gradient_dispersion(
+            derivative: Any,
+            disp: str | None = None,
+            with_3body: bool | None = None,
+            verbose: int | None = None,
+        ) -> Any:
+            return _r2scan3c_correction(
+                derivative.base.mol,
+                gradient=True,
+                use_gpu=settings.use_gpu,
+            )["gradient"]
+
+        gradient.get_dispersion = MethodType(get_gradient_dispersion, gradient)
+        return gradient
+
+    mf.nuc_grad_method = MethodType(nuc_grad_method, mf)
     return mf
 
 

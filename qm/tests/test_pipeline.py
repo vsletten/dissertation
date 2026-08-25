@@ -60,6 +60,33 @@ def test_r2scan3c_energy_includes_exact_d4_and_gcp_terms():
     assert composite - plain == pytest.approx(float(correction), abs=1e-9)
 
 
+def test_r2scan3c_patches_direct_geometric_gradient_factory(monkeypatch):
+    expected = np.full((3, 3), 0.125)
+
+    class Gradient:
+        def __init__(self, base):
+            self.base = base
+
+    class MeanField:
+        mol = object()
+        scf_summary = {}
+
+        def nuc_grad_method(self):
+            return Gradient(self)
+
+    monkeypatch.setattr(
+        pipeline,
+        "_r2scan3c_correction",
+        lambda mol, *, gradient, use_gpu: {
+            "energy": -0.01,
+            "gradient": expected,
+        },
+    )
+    mean_field = pipeline._attach_composite_energy(MeanField(), R2SCAN3C)
+    derivative = mean_field.nuc_grad_method()
+    assert np.array_equal(derivative.get_dispersion(), expected)
+
+
 def test_frequency_settings_fingerprint_ignores_execution_backend():
     cpu = DftSettings(xc="b3lyp", basis="def2-svp", density_fit=True)
     gpu = DftSettings(xc="b3lyp", basis="def2-svp", density_fit=True, use_gpu=True)
