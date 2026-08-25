@@ -121,6 +121,30 @@ CCSD(T)/CBS calibration triangle (ByteQC canonical + Psi4 TightPNO DLPNO).
   hash-bind and reuse the previously accepted conditioned crest; then exercise
   the active-subspace→spectator-relaxation→full-release chain. Do not loosen
   the distance/mode gates or restart the loose NEB.
+- 2026-08-25 14:29 PDT — **third bounded continuation closes R↔I and preserves
+  a new cleavage-search failure honestly.** Commit `8ced110` replaces ASE's
+  sequential shared-atom projector with simultaneous order-zero Sella bond
+  equations; the shared-pin analytical regression plus 50 focused A2a/TS tests,
+  Ruff, format, and diff gates pass. The addition conditioner now closes its
+  three target residuals to `2.15e-6 A`, and the full-system R↔I saddle has one
+  stable reaction mode at `714.831/714.821 cm^-1` across the two Hessian steps
+  (mode cosine `0.99999999998`, local-tangent overlaps `0.854/0.854`). Full IRC
+  displacements are `2.075/0.677 A` and terminate in the exact typed neutral
+  reactant `(False,True,False)` and associative intermediate `(True,True,True)`
+  basins. The independently persisted I↔P seven-image pre-relax and ODE climb
+  also converge (`51` and `25` steps), and its internal conditioner reaches
+  `3.95e-6 A`; however, the subsequent active-subspace Sella search escaped
+  uphill and failed SCF at step 27 before any cleavage candidate was persisted.
+  No cleavage Hessian/IRC, production single point, CC job, or barrier ran.
+  Evidence is **457 files / 1,954,856 bytes**; manifest SHA-256
+  `82af53d69809e8b688db183af5a914886178c8f82f928883f15bb3ffa7d01fb6`.
+  Both email pipelines and Honcho containers are restored, API health is `ok`,
+  Ollama is empty, the dead-man is inactive, the GPU is idle, and no QM process
+  remains. **Continuation order:** reuse the exact cleavage `climb-final` band
+  and `conditioned-crest-v3`; bound the active-subspace Sella release so it
+  cannot outrun the local crest (or recover fail-closed from the last finite
+  local geometry), then rerun only cleavage Sella→Hessian→IRC. Do not recompute
+  R↔I, either loose band, or weaken any gate.
 - 2026-08-24 — created by hermes-workstation from A2 live production evidence.
   Exact r2SCAN-3c FD-Hessian indices are reactant/product/TS `0/0/1`, but the
   repaired 260-step full IRC closes in the associative basin on both sides.

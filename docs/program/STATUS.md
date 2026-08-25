@@ -4,6 +4,12 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-25 — hermes-workstation — A2a's internally conditioned production
+  path now closes R↔I with a stable 714.83 cm^-1 reaction saddle and exact typed
+  full IRC; I↔P pre-relax/climb/conditioning also converge, but its active-core
+  Sella search escapes uphill into an SCF failure before a candidate is emitted.
+  Commit `8ced110`; durable evidence manifest `82af53d69809...` (457 files).
+
 - 2026-08-24 — hermes-workstation — A2 production infrastructure is pushed and
   fail-closed on the first real target: exact r2SCAN-3c D4+gCP optimization,
   same-surface finite-difference Hessians, repaired Sella/ASE full IRC, and

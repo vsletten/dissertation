@@ -56,3 +56,13 @@ close the residual in the A2a crest conditioner. Keep an independent final
 distance check and fail closed; use a residual-controlled internal-coordinate
 conditioner (or a hash-bound previously accepted crest) rather than loosening
 the scientific gate.
+
+### Active-subspace Sella can escape a converged local CI-NEB crest (2026-08-25)
+On A2a I↔P, a converged seven-image pre-relax/climb and simultaneous internal-
+distance conditioner reached `3.95e-6 A`, but unconstrained active-core Sella
+then climbed roughly six Hartree in 27 steps before the SCF failed. A finite
+single-point failure is not a retry license and the optimizer trajectory is not
+a candidate checkpoint. Resume from the hash-bound conditioned crest, constrain
+the trust/displacement envelope around the local band tangent, and persist only
+a converged saddle; never restart the expensive band or weaken the SCF/index
+gates to rescue the runaway search.
