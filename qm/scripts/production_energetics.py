@@ -194,6 +194,120 @@ def checkpoint_cluster(
     return loaded
 
 
+def checkpoint_irc_endpoints(
+    run_dir: Path,
+    transition_state: Cluster,
+    compute: Callable[[], tuple[Cluster, Cluster]],
+    *,
+    identity: dict[str, Any],
+) -> tuple[Cluster, Cluster]:
+    """Reuse IRC endpoints only when bound to this TS, settings, and code."""
+    forward_path = run_dir / "irc-forward.r2scan3c.xyz"
+    reverse_path = run_dir / "irc-reverse.r2scan3c.xyz"
+    receipt_path = run_dir / "irc.r2scan3c.receipt.json"
+    expected = {
+        "transition_state_geometry_fingerprint": frequency_geometry_fingerprint(
+            transition_state
+        ),
+        "identity": identity,
+    }
+    paths = (forward_path, reverse_path, receipt_path)
+    if any(path.exists() for path in paths):
+        if not all(path.exists() for path in paths):
+            raise ValueError("incomplete IRC checkpoint set")
+        receipt = json.loads(receipt_path.read_text())
+        if (
+            receipt.get("transition_state_geometry_fingerprint")
+            != expected["transition_state_geometry_fingerprint"]
+        ):
+            raise ValueError("IRC checkpoint transition-state geometry drift")
+        if receipt.get("identity") != identity:
+            raise ValueError("IRC checkpoint identity drift")
+        loaded = (
+            load_xyz_like(forward_path, transition_state, name="irc-forward"),
+            load_xyz_like(reverse_path, transition_state, name="irc-reverse"),
+        )
+        directions = receipt.get("directions")
+        if not isinstance(directions, dict):
+            raise ValueError("IRC checkpoint missing direction receipts")
+        for cluster, direction, path in (
+            (loaded[0], "forward", forward_path),
+            (loaded[1], "reverse", reverse_path),
+        ):
+            payload = directions.get(direction)
+            if not isinstance(payload, dict):
+                raise ValueError(f"IRC checkpoint missing {direction} receipt")
+            if payload.get("path") != path.name:
+                raise ValueError(f"IRC checkpoint {direction} path drift")
+            if payload.get("geometry_fingerprint") != frequency_geometry_fingerprint(
+                cluster
+            ):
+                raise ValueError(f"IRC checkpoint {direction} geometry drift")
+            if payload.get("sha256") != sha256_path(path):
+                raise ValueError(f"IRC checkpoint {direction} hash drift")
+        return loaded
+    endpoints = compute()
+    if len(endpoints) != 2:
+        raise ValueError("full IRC must return forward and reverse endpoints")
+    for cluster, path in (
+        (endpoints[0], forward_path),
+        (endpoints[1], reverse_path),
+    ):
+        if cluster.symbols != transition_state.symbols:
+            raise ValueError(f"{path.name}: computed atom order drift")
+    staged: list[Path] = []
+    published: list[Path] = []
+    try:
+        for cluster, path in (
+            (endpoints[0], forward_path),
+            (endpoints[1], reverse_path),
+        ):
+            temporary = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
+            temporary.write_text(exact_xyz(cluster))
+            staged.append(temporary)
+        for temporary, path in zip(
+            staged,
+            (forward_path, reverse_path),
+            strict=True,
+        ):
+            temporary.replace(path)
+            published.append(path)
+        loaded = (
+            load_xyz_like(forward_path, transition_state, name="irc-forward"),
+            load_xyz_like(reverse_path, transition_state, name="irc-reverse"),
+        )
+        atomic_json(
+            receipt_path,
+            {
+                **expected,
+                "directions": {
+                    "forward": {
+                        "path": forward_path.name,
+                        "geometry_fingerprint": frequency_geometry_fingerprint(
+                            loaded[0]
+                        ),
+                        "sha256": sha256_path(forward_path),
+                    },
+                    "reverse": {
+                        "path": reverse_path.name,
+                        "geometry_fingerprint": frequency_geometry_fingerprint(
+                            loaded[1]
+                        ),
+                        "sha256": sha256_path(reverse_path),
+                    },
+                },
+            },
+        )
+    except Exception:
+        for temporary in staged:
+            temporary.unlink(missing_ok=True)
+        if not receipt_path.exists():
+            for path in published:
+                path.unlink(missing_ok=True)
+        raise
+    return loaded
+
+
 def optimize_minimum(
     cluster: Cluster,
     settings: DftSettings,
@@ -648,23 +762,23 @@ def run(args: argparse.Namespace) -> int:
             f"{ts_freq.imaginary_cm.tolist()}"
         )
 
-    irc_forward_path = run_dir / "irc-forward.r2scan3c.xyz"
-    irc_reverse_path = run_dir / "irc-reverse.r2scan3c.xyz"
-    if irc_forward_path.exists() and irc_reverse_path.exists():
-        irc_endpoints = (
-            load_xyz_like(irc_forward_path, transition_state, name="irc-forward"),
-            load_xyz_like(irc_reverse_path, transition_state, name="irc-reverse"),
-        )
-    else:
-        irc_endpoints = full_irc(
+    irc_endpoints = checkpoint_irc_endpoints(
+        run_dir,
+        transition_state,
+        lambda: full_irc(
             transition_state,
             r2scan3c,
             max_steps=args.irc_steps,
             trajectory=run_dir / "full-irc.r2scan3c.traj",
             logfile=run_dir / "full-irc.r2scan3c.log",
-        )
-        irc_forward_path.write_text(exact_xyz(irc_endpoints[0]))
-        irc_reverse_path.write_text(exact_xyz(irc_endpoints[1]))
+        ),
+        identity={
+            "stage": "full-irc",
+            "algorithm": "sella-gonzalez-schlegel-full-irc-v1",
+            "settings": r2scan_identity,
+            "max_steps": args.irc_steps,
+        },
+    )
     irc_receipt = require_si_neutral_irc(
         irc_endpoints, reactant, product, args.attacker_index
     )
