@@ -229,6 +229,46 @@ def test_irc_checkpoint_binds_ts_settings_and_endpoints(tmp_path):
         )
 
 
+def test_irc_checkpoint_cleans_partial_publish(monkeypatch, tmp_path):
+    transition_state = neutral_pair("transition-state")
+    forward = replace(transition_state, coords=transition_state.coords.copy())
+    reverse = replace(transition_state, coords=transition_state.coords.copy())
+    forward.coords[2, 0] = 4.9
+    reverse.coords[2, 0] = 1.7
+    identity = {
+        "stage": "full-irc",
+        "algorithm": "sella-gonzalez-schlegel-full-irc-v1",
+        "settings": "exact",
+        "max_steps": 7,
+    }
+    real_atomic = a2.atomic_json
+
+    def boom(path, payload):
+        raise OSError("simulated persist failure")
+
+    monkeypatch.setattr(a2, "atomic_json", boom)
+    with pytest.raises(OSError, match="simulated persist failure"):
+        a2.checkpoint_irc_endpoints(
+            tmp_path,
+            transition_state,
+            lambda: (forward, reverse),
+            identity=identity,
+        )
+    assert not (tmp_path / "irc-forward.r2scan3c.xyz").exists()
+    assert not (tmp_path / "irc-reverse.r2scan3c.xyz").exists()
+    assert not (tmp_path / "irc.r2scan3c.receipt.json").exists()
+
+    monkeypatch.setattr(a2, "atomic_json", real_atomic)
+    loaded = a2.checkpoint_irc_endpoints(
+        tmp_path,
+        transition_state,
+        lambda: (forward, reverse),
+        identity=identity,
+    )
+    assert np.array_equal(loaded[0].coords, forward.coords)
+    assert (tmp_path / "irc.r2scan3c.receipt.json").exists()
+
+
 def test_full_irc_gate_requires_both_neutral_basins():
     reactant = neutral_pair("reactant")
     product = neutral_pair("product", product=True)

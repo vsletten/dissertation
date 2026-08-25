@@ -255,31 +255,56 @@ def checkpoint_irc_endpoints(
     ):
         if cluster.symbols != transition_state.symbols:
             raise ValueError(f"{path.name}: computed atom order drift")
-        temporary = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
-        temporary.write_text(exact_xyz(cluster))
-        temporary.replace(path)
-    loaded = (
-        load_xyz_like(forward_path, transition_state, name="irc-forward"),
-        load_xyz_like(reverse_path, transition_state, name="irc-reverse"),
-    )
-    atomic_json(
-        receipt_path,
-        {
-            **expected,
-            "directions": {
-                "forward": {
-                    "path": forward_path.name,
-                    "geometry_fingerprint": frequency_geometry_fingerprint(loaded[0]),
-                    "sha256": sha256_path(forward_path),
-                },
-                "reverse": {
-                    "path": reverse_path.name,
-                    "geometry_fingerprint": frequency_geometry_fingerprint(loaded[1]),
-                    "sha256": sha256_path(reverse_path),
+    staged: list[Path] = []
+    published: list[Path] = []
+    try:
+        for cluster, path in (
+            (endpoints[0], forward_path),
+            (endpoints[1], reverse_path),
+        ):
+            temporary = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
+            temporary.write_text(exact_xyz(cluster))
+            staged.append(temporary)
+        for temporary, path in zip(
+            staged,
+            (forward_path, reverse_path),
+            strict=True,
+        ):
+            temporary.replace(path)
+            published.append(path)
+        loaded = (
+            load_xyz_like(forward_path, transition_state, name="irc-forward"),
+            load_xyz_like(reverse_path, transition_state, name="irc-reverse"),
+        )
+        atomic_json(
+            receipt_path,
+            {
+                **expected,
+                "directions": {
+                    "forward": {
+                        "path": forward_path.name,
+                        "geometry_fingerprint": frequency_geometry_fingerprint(
+                            loaded[0]
+                        ),
+                        "sha256": sha256_path(forward_path),
+                    },
+                    "reverse": {
+                        "path": reverse_path.name,
+                        "geometry_fingerprint": frequency_geometry_fingerprint(
+                            loaded[1]
+                        ),
+                        "sha256": sha256_path(reverse_path),
+                    },
                 },
             },
-        },
-    )
+        )
+    except Exception:
+        for temporary in staged:
+            temporary.unlink(missing_ok=True)
+        if not receipt_path.exists():
+            for path in published:
+                path.unlink(missing_ok=True)
+        raise
     return loaded
 
 
