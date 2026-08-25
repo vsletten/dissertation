@@ -236,6 +236,39 @@ def test_full_irc_reuses_one_optimizer_for_both_directions(monkeypatch, tmp_path
     assert not np.allclose(backward.coords, forward.coords)
 
 
+def test_full_irc_bridges_ase_329_gradient_convergence_api(monkeypatch):
+    import sella
+
+    import quarry.ts as ts_module
+
+    initial_decisions = []
+
+    class FakeIRC:
+        def __init__(self, atoms, **kwargs):
+            self.atoms = atoms
+            self.first = True
+
+        def gradient_converged(self, gradient):
+            return True  # ASE 3.29's ordinary force-only decision at the TS.
+
+        def converged(self):
+            return not self.first
+
+        def run(self, **kwargs):
+            self.first = True  # Sella resets this for each direction.
+            initial_decisions.append(self.gradient_converged(np.zeros(9)))
+            self.first = False
+            sign = 1.0 if kwargs["direction"] == "forward" else -1.0
+            self.atoms.positions[:] = water().coords + sign * 0.05
+            return True
+
+    monkeypatch.setattr(sella, "IRC", FakeIRC)
+    monkeypatch.setattr(ts_module, "make_ase_calculator", lambda *args: object())
+    ts_module.full_irc(water(), CHEAP, max_steps=7)
+
+    assert initial_decisions == [False, False]
+
+
 def test_full_irc_fails_closed_when_either_direction_exhausts(monkeypatch):
     import sella
 

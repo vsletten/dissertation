@@ -1,13 +1,14 @@
 # A2-production-energetics — production-tier energies + open-source CC calibration
 
-- status: ready
+- status: blocked
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
 - depends: — (re-tiers whatever stationary points are banked in runs/;
   further points from A1b/A3 are re-tiered as they land — re-tiering is
   a settings swap by design, not a redo)
-- claimed-by:
+- claimed-by: hermes-workstation
+- blocked-on: A2a-si-neutral-production-path-rebuild
 
 ## Objective
 Upgrade banked barriers to the survey protocol: r2SCAN-3c geometries
@@ -43,6 +44,44 @@ FP64-gutted); ByteQC checkpoints tolerate preemption.
   CALCULATIONS.md rows updated to the new tier.
 
 ## Progress
+- 2026-08-24 22:53 PDT — bounded production verdict: **BLOCKED on an invalid
+  banked si-neutral saddle, not on compute.** Exact r2SCAN-3c D4+gCP minima
+  converged and central-difference composite Hessians give reactant/product/TS
+  indices `0/0/1`; the TS imaginary mode is `79.185 cm^-1`. After repairing the
+  Sella-2.5/ASE-3.29 zero-step compatibility defect, a real 260-step bilateral
+  Gonzalez--Schlegel IRC terminates in associative basin `(True,True,True)` on
+  both sides instead of reactant `(False,True,False)` and product
+  `(True,False,True)`. An endpoint-mode directed Cartesian Sella retry changed
+  the saddle only 0.0124 A RMS and reconverged the same basin. No wB97M-V,
+  B3LYP-D4, or coupled-cluster barrier was computed on that wrong path.
+  Executable READY card `A2a-si-neutral-production-path-rebuild` owns a persisted
+  path/CI-NEB rebuild before A2 resumes. Evidence root has 47 files / 791,566
+  bytes; manifest SHA-256 `efdcfc48c533dbadc1a30023f3a539f607711df0cd5cd354ff50fca3ba3556d1`
+  and rehashes with zero mismatch. Both calibration adapters were independently
+  smoke-run on water/cc-pVTZ: Psi4 1.11 TightPNO DLPNO-CCSD(T)
+  `-76.3323355604 Eh`; ByteQC canonical CCSD(T) `-76.3325745245 Eh`.
+- 2026-08-24 21:55 PDT — first production execution exposed and fixed two
+  false-surface classes before any number could escape. The initial driver
+  attached r2SCAN-3c D4+gCP to energies but PySCF geomeTRIC called an unpatched
+  gradient factory; `078f060` now binds optimization to the full composite
+  force. A force-converged r2SCAN-3c reactant/product then produced impossible
+  11/7-mode indices through GPU4PySCF's analytic meta-GGA Hessian. Those receipts
+  are preserved under the task207 evidence root, not relabeled. `f7c778a` adds
+  a central-difference Hessian over the exact full composite gradient, tested
+  against analytic HF/STO-3G frequencies; the resume-safe finite-difference
+  si-neutral run is active from the converged v3 geometries. All implementation
+  commits through `f7c778abf74995886aa69023cc606e21e83884fc` are pushed.
+- 2026-08-24 20:58 PDT — claimed atomically by `hermes-workstation`; pushed
+  `agents/A2-production-energetics` from exact `origin/main`
+  `4d715c7597edd04ed1a0d180f02d5c600eb74128` and created the congruent
+  dedicated worktree. Read-only bank inventory found four current production
+  targets: free-dimer si-neutral, al-neutral, and al-acid plus the 66-atom
+  embedded oss-neutral pilot. Their source stores/results remain byte-preserved
+  in the historical worktrees/external archives. Environment probes verified
+  PySCF 2.14.0 + GPU4PySCF 1.8.1, native def2-mTZVPP, `pyscf-dispersion`
+  r2SCAN-3c D4+gCP primitives, Psi4 1.11, and ByteQC/PySCF 2.5.0. The first
+  implementation slice is a tested, resume-safe production/calibration driver;
+  no heavy calculation or shared-service mutation has started.
 - 2026-08-18 — card created (fable).
 - 2026-08-23 — fable — **descoped from ORCA** (Victor's call: licensing).
   Calibration layer replaced by Psi4 1.11 DLPNO-CCSD(T) + ByteQC

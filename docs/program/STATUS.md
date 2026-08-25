@@ -4,6 +4,15 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-24 — hermes-workstation — A2 production infrastructure is pushed and
+  fail-closed on the first real target: exact r2SCAN-3c D4+gCP optimization,
+  same-surface finite-difference Hessians, repaired Sella/ASE full IRC, and
+  verified Psi4/ByteQC calibration adapters. The si-neutral minima/TS have
+  indices 0/0/1, but a real 260-step full IRC connects the banked saddle to the
+  associative basin on both sides; directed Sella reconverges it. No production
+  or CC barrier was fabricated. A2 is blocked on READY path-rebuild card A2a;
+  evidence manifest `efdcfc48c533...` (47 files, 791,566 bytes).
+
 - 2026-08-24 — hermes-workstation — A1g's hash-pinned bridge-side-H3O+ /
   distinct-neutral-attacker Si reactant is a zero-imaginary minimum, but its
   independent product converges outside the hydrolyzed family: Si--Ow 2.643 A,

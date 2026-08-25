@@ -16,6 +16,7 @@ from quarry.pipeline import (
     build_mol,
     energy,
     frequencies,
+    frequencies_finite_difference,
     frequency_geometry_fingerprint,
     frequency_settings_fingerprint,
     gradient,
@@ -24,6 +25,67 @@ from quarry.pipeline import (
 from quarry.rates import thermo_from_frequencies
 
 CHEAP = DftSettings(xc="hf", basis="sto-3g")
+R2SCAN3C = DftSettings(
+    xc="r2scan",
+    basis="def2-mtzvpp",
+    composite="r2scan3c",
+    density_fit=True,
+)
+
+
+def test_r2scan3c_settings_refuse_partial_or_double_counted_variants():
+    assert pipeline._normalized_composite(R2SCAN3C) == "r2scan3c"
+    with pytest.raises(ValueError, match="requires xc='r2scan'"):
+        pipeline._normalized_composite(
+            DftSettings(xc="b3lyp", basis="def2-mtzvpp", composite="r2scan3c")
+        )
+    with pytest.raises(ValueError, match="supplies its own D4"):
+        pipeline._normalized_composite(
+            DftSettings(
+                xc="r2scan",
+                basis="def2-mtzvpp",
+                composite="r2scan3c",
+                dispersion="d4",
+            )
+        )
+
+
+def test_r2scan3c_energy_includes_exact_d4_and_gcp_terms():
+    pytest.importorskip("pyscf.dispersion.gcp")
+    composite = energy(water(), R2SCAN3C)
+    plain_settings = DftSettings(xc="r2scan", basis="def2-mtzvpp", density_fit=True)
+    plain = energy(water(), plain_settings)
+    correction = pipeline._r2scan3c_correction(
+        build_mol(water(), R2SCAN3C), gradient=False, use_gpu=False
+    )["energy"]
+    assert composite - plain == pytest.approx(float(correction), abs=1e-9)
+
+
+def test_r2scan3c_patches_direct_geometric_gradient_factory(monkeypatch):
+    expected = np.full((3, 3), 0.125)
+
+    class Gradient:
+        def __init__(self, base):
+            self.base = base
+
+    class MeanField:
+        mol = object()
+        scf_summary = {}
+
+        def nuc_grad_method(self):
+            return Gradient(self)
+
+    monkeypatch.setattr(
+        pipeline,
+        "_r2scan3c_correction",
+        lambda mol, *, gradient, use_gpu: {
+            "energy": -0.01,
+            "gradient": expected,
+        },
+    )
+    mean_field = pipeline._attach_composite_energy(MeanField(), R2SCAN3C)
+    derivative = mean_field.nuc_grad_method()
+    assert np.array_equal(derivative.get_dispersion(), expected)
 
 
 def test_frequency_settings_fingerprint_ignores_execution_backend():
@@ -158,6 +220,19 @@ def opt_water():
 @pytest.fixture(scope="module")
 def freq_water(opt_water) -> FrequencyResult:
     return frequencies(opt_water, CHEAP)
+
+
+def test_finite_difference_hessian_matches_analytic_water(opt_water, freq_water):
+    numerical = frequencies_finite_difference(opt_water, CHEAP, step_bohr=1e-3)
+    assert numerical.n_imaginary == freq_water.n_imaginary == 0
+    assert numerical.frequencies_cm == pytest.approx(
+        freq_water.frequencies_cm,
+        abs=0.2,
+    )
+    assert numerical.electronic_hartree == pytest.approx(
+        freq_water.electronic_hartree,
+        abs=1e-10,
+    )
 
 
 class TestElectronicStructure:
