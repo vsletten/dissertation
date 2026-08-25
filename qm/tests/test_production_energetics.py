@@ -163,11 +163,15 @@ def test_end_to_end_driver_journals_results_without_recompute(monkeypatch, tmp_p
         "optimize_minimum",
         lambda current, settings, max_steps, trajectory: current,
     )
-    monkeypatch.setattr(
-        a2,
-        "find_ts",
-        lambda current, settings, max_steps, trajectory: current,
-    )
+    ts_calls = []
+
+    def find_transition_state(
+        current, settings, max_steps, trajectory, initial_mode, internal
+    ):
+        ts_calls.append((initial_mode.copy(), internal))
+        return current
+
+    monkeypatch.setattr(a2, "find_ts", find_transition_state)
 
     frequency_calls: list[str] = []
 
@@ -214,6 +218,9 @@ def test_end_to_end_driver_journals_results_without_recompute(monkeypatch, tmp_p
     assert result["barrier_electronic_kj"][a2.PRODUCTION_METHOD] > 0.0
     assert (run_dir / "store.sqlite").exists()
     assert len(frequency_calls) == 3
+    assert len(ts_calls) == 1
+    assert ts_calls[0][0].shape == transition_state.coords.shape
+    assert ts_calls[0][1] is False
 
     # The second run must consume exact checkpoints rather than invoke heavy work.
     monkeypatch.setattr(

@@ -42,7 +42,12 @@ from quarry.pipeline import (
 )
 from quarry.rates import rate_from_thermo, thermo_from_frequencies
 from quarry.store import Store, geometry_hash
-from quarry.ts import find_ts, full_irc, make_ase_calculator
+from quarry.ts import (
+    find_ts,
+    full_irc,
+    make_ase_calculator,
+    reaction_path_vector,
+)
 
 R2SCAN3C_METHOD = "r2scan-3c/def2-mtzvpp/d4/gcp"
 PRODUCTION_METHOD = "wb97m-v/def2-tzvpd/smd(water)"
@@ -481,6 +486,8 @@ def run(args: argparse.Namespace) -> int:
             r2scan3c,
             max_steps=args.saddle_steps,
             trajectory=str(run_dir / "transition-state.r2scan3c.traj"),
+            initial_mode=reaction_path_vector(reactant, product),
+            internal=False,
         ),
     )
 
