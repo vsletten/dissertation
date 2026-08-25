@@ -79,6 +79,29 @@ CCSD(T)/CBS calibration triangle (ByteQC canonical + Psi4 TightPNO DLPNO).
   Ruff, CLI smoke, and diff checks are green. The bounded workstation campaign
   is running under `/mnt/data/vsletten/dissertation-data/task208-a2a-path-rebuild-20260825/`
   with extraction/Honcho GPU consumers isolated and a ten-hour dead-man restore.
+- 2026-08-25 11:06 PDT — **bounded scientific continuation checkpoint; acceptance
+  remains red.** Exact r2SCAN-3c R/I/P references independently pass zero-index
+  finite-difference Hessians, and the associative intermediate is now a proved
+  minimum rather than an inferred IRC endpoint. A converged seven-image R↔I
+  CI-NEB has the exact electronic profile `0.0, 2.043, 10.744, 17.177, 51.021,
+  125.472, 108.622 kJ/mol`: a genuine interior crest at image 5 before the
+  associative image 6. Two bounded Sella refinements were rejected without
+  weakening the gate: endpoint-vector mode produced a stable `147.72 cm^-1`
+  spectator-OH saddle with overlap `0.006/0.006`; three-coordinate-conditioned
+  local-band refinement produced a stable `101.89 cm^-1` spectator-H14 saddle
+  with overlap `0.037/0.037`. Tight-climb continuations also failed honestly:
+  ODE worsened `fmax 0.0780→0.1041 eV/A` over 12 steps; BFGS worsened
+  `0.1700→0.3032` over 17. No full IRC, production single point, or CC job ran
+  after that first elementary-step gate stayed red. Commit `ab9bf00` and every
+  earlier checkpoint are pushed. Durable external evidence is **259 files /
+  869,079 bytes**, manifest SHA-256
+  `3852d6b5feea82e57f8b15eb87fc93150590fe711edba36da2ddd3f0b03a7efe`.
+  Shared extraction/Honcho services are restored, Ollama is empty, and no QM
+  process remains. **Continuation order:** reuse the proved minima and persisted
+  bands; implement a spectator-torsion-aware active-subspace or internal-
+  coordinate reaction-mode refinement. Do not rerun the rejected banked TS,
+  recompute the loose band, weaken the mode gate, or start I↔P/high-level/CC
+  work before R↔I closes.
 - 2026-08-24 — created by hermes-workstation from A2 live production evidence.
   Exact r2SCAN-3c FD-Hessian indices are reactant/product/TS `0/0/1`, but the
   repaired 260-step full IRC closes in the associative basin on both sides.
