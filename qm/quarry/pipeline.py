@@ -19,6 +19,7 @@ import tempfile
 import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
+from types import MethodType
 from typing import Any
 
 import numpy as np
@@ -42,6 +43,9 @@ class DftSettings:
     basis: str = "def2-svp"
     solvent: str | None = None
     dispersion: str | None = None  # e.g. "d3bj", "d4" (needs pyscf[dispersion])
+    # Exact composite-method contract. ``r2scan3c`` is not merely r2SCAN plus
+    # an arbitrary basis: it also carries method-specific D4 and gCP terms.
+    composite: str | None = None
     grid_level: int | None = None
     # RI-JK. Off here so cheap tests and comparisons are explicit;
     # production call sites and the smoke benchmark turn it on
@@ -61,6 +65,136 @@ def build_mol(cluster: Cluster, settings: DftSettings) -> Any:
         basis=settings.basis,
         verbose=0,
     )
+
+
+def _normalized_composite(settings: DftSettings) -> str | None:
+    if settings.composite is None:
+        return None
+    name = settings.composite.lower().replace("-", "")
+    if name != "r2scan3c":
+        raise ValueError(f"unsupported composite method '{settings.composite}'")
+    if settings.xc.lower() != "r2scan" or settings.basis.lower() != "def2-mtzvpp":
+        raise ValueError("r2scan3c requires xc='r2scan' and basis='def2-mtzvpp'")
+    if settings.dispersion is not None:
+        raise ValueError("r2scan3c supplies its own D4 correction")
+    return name
+
+
+def _r2scan3c_correction(mol: Any, *, gradient: bool, use_gpu: bool) -> dict[str, Any]:
+    """Return the exact r2SCAN-3c D4 + gCP correction."""
+    if use_gpu:
+        from gpu4pyscf.dispersion import dftd4, gcp
+    else:
+        from pyscf.dispersion import dftd4, gcp
+
+    d4_model = dftd4.DFTD4Dispersion(
+        mol,
+        xc="r2scan-3c",
+        atm=True,
+        ga=2.0,
+        gc=1.0,
+    )
+    d4_model.set_param(0.0, 0.42, 5.65, s9=2.0)
+    d4 = d4_model.get_dispersion(grad=gradient)
+    counterpoise = gcp.GCP(mol, method="r2scan3c").get_counterpoise(grad=gradient)
+    result = {"energy": d4["energy"] + counterpoise["energy"]}
+    if gradient:
+        result["gradient"] = d4["gradient"] + counterpoise["gradient"]
+    return result
+
+
+def _attach_composite_energy(mf: Any, settings: DftSettings) -> Any:
+    if _normalized_composite(settings) is None:
+        return mf
+
+    def get_dispersion(
+        method: Any,
+        disp: str | None = None,
+        with_3body: bool | None = None,
+        verbose: int | None = None,
+    ) -> Any:
+        correction = _r2scan3c_correction(
+            method.mol,
+            gradient=False,
+            use_gpu=settings.use_gpu,
+        )["energy"]
+        method.scf_summary["dispersion"] = correction
+        return correction
+
+    # CPU/GPU conversion drops instance monkeypatches, so this runs only after
+    # ``to_gpu`` in ``_make_scf``.
+    mf.get_dispersion = MethodType(get_dispersion, mf)
+    mf.do_disp = lambda: True
+    return mf
+
+
+def _gradient_method(mf: Any, settings: DftSettings) -> Any:
+    gradient = mf.nuc_grad_method()
+    if _normalized_composite(settings) is None:
+        return gradient
+
+    def get_dispersion(
+        method: Any,
+        disp: str | None = None,
+        with_3body: bool | None = None,
+        verbose: int | None = None,
+    ) -> Any:
+        return _r2scan3c_correction(
+            method.base.mol,
+            gradient=True,
+            use_gpu=settings.use_gpu,
+        )["gradient"]
+
+    gradient.get_dispersion = MethodType(get_dispersion, gradient)
+    return gradient
+
+
+def _r2scan3c_hessian_correction(
+    mol: Any, settings: DftSettings, *, step_bohr: float = 1e-5
+) -> np.ndarray:
+    """Finite-difference the cheap D4+gCP gradient for the analytic Hessian."""
+    coords = np.asarray(mol.atom_coords(), dtype=float)
+    work = mol.copy()
+    correction = np.empty((mol.natm, mol.natm, 3, 3))
+    for atom in range(mol.natm):
+        for axis in range(3):
+            displaced = coords.copy()
+            displaced[atom, axis] += step_bohr
+            work.set_geom_(displaced, unit="Bohr")
+            plus = _r2scan3c_correction(
+                work,
+                gradient=True,
+                use_gpu=settings.use_gpu,
+            )["gradient"]
+            displaced[atom, axis] -= 2.0 * step_bohr
+            work.set_geom_(displaced, unit="Bohr")
+            minus = _r2scan3c_correction(
+                work,
+                gradient=True,
+                use_gpu=settings.use_gpu,
+            )["gradient"]
+            if hasattr(plus, "get"):
+                plus = plus.get()
+            if hasattr(minus, "get"):
+                minus = minus.get()
+            correction[atom, :, axis, :] = (plus - minus) / (2.0 * step_bohr)
+    return correction
+
+
+def _hessian_method(mf: Any, settings: DftSettings) -> Any:
+    hessian = mf.Hessian()
+    if _normalized_composite(settings) is None:
+        return hessian
+
+    def get_dispersion(
+        method: Any,
+        disp: str | None = None,
+        with_3body: bool | None = None,
+    ) -> np.ndarray:
+        return _r2scan3c_hessian_correction(method.base.mol, settings)
+
+    hessian.get_dispersion = MethodType(get_dispersion, hessian)
+    return hessian
 
 
 def _make_scf(mol: Any, settings: DftSettings) -> Any:
@@ -85,7 +219,7 @@ def _make_scf(mol: Any, settings: DftSettings) -> Any:
         mf = mf.SMD() if settings.solvent.lower() == "smd" else mf.PCM()
     if settings.use_gpu:
         mf = mf.to_gpu()
-    return mf
+    return _attach_composite_energy(mf, settings)
 
 
 def energy(cluster: Cluster, settings: DftSettings) -> float:
@@ -103,7 +237,10 @@ def gradient(cluster: Cluster, settings: DftSettings) -> np.ndarray:
     mf.kernel()
     if not mf.converged:
         raise RuntimeError(f"SCF did not converge for {cluster.name}")
-    return np.asarray(mf.nuc_grad_method().kernel())
+    value = _gradient_method(mf, settings).kernel()
+    if hasattr(value, "get"):
+        value = value.get()
+    return np.asarray(value)
 
 
 @contextmanager
@@ -354,7 +491,7 @@ def _scf_hessian(cluster: Cluster, settings: DftSettings) -> tuple[Any, float, A
     if not mf.converged:
         raise RuntimeError(f"SCF did not converge for {cluster.name}")
     try:
-        return mf, float(e), mf.Hessian().kernel()
+        return mf, float(e), _hessian_method(mf, settings).kernel()
     except AssertionError as gpu_error:
         if not settings.use_gpu or not _is_gpu_hessian_contiguity_assertion(gpu_error):
             raise
@@ -370,7 +507,7 @@ def _scf_hessian(cluster: Cluster, settings: DftSettings) -> tuple[Any, float, A
             raise RuntimeError(
                 f"CPU fallback SCF did not converge for {cluster.name}"
             ) from gpu_error
-        return cpu_mf, float(cpu_e), cpu_mf.Hessian().kernel()
+        return cpu_mf, float(cpu_e), _hessian_method(cpu_mf, cpu_settings).kernel()
 
 
 def _rotational_temperatures(

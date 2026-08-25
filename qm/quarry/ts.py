@@ -24,6 +24,7 @@ from quarry.pipeline import (
     HARTREE_TO_KJ,
     DftSettings,
     FrequencyResult,
+    _gradient_method,
     _make_scf,
     build_mol,
     frequencies,
@@ -62,10 +63,10 @@ def make_ase_calculator(settings: DftSettings, charge: int, spin: int):
             e = mf.kernel()
             if not mf.converged:
                 raise RuntimeError("SCF did not converge during ASE evaluation")
-            grad = mf.nuc_grad_method().kernel()
-            grad = np.asarray(grad)
+            grad = _gradient_method(mf, settings).kernel()
             if hasattr(grad, "get"):  # cupy -> numpy when running on GPU
                 grad = grad.get()
+            grad = np.asarray(grad)
             self.results = {
                 "energy": float(e) * HARTREE_TO_EV,
                 "forces": -grad * (HARTREE_TO_EV / BOHR_TO_ANGSTROM),

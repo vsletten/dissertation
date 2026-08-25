@@ -24,6 +24,40 @@ from quarry.pipeline import (
 from quarry.rates import thermo_from_frequencies
 
 CHEAP = DftSettings(xc="hf", basis="sto-3g")
+R2SCAN3C = DftSettings(
+    xc="r2scan",
+    basis="def2-mtzvpp",
+    composite="r2scan3c",
+    density_fit=True,
+)
+
+
+def test_r2scan3c_settings_refuse_partial_or_double_counted_variants():
+    assert pipeline._normalized_composite(R2SCAN3C) == "r2scan3c"
+    with pytest.raises(ValueError, match="requires xc='r2scan'"):
+        pipeline._normalized_composite(
+            DftSettings(xc="b3lyp", basis="def2-mtzvpp", composite="r2scan3c")
+        )
+    with pytest.raises(ValueError, match="supplies its own D4"):
+        pipeline._normalized_composite(
+            DftSettings(
+                xc="r2scan",
+                basis="def2-mtzvpp",
+                composite="r2scan3c",
+                dispersion="d4",
+            )
+        )
+
+
+def test_r2scan3c_energy_includes_exact_d4_and_gcp_terms():
+    pytest.importorskip("pyscf.dispersion.gcp")
+    composite = energy(water(), R2SCAN3C)
+    plain_settings = DftSettings(xc="r2scan", basis="def2-mtzvpp", density_fit=True)
+    plain = energy(water(), plain_settings)
+    correction = pipeline._r2scan3c_correction(
+        build_mol(water(), R2SCAN3C), gradient=False, use_gpu=False
+    )["energy"]
+    assert composite - plain == pytest.approx(float(correction), abs=1e-9)
 
 
 def test_frequency_settings_fingerprint_ignores_execution_backend():
