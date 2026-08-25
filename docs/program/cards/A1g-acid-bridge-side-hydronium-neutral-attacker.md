@@ -1,11 +1,11 @@
 # A1g-acid-bridge-side-hydronium-neutral-attacker — follow the migrated proton
 
-- status: ready
+- status: active
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaign)
 - depends: A1f's exact donor-to-relay migration receipt
-- claimed-by:
+- claimed-by: hermes-workstation
 
 ## Objective
 
@@ -73,6 +73,15 @@ mechanism-versioned topology.
 
 ## Progress
 
+- 2026-08-24 18:08 PDT — implementation checkpoint: atomically claimed branch
+  `agents/A1g-acid-bridge-side-hydronium-neutral-attacker`; added the exact
+  four-water bridge-side-H3O+ / distinct-neutral-attacker endpoints and
+  mechanism-v3/gate-v3 campaign. The Si path is hash-bound to A1f's archived
+  optimized reactant `3a510764...`, preserves migrated H16 on bridge-side O22,
+  transfers bridge-facing H23 directly to Obr, and refuses A1e/A1f terminals
+  plus source-hash drift. New and inherited acid-path regressions are green
+  (**70 passed**); targeted Ruff/format, source receipt, CLI help, and diff
+  checks pass. No production DFT has started.
 - 2026-08-24 — filed from A1f's exact unconstrained reactant: H16 migrated from
   the outer donor to the bridge-side relay oxygen, while the neutral attacker
   remained neutral. This card tests that selected topology directly instead of

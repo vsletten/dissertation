@@ -358,6 +358,7 @@ def terminal_record_is_reusable(
     bounds: Bounds,
     mechanism_version: int = MECHANISM_VERSION,
     gate_version: int = GATE_VERSION,
+    identity_extra: dict[str, Any] | None = None,
 ) -> bool:
     terminal = path_dir / "terminal.json"
     if not terminal.is_file():
@@ -374,6 +375,8 @@ def terminal_record_is_reusable(
         "settings": asdict(settings),
         "bounds": asdict(bounds),
     }
+    if identity_extra:
+        expected.update(identity_extra)
     if any(record.get(field) != value for field, value in expected.items()):
         return False
     if record.get("status") not in TERMINAL_STATUSES:
@@ -428,6 +431,7 @@ def run_path(
     endpoint_gate: Callable[..., str | None] = endpoint_gate_reason,
     mode_gate: Callable[..., dict[str, Any]] = coupled_mode_components,
     irc_gate: Callable[..., str | None] = irc_channel_reason,
+    identity_extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     key = path_key(model, n_water, family)
     path_dir = path_directory(run_dir, model, n_water, family)
@@ -438,6 +442,7 @@ def run_path(
         bounds=bounds,
         mechanism_version=mechanism_version,
         gate_version=gate_version,
+        identity_extra=identity_extra,
     ):
         return json.loads((path_dir / "terminal.json").read_text())
     if path_dir.exists():
@@ -455,6 +460,8 @@ def run_path(
         "settings": asdict(settings),
         "bounds": asdict(bounds),
     }
+    if identity_extra:
+        base.update(identity_extra)
     stage = "build-endpoints"
     try:
         ends = endpoint_builder(SI_MODELS[model](), n_water=n_water, family=family)
