@@ -480,6 +480,47 @@ class TestNebConvergence:
         assert manifest["converged"] is True
         assert np.allclose(coords[1], images[1].positions)
 
+    def test_atomic_in_progress_climb_checkpoint_can_resume_with_fresh_optimizer(
+        self, tmp_path
+    ):
+        from ase import Atoms
+
+        from quarry.ts import _load_neb_checkpoint, _write_neb_checkpoint
+
+        reactant, product = self._endpoints()
+        images = [
+            Atoms(symbols=reactant.symbols, positions=reactant.coords),
+            Atoms(
+                symbols=reactant.symbols,
+                positions=0.5 * (reactant.coords + product.coords),
+            ),
+            Atoms(symbols=product.symbols, positions=product.coords),
+        ]
+        checkpoint = _write_neb_checkpoint(
+            images,
+            tmp_path,
+            stage="climb-step-000010",
+            converged=None,
+            settings=CHEAP,
+            charge=reactant.charge,
+            spin=reactant.spin,
+            frozen_indices=reactant.frozen_indices,
+            optimizer="ode",
+            fmax_ev_a=0.02,
+            step_bound=240,
+        )
+
+        coords, manifest = _load_neb_checkpoint(
+            checkpoint,
+            settings=CHEAP,
+            reactant=reactant,
+            n_images=3,
+        )
+
+        assert manifest["stage"] == "climb-step-000010"
+        assert manifest["converged"] is None
+        assert np.allclose(coords[1], images[1].positions)
+
     def test_unconverged_ode_climb_is_rejected(self, monkeypatch):
         import ase.mep
         import ase.mep.neb

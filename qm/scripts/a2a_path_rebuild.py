@@ -395,6 +395,9 @@ def run_segment(
         },
     )
     tight_neb_root = segment_dir / "tight-neb-checkpoints"
+    tight_resume = (
+        tight_neb_root if (tight_neb_root / "latest.json").is_file() else neb_root
+    )
     tight_crest = a2.checkpoint_cluster(
         segment_dir / "tight-neb-crest.xyz",
         start,
@@ -409,10 +412,10 @@ def run_segment(
             pre_relax_steps=neb_pre_steps,
             optimizer_dt=0.02,
             optimizer_maxstep=0.03,
-            climb_optimizer="ode",
+            climb_optimizer="bfgs",
             checkpoint_dir=tight_neb_root,
             checkpoint_interval=5,
-            resume_from=neb_root,
+            resume_from=tight_resume,
         ),
         identity={
             "gate_version": PATH_GATE_VERSION,
@@ -425,7 +428,7 @@ def run_segment(
             "n_images": neb_images,
             "fmax_ev_a": 0.02,
             "climb_steps": 240,
-            "climb_optimizer": "ode",
+            "climb_optimizer": "bfgs",
         },
     )
     local_tangent, tangent_receipt = final_neb_tangent(
