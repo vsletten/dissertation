@@ -48,7 +48,7 @@ from quarry.ts import (
 from scripts import production_energetics as a2
 
 PATH_GATE_VERSION = "a2a-sequential-path-v1"
-SELLA_MODE_STRATEGY = "active-subspace-reconditioned-loose-ci-neb-tangent-v2"
+SELLA_MODE_STRATEGY = "active-subspace-internal-conditioned-loose-ci-neb-tangent-v3"
 REACTION_COORDINATE_PAIRS = ((1, 15), (0, 17), (0, 1))
 CONDITIONED_DISTANCE_TOLERANCE_A = 1.0e-4
 HESSIAN_STEPS_BOHR = (1.0e-3, 2.0e-3)
@@ -403,7 +403,7 @@ def run_segment(
     atomic_json(segment_dir / "local-neb-tangent.receipt.json", tangent_receipt)
     coordinate_targets = reaction_coordinate_targets(crest)
     conditioned_crest = a2.checkpoint_cluster(
-        segment_dir / "conditioned-crest-v2.xyz",
+        segment_dir / "conditioned-crest-v3.xyz",
         crest,
         lambda: relax_at_fixed_distances(
             crest,
@@ -413,12 +413,13 @@ def run_segment(
             max_steps=120,
             optimizer_maxstep=0.03,
             distance_tolerance_a=CONDITIONED_DISTANCE_TOLERANCE_A,
-            trajectory=str(segment_dir / "conditioned-crest-v2.traj"),
-            logfile=str(segment_dir / "conditioned-crest-v2.log"),
+            constraint_method="sella-internal",
+            trajectory=str(segment_dir / "conditioned-crest-v3.traj"),
+            logfile=str(segment_dir / "conditioned-crest-v3.log"),
         ),
         identity={
             "gate_version": PATH_GATE_VERSION,
-            "stage": "three-coordinate-conditioned-loose-crest-v2",
+            "stage": "three-coordinate-internal-conditioned-loose-crest-v3",
             "segment": spec.slug,
             "settings": settings_identity,
             "fixed_distances": serialized_distance_targets(coordinate_targets),
@@ -426,6 +427,7 @@ def run_segment(
             "max_steps": 120,
             "optimizer_maxstep": 0.03,
             "distance_tolerance_a": CONDITIONED_DISTANCE_TOLERANCE_A,
+            "constraint_method": "sella-internal",
         },
     )
     active_transition_state = a2.checkpoint_cluster(
@@ -455,7 +457,7 @@ def run_segment(
     )
     reconditioned_targets = reaction_coordinate_targets(active_transition_state)
     reconditioned_crest = a2.checkpoint_cluster(
-        segment_dir / "reconditioned-active-subspace-crest.xyz",
+        segment_dir / "reconditioned-active-subspace-crest-v3.xyz",
         active_transition_state,
         lambda: relax_at_fixed_distances(
             active_transition_state,
@@ -465,12 +467,13 @@ def run_segment(
             max_steps=120,
             optimizer_maxstep=0.03,
             distance_tolerance_a=CONDITIONED_DISTANCE_TOLERANCE_A,
-            trajectory=str(segment_dir / "reconditioned-active-subspace-crest.traj"),
-            logfile=str(segment_dir / "reconditioned-active-subspace-crest.log"),
+            constraint_method="sella-internal",
+            trajectory=str(segment_dir / "reconditioned-active-subspace-crest-v3.traj"),
+            logfile=str(segment_dir / "reconditioned-active-subspace-crest-v3.log"),
         ),
         identity={
             "gate_version": PATH_GATE_VERSION,
-            "stage": "spectator-relaxed-active-subspace-crest-v2",
+            "stage": "spectator-internal-relaxed-active-subspace-crest-v3",
             "segment": spec.slug,
             "settings": settings_identity,
             "fixed_distances": serialized_distance_targets(reconditioned_targets),
@@ -478,6 +481,7 @@ def run_segment(
             "max_steps": 120,
             "optimizer_maxstep": 0.03,
             "distance_tolerance_a": CONDITIONED_DISTANCE_TOLERANCE_A,
+            "constraint_method": "sella-internal",
             "active_subspace_geometry": frequency_geometry_fingerprint(
                 active_transition_state
             ),
@@ -576,12 +580,12 @@ def run_segment(
         "artifacts": {
             "neb_checkpoints": str(neb_root),
             "neb_crest": str(segment_dir / "neb-crest.xyz"),
-            "conditioned_crest": str(segment_dir / "conditioned-crest-v2.xyz"),
+            "conditioned_crest": str(segment_dir / "conditioned-crest-v3.xyz"),
             "active_subspace_transition_state": str(
                 segment_dir / "active-subspace-transition-state.xyz"
             ),
             "reconditioned_crest": str(
-                segment_dir / "reconditioned-active-subspace-crest.xyz"
+                segment_dir / "reconditioned-active-subspace-crest-v3.xyz"
             ),
             "local_tangent_receipt": str(
                 segment_dir / "local-neb-tangent.receipt.json"

@@ -259,6 +259,7 @@ def relax_at_fixed_distances(
     max_steps: int = 120,
     optimizer_maxstep: float = 0.05,
     distance_tolerance_a: float = 1e-6,
+    constraint_method: str = "ase-projector",
     trajectory: str | None = None,
     logfile: str | None = "-",
 ) -> Cluster:
@@ -266,9 +267,10 @@ def relax_at_fixed_distances(
 
     This is a topology-agnostic alternative to a geomeTRIC ``$set``
     optimization when a transition-state guess sits on a known multidimensional
-    reaction-coordinate crest. ASE's ``FixBondLengths`` projects both positions
-    and forces, so spectator coordinates can minimize without the pinned bond
-    distances drifting as the molecular connectivity changes.
+    reaction-coordinate crest. ``ase-projector`` uses ASE's
+    ``FixBondLengths`` for independent pairs. ``sella-internal`` solves coupled
+    bond equations simultaneously inside a Cartesian order-zero Sella search;
+    use it when multiple pinned distances share atoms.
 
     The optimizer must converge and the final projected force and distance
     residuals are checked independently. Frozen atoms may be retained only when
@@ -278,6 +280,8 @@ def relax_at_fixed_distances(
     from ase import Atoms
     from ase.constraints import FixAtoms, FixBondLengths
     from ase.optimize import BFGS
+    from sella import Sella
+    from sella.internal import Constraints
 
     if not fixed_distances:
         raise ValueError("fixed_distances must not be empty")
@@ -289,6 +293,10 @@ def relax_at_fixed_distances(
         raise ValueError("optimizer_maxstep must be finite and positive")
     if not np.isfinite(distance_tolerance_a) or distance_tolerance_a <= 0.0:
         raise ValueError("distance_tolerance_a must be finite and positive")
+    if constraint_method not in {"ase-projector", "sella-internal"}:
+        raise ValueError(
+            "constraint_method must be 'ase-projector' or 'sella-internal'"
+        )
 
     pairs: list[tuple[int, int]] = []
     targets: list[float] = []
@@ -317,45 +325,62 @@ def relax_at_fixed_distances(
 
     atoms = Atoms(symbols=cluster.symbols, positions=cluster.coords)
     atoms.calc = make_ase_calculator(settings, cluster.charge, cluster.spin)
-    constraints = []
-    if cluster.frozen_indices:
-        constraints.append(FixAtoms(indices=cluster.frozen_indices))
-    constraints.append(
-        FixBondLengths(
-            pairs,
-            bondlengths=targets,
-            tolerance=distance_tolerance_a,
-        )
-    )
-    atoms.set_constraint(constraints)
-    # Explicit targets are not applied until ASE adjusts a position update.
-    # Project before BFGS's initial force-only convergence check, otherwise an
-    # off-target zero-force geometry can falsely return converged.
-    atoms.set_positions(atoms.positions.copy())
-
-    optimizer = BFGS(
-        atoms,
-        maxstep=optimizer_maxstep,
-        trajectory=trajectory,
-        logfile=logfile,
-    )
-    optimizer_reported_convergence = optimizer.run(
-        fmax=fmax_ev_a,
-        steps=max_steps,
-    )
-    # Reapply the holonomic projection at the release boundary. Coupled distance
-    # constraints can need several sequential projections because correcting one
-    # shared atom perturbs another pair; acceptance measures the exact geometry
-    # returned, not ASE's last force-query cache.
     targets_array = np.asarray(targets)
-    residual = float("inf")
-    for _ in range(20):
+    if constraint_method == "ase-projector":
+        constraints = []
+        if cluster.frozen_indices:
+            constraints.append(FixAtoms(indices=cluster.frozen_indices))
+        constraints.append(
+            FixBondLengths(
+                pairs,
+                bondlengths=targets,
+                tolerance=distance_tolerance_a,
+            )
+        )
+        atoms.set_constraint(constraints)
+        # Explicit targets are not applied until ASE adjusts a position update.
+        # Project before BFGS's initial force-only convergence check, otherwise
+        # an off-target zero-force geometry can falsely return converged.
         atoms.set_positions(atoms.positions.copy())
-        actual = np.asarray([atoms.get_distance(i, j) for i, j in pairs])
-        residual = float(np.max(np.abs(actual - targets_array)))
-        if residual <= distance_tolerance_a:
-            break
-    projected_forces = np.asarray(atoms.get_forces(), dtype=float)
+        optimizer = BFGS(
+            atoms,
+            maxstep=optimizer_maxstep,
+            trajectory=trajectory,
+            logfile=logfile,
+        )
+        optimizer_reported_convergence = optimizer.run(
+            fmax=fmax_ev_a,
+            steps=max_steps,
+        )
+        # Reapply the holonomic projection at the release boundary. This only
+        # closes ordinary sequential-projector drift; shared-atom pairs should
+        # use simultaneous Sella constraint equations instead.
+        for _ in range(20):
+            atoms.set_positions(atoms.positions.copy())
+            actual = np.asarray([atoms.get_distance(i, j) for i, j in pairs])
+            if float(np.max(np.abs(actual - targets_array))) <= distance_tolerance_a:
+                break
+        projected_forces = np.asarray(atoms.get_forces(), dtype=float)
+    else:
+        if cluster.frozen_indices:
+            atoms.set_constraint(FixAtoms(indices=cluster.frozen_indices))
+        internal_constraints = Constraints(atoms)
+        for pair, target in zip(pairs, targets, strict=True):
+            internal_constraints.fix_bond(pair, target=target)
+        optimizer = Sella(
+            atoms,
+            order=0,
+            internal=False,
+            constraints=internal_constraints,
+            constraints_tol=distance_tolerance_a,
+            trajectory=trajectory,
+            logfile=logfile if logfile is not None else "/dev/null",
+        )
+        optimizer_reported_convergence = optimizer.run(
+            fmax=fmax_ev_a,
+            steps=max_steps,
+        )
+        projected_forces = np.asarray(optimizer.pes.get_projected_forces(), dtype=float)
     projected_fmax = float(np.linalg.norm(projected_forces, axis=1).max())
     if not optimizer_reported_convergence:
         raise RuntimeError(

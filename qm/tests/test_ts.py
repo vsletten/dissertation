@@ -729,6 +729,74 @@ class TestConstraints:
         )
         assert not np.allclose(relaxed.coords[4], start.coords[4])
 
+    def test_fixed_distance_relax_sella_internal_handles_shared_atom_constraints(
+        self, monkeypatch
+    ):
+        from ase.calculators.calculator import Calculator, all_changes
+
+        import quarry.ts as ts_mod
+
+        equilibrium = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.2, 0.0],
+                [2.5, 0.0, 0.0],
+                [4.0, 4.0, 0.0],
+            ]
+        )
+
+        class HarmonicCalculator(Calculator):
+            implemented_properties = ["energy", "forces"]
+
+            def calculate(
+                self, atoms=None, properties=("energy",), system_changes=all_changes
+            ):
+                super().calculate(atoms, properties, system_changes)
+                assert atoms is not None
+                delta = atoms.positions - equilibrium
+                self.results = {
+                    "energy": 0.5 * float(np.sum(delta**2)),
+                    "forces": -delta,
+                }
+
+        monkeypatch.setattr(
+            ts_mod,
+            "make_ase_calculator",
+            lambda settings, charge, spin: HarmonicCalculator(),
+        )
+        start = Cluster(
+            "shared-pins",
+            ["H"] * 5,
+            np.array(
+                [
+                    [0.1, -0.1, 0.0],
+                    [1.3, 0.2, 0.0],
+                    [-0.2, 1.5, 0.0],
+                    [2.9, -0.2, 0.0],
+                    [5.0, 5.0, 0.0],
+                ]
+            ),
+        )
+        targets = [(0, 1, 1.0), (0, 2, 1.2), (1, 3, 1.5)]
+
+        relaxed = ts_mod.relax_at_fixed_distances(
+            start,
+            CHEAP,
+            fixed_distances=targets,
+            fmax_ev_a=1e-5,
+            max_steps=100,
+            distance_tolerance_a=1e-6,
+            constraint_method="sella-internal",
+            logfile=None,
+        )
+
+        for atom_i, atom_j, target in targets:
+            assert np.linalg.norm(
+                relaxed.coords[atom_i] - relaxed.coords[atom_j]
+            ) == pytest.approx(target, abs=1e-6)
+        assert not np.allclose(relaxed.coords[4], start.coords[4])
+
     def test_fixed_distance_relax_rejects_frozen_pair_overlap(self):
         from dataclasses import replace
 
