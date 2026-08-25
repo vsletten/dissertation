@@ -16,6 +16,7 @@ from quarry.pipeline import (
     build_mol,
     energy,
     frequencies,
+    frequencies_finite_difference,
     frequency_geometry_fingerprint,
     frequency_settings_fingerprint,
     gradient,
@@ -219,6 +220,19 @@ def opt_water():
 @pytest.fixture(scope="module")
 def freq_water(opt_water) -> FrequencyResult:
     return frequencies(opt_water, CHEAP)
+
+
+def test_finite_difference_hessian_matches_analytic_water(opt_water, freq_water):
+    numerical = frequencies_finite_difference(opt_water, CHEAP, step_bohr=1e-3)
+    assert numerical.n_imaginary == freq_water.n_imaginary == 0
+    assert numerical.frequencies_cm == pytest.approx(
+        freq_water.frequencies_cm,
+        abs=0.2,
+    )
+    assert numerical.electronic_hartree == pytest.approx(
+        freq_water.electronic_hartree,
+        abs=1e-10,
+    )
 
 
 class TestElectronicStructure:

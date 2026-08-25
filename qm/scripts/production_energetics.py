@@ -36,6 +36,7 @@ from quarry.pipeline import (
     FrequencyResult,
     energy,
     frequencies,
+    frequencies_finite_difference,
     frequency_geometry_fingerprint,
     frequency_settings_fingerprint,
 )
@@ -217,18 +218,29 @@ def checkpoint_frequency(
     path: Path,
     cluster: Cluster,
     settings: DftSettings,
+    *,
+    finite_difference: bool = False,
 ) -> FrequencyResult:
     expected_geometry = frequency_geometry_fingerprint(cluster)
     expected_settings = frequency_settings_fingerprint(settings)
+    expected_hessian = "finite-difference-gradient" if finite_difference else "analytic"
     if path.exists():
         payload = json.loads(path.read_text())
         if payload.get("geometry_fingerprint") != expected_geometry:
             raise ValueError(f"{path.name}: cached geometry fingerprint drift")
         if payload.get("settings_fingerprint") != expected_settings:
             raise ValueError(f"{path.name}: cached settings fingerprint drift")
+        if payload.get("hessian_method") != expected_hessian:
+            raise ValueError(f"{path.name}: cached Hessian method drift")
         return frequency_from_payload(payload)
-    result = frequencies(cluster, settings)
-    atomic_json(path, frequency_payload(result))
+    result = (
+        frequencies_finite_difference(cluster, settings)
+        if finite_difference
+        else frequencies(cluster, settings)
+    )
+    payload = frequency_payload(result)
+    payload["hessian_method"] = expected_hessian
+    atomic_json(path, payload)
     return result
 
 
@@ -473,15 +485,22 @@ def run(args: argparse.Namespace) -> int:
     )
 
     reactant_freq = checkpoint_frequency(
-        run_dir / "reactant.r2scan3c.frequency.json", reactant, r2scan3c
+        run_dir / "reactant.r2scan3c.frequency.json",
+        reactant,
+        r2scan3c,
+        finite_difference=True,
     )
     product_freq = checkpoint_frequency(
-        run_dir / "product.r2scan3c.frequency.json", product, r2scan3c
+        run_dir / "product.r2scan3c.frequency.json",
+        product,
+        r2scan3c,
+        finite_difference=True,
     )
     ts_freq = checkpoint_frequency(
         run_dir / "transition-state.r2scan3c.frequency.json",
         transition_state,
         r2scan3c,
+        finite_difference=True,
     )
     if reactant_freq.n_imaginary != 0 or product_freq.n_imaginary != 0:
         raise RuntimeError("r2SCAN-3c reactant/product is not a true minimum")

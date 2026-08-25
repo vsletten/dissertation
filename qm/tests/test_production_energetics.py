@@ -180,6 +180,7 @@ def test_end_to_end_driver_journals_results_without_recompute(monkeypatch, tmp_p
         )
 
     monkeypatch.setattr(a2, "frequencies", frequencies)
+    monkeypatch.setattr(a2, "frequencies_finite_difference", frequencies)
     monkeypatch.setattr(
         a2,
         "full_irc",
@@ -218,6 +219,11 @@ def test_end_to_end_driver_journals_results_without_recompute(monkeypatch, tmp_p
     monkeypatch.setattr(
         a2,
         "frequencies",
+        lambda *unused, **kwargs: pytest.fail("frequency recomputed"),
+    )
+    monkeypatch.setattr(
+        a2,
+        "frequencies_finite_difference",
         lambda *unused, **kwargs: pytest.fail("frequency recomputed"),
     )
     monkeypatch.setattr(

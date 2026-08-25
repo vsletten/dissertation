@@ -385,13 +385,73 @@ def frequencies(cluster: Cluster, settings: DftSettings) -> FrequencyResult:
     Translational terms downstream cancel in any barrier between states
     of identical composition, which is the only use PHVA results have.
     """
-    from pyscf.hessian import thermo as pyscf_thermo
-
     mf, e, hess = _scf_hessian(cluster, settings)
     hess = np.asarray(hess.get() if hasattr(hess, "get") else hess)
+    return _analyze_hessian(cluster, settings, mf.mol, hess, float(e))
+
+
+def frequencies_finite_difference(
+    cluster: Cluster,
+    settings: DftSettings,
+    *,
+    step_bohr: float = 1e-3,
+) -> FrequencyResult:
+    """Central-difference exact gradients when a backend Hessian is unreliable.
+
+    This is the fail-closed production fallback for composite/meta-GGA routes:
+    it differentiates the same full energy gradient used by optimization,
+    including D4+gCP, rather than accepting a fast analytic Hessian that yields
+    an impossible index for a force-converged minimum.
+    """
+    if not np.isfinite(step_bohr) or step_bohr <= 0.0:
+        raise ValueError("finite-difference Hessian step must be positive")
+    n = len(cluster.symbols)
+    hess = np.empty((n, n, 3, 3))
+    displacement_a = step_bohr * BOHR_TO_ANGSTROM
+    for atom in range(n):
+        for axis in range(3):
+            plus_coords = cluster.coords.copy()
+            minus_coords = cluster.coords.copy()
+            plus_coords[atom, axis] += displacement_a
+            minus_coords[atom, axis] -= displacement_a
+            plus = gradient(replace(cluster, coords=plus_coords), settings)
+            minus = gradient(replace(cluster, coords=minus_coords), settings)
+            hess[atom, :, axis, :] = (plus - minus) / (2.0 * step_bohr)
+    matrix = hess.transpose(0, 2, 1, 3).reshape(3 * n, 3 * n)
+    matrix = 0.5 * (matrix + matrix.T)
+    hess = matrix.reshape(n, 3, n, 3).transpose(0, 2, 1, 3)
+    mol = build_mol(cluster, settings)
+    return _analyze_hessian(
+        cluster,
+        settings,
+        mol,
+        hess,
+        energy(cluster, settings),
+    )
+
+
+def _analyze_hessian(
+    cluster: Cluster,
+    settings: DftSettings,
+    mol: Any,
+    hess: np.ndarray,
+    electronic_hartree: float,
+) -> FrequencyResult:
+    from pyscf.hessian import thermo as pyscf_thermo
+
+    if hess.shape != (len(cluster.symbols), len(cluster.symbols), 3, 3):
+        raise ValueError(f"invalid Hessian shape {hess.shape}")
+    if not np.all(np.isfinite(hess)):
+        raise ValueError("Hessian contains non-finite values")
     if cluster.frozen_indices:
-        return _partial_hessian_analysis(cluster, settings, mf, hess, float(e))
-    freq_info = pyscf_thermo.harmonic_analysis(mf.mol, hess)
+        return _partial_hessian_analysis(
+            cluster,
+            settings,
+            mol,
+            hess,
+            electronic_hartree,
+        )
+    freq_info = pyscf_thermo.harmonic_analysis(mol, hess)
     nu = np.asarray(freq_info["freq_wavenumber"])
     modes = np.asarray(freq_info["norm_mode"])  # (nmodes, natm, 3)
     imag_mode = None
@@ -404,20 +464,18 @@ def frequencies(cluster: Cluster, settings: DftSettings) -> FrequencyResult:
             order = np.argsort(imag)
             imag = imag[order]
             imag_modes = np.real(modes[is_imag])[order]
-            # Backward-compatible default: largest-magnitude imaginary mode.
             imag_mode = imag_modes[-1]
     else:
         imag = np.zeros(0)
         real = nu
     real = real[real > 0]
 
-    mol = mf.mol
     mass_kg = float(np.sum(mol.atom_mass_list())) * 1e-3  # amu/mol -> kg/mol
     rot = _rotational_temperatures(cluster)
     return FrequencyResult(
         frequencies_cm=np.sort(real),
         imaginary_cm=imag,
-        electronic_hartree=float(e),
+        electronic_hartree=electronic_hartree,
         molar_mass_kg=mass_kg,
         rotational_temperatures_k=rot[0],
         linear=rot[1],
@@ -431,7 +489,7 @@ def frequencies(cluster: Cluster, settings: DftSettings) -> FrequencyResult:
 def _partial_hessian_analysis(
     cluster: Cluster,
     settings: DftSettings,
-    mf: Any,
+    mol: Any,
     hess: np.ndarray,
     e: float,
 ) -> FrequencyResult:
@@ -471,7 +529,7 @@ def _partial_hessian_analysis(
         imag_modes = np.asarray(full_modes)
         imag_mode = imag_modes[-1]
 
-    mass_kg = float(np.sum(mf.mol.atom_mass_list())) * 1e-3
+    mass_kg = float(np.sum(mol.atom_mass_list())) * 1e-3
     return FrequencyResult(
         frequencies_cm=np.sort(real[real > 0]),
         imaginary_cm=imag,
