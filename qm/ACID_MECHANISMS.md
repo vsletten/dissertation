@@ -245,24 +245,67 @@ run manifest is
 and terminal is
 `0b51c68336cf3dff739f51135664f6ac7918bd2374500f642c8f112bc1b5f095`.
 
+## Bridge-side hydronium / neutral attacker result (A1g)
+
+A1g promoted the exact topology selected by A1f rather than relabelling its
+rejected endpoint. The mechanism-v3/gate-v3 Si run began from A1f's archived
+optimized reactant SHA-256
+`3a5107648bd44cbba15dd7482b4a9e8b3c6434f049442453744737e2c32aba75`.
+Atom order and physical-H identity stayed fixed: migrated H16 made bridge-side
+O22 hydronium, measured-flank O19/H20/H21 remained the distinct neutral
+attacker, and bridge-facing H23 was the proton assigned to Obr in the product.
+
+The source reactant reconverged in six optimizer steps. It retained intact
+Si--O--Si, exact solvent occupancies `(2,2,3,2)`, unique H ownership, a neutral
+attacker, and zero imaginary modes. The independent hydrolyzed product then
+converged in 89 steps but left the required family:
+
+- Si--Ow remained nonbonded at `2.642649 A`;
+- Si--Obr cleaved to `3.535115 A`;
+- attacker H21 became unassigned to any oxygen;
+- exact basin was `(False,False,True,1,7,0)`, not required
+  `(True,False,True,1,8,0)`;
+- minimum pair distance remained collision-safe at `0.964884 A`.
+
+This is a conclusive `rejected` terminal at `optimize-product`, not a compute
+failure. The endpoint gate stopped before CI-NEB, saddle, IRC, Al, barrier, or
+ordering. At B3LYP/def2-SVP/DF, accepting the A1f proton migration still does
+not stabilize an atom-matched hydrolyzed Si product with a distinct neutral
+attacker.
+
+Durable evidence root:
+`/mnt/data/vsletten/dissertation-data/task202-a1g-acid-bridge-side-20260824/`.
+Evidence manifest SHA-256 is
+`76d1d0275a773d7941a855250696cedc78a169ad68d58305195aa9df05d4564f`;
+production log is
+`7c6ab526c88b86a9f7de4031b2beedbd3a2f4b8c3e8276d8a05927b0ae133a46`;
+run manifest is
+`27f7a7040cb5f087d9aee7126676e25bed309eed243fd024a1579aa1f946fba2`;
+terminal is
+`cf74851972575f2a734d03b38c95fea85bc49acf67598739d3f01aea191c7834`.
+
 ## Required follow-up
 
 Do not retry A1e's hydronium-as-nucleophile topologies, A1f's outer-donor role,
-or weaken the physical-H gate. Executable board card
-`A1g-acid-bridge-side-hydronium-neutral-attacker` promotes the exact topology
-selected by A1f: H3O+ begins on the bridge-side solvent oxygen, a distinct
-neutral water attacks Si, and the two other waters remain neutral solvators.
-Only a fully accepted Si path may trigger its exact matched Al path. Never hold
-Obr--H, Si--Ow, or Si--Obr to manufacture thermochemistry.
+A1g's B3LYP/def2-SVP topology, or weaken any physical-H/family gate. The only
+authorized acid-topology follow-through is board card
+`A1i-acid-production-tier-bridge-side-revisit`, blocked until A2 settles the
+calibrated production geometry/solvation tier. It retests this exact hash-bound
+topology once; endpoint rejection there closes the acid topology program.
+Only a fully accepted Si path may trigger exact matched Al. Never hold Obr--H,
+Si--Ow, or Si--Obr to manufacture thermochemistry.
 
 Reproduction commands must clear inherited environments:
 
 ```bash
 env -u PYTHONPATH -u VIRTUAL_ENV \
   uv run --frozen --extra gpu --extra dev \
-  python scripts/separated_acid_relay.py --gpu \
+  python scripts/bridge_side_acid_relay.py --gpu \
   --run-dir <durable-run-dir> --threads 16 --nice 10 \
-  --log <durable-log>
+  --log <durable-log> \
+  --source-reactant <a1f-reactant-optimized.xyz> \
+  --source-reactant-sha256 \
+  3a5107648bd44cbba15dd7482b4a9e8b3c6434f049442453744737e2c32aba75
 ```
 
 The RTX 4090 must be isolated from both email extraction and Honcho memory

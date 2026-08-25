@@ -4,6 +4,15 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-24 — hermes-workstation — A1g's hash-pinned bridge-side-H3O+ /
+  distinct-neutral-attacker Si reactant is a zero-imaginary minimum, but its
+  independent product converges outside the hydrolyzed family: Si--Ow 2.643 A,
+  attacker H21 unassigned, basin `(False,False,True,1,7,0)`. This is a
+  conclusive mechanism-v3/gate-v3 product rejection with no computational
+  failure and no eligible Al/barrier/ordering. The only acid follow-through is
+  A1i's one calibrated production-tier revisit after A2; no more SVP topology
+  retries.
+
 - 2026-08-24 — hermes-workstation — A1f's one four-water separated-donor /
   neutral-attacker Si path is a conclusive reactant-family rejection: the
   unconstrained B3LYP/def2-SVP/DF endpoint moved physical H16 from outer donor

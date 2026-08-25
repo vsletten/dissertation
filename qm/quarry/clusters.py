@@ -158,6 +158,8 @@ CONCERTED_ACID_WATER_COUNTS = (3, 4)
 CONCERTED_ACID_FAMILIES = ("bridge-donor-chain", "compact-cyclic-relay")
 SEPARATED_ACID_WATER_COUNT = 4
 SEPARATED_ACID_FAMILY = "separated-donor-neutral-attacker"
+BRIDGE_SIDE_ACID_WATER_COUNT = 4
+BRIDGE_SIDE_ACID_FAMILY = "bridge-side-hydronium-neutral-attacker"
 
 
 def _validate_acid_water_count(n_water: int) -> None:
@@ -1135,6 +1137,124 @@ def separated_acid_relay_endpoints(
         relay_h_indices=(donor_h, bridge_h),
         solvent_oxygen_indices=solvent_oxygens,
         solvent_h_indices=solvent_hydrogens,
+    )
+
+
+@dataclass(frozen=True)
+class BridgeSideHydroniumEndpoints:
+    """A1g endpoints with bridge-side H3O+ and a distinct neutral attacker."""
+
+    reactant: Cluster
+    product: Cluster
+    ow_index: int
+    hydronium_oxygen_index: int
+    outer_solvator_oxygen_index: int
+    spectator_oxygen_index: int
+    migrated_h_index: int
+    transferred_h_index: int
+    hydronium_h_indices: tuple[int, ...]
+    relay_h_indices: tuple[int, ...]
+    solvent_oxygen_indices: tuple[int, ...]
+    solvent_h_indices: tuple[int, ...]
+
+
+def bridge_side_hydronium_endpoints(
+    dimer: Cluster,
+    *,
+    n_water: int = BRIDGE_SIDE_ACID_WATER_COUNT,
+    family: str = BRIDGE_SIDE_ACID_FAMILY,
+) -> BridgeSideHydroniumEndpoints:
+    """Build A1g's one four-water direct hydronium-transfer R/P pair.
+
+    This is the topology selected by A1f's unconstrained reactant. Atom order
+    remains unchanged: the former outer donor becomes neutral, the measured
+    flank water remains the neutral attacker, and physical H16 moves onto the
+    bridge-side solvent oxygen. The product transfers that hydronium's existing
+    bridge-facing H directly to Obr; no donor/relay identity is relabelled and
+    no production coordinate is constrained.
+    """
+    if n_water != BRIDGE_SIDE_ACID_WATER_COUNT:
+        raise ValueError("bridge-side acid relay requires exactly 4 waters")
+    if family != BRIDGE_SIDE_ACID_FAMILY:
+        raise ValueError(
+            f"bridge-side acid relay family must be {BRIDGE_SIDE_ACID_FAMILY}"
+        )
+
+    a1f = separated_acid_relay_endpoints(dimer)
+    outer_solvator = a1f.donor_oxygen_index
+    attacker = a1f.ow_index
+    hydronium_oxygen = a1f.relay_oxygen_index
+    spectator = a1f.spectator_oxygen_index
+    migrated_h = a1f.donor_h_index
+    original_bridge_h = a1f.transferred_h_index
+
+    reactant_coords = a1f.reactant.coords.copy()
+    # Seed the exact physical-H migration selected by A1f. The new O-H vector
+    # points back toward the now-neutral outer solvator, matching the direction
+    # taken by H16 in A1f's optimized endpoint while keeping the bridge-facing
+    # hydronium proton free to reorganize during unconstrained optimization.
+    reactant_coords[migrated_h] = reactant_coords[hydronium_oxygen] + R_O_H * _unit(
+        reactant_coords[outer_solvator] - reactant_coords[hydronium_oxygen]
+    )
+    reactant = Cluster(
+        name=f"{dimer.name}+{BRIDGE_SIDE_ACID_FAMILY}-reactant",
+        symbols=list(a1f.reactant.symbols),
+        coords=reactant_coords,
+        charge=a1f.reactant.charge,
+        spin=a1f.reactant.spin,
+        frozen_indices=list(a1f.reactant.frozen_indices),
+        site_family=a1f.reactant.site_family,
+        note=(
+            "intact bridge; bridge-side H3O+ carries migrated physical H; "
+            "distinct neutral H2O attacks Si"
+        ),
+    )
+
+    # A1f already built the exact collision-safe atom-matched product selected
+    # by this topology. H16's migration makes the bridge-side oxygen H3O+;
+    # its bridge-facing H23 then transfers directly to Obr while H16 remains
+    # on the resulting neutral water. No outer-donor-to-relay step remains.
+    product_coords = a1f.product.coords.copy()
+    product = Cluster(
+        name=f"{dimer.name}+{BRIDGE_SIDE_ACID_FAMILY}-product",
+        symbols=list(a1f.product.symbols),
+        coords=product_coords,
+        charge=a1f.product.charge,
+        spin=a1f.product.spin,
+        frozen_indices=list(a1f.product.frozen_indices),
+        site_family=a1f.product.site_family,
+        note=(
+            "hydrolyzed product; bridge-facing hydronium H is on Obr, the "
+            "migrated H remains on neutral water, and the distinct attacker "
+            "remains Si-bound"
+        ),
+    )
+    return BridgeSideHydroniumEndpoints(
+        reactant=reactant,
+        product=product,
+        ow_index=attacker,
+        hydronium_oxygen_index=hydronium_oxygen,
+        outer_solvator_oxygen_index=outer_solvator,
+        spectator_oxygen_index=spectator,
+        migrated_h_index=migrated_h,
+        transferred_h_index=original_bridge_h,
+        hydronium_h_indices=(
+            migrated_h,
+            hydronium_oxygen + 1,
+            hydronium_oxygen + 2,
+        ),
+        relay_h_indices=(
+            migrated_h,
+            hydronium_oxygen + 1,
+            hydronium_oxygen + 2,
+        ),
+        solvent_oxygen_indices=(
+            outer_solvator,
+            attacker,
+            hydronium_oxygen,
+            spectator,
+        ),
+        solvent_h_indices=a1f.solvent_h_indices,
     )
 
 

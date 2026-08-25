@@ -6,7 +6,7 @@
 - machine: workstation (GPU campaign)
 - depends: — (TASK-164's scan-smoothness repair helps but is not required)
 - claimed-by: hermes-workstation (continuation: agents/A1b-acid-microsolvation)
-- blocked-on: A1g-acid-bridge-side-hydronium-neutral-attacker
+- blocked-on: A1i-acid-production-tier-bridge-side-revisit
 
 ## Objective
 Extend scripts/phase1_xiao_lasaga.py with the acid mechanism: H3O+ first
@@ -32,6 +32,17 @@ and the si-neutral 27.0 kcal/mol (acid must come out LOWER).
 - New clusters/driver code unit-tested; suite green; PR merged.
 
 ## Progress
+- 2026-08-24 18:20 PDT — A1g's exact bridge-side-H3O+ / neutral-attacker Si
+  reactant is a true minimum, but its independently optimized hydrolyzed product
+  again ejects the neutral attacker: Si--Ow `2.643 A`, one attacker H unassigned,
+  exact product basin `(False,False,True,1,7,0)` instead of
+  `(True,False,True,1,8,0)`. Mechanism-v3/gate-v3 terminal
+  `cf748519...` is a conclusive product-family rejection with zero computational
+  failures and no eligible Al/barrier/ordering. Do not add another
+  B3LYP/def2-SVP topology. The blocker advances to bounded
+  `A1i-acid-production-tier-bridge-side-revisit`, which may retest this one exact
+  topology only after A2 settles the calibrated production geometry/solvation
+  tier.
 - 2026-08-24 16:09 PDT — A1f's exact separated donor/attacker Si path is a
   conclusive reactant-family rejection, not a compute failure: its unconstrained
   B3LYP/def2-SVP/DF endpoint moved physical H16 from outer donor O15 to
