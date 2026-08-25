@@ -26,3 +26,24 @@ density-fitted UKS Hessian aborted inside `gpu4pyscf.hessian.uks` at
 CPU; geometry, scans, and saddle optimization remain GPU-first. The affected
 astro systems contain 3–5 atoms, so this is a bounded tiny-molecule fallback,
 not a license to move campaigns onto CPU.
+
+### Composite gradients and meta-GGA Hessians must share one surface (2026-08-24)
+The first A2 r2SCAN-3c run attached D4+gCP to SCF energies, but PySCF's
+geomeTRIC bridge called `mf.nuc_grad_method()` directly and bypassed quarry's
+patched derivative helper. It therefore optimized plain-r2SCAN forces on
+composite energies. Patch the derivative factory itself, then independently
+check the final composite force. GPU4PySCF 1.8.1's analytic r2SCAN Hessian also
+returned 7--11 large imaginary modes for force-converged free-cluster minima;
+a central-difference Hessian over the exact full composite gradient returned
+zero, as physically required. Never weaken the index gate to accept the fast
+Hessian; preserve the failed receipt and use the same-surface gradient fallback.
+
+### Sella 2.5 IRC silently no-ops under ASE 3.29 without an API bridge (2026-08-24)
+Sella's `IRC` implements its load-bearing stop rule in `converged()`, including
+`first => False` so the mass-weighted kick must happen. ASE 3.29 changed
+`Optimizer.irun()` to call `gradient_converged()` directly; the inherited
+force-only rule sees the transition state already below `fmax` and returns at
+step zero in both directions. Signature: a four-line IRC log containing only
+`IRC: 0`, identical forward/reverse coordinates, and a falsely successful
+return. Bridge `gradient_converged()` to Sella's `converged()` and regression
+assert both directions reject the initial force-only decision.
