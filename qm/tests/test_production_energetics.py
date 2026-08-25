@@ -157,6 +157,78 @@ def test_cluster_checkpoint_is_exact_and_bound_to_source(tmp_path):
         )
 
 
+def test_irc_checkpoint_binds_ts_settings_and_endpoints(tmp_path):
+    transition_state = neutral_pair("transition-state")
+    forward = replace(transition_state, coords=transition_state.coords.copy())
+    reverse = replace(transition_state, coords=transition_state.coords.copy())
+    forward.coords[2, 0] = 4.9
+    reverse.coords[2, 0] = 1.7
+    identity = {
+        "stage": "full-irc",
+        "algorithm": "sella-gonzalez-schlegel-full-irc-v1",
+        "settings": "exact",
+        "max_steps": 7,
+    }
+
+    first = a2.checkpoint_irc_endpoints(
+        tmp_path,
+        transition_state,
+        lambda: (forward, reverse),
+        identity=identity,
+    )
+    second = a2.checkpoint_irc_endpoints(
+        tmp_path,
+        transition_state,
+        lambda: pytest.fail("IRC recomputed"),
+        identity=identity,
+    )
+    assert np.array_equal(first[0].coords, forward.coords)
+    assert np.array_equal(second[1].coords, reverse.coords)
+    receipt = json.loads((tmp_path / "irc.r2scan3c.receipt.json").read_text())
+    assert receipt["identity"] == identity
+    assert receipt["directions"]["forward"]["path"] == "irc-forward.r2scan3c.xyz"
+    assert receipt["directions"]["reverse"]["path"] == "irc-reverse.r2scan3c.xyz"
+
+    changed_ts = replace(transition_state, coords=transition_state.coords.copy())
+    changed_ts.coords[0, 0] += 0.01
+    with pytest.raises(ValueError, match="transition-state geometry drift"):
+        a2.checkpoint_irc_endpoints(
+            tmp_path,
+            changed_ts,
+            lambda: (forward, reverse),
+            identity=identity,
+        )
+
+    with pytest.raises(ValueError, match="identity drift"):
+        a2.checkpoint_irc_endpoints(
+            tmp_path,
+            transition_state,
+            lambda: (forward, reverse),
+            identity={**identity, "max_steps": 8},
+        )
+
+    tampered = replace(forward, coords=forward.coords.copy())
+    tampered.coords[1, 0] += 0.2
+    (tmp_path / "irc-forward.r2scan3c.xyz").write_text(a2.exact_xyz(tampered))
+    with pytest.raises(ValueError, match="forward geometry drift"):
+        a2.checkpoint_irc_endpoints(
+            tmp_path,
+            transition_state,
+            lambda: pytest.fail("IRC recomputed"),
+            identity=identity,
+        )
+
+    (tmp_path / "irc-forward.r2scan3c.xyz").write_text(a2.exact_xyz(forward))
+    (tmp_path / "irc.r2scan3c.receipt.json").unlink()
+    with pytest.raises(ValueError, match="incomplete IRC checkpoint set"):
+        a2.checkpoint_irc_endpoints(
+            tmp_path,
+            transition_state,
+            lambda: pytest.fail("IRC recomputed"),
+            identity=identity,
+        )
+
+
 def test_full_irc_gate_requires_both_neutral_basins():
     reactant = neutral_pair("reactant")
     product = neutral_pair("product", product=True)
@@ -296,7 +368,15 @@ def test_end_to_end_driver_journals_results_without_recompute(monkeypatch, tmp_p
         "energy",
         lambda *unused, **kwargs: pytest.fail("single point recomputed"),
     )
+    monkeypatch.setattr(
+        a2,
+        "full_irc",
+        lambda *unused, **kwargs: pytest.fail("IRC recomputed"),
+    )
     assert a2.execute_with_status(args) == 0
+    irc_receipt = json.loads((run_dir / "irc.r2scan3c.receipt.json").read_text())
+    assert irc_receipt["identity"]["algorithm"] == "sella-gonzalez-schlegel-full-irc-v1"
+    assert irc_receipt["identity"]["max_steps"] == 5
 
 
 def test_execute_with_status_records_failure(monkeypatch, tmp_path):
