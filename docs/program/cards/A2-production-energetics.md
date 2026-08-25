@@ -43,6 +43,17 @@ FP64-gutted); ByteQC checkpoints tolerate preemption.
   CALCULATIONS.md rows updated to the new tier.
 
 ## Progress
+- 2026-08-24 21:55 PDT — first production execution exposed and fixed two
+  false-surface classes before any number could escape. The initial driver
+  attached r2SCAN-3c D4+gCP to energies but PySCF geomeTRIC called an unpatched
+  gradient factory; `078f060` now binds optimization to the full composite
+  force. A force-converged r2SCAN-3c reactant/product then produced impossible
+  11/7-mode indices through GPU4PySCF's analytic meta-GGA Hessian. Those receipts
+  are preserved under the task207 evidence root, not relabeled. `f7c778a` adds
+  a central-difference Hessian over the exact full composite gradient, tested
+  against analytic HF/STO-3G frequencies; the resume-safe finite-difference
+  si-neutral run is active from the converged v3 geometries. All implementation
+  commits through `f7c778abf74995886aa69023cc606e21e83884fc` are pushed.
 - 2026-08-24 20:58 PDT — claimed atomically by `hermes-workstation`; pushed
   `agents/A2-production-energetics` from exact `origin/main`
   `4d715c7597edd04ed1a0d180f02d5c600eb74128` and created the congruent
