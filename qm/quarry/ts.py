@@ -343,10 +343,18 @@ def relax_at_fixed_distances(
         fmax=fmax_ev_a,
         steps=max_steps,
     )
-    # Reapply the holonomic projection at the release boundary. Optimizer force
-    # queries can leave only solver-tolerance coordinate residue; acceptance
-    # must measure the exact geometry that is returned, not the pre-query cache.
-    atoms.set_positions(atoms.positions.copy())
+    # Reapply the holonomic projection at the release boundary. Coupled distance
+    # constraints can need several sequential projections because correcting one
+    # shared atom perturbs another pair; acceptance measures the exact geometry
+    # returned, not ASE's last force-query cache.
+    targets_array = np.asarray(targets)
+    residual = float("inf")
+    for _ in range(20):
+        atoms.set_positions(atoms.positions.copy())
+        actual = np.asarray([atoms.get_distance(i, j) for i, j in pairs])
+        residual = float(np.max(np.abs(actual - targets_array)))
+        if residual <= distance_tolerance_a:
+            break
     projected_forces = np.asarray(atoms.get_forces(), dtype=float)
     projected_fmax = float(np.linalg.norm(projected_forces, axis=1).max())
     if not optimizer_reported_convergence:
