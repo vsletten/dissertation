@@ -126,11 +126,18 @@ mechanism-versioned topology.
   run manifest `27f7a7040cb5f087d9aee7126676e25bed309eed243fd024a1579aa1f946fba2`,
   and terminal `cf74851972575f2a734d03b38c95fea85bc49acf67598739d3f01aea191c7834`
   all re-hash exactly.
-- Twenty-one new A1g regressions plus inherited A1e/A1f coverage pin exact
+- Cold adversarial review found two accepted-route defects before PR creation:
+  the shared saddle driver required `relay_h_indices`, and a recomputed Si
+  rejection could leave a stale canonical Al terminal/path in a resumed
+  manifest. Both are fixed: A1g now drives a fake accepted route through
+  persisted pre-climb/saddle/IRC completion, Al terminals bind the exact
+  accepted Si terminal SHA, and any non-accepted Si result revokes stale
+  downstream Al state without deleting its evidence.
+- Twenty-four new A1g regressions plus inherited A1e/A1f coverage pin exact
   water scope, source identity, physical-H ownership, collision safety,
   direct-transfer mode classification, full-IRC endpoint identity, pre-climb
   checkpoint plumbing, conditional Al, and incomplete-failure semantics. Fresh
-  final gates: **381 QM tests passed** with cache cleared; whole-tree Ruff check,
+  final gates: **384 QM tests passed** with cache cleared; whole-tree Ruff check,
   all 45 Python files' format check, CLI help, and `git diff --check` are green.
   Email pipelines and Honcho inference were isolated under a ten-hour dead-man;
   both pipelines and both containers are restored healthy, the dead-man is

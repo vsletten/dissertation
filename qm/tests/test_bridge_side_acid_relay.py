@@ -1,5 +1,6 @@
 from dataclasses import asdict, replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -50,6 +51,7 @@ def test_bridge_side_endpoint_seeds_have_exact_roles_basins_and_no_collisions(mo
     )
     assert len(ends.solvent_oxygen_indices) == BRIDGE_SIDE_ACID_WATER_COUNT
     assert len(ends.solvent_h_indices) == 2 * BRIDGE_SIDE_ACID_WATER_COUNT + 1
+    assert ends.relay_h_indices == ends.hydronium_h_indices
     assert ends.reactant.symbols == ends.product.symbols
     assert ends.reactant.frozen_indices == ends.product.frozen_indices == []
     for endpoint, cluster in (("reactant", ends.reactant), ("product", ends.product)):
@@ -284,9 +286,70 @@ def test_run_path_forwards_a1g_identity_builder_gates_and_source(monkeypatch, tm
     assert captured["endpoint_gate"] is relay.endpoint_gate_reason
     assert captured["mode_gate"] is relay.coupled_mode_components
     assert captured["irc_gate"] is relay.irc_channel_reason
-    assert captured["identity_extra"] == {"source_reactant_sha256": digest}
+    assert captured["identity_extra"] == {
+        "source_reactant_sha256": digest,
+        "parent_si_terminal_sha256": None,
+    }
     built = captured["endpoint_builder"](disilicate())
     assert np.allclose(built.reactant.coords, source_ends.reactant.coords, atol=1.0e-8)
+
+
+def test_run_path_fake_acceptance_reaches_persisted_neb_and_saddle(
+    monkeypatch, tmp_path
+):
+    ends = bridge_side_hydronium_endpoints(disilicate())
+    optimized = iter((ends.reactant, ends.product))
+    mode = ends.product.coords - ends.reactant.coords
+    frequency_calls = 0
+    observed = {}
+
+    def fake_optimize(cluster, settings, *, max_steps):
+        return SimpleNamespace(cluster=next(optimized), converged=True)
+
+    def fake_frequency(path, cluster, settings):
+        nonlocal frequency_calls
+        frequency_calls += 1
+        if frequency_calls < 3:
+            return _frequency(cluster, np.zeros_like(cluster.coords), n_imaginary=0)
+        return _frequency(cluster, mode)
+
+    def fake_neb(reactant, product, settings, **kwargs):
+        checkpoint_dir = kwargs["checkpoint_dir"]
+        checkpoint_dir.mkdir(parents=True)
+        (checkpoint_dir / "pre-relaxed-images.npz").write_bytes(b"checkpoint")
+        observed["checkpoint_dir"] = checkpoint_dir
+        observed["pre_relax_steps"] = kwargs["pre_relax_steps"]
+        return replace(reactant, coords=0.5 * (reactant.coords + product.coords))
+
+    def fake_find_ts(crest, settings, **kwargs):
+        observed["active_mode_norm"] = float(np.linalg.norm(kwargs["initial_mode"]))
+        return crest
+
+    monkeypatch.setattr(shared, "optimize_bounded", fake_optimize)
+    monkeypatch.setattr(shared, "cached_frequency", fake_frequency)
+    monkeypatch.setattr(shared, "neb_ts_guess", fake_neb)
+    monkeypatch.setattr(shared, "find_ts", fake_find_ts)
+    monkeypatch.setattr(
+        shared,
+        "full_irc",
+        lambda saddle, settings, **kwargs: (ends.reactant, ends.product),
+    )
+    monkeypatch.setattr(
+        shared.phase1,
+        "thermo_result",
+        lambda frequency, temperature: SimpleNamespace(
+            gibbs=100.0 if frequency.n_imaginary else 0.0
+        ),
+    )
+
+    record = relay.run_path(tmp_path, CHEAP, relay.Bounds(), model="si")
+
+    assert record["status"] == "accepted"
+    assert record["stage"] == "completed"
+    assert record["barrier_kj_mol"] == 100.0
+    assert observed["pre_relax_steps"] == relay.Bounds().neb_pre_steps
+    assert observed["active_mode_norm"] > 0.0
+    assert (observed["checkpoint_dir"] / "pre-relaxed-images.npz").is_file()
 
 
 def _write_fake_terminal(run_dir: Path, model: str, status: str):
@@ -341,7 +404,13 @@ def test_campaign_triggers_only_atom_matched_al_after_accepted_si(
     calls = []
 
     def fake_run(run_dir, settings, bounds, *, model, **kwargs):
-        calls.append((model, kwargs.get("source_reactant")))
+        calls.append(
+            (
+                model,
+                kwargs.get("source_reactant"),
+                kwargs.get("parent_si_terminal_sha256"),
+            )
+        )
         return _write_fake_terminal(run_dir, model, "accepted")
 
     monkeypatch.setattr(relay, "run_path", fake_run)
@@ -354,9 +423,62 @@ def test_campaign_triggers_only_atom_matched_al_after_accepted_si(
         source_reactant_sha256="a" * 64,
     )
 
-    assert calls == [("si", tmp_path / "source.xyz"), ("al", None)]
+    si_terminal = (
+        shared.path_directory(
+            tmp_path, "si", BRIDGE_SIDE_ACID_WATER_COUNT, BRIDGE_SIDE_ACID_FAMILY
+        )
+        / "terminal.json"
+    )
+    assert calls == [
+        ("si", tmp_path / "source.xyz", None),
+        ("al", None, shared.sha256_path(si_terminal)),
+    ]
     assert manifest["summary"]["verdict"] == "matched-si-al-barrier-ready"
     assert manifest["summary"]["matched"]["ordering"] == "Si-O-Al < Si-O-Si"
+
+
+def test_al_run_path_requires_exact_parent_si_terminal(tmp_path):
+    with pytest.raises(ValueError, match="parent Si terminal"):
+        relay.run_path(tmp_path, CHEAP, relay.Bounds(), model="al")
+
+
+def test_recomputed_si_rejection_revokes_stale_al_terminal(monkeypatch, tmp_path):
+    statuses = {"si": "accepted", "al": "accepted"}
+
+    def fake_run(run_dir, settings, bounds, *, model, **kwargs):
+        return _write_fake_terminal(run_dir, model, statuses[model])
+
+    monkeypatch.setattr(relay, "run_path", fake_run)
+    first = relay.run_campaign(
+        tmp_path,
+        CHEAP,
+        relay.Bounds(),
+        log_path=str(tmp_path / "run.log"),
+        source_reactant=None,
+        source_reactant_sha256=None,
+    )
+    assert sorted(first["paths"]) == [
+        f"al:4w:{BRIDGE_SIDE_ACID_FAMILY}",
+        f"si:4w:{BRIDGE_SIDE_ACID_FAMILY}",
+    ]
+
+    statuses["si"] = "rejected"
+    second = relay.run_campaign(
+        tmp_path,
+        CHEAP,
+        relay.Bounds(),
+        log_path=str(tmp_path / "run.log"),
+        source_reactant=None,
+        source_reactant_sha256=None,
+    )
+
+    al_path = shared.path_directory(
+        tmp_path, "al", BRIDGE_SIDE_ACID_WATER_COUNT, BRIDGE_SIDE_ACID_FAMILY
+    )
+    assert list(second["paths"]) == [f"si:4w:{BRIDGE_SIDE_ACID_FAMILY}"]
+    assert second["summary"]["al_status"] is None
+    assert not (al_path / "terminal.json").exists()
+    assert len(list(al_path.glob("terminal.invalid-parent-*.json"))) == 1
 
 
 @pytest.mark.parametrize("status", ["failed", "blocked"])

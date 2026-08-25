@@ -1153,6 +1153,7 @@ class BridgeSideHydroniumEndpoints:
     migrated_h_index: int
     transferred_h_index: int
     hydronium_h_indices: tuple[int, ...]
+    relay_h_indices: tuple[int, ...]
     solvent_oxygen_indices: tuple[int, ...]
     solvent_h_indices: tuple[int, ...]
 
@@ -1238,6 +1239,11 @@ def bridge_side_hydronium_endpoints(
         migrated_h_index=migrated_h,
         transferred_h_index=original_bridge_h,
         hydronium_h_indices=(
+            migrated_h,
+            hydronium_oxygen + 1,
+            hydronium_oxygen + 2,
+        ),
+        relay_h_indices=(
             migrated_h,
             hydronium_oxygen + 1,
             hydronium_oxygen + 2,

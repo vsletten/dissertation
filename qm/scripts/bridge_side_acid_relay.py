@@ -279,9 +279,16 @@ def run_path(
     family: str = BRIDGE_SIDE_ACID_FAMILY,
     source_reactant: Path | None = None,
     source_reactant_sha256: str | None = None,
+    parent_si_terminal_sha256: str | None = None,
 ) -> dict[str, Any]:
     if (source_reactant is None) != (source_reactant_sha256 is None):
         raise ValueError("source reactant path and SHA-256 must be supplied together")
+    if model == "al" and parent_si_terminal_sha256 is None:
+        raise ValueError(
+            "Al path requires the exact accepted parent Si terminal SHA-256"
+        )
+    if model == "si" and parent_si_terminal_sha256 is not None:
+        raise ValueError("Si path cannot carry a parent Si terminal SHA-256")
     source_ends = None
     if source_reactant is not None and source_reactant_sha256 is not None:
         template = bridge_side_hydronium_endpoints(
@@ -323,7 +330,10 @@ def run_path(
         endpoint_gate=endpoint_gate_reason,
         mode_gate=coupled_mode_components,
         irc_gate=irc_channel_reason,
-        identity_extra={"source_reactant_sha256": source_reactant_sha256},
+        identity_extra={
+            "source_reactant_sha256": source_reactant_sha256,
+            "parent_si_terminal_sha256": parent_si_terminal_sha256,
+        },
     )
 
 
@@ -369,6 +379,22 @@ def _record_path(
         "sha256": shared.sha256_path(terminal),
         "status": record["status"],
     }
+
+
+def _revoke_stale_al_terminal(manifest: dict[str, Any], run_dir: Path) -> None:
+    """Remove canonical downstream state when the current Si parent is not accepted."""
+    al_key = shared.path_key(
+        "al", BRIDGE_SIDE_ACID_WATER_COUNT, BRIDGE_SIDE_ACID_FAMILY
+    )
+    manifest["paths"].pop(al_key, None)
+    al_dir = shared.path_directory(
+        run_dir, "al", BRIDGE_SIDE_ACID_WATER_COUNT, BRIDGE_SIDE_ACID_FAMILY
+    )
+    terminal = al_dir / "terminal.json"
+    if terminal.is_file():
+        terminal.rename(
+            terminal.with_name(f"terminal.invalid-parent-{time.time_ns()}.json")
+        )
 
 
 def run_campaign(
@@ -423,11 +449,14 @@ def run_campaign(
         source_reactant_sha256=source_reactant_sha256,
     )
     _record_path(manifest, run_dir, si_record)
+    if si_record["status"] != "accepted":
+        _revoke_stale_al_terminal(manifest, run_dir)
     shared.atomic_json(manifest_path, manifest)
 
     al_record = None
     matched = None
     if si_record["status"] == "accepted":
+        parent_si_terminal_sha256 = manifest["paths"][si_record["key"]]["sha256"]
         al_record = run_path(
             run_dir,
             settings,
@@ -435,6 +464,7 @@ def run_campaign(
             model="al",
             source_reactant=None,
             source_reactant_sha256=None,
+            parent_si_terminal_sha256=parent_si_terminal_sha256,
         )
         _record_path(manifest, run_dir, al_record)
         shared.atomic_json(manifest_path, manifest)
