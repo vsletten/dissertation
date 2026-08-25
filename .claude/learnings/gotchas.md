@@ -101,6 +101,14 @@ neutral and the bridge stayed intact. Do not relabel that endpoint under A1f or
 weaken role ownership; it selects a new bridge-side-H3O+ / distinct-neutral-
 attacker topology (A1g) under a new mechanism/gate identity.
 
+### Bridge-side H3O+ still does not stabilize the hydrolyzed Si product at SVP (2026-08-24)
+A1g reused A1f's exact migrated-proton reactant, which is a genuine
+zero-imaginary B3LYP/def2-SVP/DF minimum with bridge-side H3O+ and a distinct
+neutral attacker. The independent product nevertheless converged with Si--Ow
+at 2.643 A and attacker H21 unassigned. Do not chase another SVP water count,
+donor role, or unconstrained product seed; only one A2-calibrated
+production-tier revisit is authorized before closing this acid topology.
+
 ### `exec` discards the GPU-isolation shell's EXIT trap (2026-08-24)
 A shell that owns email/Honcho restoration and a bounded systemd dead-man must
 invoke the QM command normally, not with `exec`. `exec` replaces the shell, so
