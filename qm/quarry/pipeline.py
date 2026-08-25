@@ -94,7 +94,10 @@ def _r2scan3c_correction(mol: Any, *, gradient: bool, use_gpu: bool) -> dict[str
         ga=2.0,
         gc=1.0,
     )
-    d4_model.set_param(0.0, 0.42, 5.65, s9=2.0)
+    # pyscf-dispersion DFTD4Dispersion.set_param(s8, a1, a2, s6=1.0, s9=1.0).
+    # Official r2SCAN-3c D4 (Grimme et al., JCP 154, 064103 (2021);
+    # dftd4 parameters.toml r2scan-3c): s6=1.0, s8=0.0, a1=0.42, a2=5.65, s9=2.0.
+    d4_model.set_param(s8=0.0, a1=0.42, a2=5.65, s6=1.0, s9=2.0)
     d4 = d4_model.get_dispersion(grad=gradient)
     counterpoise = gcp.GCP(mol, method="r2scan3c").get_counterpoise(grad=gradient)
     result = {"energy": d4["energy"] + counterpoise["energy"]}
