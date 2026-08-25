@@ -19,6 +19,14 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
+if __name__ == "__main__":
+    from quarry.etiquette import bootstrap_cli
+
+    _ETIQUETTE = bootstrap_cli(
+        "production-energetics",
+        default_run_root="/mnt/data/vsletten/dissertation-data/task207-a2-production",
+    )
+
 import numpy as np
 
 from quarry.clusters import Cluster
@@ -552,6 +560,11 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--saddle-steps", type=int, default=400)
     result.add_argument("--irc-steps", type=int, default=400)
     result.add_argument("--imaginary-floor", type=float, default=30.0)
+    # Parsed first by ``bootstrap_cli`` so limits apply before NumPy/PySCF import;
+    # retained here so the full parser accepts the same invocation.
+    result.add_argument("--threads", type=int, default=16)
+    result.add_argument("--nice", type=int, default=10)
+    result.add_argument("--log")
     return result
 
 
