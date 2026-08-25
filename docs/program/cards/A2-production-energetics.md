@@ -1,6 +1,6 @@
 # A2-production-energetics — production-tier energies + open-source CC calibration
 
-- status: active
+- status: blocked
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
@@ -8,6 +8,7 @@
   further points from A1b/A3 are re-tiered as they land — re-tiering is
   a settings swap by design, not a redo)
 - claimed-by: hermes-workstation
+- blocked-on: A2a-si-neutral-production-path-rebuild
 
 ## Objective
 Upgrade banked barriers to the survey protocol: r2SCAN-3c geometries
@@ -43,6 +44,22 @@ FP64-gutted); ByteQC checkpoints tolerate preemption.
   CALCULATIONS.md rows updated to the new tier.
 
 ## Progress
+- 2026-08-24 22:53 PDT — bounded production verdict: **BLOCKED on an invalid
+  banked si-neutral saddle, not on compute.** Exact r2SCAN-3c D4+gCP minima
+  converged and central-difference composite Hessians give reactant/product/TS
+  indices `0/0/1`; the TS imaginary mode is `79.185 cm^-1`. After repairing the
+  Sella-2.5/ASE-3.29 zero-step compatibility defect, a real 260-step bilateral
+  Gonzalez--Schlegel IRC terminates in associative basin `(True,True,True)` on
+  both sides instead of reactant `(False,True,False)` and product
+  `(True,False,True)`. An endpoint-mode directed Cartesian Sella retry changed
+  the saddle only 0.0124 A RMS and reconverged the same basin. No wB97M-V,
+  B3LYP-D4, or coupled-cluster barrier was computed on that wrong path.
+  Executable READY card `A2a-si-neutral-production-path-rebuild` owns a persisted
+  path/CI-NEB rebuild before A2 resumes. Evidence root has 47 files / 791,566
+  bytes; manifest SHA-256 `efdcfc48c533dbadc1a30023f3a539f607711df0cd5cd354ff50fca3ba3556d1`
+  and rehashes with zero mismatch. Both calibration adapters were independently
+  smoke-run on water/cc-pVTZ: Psi4 1.11 TightPNO DLPNO-CCSD(T)
+  `-76.3323355604 Eh`; ByteQC canonical CCSD(T) `-76.3325745245 Eh`.
 - 2026-08-24 21:55 PDT — first production execution exposed and fixed two
   false-surface classes before any number could escape. The initial driver
   attached r2SCAN-3c D4+gCP to energies but PySCF geomeTRIC called an unpatched

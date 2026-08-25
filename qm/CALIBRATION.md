@@ -112,6 +112,23 @@ points only, no re-optimization.
 5. **Provenance**: every energy into the run's `store.sqlite` with
    engine + version + basis + settings, like every quarry number.
 
+### Executable adapter and fail-closed gate (2026-08-24)
+
+`qm/scripts/cc_calibration.py` now owns both one-geometry jobs plus the
+TZ/QZ CBS summarizer. Each job is atomic and idempotent on
+engine+basis+input-SHA; the summarizer requires the complete
+reactant/TS × TZ/QZ matrix and reports the 2 kJ/mol DLPNO gate. The adapters
+were exercised independently on water/cc-pVTZ: Psi4 1.11 TightPNO
+DLPNO-CCSD(T) `-76.3323355604 Eh`; ByteQC canonical CCSD(T)
+`-76.3325745245 Eh` (PySCF 2.5.0, frozen O 1s).
+
+Do not launch the si-neutral matrix until the candidate transition state passes
+A2's repaired nonzero-step full IRC. The first production attempt proved the
+banked TS reaches the associative basin in both directions, so it is ineligible
+for a functional ranking or coupled-cluster barrier. READY card
+`A2a-si-neutral-production-path-rebuild` owns the route reconstruction; this is
+a scientific gate, not a missing-engine blocker.
+
 Larger calibration points later (30–80-atom ladder clusters) follow the
 same recipe; those are where DLPNO (near-linear scaling) carries the
 load and ByteQC spot-checks at TZ where memory allows (rental GPUs
