@@ -48,7 +48,7 @@ from quarry.ts import (
 from scripts import production_energetics as a2
 
 PATH_GATE_VERSION = "a2a-sequential-path-v1"
-SELLA_MODE_STRATEGY = "conditioned-crest-local-ci-neb-tangent-v1"
+SELLA_MODE_STRATEGY = "active-subspace-reconditioned-loose-ci-neb-tangent-v2"
 REACTION_COORDINATE_PAIRS = ((1, 15), (0, 17), (0, 1))
 CONDITIONED_DISTANCE_TOLERANCE_A = 1.0e-4
 HESSIAN_STEPS_BOHR = (1.0e-3, 2.0e-3)
@@ -394,68 +394,31 @@ def run_segment(
             "climb_optimizer": "ode",
         },
     )
-    tight_neb_root = segment_dir / "tight-neb-checkpoints"
-    tight_resume = (
-        tight_neb_root if (tight_neb_root / "latest.json").is_file() else neb_root
-    )
-    tight_crest = a2.checkpoint_cluster(
-        segment_dir / "tight-neb-crest.xyz",
-        start,
-        lambda: neb_ts_guess(
-            start,
-            end,
-            settings,
-            n_images=neb_images,
-            fmax_ev_a=0.02,
-            max_steps=240,
-            pre_relax_fmax_ev_a=0.20,
-            pre_relax_steps=neb_pre_steps,
-            optimizer_dt=0.02,
-            optimizer_maxstep=0.03,
-            climb_optimizer="bfgs",
-            checkpoint_dir=tight_neb_root,
-            checkpoint_interval=5,
-            resume_from=tight_resume,
-        ),
-        identity={
-            "gate_version": PATH_GATE_VERSION,
-            "stage": "tight-climb-ci-neb",
-            "segment": spec.slug,
-            "start_geometry": frequency_geometry_fingerprint(start),
-            "end_geometry": frequency_geometry_fingerprint(end),
-            "loose_crest_geometry": frequency_geometry_fingerprint(crest),
-            "settings": settings_identity,
-            "n_images": neb_images,
-            "fmax_ev_a": 0.02,
-            "climb_steps": 240,
-            "climb_optimizer": "bfgs",
-        },
-    )
     local_tangent, tangent_receipt = final_neb_tangent(
-        tight_neb_root,
-        tight_crest,
+        neb_root,
+        crest,
         start,
         active_indices,
     )
     atomic_json(segment_dir / "local-neb-tangent.receipt.json", tangent_receipt)
-    coordinate_targets = reaction_coordinate_targets(tight_crest)
+    coordinate_targets = reaction_coordinate_targets(crest)
     conditioned_crest = a2.checkpoint_cluster(
-        segment_dir / "conditioned-crest.xyz",
-        tight_crest,
+        segment_dir / "conditioned-crest-v2.xyz",
+        crest,
         lambda: relax_at_fixed_distances(
-            tight_crest,
+            crest,
             settings,
             fixed_distances=coordinate_targets,
             fmax_ev_a=0.02,
             max_steps=120,
             optimizer_maxstep=0.03,
             distance_tolerance_a=CONDITIONED_DISTANCE_TOLERANCE_A,
-            trajectory=str(segment_dir / "conditioned-crest.traj"),
-            logfile=str(segment_dir / "conditioned-crest.log"),
+            trajectory=str(segment_dir / "conditioned-crest-v2.traj"),
+            logfile=str(segment_dir / "conditioned-crest-v2.log"),
         ),
         identity={
             "gate_version": PATH_GATE_VERSION,
-            "stage": "three-coordinate-conditioned-crest",
+            "stage": "three-coordinate-conditioned-loose-crest-v2",
             "segment": spec.slug,
             "settings": settings_identity,
             "fixed_distances": serialized_distance_targets(coordinate_targets),
@@ -465,11 +428,66 @@ def run_segment(
             "distance_tolerance_a": CONDITIONED_DISTANCE_TOLERANCE_A,
         },
     )
-    transition_state = a2.checkpoint_cluster(
-        segment_dir / "transition-state.xyz",
+    active_transition_state = a2.checkpoint_cluster(
+        segment_dir / "active-subspace-transition-state.xyz",
         conditioned_crest,
         lambda: find_ts(
             conditioned_crest,
+            settings,
+            max_steps=saddle_steps,
+            trajectory=str(segment_dir / "active-subspace-transition-state.sella.traj"),
+            initial_mode=local_tangent,
+            internal=False,
+            active_indices=active_indices,
+        ),
+        identity={
+            "gate_version": PATH_GATE_VERSION,
+            "stage": "active-subspace-reaction-saddle-seed-v2",
+            "segment": spec.slug,
+            "settings": settings_identity,
+            "max_steps": saddle_steps,
+            "active_indices": active_indices,
+            "initial_mode_strategy": SELLA_MODE_STRATEGY,
+            "conditioned_crest_geometry": frequency_geometry_fingerprint(
+                conditioned_crest
+            ),
+        },
+    )
+    reconditioned_targets = reaction_coordinate_targets(active_transition_state)
+    reconditioned_crest = a2.checkpoint_cluster(
+        segment_dir / "reconditioned-active-subspace-crest.xyz",
+        active_transition_state,
+        lambda: relax_at_fixed_distances(
+            active_transition_state,
+            settings,
+            fixed_distances=reconditioned_targets,
+            fmax_ev_a=0.02,
+            max_steps=120,
+            optimizer_maxstep=0.03,
+            distance_tolerance_a=CONDITIONED_DISTANCE_TOLERANCE_A,
+            trajectory=str(segment_dir / "reconditioned-active-subspace-crest.traj"),
+            logfile=str(segment_dir / "reconditioned-active-subspace-crest.log"),
+        ),
+        identity={
+            "gate_version": PATH_GATE_VERSION,
+            "stage": "spectator-relaxed-active-subspace-crest-v2",
+            "segment": spec.slug,
+            "settings": settings_identity,
+            "fixed_distances": serialized_distance_targets(reconditioned_targets),
+            "fmax_ev_a": 0.02,
+            "max_steps": 120,
+            "optimizer_maxstep": 0.03,
+            "distance_tolerance_a": CONDITIONED_DISTANCE_TOLERANCE_A,
+            "active_subspace_geometry": frequency_geometry_fingerprint(
+                active_transition_state
+            ),
+        },
+    )
+    transition_state = a2.checkpoint_cluster(
+        segment_dir / "transition-state.xyz",
+        reconditioned_crest,
+        lambda: find_ts(
+            reconditioned_crest,
             settings,
             max_steps=saddle_steps,
             trajectory=str(segment_dir / "transition-state.sella.traj"),
@@ -478,7 +496,7 @@ def run_segment(
         ),
         identity={
             "gate_version": PATH_GATE_VERSION,
-            "stage": "reaction-aligned-sella",
+            "stage": "reaction-aligned-sella-after-active-subspace-v2",
             "segment": spec.slug,
             "start_geometry": frequency_geometry_fingerprint(start),
             "end_geometry": frequency_geometry_fingerprint(end),
@@ -487,8 +505,8 @@ def run_segment(
             "active_indices": active_indices,
             "initial_mode_strategy": SELLA_MODE_STRATEGY,
             "local_tangent": tangent_receipt,
-            "conditioned_crest_geometry": frequency_geometry_fingerprint(
-                conditioned_crest
+            "reconditioned_crest_geometry": frequency_geometry_fingerprint(
+                reconditioned_crest
             ),
         },
     )
@@ -558,9 +576,13 @@ def run_segment(
         "artifacts": {
             "neb_checkpoints": str(neb_root),
             "neb_crest": str(segment_dir / "neb-crest.xyz"),
-            "tight_neb_checkpoints": str(tight_neb_root),
-            "tight_neb_crest": str(segment_dir / "tight-neb-crest.xyz"),
-            "conditioned_crest": str(segment_dir / "conditioned-crest.xyz"),
+            "conditioned_crest": str(segment_dir / "conditioned-crest-v2.xyz"),
+            "active_subspace_transition_state": str(
+                segment_dir / "active-subspace-transition-state.xyz"
+            ),
+            "reconditioned_crest": str(
+                segment_dir / "reconditioned-active-subspace-crest.xyz"
+            ),
             "local_tangent_receipt": str(
                 segment_dir / "local-neb-tangent.receipt.json"
             ),

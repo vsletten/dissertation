@@ -127,6 +127,25 @@ def reaction_path_vector(
     return mode / norm
 
 
+def saddle_search_frozen_indices(
+    cluster: Cluster, active_indices: list[int] | None
+) -> list[int]:
+    """Return the temporary frozen set for an active-subspace saddle seed."""
+    original = set(cluster.frozen_indices or [])
+    if active_indices is None:
+        return sorted(original)
+    if not active_indices or len(set(active_indices)) != len(active_indices):
+        raise ValueError("active_indices must be non-empty and unique")
+    atom_count = len(cluster.symbols)
+    active = set(active_indices)
+    if any(index < 0 or index >= atom_count for index in active):
+        raise ValueError("active_indices contains an out-of-range atom")
+    overlap = active & original
+    if overlap:
+        raise ValueError("active_indices contains an originally frozen atom")
+    return sorted(original | (set(range(atom_count)) - active))
+
+
 def reaction_aligned_imaginary_mode(
     frequency: FrequencyResult,
     reaction_vector: np.ndarray,
@@ -163,6 +182,7 @@ def find_ts(
     trajectory: str | None = None,
     initial_mode: np.ndarray | None = None,
     internal: bool = True,
+    active_indices: list[int] | None = None,
 ) -> Cluster:
     """First-order saddle search (Sella, partitioned RFO) from a TS guess.
 
@@ -171,8 +191,13 @@ def find_ts(
     fixed (the lattice-resistance contract). ``initial_mode`` supplies a
     normalized Cartesian reaction direction, normally from
     :func:`reaction_path_vector`; directed searches must use
-    ``internal=False`` so the mode and optimizer basis agree. Raises if Sella
-    does not converge within ``max_steps``.
+    ``internal=False`` so the mode and optimizer basis agree.
+    ``active_indices`` temporarily freezes every other atom during the search;
+    the returned :class:`Cluster` retains only its original frozen shell. This
+    is intended for a bounded active-subspace seed, not final TS acceptance:
+    callers must subsequently relax the spectator space, release the temporary
+    freezes, and verify a full-system stationary point and Hessian. Raises if
+    Sella does not converge within ``max_steps``.
     """
     from ase import Atoms
     from ase.constraints import FixAtoms
@@ -194,10 +219,11 @@ def find_ts(
             raise ValueError("initial_mode has zero norm")
         mode = mode / mode_norm
 
+    search_frozen = saddle_search_frozen_indices(cluster, active_indices)
     atoms = Atoms(symbols=cluster.symbols, positions=cluster.coords)
     atoms.calc = make_ase_calculator(settings, cluster.charge, cluster.spin)
-    if cluster.frozen_indices:
-        atoms.set_constraint(FixAtoms(indices=cluster.frozen_indices))
+    if search_frozen:
+        atoms.set_constraint(FixAtoms(indices=search_frozen))
     # Internal coordinates are the default for an undirected molecular search.
     # A directed endpoint mode is Cartesian and therefore opts into the
     # Cartesian PES explicitly.

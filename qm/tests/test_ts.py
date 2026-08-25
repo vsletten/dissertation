@@ -148,6 +148,20 @@ class TestReactionPathVector:
         with pytest.raises(ValueError, match="requires internal=False"):
             find_ts(hcn_ts_guess(), CHEAP, initial_mode=np.ones((3, 3)))
 
+    def test_active_subspace_freezes_only_the_complement(self):
+        from dataclasses import replace
+
+        from quarry.ts import saddle_search_frozen_indices
+
+        cluster = replace(water(), frozen_indices=[0])
+        assert saddle_search_frozen_indices(cluster, [1]) == [0, 2]
+        assert saddle_search_frozen_indices(cluster, None) == [0]
+
+        with pytest.raises(ValueError, match="originally frozen"):
+            saddle_search_frozen_indices(cluster, [0, 1])
+        with pytest.raises(ValueError, match="out-of-range"):
+            saddle_search_frozen_indices(cluster, [3])
+
 
 def test_quick_irc_reuses_precomputed_frequency(monkeypatch):
     import quarry.ts as ts_mod

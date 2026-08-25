@@ -332,3 +332,8 @@ def test_fixed_distance_checkpoint_identity_survives_json_roundtrip():
     serialized = a2a.serialized_distance_targets(targets)
     assert json.loads(json.dumps(serialized)) == serialized
     assert serialized == [[1, 15, 1.75], [0, 17, 0.99]]
+
+
+def test_sella_strategy_records_active_subspace_and_reconditioning():
+    assert "active-subspace" in a2a.SELLA_MODE_STRATEGY
+    assert "reconditioned" in a2a.SELLA_MODE_STRATEGY
