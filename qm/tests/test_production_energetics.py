@@ -10,8 +10,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from quarry.clusters import Cluster
-from quarry.pipeline import FrequencyResult, frequency_geometry_fingerprint
+from quarry.clusters import Cluster, water
+from quarry.pipeline import (
+    DftSettings,
+    FrequencyResult,
+    energy,
+    frequency_geometry_fingerprint,
+)
 from quarry.store import Store
 from scripts import production_energetics as a2
 
@@ -81,6 +86,19 @@ def test_composite_and_production_settings_are_exact():
     assert all(item.use_gpu for item in (r2scan3c, production, b3lyp_d4))
 
 
+def test_ase_minimum_converges_on_cheap_water(tmp_path):
+    initial = water()
+    cheap = DftSettings(xc="hf", basis="sto-3g")
+    optimized = a2.optimize_minimum(
+        initial,
+        cheap,
+        max_steps=50,
+        trajectory=tmp_path / "water.traj",
+    )
+    assert energy(optimized, cheap) < energy(initial, cheap)
+    assert (tmp_path / "water.traj").exists()
+
+
 def test_source_store_loader_checks_geometry_hash(tmp_path):
     path = tmp_path / "source.sqlite"
     reactant_id, _, reactant, _ = source_store(path)
@@ -140,7 +158,11 @@ def test_end_to_end_driver_journals_results_without_recompute(monkeypatch, tmp_p
     product_path = tmp_path / "product.xyz"
     product_path.write_text(product.to_xyz())
 
-    monkeypatch.setattr(a2, "optimize", lambda current, settings, max_steps: current)
+    monkeypatch.setattr(
+        a2,
+        "optimize_minimum",
+        lambda current, settings, max_steps, trajectory: current,
+    )
     monkeypatch.setattr(
         a2,
         "find_ts",

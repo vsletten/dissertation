@@ -38,11 +38,10 @@ from quarry.pipeline import (
     frequencies,
     frequency_geometry_fingerprint,
     frequency_settings_fingerprint,
-    optimize,
 )
 from quarry.rates import rate_from_thermo, thermo_from_frequencies
 from quarry.store import Store, geometry_hash
-from quarry.ts import find_ts, full_irc
+from quarry.ts import find_ts, full_irc, make_ase_calculator
 
 R2SCAN3C_METHOD = "r2scan-3c/def2-mtzvpp/d4/gcp"
 PRODUCTION_METHOD = "wb97m-v/def2-tzvpd/smd(water)"
@@ -142,6 +141,41 @@ def checkpoint_cluster(
     temporary.write_text(result.to_xyz())
     temporary.replace(path)
     return result
+
+
+def optimize_minimum(
+    cluster: Cluster,
+    settings: DftSettings,
+    *,
+    max_steps: int,
+    trajectory: Path,
+    fmax_ev_a: float = 0.02,
+) -> Cluster:
+    """Converge a minimum on the exact composite surface with ASE BFGS."""
+    from ase import Atoms
+    from ase.constraints import FixAtoms
+    from ase.optimize import BFGS
+
+    atoms = Atoms(symbols=cluster.symbols, positions=cluster.coords)
+    atoms.calc = make_ase_calculator(settings, cluster.charge, cluster.spin)
+    if cluster.frozen_indices:
+        atoms.set_constraint(FixAtoms(indices=cluster.frozen_indices))
+    optimizer = BFGS(
+        atoms,
+        maxstep=0.05,
+        trajectory=str(trajectory),
+        logfile="-",
+    )
+    converged = optimizer.run(fmax=fmax_ev_a, steps=max_steps)
+    projected_fmax = float(np.linalg.norm(atoms.get_forces(), axis=1).max())
+    if not converged or projected_fmax >= fmax_ev_a:
+        raise RuntimeError(
+            f"ASE minimum did not converge within {max_steps} steps; "
+            f"projected fmax={projected_fmax:.6f} eV/A"
+        )
+    return replace(
+        cluster, coords=atoms.positions.copy(), name=f"{cluster.name}-minimum"
+    )
 
 
 def frequency_payload(result: FrequencyResult) -> dict[str, Any]:
@@ -410,12 +444,22 @@ def run(args: argparse.Namespace) -> int:
     reactant = checkpoint_cluster(
         run_dir / "reactant.r2scan3c.xyz",
         reactant_source,
-        lambda: optimize(reactant_source, r2scan3c, max_steps=args.minimum_steps),
+        lambda: optimize_minimum(
+            reactant_source,
+            r2scan3c,
+            max_steps=args.minimum_steps,
+            trajectory=run_dir / "reactant.r2scan3c.traj",
+        ),
     )
     product = checkpoint_cluster(
         run_dir / "product.r2scan3c.xyz",
         product_source,
-        lambda: optimize(product_source, r2scan3c, max_steps=args.minimum_steps),
+        lambda: optimize_minimum(
+            product_source,
+            r2scan3c,
+            max_steps=args.minimum_steps,
+            trajectory=run_dir / "product.r2scan3c.traj",
+        ),
     )
     transition_state = checkpoint_cluster(
         run_dir / "transition-state.r2scan3c.xyz",
