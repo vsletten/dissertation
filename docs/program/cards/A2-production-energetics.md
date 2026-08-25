@@ -1,13 +1,13 @@
 # A2-production-energetics — production-tier energies + open-source CC calibration
 
-- status: ready
+- status: active
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
 - depends: — (re-tiers whatever stationary points are banked in runs/;
   further points from A1b/A3 are re-tiered as they land — re-tiering is
   a settings swap by design, not a redo)
-- claimed-by:
+- claimed-by: hermes-workstation
 
 ## Objective
 Upgrade banked barriers to the survey protocol: r2SCAN-3c geometries
@@ -43,6 +43,17 @@ FP64-gutted); ByteQC checkpoints tolerate preemption.
   CALCULATIONS.md rows updated to the new tier.
 
 ## Progress
+- 2026-08-24 20:58 PDT — claimed atomically by `hermes-workstation`; pushed
+  `agents/A2-production-energetics` from exact `origin/main`
+  `4d715c7597edd04ed1a0d180f02d5c600eb74128` and created the congruent
+  dedicated worktree. Read-only bank inventory found four current production
+  targets: free-dimer si-neutral, al-neutral, and al-acid plus the 66-atom
+  embedded oss-neutral pilot. Their source stores/results remain byte-preserved
+  in the historical worktrees/external archives. Environment probes verified
+  PySCF 2.14.0 + GPU4PySCF 1.8.1, native def2-mTZVPP, `pyscf-dispersion`
+  r2SCAN-3c D4+gCP primitives, Psi4 1.11, and ByteQC/PySCF 2.5.0. The first
+  implementation slice is a tested, resume-safe production/calibration driver;
+  no heavy calculation or shared-service mutation has started.
 - 2026-08-18 — card created (fable).
 - 2026-08-23 — fable — **descoped from ORCA** (Victor's call: licensing).
   Calibration layer replaced by Psi4 1.11 DLPNO-CCSD(T) + ByteQC
