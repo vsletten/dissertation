@@ -67,6 +67,28 @@ CCSD(T)/CBS calibration triangle (ByteQC canonical + Psi4 TightPNO DLPNO).
 
 ## Progress
 
+- 2026-08-26 05:08 PDT — **fourth bounded continuation prevents the cleavage
+  runaway but does not localize a saddle; acceptance remains red.** Pushed
+  commits `321f870`, `267dff8`, `826b99a`, and `9b9edb2` add a flat-bottom
+  Cartesian trust envelope anchored to the exact adjacent climb-band images,
+  a pre-PES hard guard, a `0.03 A` Sella step cap, legacy addition-receipt
+  compatibility, and a mandatory cuTENSOR preload for GPU runs. Core focused
+  verification passed 51 A2a/TS tests; the final cuTENSOR/receipt slice passed
+  10 focused tests, Ruff, format, diff checks, and a live preload probe with
+  gpu4pyscf's native cuTENSOR engine selected. The exact cleavage neighbor
+  radii were `0.344314/0.545962 A`. One full 300-step r2SCAN-3c attempt stayed
+  bounded (`0.375573 A` maximum, `0.333471 A` final; never crossed the
+  `0.545962 A` pre-PES guard) instead of climbing six Hartree, but cycled at
+  roughly `0.3--0.6 eV/A` and failed the convergence gate. No candidate,
+  Hessian, IRC, production single point, CC job, or barrier was emitted.
+  Durable evidence is **461 files / 2,645,283 bytes**, manifest SHA-256
+  `8542944ade6f2c5aa339cf9dab487fd72a12d3fe712a9437b0ea87831a4c106e`.
+  Both email pipelines and Honcho containers are restored, API health is `ok`,
+  the dead-man is inactive, Ollama is empty, the GPU is idle, and no QM process
+  remains. **Do not rerun this active-subspace trust search.** The next bounded
+  scientific move is a separately tested full-system local eigenvector-following
+  or dimer localization inside the same hash-bound climb neighborhood, followed
+  by the unchanged Hessian/IRC gates.
 - 2026-08-25 — atomic claim is remotely durable on
   `agents/A2a-si-neutral-production-path-rebuild`. Commit `13311ff` adds the
   sequential production-path driver and CPU-only orchestration contracts. It

@@ -66,3 +66,14 @@ a candidate checkpoint. Resume from the hash-bound conditioned crest, constrain
 the trust/displacement envelope around the local band tangent, and persist only
 a converged saddle; never restart the expensive band or weaken the SCF/index
 gates to rescue the runaway search.
+
+### A local trust wall can stop escape without creating a saddle (2026-08-26)
+A2a I↔P bounded Cartesian Sella to the exact adjacent climb-image radii: the
+physical PES stayed untouched inside `0.344314 A`, a flat-bottom restoring wall
+acted beyond it, a hard guard refused pre-PES evaluations past `0.545962 A`,
+and Sella's step radius was capped at `0.03 A`. The 300-step run never escaped
+(`0.375573 A` maximum; `0.333471 A` final) but settled into a limit cycle near
+`0.3--0.6 eV/A`. A trust wall is localization, not evidence of a stationary
+point: reject wall-supported/nonconverged geometries and pivot to a bounded
+full-system local eigenvector-following or dimer search rather than increasing
+the radius, weakening `fmax`, or replaying the same active-subspace attempt.

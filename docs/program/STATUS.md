@@ -4,6 +4,14 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-26 — hermes-workstation — A2a I↔P now has a tested neighbor-radius
+  flat-bottom trust envelope, hard pre-PES escape guard, capped Sella step, and
+  mandatory cuTENSOR GPU preflight. The 300-step cleavage localization stayed
+  inside the local band neighborhood but cycled near `0.3--0.6 eV/A`, so no
+  saddle or downstream number was emitted. Pushed head `9b9edb2`; evidence
+  manifest `8542944ade6f...` (461 files). Next: bounded full-system local
+  eigenvector-following/dimer localization, not another active-core retry.
+
 - 2026-08-25 — hermes-workstation — A2a's internally conditioned production
   path now closes R↔I with a stable 714.83 cm^-1 reaction saddle and exact typed
   full IRC; I↔P pre-relax/climb/conditioning also converge, but its active-core
