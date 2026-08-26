@@ -300,6 +300,7 @@ def test_local_neb_tangent_comes_from_neighbors_of_exact_peak(tmp_path):
         images[2],
         template,
         [0, 1],
+        strategy=a2a.LOCAL_TRUST_SELLA_MODE_STRATEGY,
     )
 
     expected = images[3].coords - images[1].coords
@@ -308,7 +309,7 @@ def test_local_neb_tangent_comes_from_neighbors_of_exact_peak(tmp_path):
     expected = masked / np.linalg.norm(masked)
     assert np.allclose(tangent, expected)
     assert receipt["peak_index"] == 2
-    assert receipt["strategy"] == a2a.SELLA_MODE_STRATEGY
+    assert receipt["strategy"] == a2a.LOCAL_TRUST_SELLA_MODE_STRATEGY
     left_radius = np.linalg.norm(images[1].coords[[0, 1]] - images[2].coords[[0, 1]])
     right_radius = np.linalg.norm(images[3].coords[[0, 1]] - images[2].coords[[0, 1]])
     assert receipt["left_active_radius_a"] == pytest.approx(left_radius)
@@ -320,6 +321,15 @@ def test_local_neb_tangent_comes_from_neighbors_of_exact_peak(tmp_path):
         max(left_radius, right_radius, 1.5 * min(left_radius, right_radius))
     )
     assert receipt["sella_delta_max_a"] <= a2a.LOCAL_SELLA_DELTA_MAX_A
+
+    _, legacy_receipt = a2a.final_neb_tangent(
+        checkpoint_root,
+        images[2],
+        template,
+        [0, 1],
+    )
+    assert legacy_receipt["strategy"] == a2a.SELLA_MODE_STRATEGY
+    assert "local_trust_radius_a" not in legacy_receipt
 
 
 def asdict_segment(spec: a2a.SegmentSpec) -> dict[str, str]:

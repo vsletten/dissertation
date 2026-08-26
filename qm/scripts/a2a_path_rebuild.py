@@ -320,7 +320,7 @@ def final_neb_tangent(
         raise ValueError("local CI-NEB neighbor radius is non-finite or zero")
     trust_radius = min(neighbor_radii)
     guard_radius = max(max(neighbor_radii), 1.5 * trust_radius)
-    return masked / norm, {
+    receipt: dict[str, Any] = {
         "strategy": strategy,
         "checkpoint": str(checkpoint),
         "peak_index": peak,
@@ -328,13 +328,19 @@ def final_neb_tangent(
         "left_image": image_paths[peak - 1].name,
         "right_image": image_paths[peak + 1].name,
         "active_indices": active_indices,
-        "left_active_radius_a": neighbor_radii[0],
-        "right_active_radius_a": neighbor_radii[1],
-        "local_trust_radius_a": trust_radius,
-        "local_guard_radius_a": guard_radius,
-        "local_restraint_k_ev_a2": LOCAL_SELLA_RESTRAINT_K_EV_A2,
-        "sella_delta_max_a": min(LOCAL_SELLA_DELTA_MAX_A, trust_radius / 4.0),
     }
+    if strategy == LOCAL_TRUST_SELLA_MODE_STRATEGY:
+        receipt.update(
+            {
+                "left_active_radius_a": neighbor_radii[0],
+                "right_active_radius_a": neighbor_radii[1],
+                "local_trust_radius_a": trust_radius,
+                "local_guard_radius_a": guard_radius,
+                "local_restraint_k_ev_a2": LOCAL_SELLA_RESTRAINT_K_EV_A2,
+                "sella_delta_max_a": min(LOCAL_SELLA_DELTA_MAX_A, trust_radius / 4.0),
+            }
+        )
+    return masked / norm, receipt
 
 
 def reaction_coordinate_targets(cluster: Cluster) -> list[tuple[int, int, float]]:
