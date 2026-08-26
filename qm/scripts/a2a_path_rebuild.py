@@ -46,6 +46,7 @@ from quarry.ts import (
     relax_at_fixed_distances,
 )
 from scripts import production_energetics as a2
+from scripts.phase2_ladder import preload_cutensor
 
 PATH_GATE_VERSION = "a2a-sequential-path-v1"
 SELLA_MODE_STRATEGY = "active-subspace-internal-conditioned-loose-ci-neb-tangent-v3"
@@ -80,6 +81,12 @@ SEGMENTS = (
     SegmentSpec("addition", "reactant", "intermediate"),
     SegmentSpec("cleavage", "intermediate", "product"),
 )
+
+
+def preflight_gpu_contraction_engine(gpu: bool) -> None:
+    """Fail closed unless GPU runs can load the required cuTENSOR core."""
+    if gpu:
+        preload_cutensor()
 
 
 def atomic_json(path: Path, payload: dict[str, Any]) -> None:
@@ -728,6 +735,7 @@ def record_store(
 def run(args: argparse.Namespace) -> int:
     run_dir = args.run_dir.resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
+    preflight_gpu_contraction_engine(args.gpu)
     reactant_source = load_reference(args.reactant_reference.resolve(), role="reactant")
     intermediate_source = load_reference(
         args.intermediate_reference.resolve(),

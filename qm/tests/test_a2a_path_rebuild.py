@@ -348,6 +348,16 @@ def test_active_indices_fail_closed():
         a2a.active_indices("0,5", 5)
 
 
+def test_gpu_preflight_requires_cutensor_only_for_gpu(monkeypatch):
+    calls = []
+    monkeypatch.setattr(a2a, "preload_cutensor", lambda: calls.append("loaded"))
+
+    a2a.preflight_gpu_contraction_engine(False)
+    assert calls == []
+    a2a.preflight_gpu_contraction_engine(True)
+    assert calls == ["loaded"]
+
+
 def test_fixed_distance_checkpoint_identity_survives_json_roundtrip():
     targets = [(1, 15, 1.75), (0, 17, 0.99)]
     serialized = a2a.serialized_distance_targets(targets)
