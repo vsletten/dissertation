@@ -27,7 +27,7 @@ from quarry.ts import find_ts_dimer
 from scripts import a2a_path_rebuild as a2a
 from scripts import production_energetics as a2
 
-LOCALIZATION_VERSION = "a2a-cleavage-full-system-local-dimer-v1"
+LOCALIZATION_VERSION = "a2a-cleavage-full-system-local-dimer-v2"
 
 
 def atomic_json(path: Path, payload: dict[str, Any]) -> None:
@@ -60,20 +60,33 @@ def localization_inputs(
         template=conditioned_crest,
     )
     local = np.asarray(local_indices, dtype=int)
-    radii = [
+    conditioned_radii = [
         float(np.linalg.norm(neighbor.coords[local] - conditioned_crest.coords[local]))
         for neighbor in (left, right)
     ]
-    if any(not np.isfinite(radius) or radius <= 0.0 for radius in radii):
+    peak_radii = [
+        float(np.linalg.norm(neighbor.coords[local] - neb_crest.coords[local]))
+        for neighbor in (left, right)
+    ]
+    if any(not np.isfinite(radius) or radius <= 0.0 for radius in peak_radii):
+        raise ValueError("NEB crest has an invalid adjacent-image radius")
+    if any(not np.isfinite(radius) or radius <= 0.0 for radius in conditioned_radii):
         raise ValueError("conditioned crest has an invalid adjacent-image radius")
-    trust_radius = min(radii)
-    guard_radius = max(max(radii), 1.5 * trust_radius)
+    # The conditioner relaxes spectators and can sit much farther from the band
+    # images than the exact climb peak.  Measuring from it widened v1's envelope
+    # from 0.344/0.546 A to 1.533/1.643 A.  Keep the exact persisted peak-neighbor
+    # radii as the contract; the conditioned crest is only the search origin.
+    trust_radius = min(peak_radii)
+    guard_radius = max(max(peak_radii), 1.5 * trust_radius)
     receipt = {
         **tangent,
-        "conditioned_left_local_radius_a": radii[0],
-        "conditioned_right_local_radius_a": radii[1],
+        "peak_left_local_radius_a": peak_radii[0],
+        "peak_right_local_radius_a": peak_radii[1],
+        "conditioned_left_local_radius_a": conditioned_radii[0],
+        "conditioned_right_local_radius_a": conditioned_radii[1],
         "local_trust_radius_a": trust_radius,
         "local_guard_radius_a": guard_radius,
+        "envelope_origin": "exact-persisted-climb-peak-adjacent-images",
         "checkpoint_manifest_sha256": a2.sha256_path(checkpoint / "manifest.json"),
         "left_image_sha256": a2.sha256_path(checkpoint / tangent["left_image"]),
         "right_image_sha256": a2.sha256_path(checkpoint / tangent["right_image"]),

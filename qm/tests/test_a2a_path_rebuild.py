@@ -409,11 +409,18 @@ def test_full_system_localization_inputs_bind_conditioned_adjacent_images(tmp_pa
         [0, 1],
     )
 
-    left_radius = np.linalg.norm(images[0].coords[[0, 1]] - conditioned.coords[[0, 1]])
-    right_radius = np.linalg.norm(images[2].coords[[0, 1]] - conditioned.coords[[0, 1]])
+    left_radius = np.linalg.norm(images[0].coords[[0, 1]] - crest.coords[[0, 1]])
+    right_radius = np.linalg.norm(images[2].coords[[0, 1]] - crest.coords[[0, 1]])
+    conditioned_left_radius = np.linalg.norm(
+        images[0].coords[[0, 1]] - conditioned.coords[[0, 1]]
+    )
     assert np.linalg.norm(mode) == pytest.approx(1.0)
     assert receipt["local_trust_radius_a"] == pytest.approx(
         min(left_radius, right_radius)
     )
     assert receipt["local_guard_radius_a"] >= max(left_radius, right_radius)
+    assert receipt["conditioned_left_local_radius_a"] == pytest.approx(
+        conditioned_left_radius
+    )
+    assert receipt["envelope_origin"] == ("exact-persisted-climb-peak-adjacent-images")
     assert receipt["checkpoint_manifest_sha256"]
