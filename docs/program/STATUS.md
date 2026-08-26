@@ -4,6 +4,22 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-26 — (hermes-custom-build-001; profile=workstation) — A2a's corrected full-system local dimer exhausted all 120 bounded translations inside the exact climb guard with strictly positive curvature (`+0.0274 eV/A²` minimum), finished wall-supported, and persisted no candidate or downstream number. Pushed head `95ea8df`; 425 QM tests and whole-QM Ruff/format pass; evidence manifest `9e163528bb43...` covers 478 files. A2a is scientifically blocked pending a new mechanism/path decision, not another local Sella/dimer retry.
+
+- 2026-08-26 — hermes-workstation — A2a I↔P now has a tested neighbor-radius
+  flat-bottom trust envelope, hard pre-PES escape guard, capped Sella step, and
+  mandatory cuTENSOR GPU preflight. The 300-step cleavage localization stayed
+  inside the local band neighborhood but cycled near `0.3--0.6 eV/A`, so no
+  saddle or downstream number was emitted. Pushed head `9b9edb2`; evidence
+  manifest `8542944ade6f...` (461 files). Next: bounded full-system local
+  eigenvector-following/dimer localization, not another active-core retry.
+
+- 2026-08-25 — hermes-workstation — A2a's internally conditioned production
+  path now closes R↔I with a stable 714.83 cm^-1 reaction saddle and exact typed
+  full IRC; I↔P pre-relax/climb/conditioning also converge, but its active-core
+  Sella search escapes uphill into an SCF failure before a candidate is emitted.
+  Commit `8ced110`; durable evidence manifest `82af53d69809...` (457 files).
+
 - 2026-08-24 — hermes-workstation — A2 production infrastructure is pushed and
   fail-closed on the first real target: exact r2SCAN-3c D4+gCP optimization,
   same-surface finite-difference Hessians, repaired Sella/ASE full IRC, and

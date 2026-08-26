@@ -47,3 +47,33 @@ step zero in both directions. Signature: a four-line IRC log containing only
 `IRC: 0`, identical forward/reverse coordinates, and a falsely successful
 return. Bridge `gradient_converged()` to Sella's `converged()` and regression
 assert both directions reject the initial force-only decision.
+
+### Shared-atom FixBondLengths residuals need an independent gate (2026-08-25)
+ASE 3.29's `FixBondLengths` can report a converged projected optimization while
+three coupled distances sharing atoms still miss their requested values by
+`1.2e-4--1.7e-4 A`. Repeated `set_positions()` projection did not monotonically
+close the residual in the A2a crest conditioner. Keep an independent final
+distance check and fail closed; use a residual-controlled internal-coordinate
+conditioner (or a hash-bound previously accepted crest) rather than loosening
+the scientific gate.
+
+### Active-subspace Sella can escape a converged local CI-NEB crest (2026-08-25)
+On A2a I↔P, a converged seven-image pre-relax/climb and simultaneous internal-
+distance conditioner reached `3.95e-6 A`, but unconstrained active-core Sella
+then climbed roughly six Hartree in 27 steps before the SCF failed. A finite
+single-point failure is not a retry license and the optimizer trajectory is not
+a candidate checkpoint. Resume from the hash-bound conditioned crest, constrain
+the trust/displacement envelope around the local band tangent, and persist only
+a converged saddle; never restart the expensive band or weaken the SCF/index
+gates to rescue the runaway search.
+
+### A local trust wall can stop escape without creating a saddle (2026-08-26)
+A2a I↔P bounded Cartesian Sella to the exact adjacent climb-image radii: the
+physical PES stayed untouched inside `0.344314 A`, a flat-bottom restoring wall
+acted beyond it, a hard guard refused pre-PES evaluations past `0.545962 A`,
+and Sella's step radius was capped at `0.03 A`. The 300-step run never escaped
+(`0.375573 A` maximum; `0.333471 A` final) but settled into a limit cycle near
+`0.3--0.6 eV/A`. A trust wall is localization, not evidence of a stationary
+point: reject wall-supported/nonconverged geometries and pivot to a bounded
+full-system local eigenvector-following or dimer search rather than increasing
+the radius, weakening `fmax`, or replaying the same active-subspace attempt.

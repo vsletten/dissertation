@@ -92,6 +92,116 @@ class TestAseAdapter:
         f_numeric = -(e[0] - e[1]) / (2.0 * h)
         assert f_analytic == pytest.approx(f_numeric, abs=1e-3)
 
+    def test_cartesian_trust_region_is_flat_bottomed_and_fail_closed(self):
+        from ase import Atoms
+        from ase.calculators.calculator import Calculator, all_changes
+
+        from quarry.ts import cartesian_trust_region_calculator
+
+        class ZeroCalculator(Calculator):
+            implemented_properties = ["energy", "forces"]
+
+            def __init__(self):
+                super().__init__()
+                self.calls = 0
+
+            def calculate(
+                self, atoms=None, properties=("energy",), system_changes=all_changes
+            ):
+                super().calculate(atoms, properties, system_changes)
+                assert atoms is not None
+                self.calls += 1
+                self.results = {
+                    "energy": 0.0,
+                    "forces": np.zeros_like(atoms.positions),
+                }
+
+        base = ZeroCalculator()
+        reference = np.zeros((2, 3))
+        calculator = cartesian_trust_region_calculator(
+            base,
+            reference_coords=reference,
+            active_indices=[0],
+            restraint_radius_a=0.5,
+            guard_radius_a=1.0,
+            stiffness_ev_a2=8.0,
+        )
+        atoms = Atoms("HH", positions=reference.copy())
+        atoms.calc = calculator
+        assert atoms.get_potential_energy() == pytest.approx(0.0)
+        assert np.allclose(atoms.get_forces(), 0.0)
+
+        atoms.positions[0, 0] = 0.75
+        assert atoms.get_potential_energy() == pytest.approx(0.25)
+        assert atoms.get_forces()[0, 0] == pytest.approx(-2.0)
+        calls_before_guard = base.calls
+
+        atoms.positions[0, 0] = 1.01
+        with pytest.raises(RuntimeError, match="before PES evaluation"):
+            atoms.get_potential_energy()
+        assert base.calls == calls_before_guard
+
+    def test_full_system_dimer_requires_unrestrained_physical_stationarity(
+        self, monkeypatch, tmp_path
+    ):
+        from dataclasses import replace
+
+        from ase.calculators.calculator import Calculator, all_changes
+
+        import quarry.ts as ts_mod
+
+        class SaddleCalculator(Calculator):
+            implemented_properties = ["energy", "forces"]
+
+            def calculate(
+                self, atoms=None, properties=("energy",), system_changes=all_changes
+            ):
+                super().calculate(atoms, properties, system_changes)
+                assert atoms is not None
+                x, y, z = atoms.positions[1]
+                self.results = {
+                    "energy": -0.5 * x * x + 0.5 * y * y + 0.5 * z * z,
+                    "forces": np.array([[0.0, 0.0, 0.0], [x, -y, -z]]),
+                }
+
+        monkeypatch.setattr(
+            ts_mod,
+            "make_ase_calculator",
+            lambda *args: SaddleCalculator(),
+        )
+        cluster = replace(
+            water(),
+            symbols=["H", "H"],
+            coords=np.array([[0.0, 0.0, 0.0], [0.08, 0.06, 0.0]]),
+            frozen_indices=[0],
+        )
+        mode = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+
+        candidate, receipt = ts_mod.find_ts_dimer(
+            cluster,
+            CHEAP,
+            initial_mode=mode,
+            local_indices=[1],
+            local_trust_radius_a=0.25,
+            local_guard_radius_a=0.35,
+            fmax_ev_a=1.0e-3,
+            max_steps=40,
+            maximum_translation_a=0.03,
+            dimer_separation_a=1.0e-3,
+            f_rot_min_ev_a=1.0e-4,
+            f_rot_max_ev_a=1.0e-3,
+            max_num_rot=4,
+            logfile=None,
+            trajectory=str(tmp_path / "dimer.traj"),
+        )
+
+        assert np.linalg.norm(candidate.coords[1]) < 1.0e-3
+        assert receipt["curvature_ev_a2"] < 0.0
+        assert receipt["physical_fmax_ev_a"] < 1.0e-3
+        assert receipt["maximum_translation_a"] == pytest.approx(0.03)
+        assert receipt["artificial_restraint_active_at_candidate"] is False
+        assert receipt["all_nonfrozen_atoms_movable"] is True
+
 
 class TestReactionPathVector:
     def test_removes_rigid_motion_and_normalizes_internal_change(self):
@@ -147,6 +257,20 @@ class TestReactionPathVector:
     def test_directed_find_requires_cartesian_coordinates(self):
         with pytest.raises(ValueError, match="requires internal=False"):
             find_ts(hcn_ts_guess(), CHEAP, initial_mode=np.ones((3, 3)))
+
+    def test_active_subspace_freezes_only_the_complement(self):
+        from dataclasses import replace
+
+        from quarry.ts import saddle_search_frozen_indices
+
+        cluster = replace(water(), frozen_indices=[0])
+        assert saddle_search_frozen_indices(cluster, [1]) == [0, 2]
+        assert saddle_search_frozen_indices(cluster, None) == [0]
+
+        with pytest.raises(ValueError, match="originally frozen"):
+            saddle_search_frozen_indices(cluster, [0, 1])
+        with pytest.raises(ValueError, match="out-of-range"):
+            saddle_search_frozen_indices(cluster, [3])
 
 
 def test_quick_irc_reuses_precomputed_frequency(monkeypatch):
@@ -439,6 +563,161 @@ class TestNebConvergence:
             )
         assert optimizer_calls == [(True, {"dt": 0.05, "maxstep": 0.05})]
 
+    def test_converged_climb_checkpoint_can_resume_at_tighter_force_gate(
+        self, tmp_path
+    ):
+        from ase import Atoms
+
+        from quarry.ts import _load_neb_checkpoint, _write_neb_checkpoint
+
+        reactant, product = self._endpoints()
+        images = [
+            Atoms(symbols=reactant.symbols, positions=reactant.coords),
+            Atoms(
+                symbols=reactant.symbols,
+                positions=0.5 * (reactant.coords + product.coords),
+            ),
+            Atoms(symbols=product.symbols, positions=product.coords),
+        ]
+        checkpoint = _write_neb_checkpoint(
+            images,
+            tmp_path,
+            stage="climb-final",
+            converged=True,
+            settings=CHEAP,
+            charge=reactant.charge,
+            spin=reactant.spin,
+            frozen_indices=reactant.frozen_indices,
+            optimizer="ode",
+            fmax_ev_a=0.08,
+            step_bound=80,
+            reactant=reactant,
+            product=product,
+        )
+
+        coords, manifest = _load_neb_checkpoint(
+            checkpoint,
+            settings=CHEAP,
+            reactant=reactant,
+            product=product,
+            n_images=3,
+        )
+
+        assert manifest["stage"] == "climb-final"
+        assert manifest["converged"] is True
+        assert np.allclose(coords[1], images[1].positions)
+
+    def test_atomic_in_progress_climb_checkpoint_can_resume_with_fresh_optimizer(
+        self, tmp_path
+    ):
+        from ase import Atoms
+
+        from quarry.ts import _load_neb_checkpoint, _write_neb_checkpoint
+
+        reactant, product = self._endpoints()
+        images = [
+            Atoms(symbols=reactant.symbols, positions=reactant.coords),
+            Atoms(
+                symbols=reactant.symbols,
+                positions=0.5 * (reactant.coords + product.coords),
+            ),
+            Atoms(symbols=product.symbols, positions=product.coords),
+        ]
+        checkpoint = _write_neb_checkpoint(
+            images,
+            tmp_path,
+            stage="climb-step-000010",
+            converged=None,
+            settings=CHEAP,
+            charge=reactant.charge,
+            spin=reactant.spin,
+            frozen_indices=reactant.frozen_indices,
+            optimizer="ode",
+            fmax_ev_a=0.02,
+            step_bound=240,
+            reactant=reactant,
+            product=product,
+        )
+
+        coords, manifest = _load_neb_checkpoint(
+            checkpoint,
+            settings=CHEAP,
+            reactant=reactant,
+            product=product,
+            n_images=3,
+        )
+
+        assert manifest["stage"] == "climb-step-000010"
+        assert manifest["converged"] is None
+        assert np.allclose(coords[1], images[1].positions)
+
+    def test_resume_rejects_checkpoint_from_a_different_endpoint_pair(self, tmp_path):
+        from dataclasses import replace
+
+        from ase import Atoms
+
+        from quarry.ts import _load_neb_checkpoint, _write_neb_checkpoint
+
+        reactant, product = self._endpoints()
+        images = [
+            Atoms(symbols=reactant.symbols, positions=reactant.coords),
+            Atoms(
+                symbols=reactant.symbols,
+                positions=0.5 * (reactant.coords + product.coords),
+            ),
+            Atoms(symbols=product.symbols, positions=product.coords),
+        ]
+        checkpoint = _write_neb_checkpoint(
+            images,
+            tmp_path,
+            stage="pre-relax-final",
+            converged=True,
+            settings=CHEAP,
+            charge=reactant.charge,
+            spin=reactant.spin,
+            frozen_indices=reactant.frozen_indices,
+            optimizer="mdmin",
+            fmax_ev_a=0.20,
+            step_bound=80,
+            reactant=reactant,
+            product=product,
+        )
+        other_product = replace(
+            product, coords=product.coords + np.array([[0.50, 0.0, 0.0]])
+        )
+        other_reactant = replace(
+            reactant, coords=reactant.coords + np.array([[-0.25, 0.0, 0.0]])
+        )
+
+        with pytest.raises(ValueError, match="product_geometry"):
+            _load_neb_checkpoint(
+                checkpoint,
+                settings=CHEAP,
+                reactant=reactant,
+                product=other_product,
+                n_images=3,
+            )
+        with pytest.raises(ValueError, match="reactant_geometry"):
+            _load_neb_checkpoint(
+                checkpoint,
+                settings=CHEAP,
+                reactant=other_reactant,
+                product=product,
+                n_images=3,
+            )
+
+        coords, manifest = _load_neb_checkpoint(
+            checkpoint,
+            settings=CHEAP,
+            reactant=reactant,
+            product=product,
+            n_images=3,
+        )
+        assert manifest["reactant_geometry"] == frequency_geometry_fingerprint(reactant)
+        assert manifest["product_geometry"] == frequency_geometry_fingerprint(product)
+        assert np.allclose(coords[0], reactant.coords)
+        assert np.allclose(coords[-1], product.coords)
+
     def test_unconverged_ode_climb_is_rejected(self, monkeypatch):
         import ase.mep
         import ase.mep.neb
@@ -631,6 +910,74 @@ class TestConstraints:
         assert np.linalg.norm(relaxed.coords[2] - relaxed.coords[3]) == pytest.approx(
             1.2, abs=1e-8
         )
+        assert not np.allclose(relaxed.coords[4], start.coords[4])
+
+    def test_fixed_distance_relax_sella_internal_handles_shared_atom_constraints(
+        self, monkeypatch
+    ):
+        from ase.calculators.calculator import Calculator, all_changes
+
+        import quarry.ts as ts_mod
+
+        equilibrium = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.2, 0.0],
+                [2.5, 0.0, 0.0],
+                [4.0, 4.0, 0.0],
+            ]
+        )
+
+        class HarmonicCalculator(Calculator):
+            implemented_properties = ["energy", "forces"]
+
+            def calculate(
+                self, atoms=None, properties=("energy",), system_changes=all_changes
+            ):
+                super().calculate(atoms, properties, system_changes)
+                assert atoms is not None
+                delta = atoms.positions - equilibrium
+                self.results = {
+                    "energy": 0.5 * float(np.sum(delta**2)),
+                    "forces": -delta,
+                }
+
+        monkeypatch.setattr(
+            ts_mod,
+            "make_ase_calculator",
+            lambda settings, charge, spin: HarmonicCalculator(),
+        )
+        start = Cluster(
+            "shared-pins",
+            ["H"] * 5,
+            np.array(
+                [
+                    [0.1, -0.1, 0.0],
+                    [1.3, 0.2, 0.0],
+                    [-0.2, 1.5, 0.0],
+                    [2.9, -0.2, 0.0],
+                    [5.0, 5.0, 0.0],
+                ]
+            ),
+        )
+        targets = [(0, 1, 1.0), (0, 2, 1.2), (1, 3, 1.5)]
+
+        relaxed = ts_mod.relax_at_fixed_distances(
+            start,
+            CHEAP,
+            fixed_distances=targets,
+            fmax_ev_a=1e-5,
+            max_steps=100,
+            distance_tolerance_a=1e-6,
+            constraint_method="sella-internal",
+            logfile=None,
+        )
+
+        for atom_i, atom_j, target in targets:
+            assert np.linalg.norm(
+                relaxed.coords[atom_i] - relaxed.coords[atom_j]
+            ) == pytest.approx(target, abs=1e-6)
         assert not np.allclose(relaxed.coords[4], start.coords[4])
 
     def test_fixed_distance_relax_rejects_frozen_pair_overlap(self):
