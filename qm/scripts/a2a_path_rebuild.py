@@ -48,7 +48,8 @@ from quarry.ts import (
 from scripts import production_energetics as a2
 
 PATH_GATE_VERSION = "a2a-sequential-path-v1"
-SELLA_MODE_STRATEGY = (
+SELLA_MODE_STRATEGY = "active-subspace-internal-conditioned-loose-ci-neb-tangent-v3"
+LOCAL_TRUST_SELLA_MODE_STRATEGY = (
     "active-subspace-internal-conditioned-loose-ci-neb-tangent-cartesian-trust-v4"
 )
 REACTION_COORDINATE_PAIRS = ((1, 15), (0, 17), (0, 1))
@@ -276,6 +277,8 @@ def final_neb_tangent(
     crest: Cluster,
     template: Cluster,
     active_indices: list[int],
+    *,
+    strategy: str = SELLA_MODE_STRATEGY,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Recover the local converged CI-NEB tangent around the exact peak image."""
     latest = json.loads((checkpoint_root / "latest.json").read_text())
@@ -318,7 +321,7 @@ def final_neb_tangent(
     trust_radius = min(neighbor_radii)
     guard_radius = max(max(neighbor_radii), 1.5 * trust_radius)
     return masked / norm, {
-        "strategy": SELLA_MODE_STRATEGY,
+        "strategy": strategy,
         "checkpoint": str(checkpoint),
         "peak_index": peak,
         "peak_rms_to_saved_crest_a": distances[peak],
@@ -413,11 +416,15 @@ def run_segment(
             "climb_optimizer": "ode",
         },
     )
+    use_local_trust = spec.slug == "cleavage"
     local_tangent, tangent_receipt = final_neb_tangent(
         neb_root,
         crest,
         start,
         active_indices,
+        strategy=(
+            LOCAL_TRUST_SELLA_MODE_STRATEGY if use_local_trust else SELLA_MODE_STRATEGY
+        ),
     )
     atomic_json(segment_dir / "local-neb-tangent.receipt.json", tangent_receipt)
     coordinate_targets = reaction_coordinate_targets(crest)
@@ -449,6 +456,26 @@ def run_segment(
             "constraint_method": "sella-internal",
         },
     )
+    active_identity: dict[str, Any] = {
+        "gate_version": PATH_GATE_VERSION,
+        "stage": "active-subspace-reaction-saddle-seed-v2",
+        "segment": spec.slug,
+        "settings": settings_identity,
+        "max_steps": saddle_steps,
+        "active_indices": active_indices,
+        "initial_mode_strategy": tangent_receipt["strategy"],
+        "conditioned_crest_geometry": frequency_geometry_fingerprint(conditioned_crest),
+    }
+    if use_local_trust:
+        active_identity.update(
+            {
+                "stage": "active-subspace-reaction-saddle-seed-v3",
+                "local_trust_radius_a": tangent_receipt["local_trust_radius_a"],
+                "local_guard_radius_a": tangent_receipt["local_guard_radius_a"],
+                "local_restraint_k_ev_a2": LOCAL_SELLA_RESTRAINT_K_EV_A2,
+                "sella_delta_max_a": tangent_receipt["sella_delta_max_a"],
+            }
+        )
     active_transition_state = a2.checkpoint_cluster(
         segment_dir / "active-subspace-transition-state.xyz",
         conditioned_crest,
@@ -460,27 +487,18 @@ def run_segment(
             initial_mode=local_tangent,
             internal=False,
             active_indices=active_indices,
-            local_trust_radius_a=tangent_receipt["local_trust_radius_a"],
-            local_guard_radius_a=tangent_receipt["local_guard_radius_a"],
-            local_restraint_k_ev_a2=LOCAL_SELLA_RESTRAINT_K_EV_A2,
-            sella_delta_max_a=tangent_receipt["sella_delta_max_a"],
-        ),
-        identity={
-            "gate_version": PATH_GATE_VERSION,
-            "stage": "active-subspace-reaction-saddle-seed-v3",
-            "segment": spec.slug,
-            "settings": settings_identity,
-            "max_steps": saddle_steps,
-            "active_indices": active_indices,
-            "initial_mode_strategy": SELLA_MODE_STRATEGY,
-            "conditioned_crest_geometry": frequency_geometry_fingerprint(
-                conditioned_crest
+            local_trust_radius_a=(
+                tangent_receipt["local_trust_radius_a"] if use_local_trust else None
             ),
-            "local_trust_radius_a": tangent_receipt["local_trust_radius_a"],
-            "local_guard_radius_a": tangent_receipt["local_guard_radius_a"],
-            "local_restraint_k_ev_a2": LOCAL_SELLA_RESTRAINT_K_EV_A2,
-            "sella_delta_max_a": tangent_receipt["sella_delta_max_a"],
-        },
+            local_guard_radius_a=(
+                tangent_receipt["local_guard_radius_a"] if use_local_trust else None
+            ),
+            local_restraint_k_ev_a2=LOCAL_SELLA_RESTRAINT_K_EV_A2,
+            sella_delta_max_a=(
+                tangent_receipt["sella_delta_max_a"] if use_local_trust else None
+            ),
+        ),
+        identity=active_identity,
     )
     reconditioned_targets = reaction_coordinate_targets(active_transition_state)
     reconditioned_crest = a2.checkpoint_cluster(

@@ -348,3 +348,4 @@ def test_fixed_distance_checkpoint_identity_survives_json_roundtrip():
 def test_sella_strategy_records_active_subspace_and_reconditioning():
     assert "active-subspace" in a2a.SELLA_MODE_STRATEGY
     assert "internal-conditioned" in a2a.SELLA_MODE_STRATEGY
+    assert "cartesian-trust" in a2a.LOCAL_TRUST_SELLA_MODE_STRATEGY
