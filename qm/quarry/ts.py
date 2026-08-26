@@ -399,6 +399,7 @@ def find_ts_dimer(
     max_num_rot: int = 4,
     trajectory: str | None = None,
     logfile: str | None = "-",
+    rotation_logfile: str | None = None,
     eigenmode_logfile: str | None = None,
 ) -> tuple[Cluster, dict[str, Any]]:
     """Bounded full-system dimer localization inside a Cartesian envelope.
@@ -458,7 +459,7 @@ def find_ts_dimer(
         atoms.set_constraint(FixAtoms(indices=sorted(frozen)))
 
     control = DimerControl(
-        logfile=logfile,
+        logfile=rotation_logfile,
         eigenmode_logfile=eigenmode_logfile,
         f_rot_min=f_rot_min_ev_a,
         f_rot_max=f_rot_max_ev_a,

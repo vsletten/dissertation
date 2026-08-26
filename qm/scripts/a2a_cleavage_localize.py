@@ -160,6 +160,7 @@ def run(args: argparse.Namespace) -> int:
             max_num_rot=args.max_num_rot,
             trajectory=str(run_dir / "full-system-local-dimer.traj"),
             logfile=str(run_dir / "full-system-local-dimer.log"),
+            rotation_logfile=str(run_dir / "full-system-local-dimer-rotation.log"),
             eigenmode_logfile=str(run_dir / "full-system-local-dimer-mode.log"),
         )
         algorithm_receipt.update(receipt)
