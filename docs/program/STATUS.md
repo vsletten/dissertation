@@ -4,6 +4,8 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-26 — (hermes-custom-build-001; profile=workstation) — A2a's corrected full-system local dimer exhausted all 120 bounded translations inside the exact climb guard with strictly positive curvature (`+0.0274 eV/A²` minimum), finished wall-supported, and persisted no candidate or downstream number. Pushed head `95ea8df`; 425 QM tests and whole-QM Ruff/format pass; evidence manifest `9e163528bb43...` covers 478 files. A2a is scientifically blocked pending a new mechanism/path decision, not another local Sella/dimer retry.
+
 - 2026-08-26 — hermes-workstation — A2a I↔P now has a tested neighbor-radius
   flat-bottom trust envelope, hard pre-PES escape guard, capped Sella step, and
   mandatory cuTENSOR GPU preflight. The 300-step cleavage localization stayed
