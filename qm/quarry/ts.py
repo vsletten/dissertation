@@ -1011,7 +1011,7 @@ def scan_ts_guess(scan: list[tuple[float, float, Cluster]]) -> Cluster:
     return scan[idx][2]
 
 
-_NEB_CHECKPOINT_SCHEMA = 1
+_NEB_CHECKPOINT_SCHEMA = 2
 
 
 def _write_neb_checkpoint(
@@ -1027,6 +1027,8 @@ def _write_neb_checkpoint(
     optimizer: str,
     fmax_ev_a: float,
     step_bound: int,
+    reactant: Cluster,
+    product: Cluster,
 ) -> Path:
     """Atomically persist every image plus the exact NEB stage contract.
 
@@ -1067,6 +1069,8 @@ def _write_neb_checkpoint(
         "optimizer": optimizer,
         "fmax_ev_a": fmax_ev_a,
         "step_bound": step_bound,
+        "reactant_geometry": frequency_geometry_fingerprint(reactant),
+        "product_geometry": frequency_geometry_fingerprint(product),
         "images": image_files,
     }
     (temporary / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
@@ -1082,6 +1086,7 @@ def _load_neb_checkpoint(
     *,
     settings: DftSettings,
     reactant: Cluster,
+    product: Cluster,
     n_images: int,
 ) -> tuple[list[np.ndarray], dict]:
     """Load and validate a complete pre-relaxed band for climb-only resume."""
@@ -1097,6 +1102,8 @@ def _load_neb_checkpoint(
         "frozen_indices": list(reactant.frozen_indices or []),
         "symbols": list(reactant.symbols),
         "n_images": n_images,
+        "reactant_geometry": frequency_geometry_fingerprint(reactant),
+        "product_geometry": frequency_geometry_fingerprint(product),
     }
     for key, value in expected.items():
         if manifest.get(key) != value:
@@ -1169,6 +1176,9 @@ def neb_ts_guess(
     contract are persisted periodically and at each stage boundary. A
     ``pre-relax-final`` checkpoint with ``converged=true`` can be supplied via
     ``resume_from`` to skip interpolation and pre-relaxation safely.
+    Resume also requires the checkpoint's reactant and product geometry
+    fingerprints to match this run, so a reused directory cannot mix a stale
+    interior band with a new endpoint pair.
     ``initial_image_coords`` supplies a complete physically seeded band; it is
     mutually exclusive with resume and still undergoes bounded pre-relaxation.
     """
@@ -1214,6 +1224,7 @@ def neb_ts_guess(
             Path(resume_from),
             settings=settings,
             reactant=reactant,
+            product=product,
             n_images=n_images,
         )
         for image, coords in zip(images, resumed, strict=True):
@@ -1268,6 +1279,8 @@ def neb_ts_guess(
             optimizer="none",
             fmax_ev_a=pre_relax_fmax_ev_a,
             step_bound=pre_relax_steps,
+            reactant=reactant,
+            product=product,
         )
 
     if resumed_manifest is None:
@@ -1290,6 +1303,8 @@ def neb_ts_guess(
                     optimizer="mdmin",
                     fmax_ev_a=pre_relax_fmax_ev_a,
                     step_bound=pre_relax_steps,
+                    reactant=reactant,
+                    product=product,
                 ),
                 interval=checkpoint_interval,
             )
@@ -1307,6 +1322,8 @@ def neb_ts_guess(
                 optimizer="mdmin",
                 fmax_ev_a=pre_relax_fmax_ev_a,
                 step_bound=pre_relax_steps,
+                reactant=reactant,
+                product=product,
             )
         if not relaxed:
             raise RuntimeError(
@@ -1347,6 +1364,8 @@ def neb_ts_guess(
                 optimizer=climb_optimizer,
                 fmax_ev_a=fmax_ev_a,
                 step_bound=max_steps,
+                reactant=reactant,
+                product=product,
             ),
             interval=checkpoint_interval,
         )
@@ -1364,6 +1383,8 @@ def neb_ts_guess(
             optimizer=climb_optimizer,
             fmax_ev_a=fmax_ev_a,
             step_bound=max_steps,
+            reactant=reactant,
+            product=product,
         )
     if not climbed:
         raise RuntimeError(

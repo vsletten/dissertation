@@ -591,12 +591,15 @@ class TestNebConvergence:
             optimizer="ode",
             fmax_ev_a=0.08,
             step_bound=80,
+            reactant=reactant,
+            product=product,
         )
 
         coords, manifest = _load_neb_checkpoint(
             checkpoint,
             settings=CHEAP,
             reactant=reactant,
+            product=product,
             n_images=3,
         )
 
@@ -632,18 +635,88 @@ class TestNebConvergence:
             optimizer="ode",
             fmax_ev_a=0.02,
             step_bound=240,
+            reactant=reactant,
+            product=product,
         )
 
         coords, manifest = _load_neb_checkpoint(
             checkpoint,
             settings=CHEAP,
             reactant=reactant,
+            product=product,
             n_images=3,
         )
 
         assert manifest["stage"] == "climb-step-000010"
         assert manifest["converged"] is None
         assert np.allclose(coords[1], images[1].positions)
+
+    def test_resume_rejects_checkpoint_from_a_different_endpoint_pair(self, tmp_path):
+        from dataclasses import replace
+
+        from ase import Atoms
+
+        from quarry.ts import _load_neb_checkpoint, _write_neb_checkpoint
+
+        reactant, product = self._endpoints()
+        images = [
+            Atoms(symbols=reactant.symbols, positions=reactant.coords),
+            Atoms(
+                symbols=reactant.symbols,
+                positions=0.5 * (reactant.coords + product.coords),
+            ),
+            Atoms(symbols=product.symbols, positions=product.coords),
+        ]
+        checkpoint = _write_neb_checkpoint(
+            images,
+            tmp_path,
+            stage="pre-relax-final",
+            converged=True,
+            settings=CHEAP,
+            charge=reactant.charge,
+            spin=reactant.spin,
+            frozen_indices=reactant.frozen_indices,
+            optimizer="mdmin",
+            fmax_ev_a=0.20,
+            step_bound=80,
+            reactant=reactant,
+            product=product,
+        )
+        other_product = replace(
+            product, coords=product.coords + np.array([[0.50, 0.0, 0.0]])
+        )
+        other_reactant = replace(
+            reactant, coords=reactant.coords + np.array([[-0.25, 0.0, 0.0]])
+        )
+
+        with pytest.raises(ValueError, match="product_geometry"):
+            _load_neb_checkpoint(
+                checkpoint,
+                settings=CHEAP,
+                reactant=reactant,
+                product=other_product,
+                n_images=3,
+            )
+        with pytest.raises(ValueError, match="reactant_geometry"):
+            _load_neb_checkpoint(
+                checkpoint,
+                settings=CHEAP,
+                reactant=other_reactant,
+                product=product,
+                n_images=3,
+            )
+
+        coords, manifest = _load_neb_checkpoint(
+            checkpoint,
+            settings=CHEAP,
+            reactant=reactant,
+            product=product,
+            n_images=3,
+        )
+        assert manifest["reactant_geometry"] == frequency_geometry_fingerprint(reactant)
+        assert manifest["product_geometry"] == frequency_geometry_fingerprint(product)
+        assert np.allclose(coords[0], reactant.coords)
+        assert np.allclose(coords[-1], product.coords)
 
     def test_unconverged_ode_climb_is_rejected(self, monkeypatch):
         import ase.mep
