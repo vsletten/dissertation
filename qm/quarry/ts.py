@@ -381,6 +381,166 @@ def find_ts(
     return replace(cluster, coords=atoms.positions.copy(), name=f"{cluster.name}-ts")
 
 
+def find_ts_dimer(
+    cluster: Cluster,
+    settings: DftSettings,
+    *,
+    initial_mode: np.ndarray,
+    local_indices: list[int],
+    local_trust_radius_a: float,
+    local_guard_radius_a: float,
+    local_restraint_k_ev_a2: float = 50.0,
+    fmax_ev_a: float = 0.02,
+    max_steps: int = 120,
+    maximum_translation_a: float = 0.03,
+    dimer_separation_a: float = 0.01,
+    f_rot_min_ev_a: float = 0.01,
+    f_rot_max_ev_a: float = 0.05,
+    max_num_rot: int = 4,
+    trajectory: str | None = None,
+    logfile: str | None = "-",
+    eigenmode_logfile: str | None = None,
+) -> tuple[Cluster, dict[str, Any]]:
+    """Bounded full-system dimer localization inside a Cartesian envelope.
+
+    Every atom except the cluster's original frozen shell remains movable.  The
+    ``local_indices`` select only the hash-bound reaction-coordinate envelope;
+    they do *not* define an active subspace.  The physical calculator is never
+    called outside ``local_guard_radius_a``.  A result is returned only when the
+    dimer curvature is negative, the final point lies in the flat (unrestrained)
+    part of the envelope, and the unwrapped physical forces converge over the
+    complete movable system.
+    """
+    from ase import Atoms
+    from ase.constraints import FixAtoms
+    from ase.mep.dimer import DimerControl, MinModeAtoms, MinModeTranslate
+
+    if max_steps <= 0:
+        raise ValueError("max_steps must be positive")
+    for name, value in {
+        "fmax_ev_a": fmax_ev_a,
+        "maximum_translation_a": maximum_translation_a,
+        "dimer_separation_a": dimer_separation_a,
+        "f_rot_min_ev_a": f_rot_min_ev_a,
+        "f_rot_max_ev_a": f_rot_max_ev_a,
+    }.items():
+        if not np.isfinite(value) or value <= 0.0:
+            raise ValueError(f"{name} must be finite and positive")
+    if f_rot_max_ev_a < f_rot_min_ev_a:
+        raise ValueError("f_rot_max_ev_a must not be below f_rot_min_ev_a")
+    if max_num_rot <= 0:
+        raise ValueError("max_num_rot must be positive")
+
+    mode = np.asarray(initial_mode, dtype=float).copy()
+    if mode.shape != cluster.coords.shape or not np.all(np.isfinite(mode)):
+        raise ValueError("initial_mode must be a finite vector matching cluster coords")
+    frozen = set(cluster.frozen_indices or [])
+    if any(index in frozen for index in local_indices):
+        raise ValueError("local_indices contains an originally frozen atom")
+    if frozen:
+        mode[np.asarray(sorted(frozen), dtype=int)] = 0.0
+    mode_norm = float(np.linalg.norm(mode))
+    if mode_norm < 1.0e-12:
+        raise ValueError("initial_mode has no component in the movable coordinates")
+    mode /= mode_norm
+
+    atoms = Atoms(symbols=cluster.symbols, positions=cluster.coords)
+    physical_calculator = make_ase_calculator(settings, cluster.charge, cluster.spin)
+    atoms.calc = cartesian_trust_region_calculator(
+        physical_calculator,
+        reference_coords=cluster.coords,
+        active_indices=local_indices,
+        restraint_radius_a=local_trust_radius_a,
+        guard_radius_a=local_guard_radius_a,
+        stiffness_ev_a2=local_restraint_k_ev_a2,
+    )
+    if frozen:
+        atoms.set_constraint(FixAtoms(indices=sorted(frozen)))
+
+    control = DimerControl(
+        logfile=logfile,
+        eigenmode_logfile=eigenmode_logfile,
+        f_rot_min=f_rot_min_ev_a,
+        f_rot_max=f_rot_max_ev_a,
+        max_num_rot=max_num_rot,
+        trial_trans_step=min(0.005, maximum_translation_a / 2.0),
+        maximum_translation=maximum_translation_a,
+        use_central_forces=False,
+        dimer_separation=dimer_separation_a,
+        initial_eigenmode_method="displacement",
+        displacement_method="vector",
+        order=1,
+    )
+    try:
+        dimer_atoms = MinModeAtoms(atoms, control=control, eigenmodes=[mode])
+        optimizer = MinModeTranslate(
+            dimer_atoms,
+            logfile=logfile,
+            trajectory=trajectory,
+        )
+        converged = optimizer.run(fmax=fmax_ev_a, steps=max_steps)
+        curvature = float(dimer_atoms.get_curvature())
+        steps = int(optimizer.nsteps)
+        force_calls = int(control.get_counter("forcecalls"))
+    finally:
+        control.close()
+
+    if not converged:
+        raise RuntimeError(
+            f"dimer did not converge a saddle for {cluster.name} "
+            f"within {max_steps} steps"
+        )
+    if not np.isfinite(curvature) or curvature >= 0.0:
+        raise RuntimeError(f"dimer converged without negative curvature: {curvature}")
+
+    local = np.asarray(local_indices, dtype=int)
+    final_radius = float(np.linalg.norm(atoms.positions[local] - cluster.coords[local]))
+    if final_radius > local_trust_radius_a:
+        raise RuntimeError(
+            "dimer converged only on the local Cartesian restraint: "
+            f"{final_radius:.6f} A > {local_trust_radius_a:.6f} A"
+        )
+
+    # Re-evaluate with the unwrapped calculator.  Optimizer convergence on the
+    # inverted/restraint-wrapped force is not a physical stationary-point gate.
+    atoms.calc = physical_calculator
+    physical_forces = np.asarray(atoms.get_forces(), dtype=float)
+    physical_fmax = float(np.sqrt((physical_forces**2).sum(axis=1)).max())
+    if not np.isfinite(physical_fmax) or physical_fmax >= fmax_ev_a:
+        raise RuntimeError(
+            "dimer candidate is not stationary on the unmodified physical PES: "
+            f"fmax {physical_fmax:.6f} eV/A >= {fmax_ev_a:.6f} eV/A"
+        )
+
+    result = replace(
+        cluster,
+        coords=atoms.positions.copy(),
+        name=f"{cluster.name}-dimer-ts",
+    )
+    receipt = {
+        "method": "ase-full-system-local-dimer-v1",
+        "optimizer_steps": steps,
+        "physical_force_calls": force_calls + 1,
+        "curvature_ev_a2": curvature,
+        "physical_fmax_ev_a": physical_fmax,
+        "required_fmax_ev_a": fmax_ev_a,
+        "final_local_radius_a": final_radius,
+        "local_trust_radius_a": local_trust_radius_a,
+        "local_guard_radius_a": local_guard_radius_a,
+        "local_restraint_k_ev_a2": local_restraint_k_ev_a2,
+        "artificial_restraint_active_at_candidate": False,
+        "all_nonfrozen_atoms_movable": True,
+        "original_frozen_indices": sorted(frozen),
+        "local_envelope_indices": list(local_indices),
+        "maximum_translation_a": maximum_translation_a,
+        "dimer_separation_a": dimer_separation_a,
+        "f_rot_min_ev_a": f_rot_min_ev_a,
+        "f_rot_max_ev_a": f_rot_max_ev_a,
+        "max_num_rot": max_num_rot,
+    }
+    return result, receipt
+
+
 def relax_at_fixed_distances(
     cluster: Cluster,
     settings: DftSettings,

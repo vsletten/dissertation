@@ -141,6 +141,67 @@ class TestAseAdapter:
             atoms.get_potential_energy()
         assert base.calls == calls_before_guard
 
+    def test_full_system_dimer_requires_unrestrained_physical_stationarity(
+        self, monkeypatch, tmp_path
+    ):
+        from dataclasses import replace
+
+        from ase.calculators.calculator import Calculator, all_changes
+
+        import quarry.ts as ts_mod
+
+        class SaddleCalculator(Calculator):
+            implemented_properties = ["energy", "forces"]
+
+            def calculate(
+                self, atoms=None, properties=("energy",), system_changes=all_changes
+            ):
+                super().calculate(atoms, properties, system_changes)
+                assert atoms is not None
+                x, y, z = atoms.positions[1]
+                self.results = {
+                    "energy": -0.5 * x * x + 0.5 * y * y + 0.5 * z * z,
+                    "forces": np.array([[0.0, 0.0, 0.0], [x, -y, -z]]),
+                }
+
+        monkeypatch.setattr(
+            ts_mod,
+            "make_ase_calculator",
+            lambda *args: SaddleCalculator(),
+        )
+        cluster = replace(
+            water(),
+            symbols=["H", "H"],
+            coords=np.array([[0.0, 0.0, 0.0], [0.08, 0.06, 0.0]]),
+            frozen_indices=[0],
+        )
+        mode = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+
+        candidate, receipt = ts_mod.find_ts_dimer(
+            cluster,
+            CHEAP,
+            initial_mode=mode,
+            local_indices=[1],
+            local_trust_radius_a=0.25,
+            local_guard_radius_a=0.35,
+            fmax_ev_a=1.0e-3,
+            max_steps=40,
+            maximum_translation_a=0.03,
+            dimer_separation_a=1.0e-3,
+            f_rot_min_ev_a=1.0e-4,
+            f_rot_max_ev_a=1.0e-3,
+            max_num_rot=4,
+            logfile=None,
+            trajectory=str(tmp_path / "dimer.traj"),
+        )
+
+        assert np.linalg.norm(candidate.coords[1]) < 1.0e-3
+        assert receipt["curvature_ev_a2"] < 0.0
+        assert receipt["physical_fmax_ev_a"] < 1.0e-3
+        assert receipt["maximum_translation_a"] == pytest.approx(0.03)
+        assert receipt["artificial_restraint_active_at_candidate"] is False
+        assert receipt["all_nonfrozen_atoms_movable"] is True
+
 
 class TestReactionPathVector:
     def test_removes_rigid_motion_and_normalizes_internal_change(self):

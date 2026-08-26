@@ -12,6 +12,7 @@ import pytest
 
 from quarry.clusters import Cluster
 from quarry.pipeline import DftSettings, FrequencyResult, frequency_geometry_fingerprint
+from scripts import a2a_cleavage_localize as localize
 from scripts import a2a_path_rebuild as a2a
 
 
@@ -369,3 +370,50 @@ def test_sella_strategy_records_active_subspace_and_reconditioning():
     assert "active-subspace" in a2a.SELLA_MODE_STRATEGY
     assert "internal-conditioned" in a2a.SELLA_MODE_STRATEGY
     assert "cartesian-trust" in a2a.LOCAL_TRUST_SELLA_MODE_STRATEGY
+
+
+def test_full_system_localization_inputs_bind_conditioned_adjacent_images(tmp_path):
+    template = state("conditioned", "reactant")
+    crest = replace(template, coords=template.coords.copy())
+    checkpoint_root = tmp_path / "checkpoints"
+    checkpoint = checkpoint_root / "climb-final"
+    checkpoint.mkdir(parents=True)
+    images = []
+    for index, shift in enumerate((-0.3, 0.0, 0.4)):
+        coords = template.coords.copy()
+        coords[0, 0] += shift
+        coords[1, 1] += shift / 2.0
+        current = replace(template, coords=coords)
+        write_xyz(checkpoint / f"image-{index:02d}.xyz", current)
+        images.append(current)
+    crest = images[1]
+    conditioned = replace(template, coords=template.coords.copy())
+    conditioned.coords[0, 1] += 0.05
+    (checkpoint / "manifest.json").write_text(
+        json.dumps(
+            {
+                "stage": "climb-final",
+                "converged": True,
+                "images": [f"image-{index:02d}.xyz" for index in range(3)],
+            }
+        )
+    )
+    (checkpoint_root / "latest.json").write_text(
+        json.dumps({"checkpoint": checkpoint.name})
+    )
+
+    mode, receipt = localize.localization_inputs(
+        checkpoint_root,
+        crest,
+        conditioned,
+        [0, 1],
+    )
+
+    left_radius = np.linalg.norm(images[0].coords[[0, 1]] - conditioned.coords[[0, 1]])
+    right_radius = np.linalg.norm(images[2].coords[[0, 1]] - conditioned.coords[[0, 1]])
+    assert np.linalg.norm(mode) == pytest.approx(1.0)
+    assert receipt["local_trust_radius_a"] == pytest.approx(
+        min(left_radius, right_radius)
+    )
+    assert receipt["local_guard_radius_a"] >= max(left_radius, right_radius)
+    assert receipt["checkpoint_manifest_sha256"]
