@@ -309,6 +309,17 @@ def test_local_neb_tangent_comes_from_neighbors_of_exact_peak(tmp_path):
     assert np.allclose(tangent, expected)
     assert receipt["peak_index"] == 2
     assert receipt["strategy"] == a2a.SELLA_MODE_STRATEGY
+    left_radius = np.linalg.norm(images[1].coords[[0, 1]] - images[2].coords[[0, 1]])
+    right_radius = np.linalg.norm(images[3].coords[[0, 1]] - images[2].coords[[0, 1]])
+    assert receipt["left_active_radius_a"] == pytest.approx(left_radius)
+    assert receipt["right_active_radius_a"] == pytest.approx(right_radius)
+    assert receipt["local_trust_radius_a"] == pytest.approx(
+        min(left_radius, right_radius)
+    )
+    assert receipt["local_guard_radius_a"] == pytest.approx(
+        max(left_radius, right_radius, 1.5 * min(left_radius, right_radius))
+    )
+    assert receipt["sella_delta_max_a"] <= a2a.LOCAL_SELLA_DELTA_MAX_A
 
 
 def asdict_segment(spec: a2a.SegmentSpec) -> dict[str, str]:

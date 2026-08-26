@@ -77,6 +77,80 @@ def make_ase_calculator(settings: DftSettings, charge: int, spin: int):
     return PyscfCalculator()
 
 
+def cartesian_trust_region_calculator(
+    calculator,
+    *,
+    reference_coords: np.ndarray,
+    active_indices: list[int],
+    restraint_radius_a: float,
+    guard_radius_a: float,
+    stiffness_ev_a2: float,
+):
+    """Wrap an ASE calculator with a flat-bottom local-search envelope.
+
+    The physical PES is unchanged inside ``restraint_radius_a``. Outside that
+    radius a harmonic restoring term keeps a local saddle search near its
+    hash-bound seed, while ``guard_radius_a`` refuses a geometry *before* an
+    expensive physical evaluation can run. A caller may accept a candidate only
+    after proving that it converged back inside the restraint-free region.
+
+    The radius is the Cartesian norm over ``active_indices``. This wrapper is
+    intended for an active-subspace localization whose complement is frozen; it
+    is not a replacement for an unconstrained full-system stationary-point gate.
+    """
+    from ase.calculators.calculator import Calculator, all_changes
+
+    reference = np.asarray(reference_coords, dtype=float)
+    if (
+        reference.ndim != 2
+        or reference.shape[1] != 3
+        or not np.all(np.isfinite(reference))
+    ):
+        raise ValueError("reference_coords must be a finite (N, 3) array")
+    if not active_indices or len(set(active_indices)) != len(active_indices):
+        raise ValueError("active_indices must be non-empty and unique")
+    if any(index < 0 or index >= len(reference) for index in active_indices):
+        raise ValueError("active_indices contains an out-of-range atom")
+    if not np.isfinite(restraint_radius_a) or restraint_radius_a <= 0.0:
+        raise ValueError("restraint_radius_a must be finite and positive")
+    if not np.isfinite(guard_radius_a) or guard_radius_a <= restraint_radius_a:
+        raise ValueError("guard_radius_a must exceed restraint_radius_a")
+    if not np.isfinite(stiffness_ev_a2) or stiffness_ev_a2 <= 0.0:
+        raise ValueError("stiffness_ev_a2 must be finite and positive")
+    active = np.asarray(active_indices, dtype=int)
+
+    class CartesianTrustRegionCalculator(Calculator):
+        implemented_properties = ["energy", "forces"]
+
+        def calculate(
+            self, atoms=None, properties=("energy",), system_changes=all_changes
+        ):
+            super().calculate(atoms, properties, system_changes)
+            if atoms is None or atoms.positions.shape != reference.shape:
+                raise ValueError("trust-region atoms do not match reference_coords")
+            displacement = np.asarray(atoms.positions[active] - reference[active])
+            radius = float(np.linalg.norm(displacement))
+            if not np.isfinite(radius):
+                raise RuntimeError("saddle search produced a non-finite trust radius")
+            if radius > guard_radius_a:
+                raise RuntimeError(
+                    "saddle search escaped the local Cartesian guard before PES "
+                    f"evaluation: {radius:.6f} A > {guard_radius_a:.6f} A"
+                )
+
+            calculator.calculate(atoms, ("energy", "forces"), system_changes)
+            energy = float(calculator.results["energy"])
+            forces = np.asarray(calculator.results["forces"], dtype=float).copy()
+            if radius > restraint_radius_a:
+                extension = radius - restraint_radius_a
+                energy += 0.5 * stiffness_ev_a2 * extension**2
+                forces[active] -= stiffness_ev_a2 * extension * displacement / radius
+            self.results = dict(calculator.results)
+            self.results.update(energy=energy, forces=forces)
+
+    return CartesianTrustRegionCalculator()
+
+
 def reaction_path_vector(
     reactant: Cluster,
     product: Cluster,
@@ -183,6 +257,10 @@ def find_ts(
     initial_mode: np.ndarray | None = None,
     internal: bool = True,
     active_indices: list[int] | None = None,
+    local_trust_radius_a: float | None = None,
+    local_guard_radius_a: float | None = None,
+    local_restraint_k_ev_a2: float = 50.0,
+    sella_delta_max_a: float | None = None,
 ) -> Cluster:
     """First-order saddle search (Sella, partitioned RFO) from a TS guess.
 
@@ -197,7 +275,9 @@ def find_ts(
     is intended for a bounded active-subspace seed, not final TS acceptance:
     callers must subsequently relax the spectator space, release the temporary
     freezes, and verify a full-system stationary point and Hessian. Raises if
-    Sella does not converge within ``max_steps``.
+    Sella does not converge within ``max_steps``. ``local_trust_radius_a`` and
+    ``local_guard_radius_a`` opt that seed into a flat-bottom Cartesian envelope;
+    a returned geometry must be back inside the unrestrained radius.
     """
     from ase import Atoms
     from ase.constraints import FixAtoms
@@ -220,14 +300,53 @@ def find_ts(
         mode = mode / mode_norm
 
     search_frozen = saddle_search_frozen_indices(cluster, active_indices)
+    trust_enabled = local_trust_radius_a is not None or local_guard_radius_a is not None
+    if trust_enabled:
+        if active_indices is None:
+            raise ValueError("a local Cartesian trust envelope requires active_indices")
+        if local_trust_radius_a is None or local_guard_radius_a is None:
+            raise ValueError("local trust and guard radii must be provided together")
+    if sella_delta_max_a is not None and (
+        not np.isfinite(sella_delta_max_a) or sella_delta_max_a <= 0.0
+    ):
+        raise ValueError("sella_delta_max_a must be finite and positive")
+
     atoms = Atoms(symbols=cluster.symbols, positions=cluster.coords)
-    atoms.calc = make_ase_calculator(settings, cluster.charge, cluster.spin)
+    calculator = make_ase_calculator(settings, cluster.charge, cluster.spin)
+    if trust_enabled:
+        assert active_indices is not None
+        assert local_trust_radius_a is not None
+        assert local_guard_radius_a is not None
+        calculator = cartesian_trust_region_calculator(
+            calculator,
+            reference_coords=cluster.coords,
+            active_indices=active_indices,
+            restraint_radius_a=local_trust_radius_a,
+            guard_radius_a=local_guard_radius_a,
+            stiffness_ev_a2=local_restraint_k_ev_a2,
+        )
+    atoms.calc = calculator
     if search_frozen:
         atoms.set_constraint(FixAtoms(indices=search_frozen))
     # Internal coordinates are the default for an undirected molecular search.
     # A directed endpoint mode is Cartesian and therefore opts into the
     # Cartesian PES explicitly.
-    dyn = Sella(atoms, order=1, internal=internal, trajectory=trajectory)
+    if sella_delta_max_a is None:
+        dyn = Sella(atoms, order=1, internal=internal, trajectory=trajectory)
+    else:
+        dyn = Sella(
+            atoms,
+            order=1,
+            internal=internal,
+            trajectory=trajectory,
+            delta0=sella_delta_max_a,
+        )
+        dyn.delta = min(float(dyn.delta), sella_delta_max_a)
+
+        def cap_sella_delta() -> None:
+            dyn.delta = min(float(dyn.delta), sella_delta_max_a)
+
+        dyn.attach(cap_sella_delta, interval=1)
     if mode is not None:
         free_basis = dyn.pes.get_Ufree()
         if free_basis is None:
@@ -247,6 +366,18 @@ def find_ts(
             f"Sella did not converge a saddle for {cluster.name} "
             f"within {max_steps} steps"
         )
+    if trust_enabled:
+        assert active_indices is not None
+        assert local_trust_radius_a is not None
+        active = np.asarray(active_indices, dtype=int)
+        final_radius = float(
+            np.linalg.norm(atoms.positions[active] - cluster.coords[active])
+        )
+        if final_radius > local_trust_radius_a:
+            raise RuntimeError(
+                "Sella converged only on the local Cartesian restraint: "
+                f"{final_radius:.6f} A > {local_trust_radius_a:.6f} A"
+            )
     return replace(cluster, coords=atoms.positions.copy(), name=f"{cluster.name}-ts")
 
 

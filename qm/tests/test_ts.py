@@ -92,6 +92,55 @@ class TestAseAdapter:
         f_numeric = -(e[0] - e[1]) / (2.0 * h)
         assert f_analytic == pytest.approx(f_numeric, abs=1e-3)
 
+    def test_cartesian_trust_region_is_flat_bottomed_and_fail_closed(self):
+        from ase import Atoms
+        from ase.calculators.calculator import Calculator, all_changes
+
+        from quarry.ts import cartesian_trust_region_calculator
+
+        class ZeroCalculator(Calculator):
+            implemented_properties = ["energy", "forces"]
+
+            def __init__(self):
+                super().__init__()
+                self.calls = 0
+
+            def calculate(
+                self, atoms=None, properties=("energy",), system_changes=all_changes
+            ):
+                super().calculate(atoms, properties, system_changes)
+                assert atoms is not None
+                self.calls += 1
+                self.results = {
+                    "energy": 0.0,
+                    "forces": np.zeros_like(atoms.positions),
+                }
+
+        base = ZeroCalculator()
+        reference = np.zeros((2, 3))
+        calculator = cartesian_trust_region_calculator(
+            base,
+            reference_coords=reference,
+            active_indices=[0],
+            restraint_radius_a=0.5,
+            guard_radius_a=1.0,
+            stiffness_ev_a2=8.0,
+        )
+        atoms = Atoms("HH", positions=reference.copy())
+        atoms.calc = calculator
+        assert atoms.get_potential_energy() == pytest.approx(0.0)
+        assert np.allclose(atoms.get_forces(), 0.0)
+
+        atoms.positions[0, 0] = 0.75
+        assert atoms.get_potential_energy() == pytest.approx(0.25)
+        assert atoms.get_forces()[0, 0] == pytest.approx(-2.0)
+        calls_before_guard = base.calls
+
+        atoms.positions[0, 0] = 1.01
+        with pytest.raises(RuntimeError, match="before PES evaluation"):
+            atoms.get_potential_energy()
+        assert base.calls == calls_before_guard
+
 
 class TestReactionPathVector:
     def test_removes_rigid_motion_and_normalizes_internal_change(self):
