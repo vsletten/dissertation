@@ -4,6 +4,15 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-27 — fable — Track E phase-3/paper-1 path carded: E3a
+  classical-NEB barrier campaign (READY — the "uncomputed middle": Nteme
+  replication gate, then dehydroxylate/defect-zone/trap/Xe barriers), E3b
+  CP2K spot checks (blocked: E3a), E2b grain-size sweep (READY — closes
+  E2's 768-site statistics deviation), E4 1998-comparison (blocked: E3a,
+  E2b, A8; the paper-1 figure set). Also A5p1-aging-study (READY): M5 named it
+  but it was never carded. Context: board starvation 08-25→08-27 was a
+  feeder machine-parser bug, fixed in mission-control 387300f.
+
 - 2026-08-27 — (hermes-8d9e30fee91548; profile=laptop) — C2 ships a
   strain-seeded passive-film CTMC deck plus a deterministic 7×32-replica study
   and three-size scan: initiation rises 0/32→32/32, mean pit count
