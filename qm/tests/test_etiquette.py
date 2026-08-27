@@ -4,6 +4,7 @@ import os
 import re
 import signal
 import stat
+import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -305,6 +306,133 @@ def test_two_gpu_driver_bootstraps_serialize_and_release(monkeypatch, tmp_path, 
     finally:
         first.close()
     assert not lease_path.exists()
+
+
+def test_forked_child_cannot_release_parent_lease(tmp_path):
+    lease_path = tmp_path / "lease.json"
+    lease = acquire_gpu(
+        "parent",
+        16.0,
+        1.0,
+        lease_path=lease_path,
+        install_signal_handlers=False,
+    )
+    child = os.fork()
+    if child == 0:
+        lease.release()
+        os._exit(0)
+    try:
+        _, status = os.waitpid(child, 0)
+        assert os.waitstatus_to_exitcode(status) == 0
+        assert lease_path.exists()
+        assert json.loads(lease_path.read_text())["pid"] == os.getpid()
+    finally:
+        lease.release()
+    assert not lease_path.exists()
+
+
+def test_actual_phase2_cli_refuses_live_lease_without_traceback(tmp_path):
+    lease_path = tmp_path / "lease.json"
+    lease = acquire_gpu(
+        "parent",
+        16.0,
+        1.0,
+        lease_path=lease_path,
+        install_signal_handlers=False,
+    )
+    driver = Path(__file__).resolve().parent.parent / "scripts" / "phase2_ladder.py"
+    env = os.environ | {"GPU_LEASE_PATH": str(lease_path)}
+    try:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(driver),
+                "--family",
+                "oss",
+                "--dry-run",
+                "--gpu",
+                "--nice",
+                "0",
+                "--log",
+                str(tmp_path / "driver.log"),
+            ],
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    finally:
+        lease.release()
+
+    assert completed.returncode == 1
+    assert "GPU lane busy (owner=parent" in completed.stderr
+    assert "Traceback" not in completed.stderr
+
+
+def test_sigterm_during_release_does_not_deadlock(tmp_path):
+    lease_path = tmp_path / "lease.json"
+    code = """
+import os
+import signal
+import quarry.etiquette as etiquette
+
+path = os.environ["GPU_LEASE_PATH"]
+lease = etiquette.acquire_gpu("signal-test", 16.0, 1.0)
+original = etiquette._read_lease
+
+def signal_while_locked(current_path):
+    os.kill(os.getpid(), signal.SIGTERM)
+    return original(current_path)
+
+etiquette._read_lease = signal_while_locked
+lease.release()
+raise RuntimeError("pending SIGTERM did not terminate the process")
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        env=os.environ | {"GPU_LEASE_PATH": str(lease_path)},
+        text=True,
+        capture_output=True,
+        timeout=5,
+        check=False,
+    )
+
+    assert completed.returncode == -signal.SIGTERM
+    assert not lease_path.exists()
+
+
+def test_state_symlinks_fail_closed_without_touching_targets(tmp_path):
+    lease_path = tmp_path / "lease.json"
+    victim = tmp_path / "victim.txt"
+    victim.write_text("KEEP\n")
+    victim.chmod(0o644)
+    lock_path = tmp_path / "lease.json.lock"
+    lock_path.symlink_to(victim)
+
+    with pytest.raises(GpuLeaseBusy, match="unsafe lock path"):
+        gpu_lane_available(lease_path=lease_path)
+    assert victim.read_text() == "KEEP\n"
+    assert stat.S_IMODE(victim.stat().st_mode) == 0o644
+
+    lock_path.unlink()
+    lease_path.write_text(
+        json.dumps(
+            {
+                "owner": "dead",
+                "pid": 999_999_999,
+                "started": "2026-08-27T12:00:00Z",
+                "ttl": 1.0,
+                "expected_gb": 16.0,
+            }
+        )
+    )
+    (tmp_path / "stale-breaks.log").symlink_to(victim)
+    with pytest.raises(GpuLeaseBusy, match="unsafe stale-break path"):
+        gpu_lane_available(lease_path=lease_path, pid_alive=lambda pid: False)
+    assert victim.read_text() == "KEEP\n"
+    assert stat.S_IMODE(victim.stat().st_mode) == 0o644
+    assert lease_path.exists()
 
 
 def test_phase_drivers_wire_gpu_lease_and_memory_override():

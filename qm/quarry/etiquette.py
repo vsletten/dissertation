@@ -9,6 +9,7 @@ import json
 import math
 import os
 import signal
+import stat
 import sys
 import time
 import warnings
@@ -70,9 +71,22 @@ def _validate_gpu_mem_gb(value: float) -> None:
         )
 
 
+def _open_regular(path: Path, flags: int, mode: int = 0o600) -> int:
+    """Open one state file without following links or accepting special files."""
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    fd = os.open(path, flags | nofollow | cloexec, mode)
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise OSError(f"GPU lease state path is not a regular file: {path}")
+    return fd
+
+
 def _read_lease(path: Path) -> dict[str, object]:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        fd = _open_regular(path, os.O_RDONLY)
+        with os.fdopen(fd, encoding="utf-8") as stream:
+            payload = json.load(stream)
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise GpuLeaseBusy(
             f"GPU lane busy (unreadable lease at {path}: {exc})"
@@ -91,7 +105,12 @@ def _read_lease(path: Path) -> dict[str, object]:
 def _lease_lock(lease_path: Path) -> Iterator[None]:
     lease_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = lease_path.with_name(f"{lease_path.name}.lock")
-    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fd = _open_regular(lock_path, os.O_CREAT | os.O_RDWR)
+    except OSError as exc:
+        raise GpuLeaseBusy(
+            f"GPU lane busy (unsafe lock path {lock_path}: {exc})"
+        ) from exc
     try:
         os.fchmod(fd, 0o600)
         fcntl.flock(fd, fcntl.LOCK_EX)
@@ -104,7 +123,7 @@ def _lease_lock(lease_path: Path) -> Iterator[None]:
 def _write_lease(path: Path, payload: dict[str, object]) -> None:
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
-        fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        fd = _open_regular(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             json.dump(payload, stream, sort_keys=True)
             stream.write("\n")
@@ -127,7 +146,12 @@ def _record_stale_break(
         f"{_iso_utc(now)} broke stale GPU lease: "
         f"owner={payload['owner']} pid={payload['pid']} reason=pid-dead\n"
     )
-    fd = os.open(note_path, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
+    try:
+        fd = _open_regular(note_path, os.O_CREAT | os.O_APPEND | os.O_WRONLY)
+    except OSError as exc:
+        raise GpuLeaseBusy(
+            f"GPU lane busy (unsafe stale-break path {note_path}: {exc})"
+        ) from exc
     with os.fdopen(fd, "a", encoding="utf-8") as stream:
         stream.write(line)
         stream.flush()
@@ -145,7 +169,9 @@ class GpuLease:
     ttl_hours: float
     expected_gb: float
     path: Path
+    _acquirer_pid: int = field(default_factory=os.getpid)
     _released: bool = False
+    _releasing: bool = False
     _signal_handlers: dict[int, object] = field(default_factory=dict)
 
     def install_signal_handlers(self) -> None:
@@ -171,9 +197,16 @@ class GpuLease:
         os.kill(os.getpid(), signum)
 
     def release(self) -> None:
-        """Remove only the exact lease record this object acquired."""
-        if self._released:
+        """Remove only the exact lease record this process acquired."""
+        if os.getpid() != self._acquirer_pid or self._released or self._releasing:
             return
+        self._releasing = True
+        previous_mask = None
+        pthread_sigmask = getattr(signal, "pthread_sigmask", None)
+        if pthread_sigmask is not None:
+            previous_mask = pthread_sigmask(
+                signal.SIG_BLOCK, {signal.SIGTERM, signal.SIGINT}
+            )
         try:
             with _lease_lock(self.path):
                 if self.path.exists():
@@ -196,6 +229,10 @@ class GpuLease:
                     signal.signal(signum, previous)
             self._signal_handlers.clear()
             self._released = True
+            self._releasing = False
+            if previous_mask is not None:
+                assert pthread_sigmask is not None
+                pthread_sigmask(signal.SIG_SETMASK, previous_mask)
 
     def __enter__(self) -> GpuLease:
         return self
