@@ -187,22 +187,25 @@ fn run_replica(
             repassivation_events += 1;
         }
 
+        // Record first formation immediately; keep sparse sampling only for CSV.
         let sample = event.is_multiple_of(20) || name == "film_rupture";
-        if sample {
+        if sample || induction_time.is_none() {
             let clusters = cluster_stats(&engine, &pit);
             if induction_time.is_none() && clusters.largest >= STABLE_CLUSTER {
                 induction_time = Some(engine.time);
             }
-            if let Some(writer) = transient.as_mut() {
-                writeln!(
-                    writer,
-                    "{event},{:.9},{},{},{:.9},{dissolution_events},{repassivation_events}",
-                    engine.time,
-                    active_count(&engine, &pit),
-                    clusters.largest,
-                    reaction_rate(&engine, dissolution_rule),
-                )
-                .map_err(|error| error.to_string())?;
+            if sample {
+                if let Some(writer) = transient.as_mut() {
+                    writeln!(
+                        writer,
+                        "{event},{:.9},{},{},{:.9},{dissolution_events},{repassivation_events}",
+                        engine.time,
+                        active_count(&engine, &pit),
+                        clusters.largest,
+                        reaction_rate(&engine, dissolution_rule),
+                    )
+                    .map_err(|error| error.to_string())?;
+                }
             }
         }
     }
