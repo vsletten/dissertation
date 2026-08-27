@@ -47,14 +47,15 @@ on main). Priority P0 > P1 > P2 within READY.
 | [B3-conformance-decks](cards/B3-conformance-decks.md) | B | P1 | any | done | B2 ✅ |
 | [B4-ensembles-observables](cards/B4-ensembles-observables.md) | B | P1 | any | done | B2 ✅ |
 | [B5-execution-schedule](cards/B5-execution-schedule.md) | B | P1 | any | done | B2 ✅ |
-| [C2-corrosion-deck](cards/C2-corrosion-deck.md) | C | P2 | any | ready | B3 ✅ |
+| [C2-corrosion-deck](cards/C2-corrosion-deck.md) | C | P2 | any | done | B3 ✅ |
 | [D2a-astro-rate-reproduction](cards/D2a-astro-rate-reproduction.md) | D | P1 | workstation | done | — |
 | [D2b-explicit-surface-rates](cards/D2b-explicit-surface-rates.md) | D | P1 | workstation | ready | D2a ✅ |
 | [D3-ice-mantle-deck](cards/D3-ice-mantle-deck.md) | D | P2 | any | done | B3 ✅, D2a ✅ |
 | [D3b-co-hydrogenation-deck](cards/D3b-co-hydrogenation-deck.md) | D | P2 | any | blocked: D2b | D3 ✅, D2b |
 | [A5p0-aging-observables](cards/A5p0-aging-observables.md) | A | P1 | any | done | B4 ✅ |
 
-**Done** (acceptance verified on main): A1g-acid-bridge-side-hydronium-neutral-attacker,
+**Done** (acceptance verified on main): C2-corrosion-deck,
+A1g-acid-bridge-side-hydronium-neutral-attacker,
 A1f-acid-neutral-water-attacker-relay,
 A1e-acid-concerted-hydronium-relay,
 A1d-acid-3w-bridge-convergence,
