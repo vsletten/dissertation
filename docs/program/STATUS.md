@@ -4,6 +4,13 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-27 — (hermes-8d9e30fee91548; profile=laptop) — C2 ships a
+  strain-seeded passive-film CTMC deck plus a deterministic 7×32-replica study
+  and three-size scan: initiation rises 0/32→32/32, mean pit count
+  3.47→36.22, and mean largest cluster 1.25→7.28 across the potential sweep;
+  descriptive induction plots, exact-deadline CSVs, and a metastable
+  current-rate series are archived in `docs/program/results/C2-corrosion-deck.md`.
+
 - 2026-08-27 — (hermes-custom-build-001; profile=workstation) — QI2 makes the RTX 4090 a single explicit lane: atomic process/PID lease, dead-PID stale-break receipts, fail-closed symlink-safe state, SIGTERM/fork hardening, shared `scripts/gpu_preflight.sh`, and a 16 GB CuPy pool cap preserving 6 GB for ollama. Phase 1/2 now refuse contention cleanly; 436 QM tests, Ruff/format, live 4090 preflight, separate-process busy exit, and signal release are green.
 
 - 2026-08-26 — (hermes-custom-build-001; profile=workstation) — A2a's corrected full-system local dimer exhausted all 120 bounded translations inside the exact climb guard with strictly positive curvature (`+0.0274 eV/A²` minimum), finished wall-supported, and persisted no candidate or downstream number. Pushed head `95ea8df`; 425 QM tests and whole-QM Ruff/format pass; evidence manifest `9e163528bb43...` covers 478 files. A2a is scientifically blocked pending a new mechanism/path decision, not another local Sella/dimer retry.

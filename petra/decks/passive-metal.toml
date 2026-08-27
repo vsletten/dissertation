@@ -1,0 +1,228 @@
+# Minimal coarse-grained passive-film breakdown model. Each square-grid site is
+# a nanometre-scale film patch, not an atom. Rates are deliberately compressed
+# for bounded ensemble studies; their ordering, thermo coupling, and spatial
+# feedback are the scientific content of this conformance/showcase deck.
+[deck]
+name = "passive-metal-pitting"
+schema = 2
+units = "kcal/mol"
+
+[structure]
+kind = "grid"
+grid = "square"
+neighborhood = "von_neumann"
+dims = [24, 24]
+boundary = ["periodic", "periodic"]
+default_kind = "film_patch"
+
+[[structure.species]]
+name = "Film"
+
+[[structure.species]]
+name = "Metal"
+
+# Reservoir species: a_Cl is chloride activity; mu(e_drive) is the
+# electrochemical driving term (the alpha*F*eta analogue, in kcal/mol).
+[[structure.species]]
+name = "Cl"
+charge = -1.0
+
+[[structure.species]]
+name = "e_drive"
+
+[[structure.kinds]]
+name = "film_patch"
+initial = "intact"
+
+[[structure.kinds.states]]
+name = "intact"
+occupant = "Film"
+
+[[structure.kinds.states]]
+name = "adsorbed"
+occupant = "Film"
+
+[[structure.kinds.states]]
+name = "thinned"
+occupant = "Film"
+
+[[structure.kinds.states]]
+name = "bare"
+occupant = "Metal"
+
+[[structure.kinds.states]]
+name = "dissolving"
+occupant = "Metal"
+
+[[structure.kinds.states]]
+name = "repassivated"
+occupant = "Film"
+
+# A static screw-dislocation strain-energy field provides a deterministic weak
+# point. film_rupture couples to it below; the core therefore nucleates first
+# without hard-coding a special site state.
+[[structure.defects]]
+type = "screw"
+line_axis = 2
+at = [12.0, 12.0, 0.0]
+strain_prefactor = 1.20
+core_radius = 1.5
+cap = 0.55
+
+[dynamics.thermo]
+temperature = 298.15
+
+[dynamics.thermo.activity]
+Cl = 0.12
+e_drive = 1.0
+
+[dynamics.thermo.mu]
+Cl = 0.0
+e_drive = 0.0
+
+[dynamics.aliases]
+active = ["film_patch.thinned", "film_patch.bare", "film_patch.dissolving"]
+pit = ["film_patch.bare", "film_patch.dissolving"]
+
+# Cl adsorption carries both reservoir factors: changing a_Cl changes chloride
+# exposure, while changing mu(e_drive) represents applied electrode potential.
+[[dynamics.rules]]
+name = "chloride_adsorption"
+center = { kind = "film_patch", state = ["intact"] }
+rate = { constant = 0.020 }
+consumes = ["Cl", "e_drive"]
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "adsorbed"
+
+[[dynamics.rules]]
+name = "chloride_desorption"
+center = { kind = "film_patch", state = ["adsorbed"] }
+rate = { constant = 0.050 }
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "intact"
+
+# Local acidification / Cl retention proxy. A neighboring active patch lowers
+# the thinning barrier nonlinearly; this by_count table is the Punckt-style
+# autocatalytic coupling varied indirectly by potential in the study.
+[[dynamics.rules]]
+name = "film_thinning"
+center = { kind = "film_patch", state = ["adsorbed"] }
+rate = { arrhenius = { prefactor = 0.030, ea = 0.0 } }
+
+[[dynamics.rules.modifiers]]
+select = { distance = 1, state = ["@active"] }
+by_count = { dea = [0.0, -0.30, -0.65, -1.00, -1.30] }
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "thinned"
+
+# Rupture is promoted by potential, active neighbors, and the declared defect
+# field. strain.scale < 0 lowers the activation barrier near the core.
+[[dynamics.rules]]
+name = "film_rupture"
+center = { kind = "film_patch", state = ["thinned"] }
+rate = { arrhenius = { prefactor = 0.020, ea = 0.55 } }
+consumes = ["e_drive"]
+strain = { scale = -1.0 }
+
+[[dynamics.rules.modifiers]]
+select = { distance = 1, state = ["@active"] }
+by_count = { dea = [0.0, -0.25, -0.55, -0.85, -1.10] }
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "bare"
+
+# Bare/dissolving form a two-state anodic cycle. Each activation and dissolution
+# event is one unit of the current-transient proxy recorded by the study.
+[[dynamics.rules]]
+name = "dissolution_activate"
+center = { kind = "film_patch", state = ["bare"] }
+rate = { constant = 0.040 }
+consumes = ["e_drive"]
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "dissolving"
+
+[[dynamics.rules]]
+name = "metal_dissolution"
+center = { kind = "film_patch", state = ["dissolving"] }
+rate = { constant = 0.055 }
+consumes = ["e_drive"]
+
+[[dynamics.rules.modifiers]]
+select = { distance = 1, state = ["@pit"] }
+by_count = { dea = [0.0, -0.12, -0.28, -0.45, -0.60] }
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "bare"
+
+# Active neighbors suppress healing by raising the repair barrier. Separate
+# channels preserve the observable distinction between bare and dissolving.
+[[dynamics.rules]]
+name = "repassivate_bare"
+center = { kind = "film_patch", state = ["bare"] }
+rate = { arrhenius = { prefactor = 0.045, ea = 0.0 } }
+
+[[dynamics.rules.modifiers]]
+select = { distance = 1, state = ["@active"] }
+by_count = { dea = [0.0, 0.25, 0.55, 0.90, 1.20] }
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "repassivated"
+
+[[dynamics.rules]]
+name = "repassivate_dissolving"
+center = { kind = "film_patch", state = ["dissolving"] }
+rate = { arrhenius = { prefactor = 0.030, ea = 0.0 } }
+
+[[dynamics.rules.modifiers]]
+select = { distance = 1, state = ["@active"] }
+by_count = { dea = [0.0, 0.25, 0.55, 0.90, 1.20] }
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "repassivated"
+
+[[dynamics.rules]]
+name = "film_healing"
+center = { kind = "film_patch", state = ["repassivated"] }
+rate = { constant = 0.025 }
+
+[[dynamics.rules.effects]]
+target = "center"
+set = "intact"
+
+[execution]
+strategy = "ctmc"
+
+[execution.ctmc]
+
+[execution.stop]
+steps = 30000
+
+[execution.ensemble]
+seed = 82026
+n_replicas = 32
+seed_policy = "hash"
+
+[observables]
+report_every = 250
+
+[[observables.series]]
+kind = "state_counts"
+
+[[observables.series]]
+kind = "event_rates"
+
+[[observables.series]]
+kind = "cluster_sizes"
+state = "@pit"
