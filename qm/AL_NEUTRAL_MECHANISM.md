@@ -126,7 +126,9 @@ associative-intermediate and hydrolyzed-product basins.
 
 The ignored campaign directory is
 `qm/runs/phase1/al-neutral-b3lyp-def2-svp-flank/`. Its durable copy is named in
-the mission-control TASK-168 Result before worktree teardown.
+the mission-control TASK-168 Result before worktree teardown. Any TASK-168
+continuation now starts with repository `scripts/gpu_preflight.sh`; do not
+recreate its historical hand-rolled `nvidia-smi` checks.
 
 | Artifact | SHA-256 |
 |---|---|

@@ -46,6 +46,24 @@ uv run python scripts/phase0_smoke.py --quick    # seconds-long sanity check
 uv run python scripts/phase0_smoke.py --waters 24  # ~100-atom-regime probe
 ```
 
+### Shared GPU lane
+
+Before any ad-hoc workstation GPU job, run `../scripts/gpu_preflight.sh`.
+It exits non-zero when `nvidia-smi` is unhealthy or a live campaign owns the
+single lease at `~/.local/state/gpu-lease/lease.json`. Phase 1 and Phase 2
+drivers acquire that lease automatically with `--gpu`, release it on normal
+exit and SIGTERM/SIGINT, and refuse contention with `GPU lane busy
+(owner=...)`. A deterministically dead lease PID is broken under a serialized
+lock and recorded with a UTC timestamp in `stale-breaks.log`; a live PID is
+never evicted merely because its declared TTL elapsed.
+
+CuPy's device pool defaults to **16 GB** for leased drivers. The explicit
+`--gpu-mem-gb` override is capped at **18 GB** on the 24 GB RTX 4090, preserving
+at least **6 GB for ollama** and other cohabiting model users. The limit applies
+to CuPy's cached device allocator; it is not permission to run a second heavy
+GPU campaign. TASK-168-family continuations and future queue workers should use
+the shared preflight instead of open-coding `nvidia-smi` parsing.
+
 First measured table (2026-08-18, 15 atoms, **no** density fitting, cold
 GPU): CPU/GPU energies bitwise-matched; Hessian 1.6× GPU, SCF/gradient
 *slower* on GPU. That is the survey's predicted small-molecule worst case

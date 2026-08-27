@@ -37,6 +37,7 @@ if __name__ == "__main__":
     bootstrap_cli(
         "phase2_ladder",
         default_run_root=Path(__file__).resolve().parent.parent / "runs",
+        gpu_owner="phase2_ladder",
     )
 
 import numpy as np  # noqa: E402
@@ -477,6 +478,12 @@ def main() -> int:
     ap.add_argument("--xc", default="b3lyp")
     ap.add_argument("--basis", default="def2-svp")
     ap.add_argument("--gpu", action="store_true")
+    ap.add_argument(
+        "--gpu-mem-gb",
+        type=float,
+        default=16.0,
+        help="CuPy device-pool ceiling in GB (max 18 preserves 6 GB for ollama)",
+    )
     ap.add_argument("--threads", type=int, default=16)
     ap.add_argument("--nice", type=int, default=10, help="process niceness increment")
     ap.add_argument("--log", help="tee output to this path (default: qm/runs)")
