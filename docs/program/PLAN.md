@@ -28,7 +28,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [B1-schema-rfc](cards/B1-schema-rfc.md) | B | P0 | any | done | — |
 | [B2-engine-refactor](cards/B2-engine-refactor.md) | B | P0 | any | done | B1 ✅ |
 | [QI1-driver-enforced-etiquette](cards/QI1-driver-enforced-etiquette.md) | A | P2 | any | done | — |
-| [QI2-gpu-lease](cards/QI2-gpu-lease.md) | A | P1 | any | ready | — |
+| [QI2-gpu-lease](cards/QI2-gpu-lease.md) | A | P1 | any | done | — |
 | [QI3-fenwick-total-cancellation](cards/QI3-fenwick-total-cancellation.md) | B | P1 | any | done | — |
 | [E1-muscovite-deck](cards/E1-muscovite-deck.md) | E | P1 | any | done | — (phase 1 isothermal) |
 | [E2-muscovite-full-mechanism](cards/E2-muscovite-full-mechanism.md) | E | P1 | any | done | B5 ✅ |
@@ -54,7 +54,8 @@ on main). Priority P0 > P1 > P2 within READY.
 | [D3b-co-hydrogenation-deck](cards/D3b-co-hydrogenation-deck.md) | D | P2 | any | blocked: D2b | D3 ✅, D2b |
 | [A5p0-aging-observables](cards/A5p0-aging-observables.md) | A | P1 | any | done | B4 ✅ |
 
-**Done** (acceptance verified on main): A1g-acid-bridge-side-hydronium-neutral-attacker,
+**Done** (acceptance verified on main): QI2-gpu-lease,
+A1g-acid-bridge-side-hydronium-neutral-attacker,
 A1f-acid-neutral-water-attacker-relay,
 A1e-acid-concerted-hydronium-relay,
 A1d-acid-3w-bridge-convergence,
