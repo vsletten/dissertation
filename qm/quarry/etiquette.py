@@ -129,8 +129,8 @@ def _write_lease(path: Path, payload: dict[str, object]) -> None:
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
+            os.fchmod(stream.fileno(), 0o600)
         os.replace(temporary, path)
-        path.chmod(0o600)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -153,10 +153,10 @@ def _record_stale_break(
             f"GPU lane busy (unsafe stale-break path {note_path}: {exc})"
         ) from exc
     with os.fdopen(fd, "a", encoding="utf-8") as stream:
+        os.fchmod(stream.fileno(), 0o600)
         stream.write(line)
         stream.flush()
         os.fsync(stream.fileno())
-    note_path.chmod(0o600)
 
 
 @dataclass
