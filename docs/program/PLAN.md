@@ -57,7 +57,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [E2b-grain-size-sweep](cards/E2b-grain-size-sweep.md) | E | P1 | any | ready | E2 ✅, B4 ✅ |
 | [E3a-classical-neb-barriers](cards/E3a-classical-neb-barriers.md) | E | P1 | workstation | ready | — |
 | [E3b-periodic-dft-spot-checks](cards/E3b-periodic-dft-spot-checks.md) | E | P2 | workstation | blocked: E3a | E3a |
-| [E4-1998-comparison](cards/E4-1998-comparison.md) | E | P1 | any | blocked: E3a, E2b | E3a, E2b, A8 |
+| [E4-1998-comparison](cards/E4-1998-comparison.md) | E | P1 | any | blocked: E3a, E2b, A8 | E3a, E2b, A8 |
 
 **Done** (acceptance verified on main): C2-corrosion-deck,
 QI2-gpu-lease,

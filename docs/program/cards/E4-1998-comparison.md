@@ -5,7 +5,7 @@
 - priority: P1
 - machine: any (CPU ensembles; needs the E3a barrier set)
 - depends: E3a-classical-neb-barriers, E2b-grain-size-sweep, A8-thesis-archive-intake
-- blocked-on: E3a-classical-neb-barriers, E2b-grain-size-sweep
+- blocked-on: E3a-classical-neb-barriers, E2b-grain-size-sweep, A8-thesis-archive-intake
 - claimed-by:
 
 ## Objective
@@ -45,5 +45,5 @@ reservoir release ordering.
 ## Progress
 
 - 2026-08-27 — filed by Fable. Blocked on the computed-barrier campaign
-  (E3a) and the statistics ladder (E2b); A8 supplies the digitized 1998
-  release data.
+  (E3a), the statistics ladder (E2b), and thesis-archive intake (A8),
+  which supplies the digitized 1998 release data.

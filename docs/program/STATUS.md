@@ -9,7 +9,7 @@ appended by the PR that did it: `date — actor — what + pointer`.
   replication gate, then dehydroxylate/defect-zone/trap/Xe barriers), E3b
   CP2K spot checks (blocked: E3a), E2b grain-size sweep (READY — closes
   E2's 768-site statistics deviation), E4 1998-comparison (blocked: E3a,
-  E2b; the paper-1 figure set). Also A5p1-aging-study (READY): M5 named it
+  E2b, A8; the paper-1 figure set). Also A5p1-aging-study (READY): M5 named it
   but it was never carded. Context: board starvation 08-25→08-27 was a
   feeder machine-parser bug, fixed in mission-control 387300f.
 
