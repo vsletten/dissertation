@@ -238,6 +238,27 @@ def test_gpu_lease_breaks_dead_pid_and_writes_dated_note(tmp_path):
         second.release()
 
 
+def test_gpu_lease_recovers_orphaned_pid_temp_and_acquires(tmp_path):
+    lease_path = tmp_path / "lease.json"
+    leftover = tmp_path / f".lease.json.{os.getpid()}.tmp"
+    leftover.write_text("{}\n")
+    leftover.chmod(0o600)
+
+    lease = acquire_gpu(
+        "replacement",
+        16.0,
+        1.0,
+        lease_path=lease_path,
+        install_signal_handlers=False,
+    )
+    try:
+        assert json.loads(lease_path.read_text())["owner"] == "replacement"
+        assert not leftover.exists()
+    finally:
+        lease.release()
+    assert not lease_path.exists()
+
+
 def test_gpu_lane_preflight_clears_only_a_dead_lease(tmp_path):
     lease_path = tmp_path / "lease.json"
     lease = acquire_gpu(

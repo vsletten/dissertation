@@ -123,14 +123,34 @@ def _lease_lock(lease_path: Path) -> Iterator[None]:
 def _write_lease(path: Path, payload: dict[str, object]) -> None:
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
-        fd = _open_regular(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        try:
+            fd = _open_regular(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                stale = _open_regular(temporary, os.O_RDONLY)
+                os.close(stale)
+                temporary.unlink()
+                fd = _open_regular(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except OSError as exc:
+                raise GpuLeaseBusy(
+                    f"GPU lane busy (unrecoverable leftover lease temp {temporary}: {exc})"
+                ) from exc
+        except OSError as exc:
+            raise GpuLeaseBusy(
+                f"GPU lane busy (unsafe temporary lease path {temporary}: {exc})"
+            ) from exc
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             json.dump(payload, stream, sort_keys=True)
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
             os.fchmod(stream.fileno(), 0o600)
-        os.replace(temporary, path)
+        try:
+            os.replace(temporary, path)
+        except OSError as exc:
+            raise GpuLeaseBusy(
+                f"GPU lane busy (failed to install lease at {path}: {exc})"
+            ) from exc
     finally:
         temporary.unlink(missing_ok=True)
 
