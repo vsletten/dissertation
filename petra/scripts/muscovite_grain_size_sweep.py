@@ -182,6 +182,8 @@ def validate_result_receipt(
 def _run(command: list[str], log_path: Path, cwd: Path, env: dict[str, str]) -> float:
     started = time.monotonic()
     with log_path.open("w", encoding="utf-8") as log:
+        # argv sequence, shell=False: trusted `nice` plus a local petra binary path.
+        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
         subprocess.run(
             command,
             cwd=cwd,
