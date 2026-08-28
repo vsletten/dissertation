@@ -49,8 +49,8 @@ from scripts import production_energetics as a2
 
 SCAN_VERSION = "a2a-coupled-cleavage-scan-v1"
 SCAN_RELATIVE_PATH = Path("cleavage") / "coupled-scan-v1"
-DOWNHILL_RELEASE_VERSION = "a2a-barrierless-downhill-release-v1"
-DOWNHILL_RELEASE_RELATIVE_PATH = Path("cleavage") / "barrierless-downhill-release-v1"
+DOWNHILL_RELEASE_VERSION = "a2a-barrierless-downhill-release-v2"
+DOWNHILL_RELEASE_RELATIVE_PATH = Path("cleavage") / "barrierless-downhill-release-v2"
 DEFAULT_AXIS_POINTS = 9
 DEFAULT_BARRIER_THRESHOLD_KJ_MOL = 2.0
 DEFAULT_FMAX_EV_A = 0.02
@@ -763,7 +763,7 @@ def select_barrierless_release_seed(
     *,
     attacker_index: int = OW_INDEX,
 ) -> CellRecord:
-    """Select the first exact product-typed cell on the classified I-to-P valley."""
+    """Select the exact product cell at the end of the classified I-to-P valley."""
     if classification.get("outcome") != BARRIERLESS_SHELF:
         raise ValueError("downhill release requires a barrierless-shelf classification")
     if classification.get("verified_saddle") is not False:
@@ -793,24 +793,20 @@ def select_barrierless_release_seed(
         if cell in by_cell:
             raise ValueError(f"duplicate scan record for cell {cell}")
         by_cell[cell] = record
-    product_identity = a2.endpoint_identity(product, attacker_index)
-    for cell in path[1:]:
-        record = by_cell.get(cell)
-        if record is None:
-            raise ValueError(
-                f"barrierless classification references missing cell {cell}"
-            )
-        topology = record.topology
-        if not (
-            topology.get("valid_typed_identity") is True
-            and tuple(topology.get("basin", ())) == a2a.PRODUCT_BASIN
-        ):
-            continue
-        if a2.endpoint_identity(record.cluster, attacker_index) == product_identity:
-            return record
-    raise RuntimeError(
-        "barrierless minimax path never enters the exact typed hydrolyzed-product basin"
-    )
+    record = by_cell.get(goal)
+    if record is None:
+        raise ValueError(f"barrierless classification references missing cell {goal}")
+    topology = record.topology
+    if not (
+        topology.get("valid_typed_identity") is True
+        and tuple(topology.get("basin", ())) == a2a.PRODUCT_BASIN
+        and a2.endpoint_identity(record.cluster, attacker_index)
+        == a2.endpoint_identity(product, attacker_index)
+    ):
+        raise RuntimeError(
+            "classified product cell is not the exact typed hydrolyzed-product basin"
+        )
+    return record
 
 
 def run_barrierless_downhill_release(

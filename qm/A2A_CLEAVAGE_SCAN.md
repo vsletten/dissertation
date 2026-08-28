@@ -60,13 +60,14 @@ minimax path is restricted to rows/columns `0..product_index`.
 
 A `barrierless-shelf` classification is incomplete until one fresh
 full-dimensional minimum optimization releases **both** scan distances. The seed
-is deterministic: the first physical minimax-path cell whose recomputed exact
-endpoint identity equals the archived hydrolyzed product (basin, every physical
-hydrogen owner, and every heavy-atom bond). Index position or the coarse basin
-triple alone is insufficient.
+is deterministic: the exact product cell at the end of the physical minimax
+path, whose recomputed endpoint identity must equal the archived hydrolyzed
+product (basin, every physical hydrogen owner, and every heavy-atom bond). A
+prior product-like grid cell, index position alone, or the coarse basin triple
+is insufficient.
 
 The release is checkpointed under
-`cleavage/barrierless-downhill-release-v1/` and binds the classification,
+`cleavage/barrierless-downhill-release-v2/` and binds the classification,
 settings, seed, exact product reference, optimizer, force gate, and step bound.
 Acceptance requires all of the following:
 
@@ -96,7 +97,7 @@ route production transition state.
 - topology-backed proton-first precedence with no index-only inference;
 - interior-crest, threshold/barrierless, boundary-maximum, and extension-detour
   cases;
-- deterministic first exact-product valley seed selection plus fresh
+- deterministic exact-product-cell valley seed selection plus fresh
   unconstrained downhill, zero-index, nonzero-step, exact-identity,
   uphill-rejection, resume, and stale-canonical rejection gates; and
 - GPU-memory CLI wiring and the fixed external evidence namespace.

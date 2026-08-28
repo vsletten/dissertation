@@ -289,7 +289,9 @@ def release_record(
     )
 
 
-def test_select_release_seed_uses_first_exact_product_typed_valley_cell(monkeypatch):
+def test_select_release_seed_uses_exact_product_cell_not_earlier_product_like_cell(
+    monkeypatch,
+):
     intermediate = endpoint("I", si_obr=1.95, hw_obr=2.98, h17_obr=0.98)
     early_product = endpoint("early-product", si_obr=2.45, hw_obr=1.85, h17_obr=0.96)
     product = endpoint("P", si_obr=3.73, hw_obr=1.85, h17_obr=0.96)
@@ -332,7 +334,7 @@ def test_select_release_seed_uses_first_exact_product_typed_valley_cell(monkeypa
         records, classification, product, attacker_index=scan.OW_INDEX
     )
 
-    assert (selected.row, selected.column) == (1, 1)
+    assert (selected.row, selected.column) == (2, 1)
 
 
 def test_barrierless_release_is_fresh_downhill_and_exact_typed_product(
