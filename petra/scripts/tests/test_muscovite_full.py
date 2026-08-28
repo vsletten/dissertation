@@ -153,6 +153,30 @@ class GrainSizeSweepDriverTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "strictly increasing"):
                 sweep.load_campaign_receipts(duplicate)
 
+    def test_nonnegative_integer_preserves_identity_beyond_float_precision(self) -> None:
+        sweep = load_module("muscovite_grain_size_sweep", SWEEP_PATH)
+        huge = 2**53 + 1
+        self.assertEqual(sweep._nonnegative_integer(str(huge), "seed"), huge)
+        self.assertEqual(sweep._nonnegative_integer("0", "steps"), 0)
+        with self.assertRaisesRegex(ValueError, "non-negative integer"):
+            sweep._nonnegative_integer("-1", "seed")
+        with self.assertRaisesRegex(ValueError, "non-negative integer"):
+            sweep._nonnegative_integer("1.0", "seed")
+        with self.assertRaisesRegex(ValueError, "non-negative integer"):
+            sweep._nonnegative_integer("1e2", "steps")
+        with tempfile.TemporaryDirectory() as directory:
+            ensemble = Path(directory) / "ensemble.csv"
+            ensemble.write_text(
+                f"seed,steps,time,state\n{huge},10,1.0,0\n{huge + 1},15,1.0,0\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(sweep.total_events(ensemble), 25)
+            rows = sweep.ensemble_rows(ensemble)
+            self.assertEqual(
+                [sweep._nonnegative_integer(row["seed"], "seed") for row in rows],
+                [huge, huge + 1],
+            )
+
 
 class FullMechanismAnalysisTests(unittest.TestCase):
     def _write_fixture(self, root: Path, increase: bool = False) -> tuple[Path, Path]:

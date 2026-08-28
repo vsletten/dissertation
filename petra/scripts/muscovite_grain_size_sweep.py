@@ -54,12 +54,12 @@ def parse_sizes(text: str) -> tuple[tuple[int, int, int], ...]:
 
 def _nonnegative_integer(text: str, label: str) -> int:
     try:
-        value = float(text)
+        value = int(text)
     except ValueError as exc:
         raise ValueError(f"{label} must be a non-negative integer") from exc
-    if not math.isfinite(value) or value < 0 or not value.is_integer():
+    if value < 0:
         raise ValueError(f"{label} must be a non-negative integer")
-    return int(value)
+    return value
 
 
 def ensemble_rows(
