@@ -84,7 +84,13 @@ from quarry.rates import (  # noqa: E402
     surface_thermo_from_frequencies,
     thermo_from_frequencies,
 )
-from quarry.ts import find_ts, quick_irc, scan_to_maximum, scan_ts_guess  # noqa: E402
+from quarry.ts import (  # noqa: E402
+    ScanNoMaximumError,
+    find_ts,
+    quick_irc,
+    scan_to_maximum,
+    scan_ts_guess,
+)
 from scripts.cc_calibration import (  # noqa: E402
     extrapolate_correlation,
     extrapolate_hf,
@@ -270,7 +276,10 @@ def reactions(*, gpu: bool, basis: str) -> dict[str, Reaction]:
     song_ch3o = LiteratureFit(3146e10, 1.0, 830.0, 119.6, SONG, 59.0)
     song_abstraction = LiteratureFit(4.13e10, 1.0, 1222.0, 147.7, SONG, 59.0)
 
-    co_scan = (2.8, 2.5, 2.2, 2.0, 1.9, 1.8, 1.7, 1.6, 1.5, 1.4)
+    # H+CO is an early TS on a very flat approach: the crest near 1.9 A
+    # cleared its neighbors by only ~2e-5 Ha on the first campaign pass, so
+    # the grid is fine near the top (see interior_global_maximum fallback).
+    co_scan = (2.8, 2.5, 2.2, 2.05, 1.95, 1.9, 1.85, 1.8, 1.7, 1.6, 1.5, 1.4)
     ch3o_scan = (2.8, 2.5, 2.2, 2.0, 1.85, 1.7, 1.55, 1.4, 1.25)
     abstraction_scan = (2.6, 2.3, 2.0, 1.75, 1.5, 1.3, 1.15, 1.02, 0.9)
 
@@ -362,6 +371,37 @@ def load_xyz(path: Path, template: Cluster) -> Cluster:
 
 def geometry_hash(cluster: Cluster) -> str:
     return hashlib.sha256(cluster.to_xyz().encode()).hexdigest()
+
+
+def interior_global_maximum(
+    scan: list[tuple[float, float, Cluster]],
+    *,
+    min_rise_hartree: float = 1.0e-4,
+) -> Cluster:
+    """Shallow-crest fallback TS guess: the interior global energy maximum.
+
+    An early transition state on a flat approach (H + CO: the crest near
+    1.9 A clears its neighbors by ~2e-5 Ha) fails ``scan_to_maximum``'s
+    strict per-neighbor tolerance while still being a genuine interior
+    global maximum well above both scan endpoints.  Sella plus the
+    chemical-imaginary-mode gate remain the actual saddle acceptance;
+    this only hands over a physically sensible seed.
+    """
+    if len(scan) < 3:
+        raise ValueError("scan too short for an interior maximum")
+    energies = [e for _, e, _ in scan]
+    peak = int(np.argmax(energies))
+    if peak in (0, len(scan) - 1):
+        raise ValueError("scan global maximum is an endpoint — ridge not crossed")
+    if (
+        energies[peak] - energies[0] < min_rise_hartree
+        or energies[peak] - energies[-1] < min_rise_hartree
+    ):
+        raise ValueError(
+            "scan global maximum does not clear the endpoints by "
+            f"{min_rise_hartree:.1e} Ha — noise, not a crest"
+        )
+    return scan[peak][2]
 
 
 def crossover_temperature_k(imag_cm: float) -> float:
@@ -671,21 +711,33 @@ def run_reaction(
         ts_guess = load_xyz(ts_guess_path, reaction.cluster)
     else:
         log(f"{reaction.key}: relaxed scan")
-        scan = scan_to_maximum(
-            reaction.cluster,
-            reaction.method,
-            atom_i=reaction.scan_i,
-            atom_j=reaction.scan_j,
-            distances_a=list(reaction.scan_distances_a),
-            min_distance_a=reaction.scan_floor_a,
-            progress=lambda r, e: log(f"{reaction.key}: r={r:.3f} A E={e:.10f} Ha"),
-        )
+        try:
+            scan = scan_to_maximum(
+                reaction.cluster,
+                reaction.method,
+                atom_i=reaction.scan_i,
+                atom_j=reaction.scan_j,
+                distances_a=list(reaction.scan_distances_a),
+                min_distance_a=reaction.scan_floor_a,
+                progress=lambda r, e: log(f"{reaction.key}: r={r:.3f} A E={e:.10f} Ha"),
+            )
+        except ScanNoMaximumError as exc:
+            scan = exc.scan
         scan_path.write_text(
             json.dumps(
-                [{"distance_a": r, "energy_hartree": e} for r, e, _ in scan], indent=2
+                [{"distance_a": r, "energy_hartree": e} for r, e, _ in scan],
+                indent=2,
             )
         )
-        ts_guess = scan_ts_guess(scan)
+        try:
+            ts_guess = scan_ts_guess(scan)
+        except ValueError:
+            ts_guess = interior_global_maximum(scan)
+            log(
+                f"{reaction.key}: no tolerance-cleared crest; seeding Sella "
+                "from the interior global maximum at "
+                f"r={max(scan, key=lambda p: p[1])[0]:.2f} A"
+            )
         save_xyz(ts_guess, ts_guess_path)
 
     ts_path = run_dir / "ts.xyz"

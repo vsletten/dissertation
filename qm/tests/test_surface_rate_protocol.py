@@ -205,6 +205,31 @@ def test_geometry_hash_changes_with_coordinates():
     )
 
 
+def _fake_scan(energies):
+    payload = surf.reactions(gpu=False, basis="sto-3g")["h-co"].cluster
+    radii = np.linspace(2.8, 1.4, len(energies))
+    return [(float(r), float(e), payload) for r, e in zip(radii, energies, strict=True)]
+
+
+def test_interior_global_maximum_accepts_shallow_interior_crest():
+    # The live h-co failure: crest clears one neighbor by only 2e-5 Ha but
+    # clears both endpoints by miles.
+    scan = _fake_scan([-113.7714, -113.7688, -113.76779, -113.76781, -113.789])
+    guess = surf.interior_global_maximum(scan)
+    assert guess is scan[2][2]
+
+
+def test_interior_global_maximum_rejects_endpoint_maximum():
+    with pytest.raises(ValueError, match="endpoint"):
+        surf.interior_global_maximum(_fake_scan([-1.0, -1.1, -1.2, -1.3]))
+
+
+def test_interior_global_maximum_rejects_noise_level_rise():
+    flat = [-1.0, -1.0 + 5e-5, -1.0 + 2e-5]
+    with pytest.raises(ValueError, match="noise"):
+        surf.interior_global_maximum(_fake_scan(flat))
+
+
 def test_saddle_gate_rejects_soft_and_multiple_imaginary_modes():
     class FakeFreq:
         def __init__(self, imaginary):
