@@ -4,6 +4,8 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-28 06:35 PDT (hermes-custom-build-001; profile=workstation) — A2a's production coupled scan is crash-durable at 35/81 exact cells. Five new cells through `(3,1)` remain finite, residual-gated hydrolyzed product with cleaved Si--Obr and water-owned H16; the bounded cgroup stopped during unaccepted `(3,0)`, and all shared services plus the QI2 lane are restored. The incomplete surface has no classifier, saddle, IRC, production/CC energy, barrier, or PR; resume at `(3,0)`.
+
 - 2026-08-28 05:40 PDT (hermes-custom-build-001; profile=workstation) — A2a's production coupled scan is crash-durable at 30/81 exact cells. Six new cells through `(3,6)` remain finite, residual-gated hydrolyzed product with cleaved Si--Obr and water-owned H16; the bounded cgroup stopped during unaccepted `(3,5)`, and all shared services plus the QI2 lane are restored. The incomplete surface has no classifier, saddle, IRC, production/CC energy, barrier, or PR; resume at `(3,5)`.
 
 - 2026-08-28 04:45 PDT (hermes-custom-build-001; profile=workstation) — A2a's production coupled scan is crash-durable at 24/81 exact cells. New cells `(2,0)` through `(2,5)` are finite, residual-gated, and typed as hydrolyzed product with cleaved Si--Obr while H16 remains water-owned; energies descend to `-67.750969 kJ/mol` relative to `(0,0)`. The bounded cgroup stopped during unaccepted `(2,6)`, and all shared services plus the QI2 lane are restored. The incomplete surface has no classifier, saddle, IRC, production/CC energy, barrier, or PR; resume at `(2,6)`.
