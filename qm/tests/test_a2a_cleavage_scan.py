@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from argparse import Namespace
 from dataclasses import replace
 from itertools import pairwise
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -355,6 +357,12 @@ def test_barrierless_release_is_fresh_downhill_and_exact_typed_product(
         scan.atomic_json(path, {"electronic_hartree": -100.5})
         return -100.5
 
+    def frequency_checkpoint(path, cluster, _settings, *, finite_difference):
+        assert cluster.name == "released-product"
+        assert finite_difference is True
+        scan.atomic_json(path, {"imaginary_cm": []})
+        return SimpleNamespace(imaginary_cm=np.asarray([], dtype=float))
+
     classification = {
         "outcome": scan.BARRIERLESS_SHELF,
         "verified_saddle": False,
@@ -372,9 +380,23 @@ def test_barrierless_release_is_fresh_downhill_and_exact_typed_product(
         fmax_ev_a=0.015,
         optimize_fn=optimize,
         checkpoint_energy_fn=energy_checkpoint,
+        checkpoint_frequency_fn=frequency_checkpoint,
+    )
+    resumed = scan.run_barrierless_downhill_release(
+        tmp_path,
+        [record],
+        classification,
+        product,
+        settings,
+        max_steps=17,
+        fmax_ev_a=0.015,
+        optimize_fn=optimize,
+        checkpoint_energy_fn=energy_checkpoint,
+        checkpoint_frequency_fn=frequency_checkpoint,
     )
 
     assert len(optimize_calls) == 1
+    assert resumed == receipt
     assert receipt["status"] == "completed"
     assert receipt["seed_cell"] == [1, 1]
     assert receipt["constraints_released"] == [
@@ -384,6 +406,8 @@ def test_barrierless_release_is_fresh_downhill_and_exact_typed_product(
     assert receipt["electronic_delta_kj_mol"] < 0.0
     assert receipt["cartesian_displacement_a"] > scan.DOWNHILL_MINIMUM_DISPLACEMENT_A
     assert receipt["typed_product_identity_matches"] is True
+    assert receipt["zero_index_minimum"] is True
+    assert receipt["imaginary_mode_count"] == 0
 
 
 def test_barrierless_release_rejects_uphill_endpoint(monkeypatch, tmp_path):
@@ -415,7 +439,61 @@ def test_barrierless_release_rejects_uphill_endpoint(monkeypatch, tmp_path):
                 product, name="released-product"
             ),
             checkpoint_energy_fn=lambda *_args, **_kwargs: -99.5,
+            checkpoint_frequency_fn=lambda *_args, **_kwargs: SimpleNamespace(
+                imaginary_cm=np.asarray([], dtype=float)
+            ),
         )
+
+
+def test_barrierless_release_rejects_nonminimum(monkeypatch, tmp_path):
+    seed = endpoint("seed", si_obr=2.45, hw_obr=1.85, h17_obr=0.96)
+    product = endpoint("P", si_obr=3.73, hw_obr=1.85, h17_obr=0.96)
+    record = release_record(1, 1, seed, energy=-100.0, basin=scan.a2a.PRODUCT_BASIN)
+    monkeypatch.setattr(
+        scan.a2,
+        "endpoint_identity",
+        lambda *_args: (scan.a2a.PRODUCT_BASIN, ((16, 15), (17, 0)), ((0, 2),)),
+    )
+    classification = {
+        "outcome": scan.BARRIERLESS_SHELF,
+        "verified_saddle": False,
+        "start_cell": [0, 0],
+        "product_cell": [1, 1],
+        "minimax_path": [[0, 0], [1, 1]],
+    }
+
+    with pytest.raises(RuntimeError, match="index-zero minimum"):
+        scan.run_barrierless_downhill_release(
+            tmp_path,
+            [record],
+            classification,
+            product,
+            DftSettings(xc="r2scan", basis="def2-mtzvpp", composite="r2scan3c"),
+            optimize_fn=lambda *_args, **_kwargs: replace(
+                product, name="released-product"
+            ),
+            checkpoint_frequency_fn=lambda *_args, **_kwargs: SimpleNamespace(
+                imaginary_cm=np.asarray([42.0])
+            ),
+        )
+
+
+def test_failed_attempt_removes_stale_canonical_classification(monkeypatch, tmp_path):
+    output_dir = scan.scan_root(tmp_path)
+    output_dir.mkdir(parents=True)
+    result_path = output_dir / "complete-grid-classification.json"
+    scan.atomic_json(result_path, {"status": "complete", "legacy": True})
+    monkeypatch.setattr(
+        scan, "run", lambda _args: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        scan.execute_with_status(Namespace(run_dir=tmp_path))
+
+    assert not result_path.exists()
+    assert (
+        json.loads((output_dir / "scan-status.json").read_text())["status"] == "failed"
+    )
 
 
 def test_parser_carries_gpu_memory_override_and_fixed_scan_location(tmp_path):

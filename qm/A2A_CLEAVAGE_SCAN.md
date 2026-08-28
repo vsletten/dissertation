@@ -74,12 +74,17 @@ Acceptance requires all of the following:
 - a nonzero Cartesian displacement greater than `1e-3 A` occurs;
 - the final electronic energy is no higher than the constrained seed beyond a
   `1e-8 Eh` numerical tolerance;
+- a fingerprint-bound finite-difference Hessian proves the released structure
+  is an index-zero minimum;
 - exact product typed identity matches the archived P endpoint; and
 - geometry, energy, identity, and content hashes are durably receipted.
 
-An uphill, zero-step, identity-drifted, partial, or checkpoint-drifted release
-fails closed. No cleavage Hessian or IRC is commissioned after this proof: the
-accepted R-I saddle is the route production transition state.
+An uphill, nonminimum, zero-step, identity-drifted, partial, or
+checkpoint-drifted release fails closed. Starting any attempt removes the
+canonical complete-classification artifact before work begins, so a failed new
+release cannot leave a stale pre-release success visible. No cleavage saddle
+Hessian or IRC is commissioned after this proof: the accepted R-I saddle is the
+route production transition state.
 
 ## Named proof
 
@@ -92,8 +97,8 @@ accepted R-I saddle is the route production transition state.
 - interior-crest, threshold/barrierless, boundary-maximum, and extension-detour
   cases;
 - deterministic first exact-product valley seed selection plus fresh
-  unconstrained downhill, nonzero-step, exact-identity, and uphill-rejection
-  gates; and
+  unconstrained downhill, zero-index, nonzero-step, exact-identity,
+  uphill-rejection, resume, and stale-canonical rejection gates; and
 - GPU-memory CLI wiring and the fixed external evidence namespace.
 
 The aggregate QM suite must also remain green because the driver reuses shared

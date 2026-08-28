@@ -76,6 +76,7 @@ BARRIERLESS_SHELF = "barrierless-shelf"
 RelaxFunction = Callable[..., Cluster]
 OptimizeFunction = Callable[..., Cluster]
 EnergyCheckpointFunction = Callable[[Path, Cluster, DftSettings, str], float]
+FrequencyCheckpointFunction = Callable[..., Any]
 
 
 @dataclass(frozen=True)
@@ -824,6 +825,7 @@ def run_barrierless_downhill_release(
     fmax_ev_a: float = DEFAULT_FMAX_EV_A,
     optimize_fn: OptimizeFunction = a2.optimize_minimum,
     checkpoint_energy_fn: EnergyCheckpointFunction = a2.checkpoint_energy,
+    checkpoint_frequency_fn: FrequencyCheckpointFunction = a2.checkpoint_frequency,
 ) -> dict[str, Any]:
     """Release both scan constraints and prove downhill convergence into exact P."""
     if max_steps <= 0:
@@ -841,6 +843,7 @@ def run_barrierless_downhill_release(
     geometry_path = release_dir / "released-product.xyz"
     trajectory_path = release_dir / "released-product.traj"
     energy_path = release_dir / "released-product.electronic-energy.json"
+    frequency_path = release_dir / "released-product.fd.frequency.json"
     receipt_path = release_dir / "release-receipt.json"
     identity = _json_stable(
         {
@@ -879,6 +882,18 @@ def run_barrierless_downhill_release(
             "unconstrained downhill release did not reach "
             "exact typed hydrolyzed product"
         )
+    frequency = checkpoint_frequency_fn(
+        frequency_path,
+        released,
+        settings,
+        finite_difference=True,
+    )
+    imaginary_cm = np.asarray(frequency.imaginary_cm, dtype=float)
+    if imaginary_cm.size:
+        raise RuntimeError(
+            "unconstrained downhill release did not reach an index-zero minimum: "
+            f"{imaginary_cm.size} imaginary mode(s)"
+        )
     final_energy = checkpoint_energy_fn(
         energy_path,
         released,
@@ -912,12 +927,15 @@ def run_barrierless_downhill_release(
             "cartesian_displacement_a": displacement,
             "minimum_cartesian_displacement_a": DOWNHILL_MINIMUM_DISPLACEMENT_A,
             "typed_product_identity_matches": True,
+            "zero_index_minimum": True,
+            "imaginary_mode_count": int(imaginary_cm.size),
             "typed_product_identity": a2a.typed_identity_payload(
                 released, attacker_index
             ),
             "released_geometry_fingerprint": frequency_geometry_fingerprint(released),
             "released_geometry_sha256": a2.sha256_path(geometry_path),
             "released_energy_sha256": a2.sha256_path(energy_path),
+            "released_frequency_sha256": a2.sha256_path(frequency_path),
         }
     )
     if receipt_path.exists():
@@ -1031,6 +1049,8 @@ def execute_with_status(args: argparse.Namespace) -> int:
     output_dir = scan_root(args.run_dir.resolve())
     output_dir.mkdir(parents=True, exist_ok=True)
     status_path = output_dir / "scan-status.json"
+    result_path = output_dir / "complete-grid-classification.json"
+    result_path.unlink(missing_ok=True)
     atomic_json(
         status_path,
         {
@@ -1053,7 +1073,6 @@ def execute_with_status(args: argparse.Namespace) -> int:
             },
         )
         raise
-    result_path = output_dir / "complete-grid-classification.json"
     atomic_json(
         status_path,
         {
