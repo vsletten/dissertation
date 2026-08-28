@@ -75,6 +75,7 @@ from quarry.pipeline import (  # noqa: E402
     DftSettings,
     FrequencyResult,
     frequencies,
+    optimize,
 )
 from quarry.rates import (  # noqa: E402
     KB,
@@ -736,10 +737,24 @@ def run_reaction(
         log(f"{reaction.key}: ts_guess.xyz exists; skipping completed scan")
         ts_guess = load_xyz(ts_guess_path, reaction.cluster)
     else:
+        seed = reaction.cluster
+        if reaction.n_water:
+            # Hand-built water networks settle a long way on their first
+            # relaxation; doing that inside a constrained scan point strained
+            # the SCF to divergence (observed live: h-h2co-h2-hco-2w died 35
+            # geomeTRIC steps into its first pinned point).  Relax the seed
+            # unconstrained first, checkpointed, then drive the coordinate.
+            preopt_path = run_dir / "preopt.xyz"
+            if preopt_path.exists():
+                seed = load_xyz(preopt_path, reaction.cluster)
+            else:
+                log(f"{reaction.key}: pre-optimizing wet seed")
+                seed = optimize(reaction.cluster, reaction.method, max_steps=200)
+                save_xyz(seed, preopt_path)
         log(f"{reaction.key}: relaxed scan")
         try:
             scan = scan_to_maximum(
-                reaction.cluster,
+                seed,
                 reaction.method,
                 atom_i=reaction.scan_i,
                 atom_j=reaction.scan_j,
