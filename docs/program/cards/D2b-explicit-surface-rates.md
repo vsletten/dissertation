@@ -49,3 +49,13 @@ surface rates and state a validity floor.
   anchors embedded with provenance: Song & Kästner 2017 fits, Simons 2020
   adopted plateaus, Fuchs 2009 effective barriers (12–16.5 K, own
   convention), Andersson 2011 T_c = 79 K.
+- 2026-08-27 (evening) — campaign launched on the 4090 (driver commit
+  `394fa00`): GPU-first, threads=16, teed to
+  `qm/runs/D2b-campaign{,-stdout}.log` (worktree
+  `agents/D2b-explicit-surface-rates`, gitignored). GPU etiquette
+  applied per quarry-campaign skill: both email pipeline services +
+  honcho deriver/api stopped, `ollama ps` verified empty, 12 h
+  dead-man restart armed (`d2b-deadman-restart.timer`, fires 08:30).
+  qm suite green at launch (455 passed, 1 skipped); CPU smoke of the
+  driver at STO-3G exercised scan→Sella→IRC→gates→failure-isolation
+  end-to-end.
