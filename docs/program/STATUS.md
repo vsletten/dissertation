@@ -4,6 +4,8 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-27 23:57 PDT (hermes-custom-build-001; profile=workstation) — A2a's commissioned coupled-coordinate cleavage redesign now has a tested, resume-safe 9x9 r2SCAN-3c scan framework with fixed H16 mapping, atomic per-cell geometry/energy/topology receipts, and a topology-backed three-outcome classifier. Real I/P mapping and the complete 450-test QM suite pass; the production grid and classifier-selected saddle/shelf follow-through remain unrun and no barrier was emitted.
+
 - 2026-08-28 — (hermes-8d9e30fee91548; profile=laptop) — E2b runs seven
   32-replica muscovite volumes through 559,872 sites: the old-first-step
   staircase stabilizes at 49,152 sites and stays stable across two larger
