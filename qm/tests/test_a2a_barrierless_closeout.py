@@ -95,11 +95,16 @@ def test_closeout_method_matrix_is_exact():
     assert all(value.use_gpu for value in settings.values())
 
 
-def test_production_scf_uses_receipted_bounded_newton(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    "method",
+    [
+        closeout.production.PRODUCTION_METHOD,
+        closeout.production.B3LYP_D4_METHOD,
+    ],
+)
+def test_production_scf_uses_receipted_bounded_newton(monkeypatch, tmp_path, method):
     current = cluster("reactant")
-    settings = closeout.method_settings(use_gpu=False)[
-        closeout.production.PRODUCTION_METHOD
-    ]
+    settings = closeout.method_settings(use_gpu=False)[method]
 
     class FakeScf:
         converged = False
@@ -121,7 +126,7 @@ def test_production_scf_uses_receipted_bounded_newton(monkeypatch, tmp_path):
         path,
         current,
         settings,
-        closeout.production.PRODUCTION_METHOD,
+        method,
     )
 
     assert value == -30.5

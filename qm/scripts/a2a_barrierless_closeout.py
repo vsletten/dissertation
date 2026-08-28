@@ -302,7 +302,10 @@ def checkpoint_closeout_energy(
     expected_settings = production.frequency_settings_fingerprint(settings)
     mf = pipeline._make_scf(pipeline.build_mol(cluster, settings), settings)
     convergence_route = "direct-diis"
-    if method == production.PRODUCTION_METHOD:
+    if method in {
+        production.PRODUCTION_METHOD,
+        production.B3LYP_D4_METHOD,
+    }:
         convergence_route = "newton-first"
         mf = mf.newton()
         mf.max_cycle = 100
