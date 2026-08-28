@@ -49,12 +49,17 @@ from scripts import production_energetics as a2
 
 SCAN_VERSION = "a2a-coupled-cleavage-scan-v1"
 SCAN_RELATIVE_PATH = Path("cleavage") / "coupled-scan-v1"
+DOWNHILL_RELEASE_VERSION = "a2a-barrierless-downhill-release-v1"
+DOWNHILL_RELEASE_RELATIVE_PATH = Path("cleavage") / "barrierless-downhill-release-v1"
 DEFAULT_AXIS_POINTS = 9
 DEFAULT_BARRIER_THRESHOLD_KJ_MOL = 2.0
 DEFAULT_FMAX_EV_A = 0.02
 DEFAULT_MAX_STEPS = 120
+DEFAULT_DOWNHILL_MAX_STEPS = 200
 DEFAULT_OPTIMIZER_MAXSTEP_A = 0.03
 DEFAULT_DISTANCE_TOLERANCE_A = 1.0e-4
+DOWNHILL_MINIMUM_DISPLACEMENT_A = 1.0e-3
+DOWNHILL_ENERGY_TOLERANCE_HARTREE = 1.0e-8
 PROTON_SELECTION_MIN_CONTRACTION_A = 0.05
 PROTON_SELECTION_MARGIN_A = 0.05
 
@@ -69,6 +74,7 @@ INTERIOR_CREST = "interior-crest-above-threshold"
 BARRIERLESS_SHELF = "barrierless-shelf"
 
 RelaxFunction = Callable[..., Cluster]
+OptimizeFunction = Callable[..., Cluster]
 EnergyCheckpointFunction = Callable[[Path, Cluster, DftSettings, str], float]
 
 
@@ -749,6 +755,178 @@ def classify_complete_grid(
     return result
 
 
+def select_barrierless_release_seed(
+    records: list[CellRecord],
+    classification: dict[str, Any],
+    product: Cluster,
+    *,
+    attacker_index: int = OW_INDEX,
+) -> CellRecord:
+    """Select the first exact product-typed cell on the classified I-to-P valley."""
+    if classification.get("outcome") != BARRIERLESS_SHELF:
+        raise ValueError("downhill release requires a barrierless-shelf classification")
+    if classification.get("verified_saddle") is not False:
+        raise ValueError("barrierless classification must explicitly reject a saddle")
+
+    def parse_cell(value: Any) -> tuple[int, int]:
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            raise ValueError("cell must contain exactly two indices")
+        return int(value[0]), int(value[1])
+
+    try:
+        path = [parse_cell(cell) for cell in classification["minimax_path"]]
+        start = parse_cell(classification["start_cell"])
+        goal = parse_cell(classification["product_cell"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "barrierless classification has a malformed minimax path"
+        ) from exc
+    if not path or path[0] != start or path[-1] != goal:
+        raise ValueError(
+            "barrierless classification path does not span exact I-to-P cells"
+        )
+
+    by_cell: dict[tuple[int, int], CellRecord] = {}
+    for record in records:
+        cell = (record.row, record.column)
+        if cell in by_cell:
+            raise ValueError(f"duplicate scan record for cell {cell}")
+        by_cell[cell] = record
+    product_identity = a2.endpoint_identity(product, attacker_index)
+    for cell in path[1:]:
+        record = by_cell.get(cell)
+        if record is None:
+            raise ValueError(
+                f"barrierless classification references missing cell {cell}"
+            )
+        topology = record.topology
+        if not (
+            topology.get("valid_typed_identity") is True
+            and tuple(topology.get("basin", ())) == a2a.PRODUCT_BASIN
+        ):
+            continue
+        if a2.endpoint_identity(record.cluster, attacker_index) == product_identity:
+            return record
+    raise RuntimeError(
+        "barrierless minimax path never enters the exact typed hydrolyzed-product basin"
+    )
+
+
+def run_barrierless_downhill_release(
+    run_dir: Path,
+    records: list[CellRecord],
+    classification: dict[str, Any],
+    product: Cluster,
+    settings: DftSettings,
+    *,
+    attacker_index: int = OW_INDEX,
+    max_steps: int = DEFAULT_DOWNHILL_MAX_STEPS,
+    fmax_ev_a: float = DEFAULT_FMAX_EV_A,
+    optimize_fn: OptimizeFunction = a2.optimize_minimum,
+    checkpoint_energy_fn: EnergyCheckpointFunction = a2.checkpoint_energy,
+) -> dict[str, Any]:
+    """Release both scan constraints and prove downhill convergence into exact P."""
+    if max_steps <= 0:
+        raise ValueError("downhill max-steps must be positive")
+    if not math.isfinite(fmax_ev_a) or fmax_ev_a <= 0.0:
+        raise ValueError("downhill fmax must be finite and positive")
+    seed = select_barrierless_release_seed(
+        records,
+        classification,
+        product,
+        attacker_index=attacker_index,
+    )
+    release_dir = run_dir / DOWNHILL_RELEASE_RELATIVE_PATH
+    release_dir.mkdir(parents=True, exist_ok=True)
+    geometry_path = release_dir / "released-product.xyz"
+    trajectory_path = release_dir / "released-product.traj"
+    energy_path = release_dir / "released-product.electronic-energy.json"
+    receipt_path = release_dir / "release-receipt.json"
+    identity = _json_stable(
+        {
+            "release_version": DOWNHILL_RELEASE_VERSION,
+            "stage": "fresh-unconstrained-downhill-release",
+            "algorithm": "ase-bfgs-v1",
+            "classification_fingerprint": _payload_fingerprint(classification),
+            "seed_cell": [seed.row, seed.column],
+            "seed_geometry_fingerprint": seed.output_geometry_fingerprint,
+            "product_geometry_fingerprint": frequency_geometry_fingerprint(product),
+            "settings_fingerprint": frequency_settings_fingerprint(settings),
+            "constraints_released": [
+                [SI_INDEX, BRIDGE_INDEX],
+                [HW_INDEX, BRIDGE_INDEX],
+            ],
+            "fmax_ev_a": fmax_ev_a,
+            "max_steps": max_steps,
+        }
+    )
+    released = a2.checkpoint_cluster(
+        geometry_path,
+        seed.cluster,
+        lambda: optimize_fn(
+            seed.cluster,
+            settings,
+            max_steps=max_steps,
+            trajectory=trajectory_path,
+            fmax_ev_a=fmax_ev_a,
+        ),
+        identity=identity,
+    )
+    expected_identity = a2.endpoint_identity(product, attacker_index)
+    actual_identity = a2.endpoint_identity(released, attacker_index)
+    if actual_identity != expected_identity:
+        raise RuntimeError(
+            "unconstrained downhill release did not reach "
+            "exact typed hydrolyzed product"
+        )
+    final_energy = checkpoint_energy_fn(
+        energy_path,
+        released,
+        settings,
+        a2.R2SCAN3C_METHOD,
+    )
+    if not math.isfinite(final_energy):
+        raise RuntimeError("unconstrained downhill release has non-finite energy")
+    delta_hartree = final_energy - seed.electronic_hartree
+    if delta_hartree > DOWNHILL_ENERGY_TOLERANCE_HARTREE:
+        raise RuntimeError(
+            "unconstrained release is not downhill: "
+            f"delta={delta_hartree * HARTREE_TO_KJ:.6f} kJ/mol"
+        )
+    displacement = float(np.linalg.norm(released.coords - seed.cluster.coords))
+    if (
+        not math.isfinite(displacement)
+        or displacement <= DOWNHILL_MINIMUM_DISPLACEMENT_A
+    ):
+        raise RuntimeError(
+            "unconstrained downhill release did not make a nonzero Cartesian step"
+        )
+    receipt = _json_stable(
+        {
+            "status": "completed",
+            **identity,
+            "seed_electronic_hartree": seed.electronic_hartree,
+            "released_electronic_hartree": final_energy,
+            "electronic_delta_hartree": delta_hartree,
+            "electronic_delta_kj_mol": delta_hartree * HARTREE_TO_KJ,
+            "cartesian_displacement_a": displacement,
+            "minimum_cartesian_displacement_a": DOWNHILL_MINIMUM_DISPLACEMENT_A,
+            "typed_product_identity_matches": True,
+            "typed_product_identity": a2a.typed_identity_payload(
+                released, attacker_index
+            ),
+            "released_geometry_fingerprint": frequency_geometry_fingerprint(released),
+            "released_geometry_sha256": a2.sha256_path(geometry_path),
+            "released_energy_sha256": a2.sha256_path(energy_path),
+        }
+    )
+    if receipt_path.exists():
+        _require_exact_json(receipt_path, receipt, "downhill release receipt")
+    else:
+        atomic_json(receipt_path, receipt)
+    return receipt
+
+
 def _energy_matrix(records: list[CellRecord], axis_points: int) -> np.ndarray:
     if len(records) != axis_points * axis_points:
         raise ValueError("classification requires every grid cell")
@@ -795,16 +973,25 @@ def run(args: argparse.Namespace) -> int:
             (record.row, record.column): record.topology for record in records
         },
     )
-    payload = _json_stable(
-        {
-            "status": "complete",
-            "scan_version": SCAN_VERSION,
-            "cell_count": len(records),
-            "relative_energies_kj_mol": relative_energies.tolist(),
-            "classification": classification,
-            "coarse_grid_point_is_verified_saddle": False,
-        }
-    )
+    payload_data: dict[str, Any] = {
+        "status": "complete",
+        "scan_version": SCAN_VERSION,
+        "cell_count": len(records),
+        "relative_energies_kj_mol": relative_energies.tolist(),
+        "classification": classification,
+        "coarse_grid_point_is_verified_saddle": False,
+    }
+    if classification["outcome"] == BARRIERLESS_SHELF:
+        payload_data["downhill_release"] = run_barrierless_downhill_release(
+            args.run_dir.resolve(),
+            records,
+            classification,
+            product,
+            settings,
+            max_steps=args.downhill_max_steps,
+            fmax_ev_a=args.fmax,
+        )
+    payload = _json_stable(payload_data)
     atomic_json(output_dir / "complete-grid-classification.json", payload)
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
@@ -818,6 +1005,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--axis-points", type=int, default=DEFAULT_AXIS_POINTS)
     result.add_argument("--fmax", type=float, default=DEFAULT_FMAX_EV_A)
     result.add_argument("--max-steps", type=int, default=DEFAULT_MAX_STEPS)
+    result.add_argument(
+        "--downhill-max-steps", type=int, default=DEFAULT_DOWNHILL_MAX_STEPS
+    )
     result.add_argument(
         "--optimizer-maxstep", type=float, default=DEFAULT_OPTIMIZER_MAXSTEP_A
     )
@@ -882,6 +1072,8 @@ def main() -> int:
         raise ValueError("axis-points must be at least 3")
     if args.max_steps <= 0:
         raise ValueError("max-steps must be positive")
+    if args.downhill_max_steps <= 0:
+        raise ValueError("downhill-max-steps must be positive")
     return execute_with_status(args)
 
 

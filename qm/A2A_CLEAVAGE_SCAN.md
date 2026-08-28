@@ -56,6 +56,31 @@ minimax path is restricted to rows/columns `0..product_index`.
    maxima are not saddles, and extension points cannot rescue or condemn the
    physical route.
 
+## Barrierless downhill release proof
+
+A `barrierless-shelf` classification is incomplete until one fresh
+full-dimensional minimum optimization releases **both** scan distances. The seed
+is deterministic: the first physical minimax-path cell whose recomputed exact
+endpoint identity equals the archived hydrolyzed product (basin, every physical
+hydrogen owner, and every heavy-atom bond). Index position or the coarse basin
+triple alone is insufficient.
+
+The release is checkpointed under
+`cleavage/barrierless-downhill-release-v1/` and binds the classification,
+settings, seed, exact product reference, optimizer, force gate, and step bound.
+Acceptance requires all of the following:
+
+- no `Si1-Obr0` or `H16-Obr0` distance constraint remains;
+- a nonzero Cartesian displacement greater than `1e-3 A` occurs;
+- the final electronic energy is no higher than the constrained seed beyond a
+  `1e-8 Eh` numerical tolerance;
+- exact product typed identity matches the archived P endpoint; and
+- geometry, energy, identity, and content hashes are durably receipted.
+
+An uphill, zero-step, identity-drifted, partial, or checkpoint-drifted release
+fails closed. No cleavage Hessian or IRC is commissioned after this proof: the
+accepted R-I saddle is the route production transition state.
+
 ## Named proof
 
 `tests/test_a2a_cleavage_scan.py` covers:
@@ -66,6 +91,9 @@ minimax path is restricted to rows/columns `0..product_index`.
 - topology-backed proton-first precedence with no index-only inference;
 - interior-crest, threshold/barrierless, boundary-maximum, and extension-detour
   cases;
+- deterministic first exact-product valley seed selection plus fresh
+  unconstrained downhill, nonzero-step, exact-identity, and uphill-rejection
+  gates; and
 - GPU-memory CLI wiring and the fixed external evidence namespace.
 
 The aggregate QM suite must also remain green because the driver reuses shared
