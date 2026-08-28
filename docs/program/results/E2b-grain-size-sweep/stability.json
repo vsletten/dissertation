@@ -4,7 +4,7 @@
       "current_sites": 2592,
       "max_age_defined_fraction_delta": 0.09375,
       "max_age_relative_delta": 0.2038803408600566,
-      "max_release_fraction_delta": 0.1875,
+      "max_release_fraction_delta": 0.10039960039960039,
       "previous_sites": 768,
       "stable": false
     },
@@ -51,6 +51,6 @@
   ],
   "max_age_defined_fraction_delta": 0.09375,
   "max_age_relative_delta": 0.22511957140478595,
-  "max_release_fraction_delta": 0.1875,
+  "max_release_fraction_delta": 0.10039960039960039,
   "stabilized_at_sites": 49152
 }
