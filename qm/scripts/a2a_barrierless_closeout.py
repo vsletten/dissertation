@@ -28,6 +28,7 @@ if __name__ == "__main__":
 
 import numpy as np
 
+from quarry import pipeline
 from quarry.clusters import Cluster
 from quarry.pipeline import HARTREE_TO_KJ, DftSettings, FrequencyResult
 from scripts import a2a_path_rebuild as path_driver
@@ -281,6 +282,61 @@ def method_settings(use_gpu: bool) -> dict[str, DftSettings]:
     }
 
 
+def checkpoint_closeout_energy(
+    path: Path,
+    cluster: Cluster,
+    settings: DftSettings,
+    method: str,
+) -> float:
+    """Run a receipt-bound SCF with a bounded Newton fallback.
+
+    The GPU SMD wB97M-V direct-DIIS route exhausted its 150-cycle bound on the
+    accepted reactant.  Newton is an SCF solver change, not a method change; it
+    is predeclared here and persisted in the receipt rather than silently
+    loosening convergence or accepting the unconverged direct value.
+    """
+    if path.exists():
+        return production.checkpoint_energy(path, cluster, settings, method)
+
+    expected_geometry = production.frequency_geometry_fingerprint(cluster)
+    expected_settings = production.frequency_settings_fingerprint(settings)
+    mf = pipeline._make_scf(pipeline.build_mol(cluster, settings), settings)
+    convergence_route = "direct-diis"
+    if method == production.PRODUCTION_METHOD:
+        convergence_route = "newton-first"
+        mf = mf.newton()
+        mf.max_cycle = 100
+        value = mf.kernel()
+    else:
+        value = mf.kernel()
+        if not mf.converged:
+            density = mf.make_rdm1()
+            mf = mf.newton()
+            mf.max_cycle = 100
+            value = mf.kernel(dm0=density)
+            convergence_route = "direct-diis-then-newton"
+    if not mf.converged:
+        raise RuntimeError(
+            f"SCF did not converge for {cluster.name} via {convergence_route}"
+        )
+    value = float(value)
+    if not np.isfinite(value):
+        raise RuntimeError(f"{path.name}: computed electronic energy is non-finite")
+    production.atomic_json(
+        path,
+        {
+            "method": method,
+            "electronic_hartree": value,
+            "geometry_fingerprint": expected_geometry,
+            "settings_fingerprint": expected_settings,
+            "scf_contract": "bounded-direct-diis-or-newton-v1",
+            "convergence_route": convergence_route,
+            "converged": True,
+        },
+    )
+    return value
+
+
 def run_dft(route: AcceptedRoute, *, use_gpu: bool) -> dict[str, Any]:
     path_driver.preflight_gpu_contraction_engine(use_gpu)
     output_root = route.evidence_root / "production-closeout"
@@ -294,7 +350,7 @@ def run_dft(route: AcceptedRoute, *, use_gpu: bool) -> dict[str, Any]:
         slug = method.split("/")[0].replace("(", "-").replace(")", "")
         energies[method] = {}
         for role, cluster in route.clusters.items():
-            energies[method][role] = production.checkpoint_energy(
+            energies[method][role] = checkpoint_closeout_energy(
                 energy_root / f"{role}.{slug}.energy.json",
                 cluster,
                 settings,

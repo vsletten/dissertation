@@ -95,6 +95,42 @@ def test_closeout_method_matrix_is_exact():
     assert all(value.use_gpu for value in settings.values())
 
 
+def test_production_scf_uses_receipted_bounded_newton(monkeypatch, tmp_path):
+    current = cluster("reactant")
+    settings = closeout.method_settings(use_gpu=False)[
+        closeout.production.PRODUCTION_METHOD
+    ]
+
+    class FakeScf:
+        converged = False
+        max_cycle = 150
+
+        def newton(self):
+            return self
+
+        def kernel(self, **kwargs):
+            assert kwargs == {}
+            self.converged = True
+            return -30.5
+
+    monkeypatch.setattr(closeout.pipeline, "build_mol", lambda *args: object())
+    monkeypatch.setattr(closeout.pipeline, "_make_scf", lambda *args: FakeScf())
+    path = tmp_path / "energy.json"
+
+    value = closeout.checkpoint_closeout_energy(
+        path,
+        current,
+        settings,
+        closeout.production.PRODUCTION_METHOD,
+    )
+
+    assert value == -30.5
+    payload = json.loads(path.read_text())
+    assert payload["converged"] is True
+    assert payload["convergence_route"] == "newton-first"
+    assert payload["scf_contract"] == "bounded-direct-diis-or-newton-v1"
+
+
 def test_dft_runs_four_by_three_matrix_and_uses_only_addition_ts(monkeypatch, tmp_path):
     roles = (
         "reactant",
@@ -144,7 +180,7 @@ def test_dft_runs_four_by_three_matrix_and_uses_only_addition_ts(monkeypatch, tm
         path.write_text(json.dumps(payload))
         return payload["electronic_hartree"]
 
-    monkeypatch.setattr(closeout.production, "checkpoint_energy", checkpoint)
+    monkeypatch.setattr(closeout, "checkpoint_closeout_energy", checkpoint)
     monkeypatch.setattr(
         closeout.production,
         "thermo",
