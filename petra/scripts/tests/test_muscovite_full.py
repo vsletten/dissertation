@@ -441,6 +441,48 @@ duration = 20.0
         with self.assertRaisesRegex(ValueError, "same schedule"):
             analysis.assess_stability([result, mismatched_schedule])
 
+    def test_release_fraction_gate_ignores_cumulative_isotope_support_changes(
+        self,
+    ) -> None:
+        dummy = analysis.distribution_band([0.0, 0.0], seed=1)
+        full_release = analysis.distribution_band([0.5, 0.5], seed=1)
+        sparse_release = analysis.distribution_band([0.5], seed=1)
+        ages = analysis.distribution_band([10.0, 10.0], seed=1)
+
+        def make_step(release_band):
+            return analysis.EnsembleSpectrumStep(
+                segment=0,
+                temperature_k=773.15,
+                duration_s=10.0,
+                released_ar40=dummy,
+                released_ar39=dummy,
+                released_ar36=dummy,
+                cumulative_ar40_fraction=release_band,
+                cumulative_ar39_fraction=full_release,
+                cumulative_ar36_fraction=full_release,
+                apparent_age_ma=ages,
+                ar36_ar40=dummy,
+            )
+
+        small = analysis.EnsembleAnalysis(
+            dims=(4, 4, 6),
+            sites=768,
+            replicas=2,
+            steps=(make_step(full_release),),
+        )
+        large = analysis.EnsembleAnalysis(
+            dims=(6, 6, 9),
+            sites=2592,
+            replicas=2,
+            steps=(make_step(sparse_release),),
+        )
+        stability = analysis.assess_stability([small, large])
+        comparison = stability.comparisons[0]
+        self.assertEqual(comparison.max_release_fraction_delta, 0.0)
+        self.assertEqual(comparison.max_age_relative_delta, 0.0)
+        self.assertEqual(comparison.max_age_defined_fraction_delta, 0.0)
+        self.assertTrue(comparison.stable)
+
 
 if __name__ == "__main__":
     unittest.main()

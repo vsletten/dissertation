@@ -532,12 +532,6 @@ def assess_stability(
                 old = old_band.mean
                 new = new_band.mean
                 release_deltas.append(abs(new - old))
-                release_deltas.append(
-                    abs(
-                        len(old_band.values) / previous.replicas
-                        - len(new_band.values) / current.replicas
-                    )
-                )
             old_ar39_segment = (
                 old_step.cumulative_ar39_fraction.mean - previous_ar39_cumulative
             )
