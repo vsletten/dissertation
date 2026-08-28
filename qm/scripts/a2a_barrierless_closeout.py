@@ -416,6 +416,9 @@ def parser() -> argparse.ArgumentParser:
         subparser = subparsers.add_parser(command)
         subparser.add_argument("--evidence-root", type=Path, required=True)
         subparser.add_argument("--attacker-index", type=int, default=15)
+        subparser.add_argument("--threads", type=int, default=16)
+        subparser.add_argument("--nice", type=int, default=10)
+        subparser.add_argument("--log")
         if command == "dft":
             subparser.add_argument("--gpu", action="store_true")
     return result
