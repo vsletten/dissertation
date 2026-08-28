@@ -93,6 +93,12 @@ steps = 600
             with self.assertRaisesRegex(ValueError, "still has defects"):
                 aging.analyze_density(path, density=0.25, aged_step=140)
 
+    def test_analysis_requires_exact_aged_step(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self._write_fixture(Path(directory))
+            with self.assertRaisesRegex(ValueError, "never reaches step 141"):
+                aging.analyze_density(path, density=0.25, aged_step=141)
+
 
 if __name__ == "__main__":
     unittest.main()

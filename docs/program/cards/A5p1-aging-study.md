@@ -68,6 +68,6 @@ test (lab rates measure fresh surfaces; field rates measure aged ones).
 - External evidence: 20 files / 340,515,688 bytes at
   `/opt/data/run-outputs/dissertation/A5p1-aging-study-20260828/`; manifest
   SHA-256 `e32d658b1857754aab06b5796c8a97a25221fc510621c24d0855876a5a674d58`.
-- Verification: 22 Python script tests and 116 Petra workspace tests pass;
+- Verification: 23 Python script tests and 116 Petra workspace tests pass;
   Clippy with `-D warnings`, Rustfmt, deterministic parity, and SVG XML gates
   are green.

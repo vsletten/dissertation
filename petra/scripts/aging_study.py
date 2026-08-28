@@ -179,7 +179,7 @@ def analyze_density(path: Path, density: float, aged_step: int) -> DensityResult
         del replica
         samples.sort(key=lambda sample: sample.step)
         fresh.append(samples[0])
-        candidate = next((sample for sample in samples if sample.step >= aged_step), None)
+        candidate = next((sample for sample in samples if sample.step == aged_step), None)
         if candidate is None:
             raise ValueError(f"replica {samples[0].replica} never reaches step {aged_step}")
         defects = sample_metric(candidate, "state_counts", 1)
@@ -459,6 +459,8 @@ def run_campaign(
             str(output),
         ]
         with (logs / f"aging-{slug}.log").open("w", encoding="utf-8") as log:
+            # argv sequence, shell=False: trusted `nice` plus a local petra binary path.
+            # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
             subprocess.run(
                 command,
                 check=True,
@@ -467,6 +469,7 @@ def run_campaign(
                 env=env,
                 stdout=log,
                 stderr=subprocess.STDOUT,
+                shell=False,
             )
 
 

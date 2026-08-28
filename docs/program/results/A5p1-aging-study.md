@@ -99,7 +99,7 @@ The runner uses `nice -n 10`, caps Rayon and numerical-library threads at 16, wr
 
 - 256/256 ensemble trajectories reached the finite slab's honest no-events state at step 576; each final population is 576 empty sites.
 - Analysis tests cover exact deck generation, deterministic ratio/band aggregation, area normalization, distribution extraction, and the aged-regime defect gate.
-- `python3 -m unittest discover -s petra/scripts/tests -v`: **22 passed**, including 3 new aging-study tests.
+- `python3 -m unittest discover -s petra/scripts/tests -v`: **23 passed**, including 4 new aging-study tests.
 - `cargo test --workspace` in `petra/`: **116 passed, 0 failed**, including seeded 20k-step kaolinite and Kossel bitwise-parity gates and A5p0 observable regressions.
 - `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --all --check`: pass.
 - The committed SVG parses as XML; generated CSVs and the external raw campaign are manifest-hashed.
