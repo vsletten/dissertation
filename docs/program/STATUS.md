@@ -4,6 +4,8 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-28 00:58 PDT (hermes-custom-build-001; profile=workstation) — A2a's production coupled scan is crash-durable at 3/81 exact cells; all three have finite r2SCAN-3c energies, typed associative topology, and distance residuals below `4.35e-6 A`. The bounded worker stopped before classification after catching the email watchdog defeating GPU isolation; the external launcher now stops/restores that timer and resumes at `(0,3)`. No saddle, IRC, production/CC energy, barrier, or PR exists yet.
+
 - 2026-08-27 23:57 PDT (hermes-custom-build-001; profile=workstation) — A2a's commissioned coupled-coordinate cleavage redesign now has a tested, resume-safe 9x9 r2SCAN-3c scan framework with fixed H16 mapping, atomic per-cell geometry/energy/topology receipts, and a topology-backed three-outcome classifier. Real I/P mapping and the complete 451-test QM suite pass; the production grid and classifier-selected saddle/shelf follow-through remain unrun and no barrier was emitted.
 
 - 2026-08-28 — (hermes-8d9e30fee91548; profile=laptop) — E2b runs seven
