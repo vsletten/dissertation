@@ -253,6 +253,25 @@ def test_saddle_gate_rejects_soft_and_multiple_imaginary_modes():
     assert surf.require_chemical_saddle(FakeFreq([900.0, 20.0]), name="ok") == 900.0
 
 
+def test_wet_noise_floor_tolerates_spectator_librations():
+    class FakeFreq:
+        def __init__(self, imaginary):
+            self.imaginary_cm = np.array(imaginary)
+
+    # The live h-co-1w-cside saddle: chemical 678i + spectator 52.8i + 16.8i.
+    modes = FakeFreq([16.8, 52.8, 678.1])
+    with pytest.raises(RuntimeError, match="expected exactly 1"):
+        surf.require_chemical_saddle(
+            modes, name="gas", noise_floor_cm=surf.ts_noise_floor_cm(0)
+        )
+    assert (
+        surf.require_chemical_saddle(
+            modes, name="wet", noise_floor_cm=surf.ts_noise_floor_cm(1)
+        )
+        == 678.1
+    )
+
+
 def test_minimum_gate_tolerates_only_numerical_noise():
     class FakeFreq:
         def __init__(self, imaginary):

@@ -104,9 +104,12 @@ DEEP_TEMPERATURES = (12.0, 13.5, 15.0, 16.5, 20.0, 30.0, 40.0)
 FUCHS_PREFACTOR_S = 2.0e11  # nu ~ kT/h convention of Fuchs et al. 2009
 # Minima may carry numerically imaginary soft librations on clusters; a TS
 # must have exactly one imaginary mode above the noise floor and that mode
-# must be chemical (>= 200 cm^-1, the D2a gate).
+# must be chemical (>= 200 cm^-1, the D2a gate).  Wet sites get the standard
+# cluster-model spectator tolerance (observed live: a healthy 678i saddle on
+# h-co-1w-cside carrying a 52.8i water libration); gas stays strict.
 MINIMUM_NOISE_FLOOR_CM = 30.0
-TS_NOISE_FLOOR_CM = 50.0
+TS_NOISE_FLOOR_GAS_CM = 50.0
+TS_NOISE_FLOOR_WET_CM = 100.0
 TS_CHEMICAL_MODE_CM = 200.0
 RUN_ROOT = (
     Path(__file__).resolve().parent.parent / "runs" / "D2b-explicit-surface-rates"
@@ -429,12 +432,18 @@ def require_minimum(freq: FrequencyResult, *, name: str) -> None:
         )
 
 
-def require_chemical_saddle(freq: FrequencyResult, *, name: str) -> float:
-    significant = freq.imaginary_cm[freq.imaginary_cm > TS_NOISE_FLOOR_CM]
+def ts_noise_floor_cm(n_water: int) -> float:
+    return TS_NOISE_FLOOR_GAS_CM if n_water == 0 else TS_NOISE_FLOOR_WET_CM
+
+
+def require_chemical_saddle(
+    freq: FrequencyResult, *, name: str, noise_floor_cm: float = TS_NOISE_FLOOR_GAS_CM
+) -> float:
+    significant = freq.imaginary_cm[freq.imaginary_cm > noise_floor_cm]
     if significant.size != 1:
         raise RuntimeError(
             f"{name}: expected exactly 1 imaginary mode above "
-            f"{TS_NOISE_FLOOR_CM:.0f} cm^-1, got "
+            f"{noise_floor_cm:.0f} cm^-1, got "
             f"{np.round(freq.imaginary_cm, 1).tolist()}"
         )
     mode = float(significant[0])
@@ -751,13 +760,16 @@ def run_reaction(
     )
     save_xyz(ts, ts_path)
     ts_freq = frequencies(ts, reaction.method)
-    imag = require_chemical_saddle(ts_freq, name=reaction.key)
+    noise_floor = ts_noise_floor_cm(reaction.n_water)
+    imag = require_chemical_saddle(
+        ts_freq, name=reaction.key, noise_floor_cm=noise_floor
+    )
 
     back_path, fwd_path = run_dir / "irc_back.xyz", run_dir / "irc_fwd.xyz"
     if back_path.exists() and fwd_path.exists():
         back, fwd = load_xyz(back_path, ts), load_xyz(fwd_path, ts)
     else:
-        back, fwd = quick_irc(ts, reaction.method, noise_floor_cm=TS_NOISE_FLOOR_CM)
+        back, fwd = quick_irc(ts, reaction.method, noise_floor_cm=noise_floor)
         save_xyz(back, back_path)
         save_xyz(fwd, fwd_path)
 
