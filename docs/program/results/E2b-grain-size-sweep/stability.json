@@ -1,0 +1,56 @@
+{
+  "comparisons": [
+    {
+      "current_sites": 2592,
+      "max_age_defined_fraction_delta": 0.09375,
+      "max_age_relative_delta": 0.2038803408600566,
+      "max_release_fraction_delta": 0.1875,
+      "previous_sites": 768,
+      "stable": false
+    },
+    {
+      "current_sites": 6144,
+      "max_age_defined_fraction_delta": 0.0,
+      "max_age_relative_delta": 0.22511957140478595,
+      "max_release_fraction_delta": 0.0470665815022267,
+      "previous_sites": 2592,
+      "stable": false
+    },
+    {
+      "current_sites": 20736,
+      "max_age_defined_fraction_delta": 0.0,
+      "max_age_relative_delta": 0.09594422800896586,
+      "max_release_fraction_delta": 0.08353083554276397,
+      "previous_sites": 6144,
+      "stable": false
+    },
+    {
+      "current_sites": 49152,
+      "max_age_defined_fraction_delta": 0.0,
+      "max_age_relative_delta": 0.03419011622472596,
+      "max_release_fraction_delta": 0.021546177866978933,
+      "previous_sites": 20736,
+      "stable": true
+    },
+    {
+      "current_sites": 165888,
+      "max_age_defined_fraction_delta": 0.0,
+      "max_age_relative_delta": 0.027241881360166816,
+      "max_release_fraction_delta": 0.027616997121568676,
+      "previous_sites": 49152,
+      "stable": true
+    },
+    {
+      "current_sites": 559872,
+      "max_age_defined_fraction_delta": 0.0,
+      "max_age_relative_delta": 0.010082592024126924,
+      "max_release_fraction_delta": 0.016339202856879953,
+      "previous_sites": 165888,
+      "stable": true
+    }
+  ],
+  "max_age_defined_fraction_delta": 0.09375,
+  "max_age_relative_delta": 0.22511957140478595,
+  "max_release_fraction_delta": 0.1875,
+  "stabilized_at_sites": 49152
+}

@@ -12,7 +12,10 @@ import argparse
 from pathlib import Path
 
 
-def render_deck() -> str:
+def render_deck(dims: tuple[int, int, int] = (4, 4, 6)) -> str:
+    if len(dims) != 3 or any(value <= 0 for value in dims):
+        raise ValueError("lattice dimensions must be three positive integers")
+    na, nb, n_layers = dims
     lines: list[str] = []
 
     def add(*values: str) -> None:
@@ -23,7 +26,11 @@ def render_deck() -> str:
         "# Published anchors and proxy barriers are documented in",
         "# docs/program/results/E2-muscovite-full-mechanism.md.",
         "[deck]",
-        'name = "muscovite-full-mechanism"',
+        (
+            'name = "muscovite-full-mechanism"'
+            if dims == (4, 4, 6)
+            else f'name = "muscovite-full-{na}x{nb}x{n_layers}"'
+        ),
         "schema = 2",
         'units = "kcal/mol"',
         'comment = "mechanism comparison; proxy brackets are not computed kinetics"',
@@ -137,7 +144,7 @@ def render_deck() -> str:
     add(
         "",
         "[structure.lattice]",
-        "dims = [4, 4, 6]",
+        f"dims = [{na}, {nb}, {n_layers}]",
         'boundary = ["periodic", "periodic", "open"]',
     )
 
@@ -180,7 +187,7 @@ def render_deck() -> str:
         "closed",
         1.0,
         "open",
-        "{ axis = 2, min = 5, max = 5 }",
+        f"{{ axis = 2, min = {n_layers - 1}, max = {n_layers - 1} }}",
     )
 
     add(
