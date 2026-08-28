@@ -370,7 +370,10 @@ def load_xyz(path: Path, template: Cluster) -> Cluster:
 
 
 def geometry_hash(cluster: Cluster) -> str:
-    return hashlib.sha256(cluster.to_xyz().encode()).hexdigest()
+    # A fixed comment keeps the hash name-insensitive: a checkpoint-resumed
+    # cluster inherits its load template's name, and CC receipt identity must
+    # survive that (observed live: cc-reactant-tz.json drift on resume).
+    return hashlib.sha256(cluster.to_xyz(comment="geometry").encode()).hexdigest()
 
 
 def interior_global_maximum(

@@ -191,6 +191,17 @@ def test_rate_table_without_cc_falls_back_to_dft_headline():
     assert row["eckart_extrapolated"] is True
 
 
+def test_geometry_hash_ignores_cluster_name():
+    cluster = surf.reactions(gpu=False, basis="sto-3g")["h-co"].cluster
+    renamed = type(cluster)(
+        name=f"{cluster.name}-ts-back",
+        symbols=list(cluster.symbols),
+        coords=cluster.coords.copy(),
+        spin=cluster.spin,
+    )
+    assert surf.geometry_hash(cluster) == surf.geometry_hash(renamed)
+
+
 def test_geometry_hash_changes_with_coordinates():
     cluster = surf.reactions(gpu=False, basis="sto-3g")["h-co"].cluster
     moved = cluster.coords.copy()
