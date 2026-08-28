@@ -4,6 +4,14 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-28 — (hermes-8d9e30fee91548; profile=laptop) — A5 Phase 1 runs
+  4×64 finite-defect kaolinite-aging ensembles: all replicas are defect-free
+  by step 90 at the latest, fresh/aged apparent-rate drops grow 36.36×→363.06×
+  with initial damage density, spectra transiently broaden then down-shift
+  three orders, and BET-like area rises while rate falls. The honest
+  mechanism-tier verdict is partial plausibility (1.53–2.56 log units), not a
+  calibrated field attribution. `docs/program/results/A5p1-aging-study.md`.
+
 - 2026-08-27 — fable — Track E phase-3/paper-1 path carded: E3a
   classical-NEB barrier campaign (READY — the "uncomputed middle": Nteme
   replication gate, then dehydroxylate/defect-zone/trap/Xe barriers), E3b
