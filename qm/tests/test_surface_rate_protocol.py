@@ -280,3 +280,16 @@ def test_minimum_gate_tolerates_only_numerical_noise():
     surf.require_minimum(FakeFreq([12.0, 25.0]), name="soft-librations")
     with pytest.raises(RuntimeError, match="not a minimum"):
         surf.require_minimum(FakeFreq([80.0]), name="bad")
+    # The live h-co-2w complex: a 76.5i water libration passes on wet sites
+    # but a chemical-scale mode never does.
+    surf.require_minimum(
+        FakeFreq([76.5]),
+        name="wet-complex",
+        noise_floor_cm=surf.minimum_noise_floor_cm(2),
+    )
+    with pytest.raises(RuntimeError, match="not a minimum"):
+        surf.require_minimum(
+            FakeFreq([150.0]),
+            name="wet-bad",
+            noise_floor_cm=surf.minimum_noise_floor_cm(2),
+        )

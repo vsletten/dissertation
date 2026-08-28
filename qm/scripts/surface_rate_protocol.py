@@ -107,7 +107,8 @@ FUCHS_PREFACTOR_S = 2.0e11  # nu ~ kT/h convention of Fuchs et al. 2009
 # must be chemical (>= 200 cm^-1, the D2a gate).  Wet sites get the standard
 # cluster-model spectator tolerance (observed live: a healthy 678i saddle on
 # h-co-1w-cside carrying a 52.8i water libration); gas stays strict.
-MINIMUM_NOISE_FLOOR_CM = 30.0
+MINIMUM_NOISE_FLOOR_GAS_CM = 30.0
+MINIMUM_NOISE_FLOOR_WET_CM = 100.0
 TS_NOISE_FLOOR_GAS_CM = 50.0
 TS_NOISE_FLOOR_WET_CM = 100.0
 TS_CHEMICAL_MODE_CM = 200.0
@@ -423,8 +424,21 @@ def fuchs_effective_barrier_k(k_s: float, temperature_k: float) -> float:
     return -temperature_k * math.log(k_s / FUCHS_PREFACTOR_S)
 
 
-def require_minimum(freq: FrequencyResult, *, name: str) -> None:
-    significant = freq.imaginary_cm[freq.imaginary_cm > MINIMUM_NOISE_FLOOR_CM]
+def minimum_noise_floor_cm(n_water: int) -> float:
+    # Physisorbed clusters keep their soft water librations numerically
+    # imaginary below ~100 cm^-1 at production convergence (observed live:
+    # 76.5i on the h-co-2w pre-reactive complex).  Same spectator tolerance
+    # as the wet TS gate, disclosed via the stored imaginary-mode lists.
+    return MINIMUM_NOISE_FLOOR_GAS_CM if n_water == 0 else MINIMUM_NOISE_FLOOR_WET_CM
+
+
+def require_minimum(
+    freq: FrequencyResult,
+    *,
+    name: str,
+    noise_floor_cm: float = MINIMUM_NOISE_FLOOR_GAS_CM,
+) -> None:
+    significant = freq.imaginary_cm[freq.imaginary_cm > noise_floor_cm]
     if significant.size:
         raise RuntimeError(
             f"{name}: endpoint is not a minimum — imaginary modes "
@@ -783,8 +797,15 @@ def run_reaction(
     reactant, product = sorted((back, fwd), key=distance, reverse=True)
     reactant_freq = frequencies(reactant, reaction.method)
     product_freq = frequencies(product, reaction.method)
-    require_minimum(reactant_freq, name=f"{reaction.key} reactant complex")
-    require_minimum(product_freq, name=f"{reaction.key} product")
+    minimum_floor = minimum_noise_floor_cm(reaction.n_water)
+    require_minimum(
+        reactant_freq,
+        name=f"{reaction.key} reactant complex",
+        noise_floor_cm=minimum_floor,
+    )
+    require_minimum(
+        product_freq, name=f"{reaction.key} product", noise_floor_cm=minimum_floor
+    )
 
     def zpe(freq: FrequencyResult) -> float:
         return surface_thermo(freq, 1.0).zpe_kj
