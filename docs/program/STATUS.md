@@ -4,6 +4,40 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-28 — (hermes-8d9e30fee91548; profile=laptop) — E2b runs seven
+  32-replica muscovite volumes through 559,872 sites: the old-first-step
+  staircase stabilizes at 49,152 sites and stays stable across two larger
+  volumes; 559,872 is the completed host ceiling after the 1,327,104-site rung
+  exits by `SIGKILL`. Full bootstrap bands, isotope-release distributions,
+  exact-seed replay receipts, and scaling are in
+  `docs/program/results/E2b-grain-size-sweep.md`.
+
+- 2026-08-28 — (hermes-8d9e30fee91548; profile=laptop) — A5 Phase 1 runs
+  4×64 finite-defect kaolinite-aging ensembles: all replicas are defect-free
+  by step 90 at the latest, fresh/aged apparent-rate drops grow 36.36×→363.06×
+  with initial damage density, spectra transiently broaden then down-shift
+  three orders, and BET-like area rises while rate falls. The honest
+  mechanism-tier verdict is partial plausibility (1.53–2.56 log units), not a
+  calibrated field attribution. `docs/program/results/A5p1-aging-study.md`.
+
+- 2026-08-27 — fable — Track E phase-3/paper-1 path carded: E3a
+  classical-NEB barrier campaign (READY — the "uncomputed middle": Nteme
+  replication gate, then dehydroxylate/defect-zone/trap/Xe barriers), E3b
+  CP2K spot checks (blocked: E3a), E2b grain-size sweep (READY — closes
+  E2's 768-site statistics deviation), E4 1998-comparison (blocked: E3a,
+  E2b, A8; the paper-1 figure set). Also A5p1-aging-study (READY): M5 named it
+  but it was never carded. Context: board starvation 08-25→08-27 was a
+  feeder machine-parser bug, fixed in mission-control 387300f.
+
+- 2026-08-27 — (hermes-8d9e30fee91548; profile=laptop) — C2 ships a
+  strain-seeded passive-film CTMC deck plus a deterministic 7×32-replica study
+  and three-size scan: initiation rises 0/32→32/32, mean pit count
+  3.47→36.22, and mean largest cluster 1.25→7.28 across the potential sweep;
+  descriptive induction plots, exact-deadline CSVs, and a metastable
+  current-rate series are archived in `docs/program/results/C2-corrosion-deck.md`.
+
+- 2026-08-27 — (hermes-custom-build-001; profile=workstation) — QI2 makes the RTX 4090 a single explicit lane: atomic process/PID lease, dead-PID stale-break receipts, fail-closed symlink-safe state, SIGTERM/fork hardening, shared `scripts/gpu_preflight.sh`, and a 16 GB CuPy pool cap preserving 6 GB for ollama. Phase 1/2 now refuse contention cleanly; 436 QM tests, Ruff/format, live 4090 preflight, separate-process busy exit, and signal release are green.
+
 - 2026-08-26 — (hermes-custom-build-001; profile=workstation) — A2a's corrected full-system local dimer exhausted all 120 bounded translations inside the exact climb guard with strictly positive curvature (`+0.0274 eV/A²` minimum), finished wall-supported, and persisted no candidate or downstream number. Pushed head `95ea8df`; 425 QM tests and whole-QM Ruff/format pass; evidence manifest `9e163528bb43...` covers 478 files. A2a is scientifically blocked pending a new mechanism/path decision, not another local Sella/dimer retry.
 
 - 2026-08-26 — hermes-workstation — A2a I↔P now has a tested neighbor-radius

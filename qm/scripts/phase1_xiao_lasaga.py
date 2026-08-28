@@ -51,6 +51,7 @@ if __name__ == "__main__":
     bootstrap_cli(
         "phase1_xiao_lasaga",
         default_run_root=Path(__file__).resolve().parent.parent / "runs",
+        gpu_owner="phase1_xiao_lasaga",
     )
 
 import numpy as np  # noqa: E402
@@ -2016,6 +2017,12 @@ def main() -> int:
         help="geometry/frequency basis (def2-svp first pass)",
     )
     ap.add_argument("--gpu", action="store_true")
+    ap.add_argument(
+        "--gpu-mem-gb",
+        type=float,
+        default=16.0,
+        help="CuPy device-pool ceiling in GB (max 18 preserves 6 GB for ollama)",
+    )
     ap.add_argument(
         "--threads",
         type=int,

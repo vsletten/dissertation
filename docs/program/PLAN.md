@@ -28,7 +28,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [B1-schema-rfc](cards/B1-schema-rfc.md) | B | P0 | any | done | — |
 | [B2-engine-refactor](cards/B2-engine-refactor.md) | B | P0 | any | done | B1 ✅ |
 | [QI1-driver-enforced-etiquette](cards/QI1-driver-enforced-etiquette.md) | A | P2 | any | done | — |
-| [QI2-gpu-lease](cards/QI2-gpu-lease.md) | A | P1 | any | ready | — |
+| [QI2-gpu-lease](cards/QI2-gpu-lease.md) | A | P1 | any | done | — |
 | [QI3-fenwick-total-cancellation](cards/QI3-fenwick-total-cancellation.md) | B | P1 | any | done | — |
 | [E1-muscovite-deck](cards/E1-muscovite-deck.md) | E | P1 | any | done | — (phase 1 isothermal) |
 | [E2-muscovite-full-mechanism](cards/E2-muscovite-full-mechanism.md) | E | P1 | any | done | B5 ✅ |
@@ -47,14 +47,22 @@ on main). Priority P0 > P1 > P2 within READY.
 | [B3-conformance-decks](cards/B3-conformance-decks.md) | B | P1 | any | done | B2 ✅ |
 | [B4-ensembles-observables](cards/B4-ensembles-observables.md) | B | P1 | any | done | B2 ✅ |
 | [B5-execution-schedule](cards/B5-execution-schedule.md) | B | P1 | any | done | B2 ✅ |
-| [C2-corrosion-deck](cards/C2-corrosion-deck.md) | C | P2 | any | ready | B3 ✅ |
+| [C2-corrosion-deck](cards/C2-corrosion-deck.md) | C | P2 | any | done | B3 ✅ |
 | [D2a-astro-rate-reproduction](cards/D2a-astro-rate-reproduction.md) | D | P1 | workstation | done | — |
 | [D2b-explicit-surface-rates](cards/D2b-explicit-surface-rates.md) | D | P1 | workstation | ready | D2a ✅ |
 | [D3-ice-mantle-deck](cards/D3-ice-mantle-deck.md) | D | P2 | any | done | B3 ✅, D2a ✅ |
 | [D3b-co-hydrogenation-deck](cards/D3b-co-hydrogenation-deck.md) | D | P2 | any | blocked: D2b | D3 ✅, D2b |
 | [A5p0-aging-observables](cards/A5p0-aging-observables.md) | A | P1 | any | done | B4 ✅ |
+| [A5p1-aging-study](cards/A5p1-aging-study.md) | A | P1 | any | done | A5p0 ✅ |
+| [E2b-grain-size-sweep](cards/E2b-grain-size-sweep.md) | E | P1 | any | done | E2 ✅, B4 ✅ |
+| [E3a-classical-neb-barriers](cards/E3a-classical-neb-barriers.md) | E | P1 | workstation | ready | — |
+| [E3b-periodic-dft-spot-checks](cards/E3b-periodic-dft-spot-checks.md) | E | P2 | workstation | blocked: E3a | E3a |
+| [E4-1998-comparison](cards/E4-1998-comparison.md) | E | P1 | any | blocked: E3a, E2b, A8 | E3a, E2b, A8 |
 
-**Done** (acceptance verified on main): A1g-acid-bridge-side-hydronium-neutral-attacker,
+**Done** (acceptance verified on main): E2b-grain-size-sweep,
+A5p1-aging-study, C2-corrosion-deck,
+QI2-gpu-lease,
+A1g-acid-bridge-side-hydronium-neutral-attacker,
 A1f-acid-neutral-water-attacker-relay,
 A1e-acid-concerted-hydronium-relay,
 A1d-acid-3w-bridge-convergence,
