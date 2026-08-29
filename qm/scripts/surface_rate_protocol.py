@@ -897,6 +897,13 @@ def run_reaction(
         cc_delta = gas_cc_delta_kj[reaction.family]
         cc_reverse_delta = cc_delta
         cc_delta_source = "gas-phase-transfer"
+    require_requested_cc_delta(
+        cc_mode=cc_mode,
+        key=reaction.key,
+        n_water=reaction.n_water,
+        family=reaction.family,
+        cc_delta=cc_delta,
+    )
 
     rates = rate_table(
         reactant_freq,
@@ -956,6 +963,58 @@ def run_reaction(
     return result
 
 
+def gas_family_key(all_reactions: dict[str, Reaction], family: str) -> str:
+    for key, reaction in all_reactions.items():
+        if reaction.family == family and reaction.n_water == 0:
+            return key
+    raise KeyError(f"no gas-phase reaction for family '{family}'")
+
+
+def ensure_cc_transfer_prerequisites(
+    selected: list[str],
+    all_reactions: dict[str, Reaction],
+    *,
+    cc_mode: str,
+) -> None:
+    """Fail fast when --cc full cannot produce a 2-water transfer correction."""
+    if cc_mode == "skip":
+        return
+    selected_set = set(selected)
+    missing: list[str] = []
+    for key in selected:
+        reaction = all_reactions[key]
+        if reaction.n_water < 2:
+            continue
+        gas_key = gas_family_key(all_reactions, reaction.family)
+        if gas_key not in selected_set:
+            missing.append(f"{key} needs {gas_key}")
+    if missing:
+        details = "; ".join(missing)
+        raise SystemExit(
+            f"--cc {cc_mode} requires the gas-phase family reaction for each "
+            f"2-water selection so the additive CC transfer exists. Missing: "
+            f"{details}. Add those --reaction keys or pass --cc skip."
+        )
+
+
+def require_requested_cc_delta(
+    *,
+    cc_mode: str,
+    key: str,
+    n_water: int,
+    family: str,
+    cc_delta: float | None,
+) -> None:
+    """Refuse a successful DFT-only result when the caller asked for rung B."""
+    if cc_mode == "skip" or cc_delta is not None:
+        return
+    raise RuntimeError(
+        f"{key}: --cc {cc_mode} requested but no coupled-cluster correction "
+        f"is available (n_water={n_water}, family={family}). Include the "
+        f"gas-phase family reaction in the same invocation, or pass --cc skip."
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--threads", type=int, default=16, help="numerical thread cap")
@@ -982,6 +1041,7 @@ def main() -> int:
     unknown = sorted(set(selected) - set(all_reactions))
     if unknown:
         raise SystemExit(f"unknown reactions: {unknown}")
+    ensure_cc_transfer_prerequisites(selected, all_reactions, cc_mode=args.cc)
     RUN_ROOT.mkdir(parents=True, exist_ok=True)
 
     # Gas-phase reactions run first so cluster reactions can inherit the

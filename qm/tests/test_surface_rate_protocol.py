@@ -341,3 +341,44 @@ def test_minimum_gate_tolerates_only_numerical_noise():
             name="wet-bad",
             noise_floor_cm=surf.minimum_noise_floor_cm(2),
         )
+
+
+def test_two_water_cc_full_requires_gas_family_in_selection():
+    targets = surf.reactions(gpu=False, basis="sto-3g")
+    with pytest.raises(SystemExit, match="h-co-2w.*h-co"):
+        surf.ensure_cc_transfer_prerequisites(["h-co-2w"], targets, cc_mode="full")
+
+
+def test_two_water_cc_full_accepts_selection_that_includes_gas_family():
+    targets = surf.reactions(gpu=False, basis="sto-3g")
+    surf.ensure_cc_transfer_prerequisites(["h-co", "h-co-2w"], targets, cc_mode="full")
+
+
+def test_two_water_cc_skip_does_not_require_gas_family():
+    targets = surf.reactions(gpu=False, basis="sto-3g")
+    surf.ensure_cc_transfer_prerequisites(["h-co-2w"], targets, cc_mode="skip")
+
+
+def test_one_water_cc_full_does_not_require_gas_family():
+    targets = surf.reactions(gpu=False, basis="sto-3g")
+    surf.ensure_cc_transfer_prerequisites(["h-co-1w-oside"], targets, cc_mode="full")
+
+
+def test_require_cc_delta_rejects_silent_dft_fallback():
+    with pytest.raises(RuntimeError, match="no coupled-cluster correction"):
+        surf.require_requested_cc_delta(
+            cc_mode="full",
+            key="h-co-2w",
+            n_water=2,
+            family="h-co",
+            cc_delta=None,
+        )
+
+
+def test_require_cc_delta_allows_skip_and_present_delta():
+    surf.require_requested_cc_delta(
+        cc_mode="skip", key="h-co-2w", n_water=2, family="h-co", cc_delta=None
+    )
+    surf.require_requested_cc_delta(
+        cc_mode="full", key="h-co-2w", n_water=2, family="h-co", cc_delta=1.2
+    )
