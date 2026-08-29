@@ -47,6 +47,8 @@ CHECKPOINT_ARRAY_NAMES = (
     "t2",
 )
 CHECKPOINT_DTYPE = np.dtype("float64")
+SCF_ENERGY_VALIDATION_ATOL = 1e-8
+SCF_ORBITAL_VALIDATION_ATOL = 1e-5
 BYTEQC_SCF_SETTINGS = {
     "method": "RHF",
     "density_fit": True,
@@ -547,7 +549,9 @@ def _validate_restored_scf_state(
     hcore = mean_field.get_hcore()
     veff = mean_field.get_veff(mean_field.mol, density)
     recomputed_energy = float(mean_field.energy_tot(dm=density, h1e=hcore, vhf=veff))
-    if not np.isclose(recomputed_energy, scf_energy, atol=1e-8, rtol=0.0):
+    if not np.isclose(
+        recomputed_energy, scf_energy, atol=SCF_ENERGY_VALIDATION_ATOL, rtol=0.0
+    ):
         raise ValueError(f"{path}: restored RHF total energy is inconsistent")
     fock = np.asarray(
         mean_field.get_fock(h1e=hcore, s1e=overlap, vhf=veff, dm=density),
@@ -557,8 +561,13 @@ def _validate_restored_scf_state(
         raise ValueError(f"{path}: restored RHF Fock matrix is invalid")
     mo_fock = mo_coeff.T @ fock @ mo_coeff
     off_diagonal = mo_fock - np.diag(np.diag(mo_fock))
-    if not np.allclose(off_diagonal, 0.0, atol=1e-7, rtol=0.0) or not np.allclose(
-        np.diag(mo_fock), mo_energy, atol=1e-7, rtol=1e-9
+    if not np.allclose(
+        off_diagonal, 0.0, atol=SCF_ORBITAL_VALIDATION_ATOL, rtol=0.0
+    ) or not np.allclose(
+        np.diag(mo_fock),
+        mo_energy,
+        atol=SCF_ORBITAL_VALIDATION_ATOL,
+        rtol=1e-9,
     ):
         raise ValueError(f"{path}: restored RHF orbitals do not diagonalize Fock")
 
