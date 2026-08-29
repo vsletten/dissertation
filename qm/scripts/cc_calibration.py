@@ -23,6 +23,7 @@ if __name__ == "__main__":
     _ETIQUETTE = bootstrap_cli(
         "cc-calibration",
         default_run_root="/mnt/data/vsletten/dissertation-data/task207-a2-production",
+        gpu_owner="cc_calibration",
     )
 
 import numpy as np
@@ -403,6 +404,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--threads", type=int, default=16)
     result.add_argument("--nice", type=int, default=10)
     result.add_argument("--log")
+    result.add_argument("--gpu", action="store_true")
+    result.add_argument("--gpu-mem-gb", type=float, default=16.0)
     subparsers = result.add_subparsers(dest="command", required=True)
     for command in ("psi4", "byteqc"):
         job = subparsers.add_parser(command)
@@ -422,8 +425,21 @@ def parser() -> argparse.ArgumentParser:
     return result
 
 
+def validate_resource_contract(args: argparse.Namespace) -> None:
+    if args.command == "byteqc":
+        if not args.gpu:
+            raise ValueError(
+                "ByteQC calibration requires --gpu and the shared GPU lease"
+            )
+        if float(args.gpu_mem_gb) != float(args.gpu_memory_gb):
+            raise ValueError("--gpu-mem-gb must equal --gpu-memory-gb")
+    elif args.gpu:
+        raise ValueError("--gpu is valid only for ByteQC calibration jobs")
+
+
 def main() -> int:
     args = parser().parse_args()
+    validate_resource_contract(args)
     if args.command in {"psi4", "byteqc"}:
         args.log = args.engine_log
         if args.threads < 1 or args.threads > 16:

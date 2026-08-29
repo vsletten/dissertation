@@ -88,6 +88,25 @@ def test_calibration_engines_refuse_open_shell_before_import():
         cc.psi4_job(argparse.Namespace(spin=1))
 
 
+def test_calibration_resource_contract_requires_exact_byteqc_gpu_lease():
+    byteqc = argparse.Namespace(
+        command="byteqc", gpu=False, gpu_mem_gb=16.0, gpu_memory_gb=16
+    )
+    with pytest.raises(ValueError, match="requires --gpu"):
+        cc.validate_resource_contract(byteqc)
+
+    byteqc.gpu = True
+    byteqc.gpu_mem_gb = 12.0
+    with pytest.raises(ValueError, match="must equal"):
+        cc.validate_resource_contract(byteqc)
+
+    byteqc.gpu_memory_gb = 12
+    cc.validate_resource_contract(byteqc)
+
+    with pytest.raises(ValueError, match="only for ByteQC"):
+        cc.validate_resource_contract(argparse.Namespace(command="psi4", gpu=True))
+
+
 def test_summarize_reports_barrier_delta_and_gate(tmp_path):
     paths = {engine: {} for engine in ("canonical", "dlpno")}
     engine_names = {
