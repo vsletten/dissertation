@@ -140,3 +140,11 @@ cutensor backend also dlopens libcutensorMg, which needs NCCL: put BOTH
 LD_LIBRARY_PATH (the cutensor-preload gotcha, extended). cupbc (PBC) is
 unneeded for cluster work and wants a tarball/conda cuTENSOR layout —
 skip it. Full working recipe: qm/CALIBRATION.md.
+
+### Cluster.to_xyz embeds the name — never hash it for caching (2026-08-28)
+`to_xyz()` puts `comment or self.name` on line 2, and a checkpoint-resumed
+cluster inherits its load template's name (`load_xyz(path, ts)` → name
+"…-ts", fresh IRC output → "…-ts-back"). D2b's CC receipt cache keyed on
+sha256(to_xyz()) and hit "identity drift" on identical coordinates across a
+resume. Hash `to_xyz(comment="geometry")` (or coords directly) for any
+geometry-keyed cache.

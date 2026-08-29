@@ -240,6 +240,40 @@ def thermo_from_frequencies(
     )
 
 
+def surface_thermo_from_frequencies(
+    electronic_kj: float,
+    frequencies_cm: list[float] | np.ndarray,
+    temperature: float,
+    *,
+    qrrho_cutoff_cm: float = 100.0,
+) -> Thermo:
+    """Vibration-only thermochemistry for an adsorbed (surface-bound) species.
+
+    The Langmuir--Hinshelwood convention of the grain-chemistry literature
+    (Meisner, Lamberts & Kaestner 2017; Song & Kaestner 2017): a surface holds
+    both the pre-reactive complex and its transition state, so translational
+    and rigid-rotor partition functions are taken to cancel between the two
+    and are excluded entirely.  There is no PV term either — the adsorbed
+    standard state has H = U.  Quasi-RRHO damping still applies to the soft
+    modes, which is where a physisorbed complex stores most of its entropy.
+    """
+    t = temperature
+    zpe = 0.0
+    e_vib = 0.0
+    s_vib = 0.0
+    freqs = np.asarray(frequencies_cm, dtype=float)
+    if freqs.size:
+        zpe = 0.5 * NA * float(np.sum(wavenumber_to_joule(freqs))) / 1000.0
+        e_vib, s_vib = _vib_thermal_and_entropy(freqs, t, qrrho_cutoff_cm)
+    return Thermo(
+        electronic_kj=electronic_kj,
+        zpe_kj=zpe,
+        thermal_kj=e_vib,
+        entropy_kj_per_k=s_vib,
+        temperature=t,
+    )
+
+
 @dataclass(frozen=True)
 class RateResult:
     """k(T) for one elementary step, with the pieces kept visible."""
