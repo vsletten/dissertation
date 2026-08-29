@@ -15,3 +15,6 @@ __pycache__/
 # campaign outputs (checkpoints, trajectories, results)
 runs/
 *.traj
+
+# ByteQC/cuTENSOR autotuning cache written in the process CWD
+cuTensorModel.dat
