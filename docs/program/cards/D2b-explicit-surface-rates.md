@@ -59,3 +59,21 @@ surface rates and state a validity floor.
   qm suite green at launch (455 passed, 1 skipped); CPU smoke of the
   driver at STO-3G exercised scan→Sella→IRC→gates→failure-isolation
   end-to-end.
+- 2026-08-27 (night) — pass 1: 5/10 clean; four campaign-hardening
+  fixes landed from live failures (`d1d7cb6` shallow-crest fallback,
+  `f60c810` name-insensitive CC receipt hashes, `c311c3e`/`335e9c9`
+  tiered spectator-mode gates for wet sites, `87ea5eb` wet-seed
+  pre-optimization). Catch-up pass running detached (pid 3010250 on
+  the 4090): 9/10 reactions done or resumed clean as of 22:52; final
+  reaction h-h2co-h2-hco-2w scanning from its pre-optimized seed.
+  REMAINING FOR CLOSEOUT once `complete:` appears in
+  `qm/runs/D2b-campaign-stdout.log`: analyze
+  `qm/runs/D2b-explicit-surface-rates/results.json` against the gate
+  (rungs A/B/C decomposition vs Song&Kästner fits / Simons plateaus /
+  Fuchs effective barriers), write
+  `docs/program/results/D2b-explicit-surface-rates.md` with the
+  go/no-go verdict, emit the D3b rate table ONLY if the gate passes,
+  card→done, STATUS.md line, open PR and STOP. Then restore GPU
+  workloads (email pipelines + honcho deriver/api — dead-man
+  `d2b-deadman-restart.timer` fires 08:30 regardless) and stop the
+  `d2b` monitor.
