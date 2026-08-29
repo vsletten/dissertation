@@ -96,11 +96,72 @@ def frozen_core_orbitals(symbols: list[str]) -> int:
     return count
 
 
-def configure_byteqc_frozen_core_blocking(coupled_cluster: Any) -> int:
-    """Avoid ByteQC 2.5's undersized reused DF buffer with frozen orbitals."""
+def byteqc_frozen_core_nr_e2(
+    eri: Any,
+    mo_coeff: Any,
+    orbs_slice: tuple[int, int, int, int],
+    aosym: str = "s1",
+    mosym: str = "s1",
+    out: Any = None,
+    ao_loc: Any = None,
+    *,
+    array_module: Any = None,
+    lib_module: Any = None,
+    contraction_module: Any = None,
+) -> Any:
+    """Transform one DF block without reusing an MO-sized buffer as AO scratch.
+
+    ByteQC 2.5 passes the previous MO-transformed block back as ``out``.  Its
+    stock ``nr_e2`` also passes that buffer to ``unpack_tril`` even though the
+    AO matrix is larger whenever frozen core makes ``nmo < nao``.  Keep the
+    reusable buffer for the final MO result only and allocate the AO scratch
+    independently.  This preserves bounded DF blocks for cc-pVQZ instead of
+    forcing the entire auxiliary basis onto the GPU at once.
+    """
+    if array_module is None or lib_module is None or contraction_module is None:
+        import cupy
+        from byteqc import lib as byteqc_lib
+        from byteqc.cucc import culib
+
+        array_module = cupy
+        lib_module = byteqc_lib
+        contraction_module = culib
+
+    assert eri.flags.c_contiguous
+    assert mo_coeff.dtype == np.double
+    k0, k1, l0, l1 = orbs_slice
+    kc = k1 - k0
+    lc = l1 - l0
+    kl_count = kc * lc
+    nrow = eri.shape[0]
+    if nrow * kl_count == 0:
+        return array_module.empty((nrow, kl_count))
+    assert aosym == "s2" and mosym == "s1" and kc == lc and ao_loc is None
+
+    # Never expose the smaller, prior MO result to the larger AO unpack.
+    mat = lib_module.unpack_tril(eri)
+    tmp = contraction_module.contraction("ij", mo_coeff[k0:], "mjk", mat, "mik")
+    mat = None
+    result = contraction_module.gemm(
+        "N", "T", tmp.reshape(-1, tmp.shape[-1]), mo_coeff[l0:], buf=out
+    )
+    return result.reshape((tmp.shape[0], tmp.shape[1], -1))
+
+
+def configure_byteqc_frozen_core_blocking(
+    coupled_cluster: Any, *, dfccsd_module: Any = None
+) -> int:
+    """Install the frozen-core-safe DF transform and retain bounded blocks."""
+    if dfccsd_module is None:
+        from byteqc.cucc import dfccsd as dfccsd_module
+
+    dfccsd_module.nr_e2 = byteqc_frozen_core_nr_e2
     naux = int(coupled_cluster.with_df.get_naoaux())
-    coupled_cluster.with_df.blockdim = naux
-    return naux
+    blockdim = min(int(coupled_cluster.with_df.blockdim), naux)
+    if blockdim < 1:
+        raise ValueError("ByteQC DF block size must be positive")
+    coupled_cluster.with_df.blockdim = blockdim
+    return blockdim
 
 
 def existing_receipt(
@@ -224,7 +285,7 @@ def byteqc_job(args: argparse.Namespace) -> dict[str, Any]:
         "basis": args.basis,
         "freeze_core_orbitals": frozen,
         "density_fit": True,
-        "df_aux_blocking": "single-block-frozen-core-v1",
+        "df_aux_blocking": "bounded-frozen-core-safe-transform-v2",
         "charge": args.charge,
         "spin_2s": args.spin,
     }

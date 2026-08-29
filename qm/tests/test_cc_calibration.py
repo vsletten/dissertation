@@ -31,12 +31,72 @@ def test_frozen_core_orbitals_for_si_neutral_cluster():
     assert cc.frozen_core_orbitals(["H"] * 8 + ["O"] * 8 + ["Si"] * 2) == 18
 
 
-def test_byteqc_frozen_core_df_uses_one_complete_auxiliary_block():
+def test_byteqc_frozen_core_df_retains_bounded_blocks_and_installs_safe_transform():
     with_df = SimpleNamespace(blockdim=240, get_naoaux=lambda: 1337)
     coupled_cluster = SimpleNamespace(with_df=with_df)
+    dfccsd = SimpleNamespace(nr_e2=object())
 
-    assert cc.configure_byteqc_frozen_core_blocking(coupled_cluster) == 1337
-    assert with_df.blockdim == 1337
+    assert (
+        cc.configure_byteqc_frozen_core_blocking(coupled_cluster, dfccsd_module=dfccsd)
+        == 240
+    )
+    assert with_df.blockdim == 240
+    assert dfccsd.nr_e2 is cc.byteqc_frozen_core_nr_e2
+
+
+def test_byteqc_frozen_core_nr_e2_keeps_ao_scratch_separate_from_mo_output():
+    class FakeArray:
+        dtype = cc.np.double
+        flags = SimpleNamespace(c_contiguous=True)
+
+        def __init__(self, shape):
+            self.shape = shape
+
+        def __getitem__(self, _key):
+            return self
+
+        @property
+        def T(self):
+            return self
+
+        def reshape(self, *shape):
+            normalized = (
+                shape[0] if len(shape) == 1 and isinstance(shape[0], tuple) else shape
+            )
+            return FakeArray(tuple(normalized))
+
+    reusable_mo_output = object()
+    calls = {}
+
+    def unpack_tril(eri, out=None):
+        calls["unpack_out"] = out
+        return FakeArray((eri.shape[0], 5, 5))
+
+    def contraction(*_args):
+        return FakeArray((2, 5, 4))
+
+    def gemm(*_args, buf=None):
+        calls["gemm_buf"] = buf
+        return FakeArray((10, 4))
+
+    result = cc.byteqc_frozen_core_nr_e2(
+        FakeArray((2, 15)),
+        FakeArray((5, 4)),
+        (0, 4, 0, 4),
+        aosym="s2",
+        mosym="s1",
+        out=reusable_mo_output,
+        array_module=SimpleNamespace(empty=lambda shape: FakeArray(shape)),
+        lib_module=SimpleNamespace(unpack_tril=unpack_tril),
+        contraction_module=SimpleNamespace(
+            contraction=contraction,
+            gemm=gemm,
+        ),
+    )
+
+    assert result.shape == (2, 5, -1)
+    assert calls["unpack_out"] is None
+    assert calls["gemm_buf"] is reusable_mo_output
 
 
 def test_two_point_extrapolations_recover_synthetic_limits():
