@@ -373,9 +373,7 @@ def test_ccsd_checkpoint_failed_replacement_preserves_last_good_state(
     assert not cc.ccsd_converged_marker_path(path).exists()
 
 
-def test_byteqc_energy_checkpoint_persists_each_completed_cycle_before_next_update(
-    tmp_path, monkeypatch
-):
+def test_byteqc_energy_checkpoint_stops_before_second_update(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(
         cc,
@@ -388,23 +386,115 @@ def test_byteqc_energy_checkpoint_persists_each_completed_cycle_before_next_upda
         checkpoint_scf(2),
         base_cycle=4,
     )
-    energies = iter((-2.0, -2.1, -2.2))
+    energies = iter((-2.0, -2.1))
     wrapped = checkpoint.wrap(lambda *_args: (next(energies), None))
+    updates = []
+    wrapped_update = checkpoint.wrap_update_amps(
+        lambda *args: updates.append(args) or args
+    )
     t1 = cc.np.zeros((1, 1))
     t2 = cc.np.zeros((1, 1, 1, 1))
 
     wrapped(t1, t2, None)
     assert calls == []
+    wrapped_update(t1, t2, None)
     wrapped(t1, t2, None)
     assert calls[0][1]["completed_cycle"] == 5
     assert calls[0][1]["ccsd_correlation_hartree"] == -2.1
-    # A kill during the following update cannot roll back cycle 5: its atomic
-    # state was written by the preceding post-DIIS energy evaluation.
+    assert len(updates) == 1
     assert checkpoint.last_checkpoint is not None
+    with pytest.raises(cc.CCSDLaunchCheckpointed) as stopped:
+        wrapped_update(t1, t2, None)
+    assert stopped.value.checkpoint is checkpoint.last_checkpoint
+    assert len(calls) == 1 and len(updates) == 1
+    assert set(checkpoint_scf(2)) <= set(calls[0][1])
+
+
+def test_byteqc_checkpoint_limit_allows_convergence_check(tmp_path, monkeypatch):
+    writes = []
+    monkeypatch.setattr(
+        cc,
+        "write_ccsd_checkpoint",
+        lambda _path, **kwargs: writes.append(kwargs) or kwargs,
+    )
+    cluster = SimpleNamespace()
+    cluster.energy = lambda *_args: (-2.0, None)
+    cluster.update_amps = lambda t1, t2, _eris: (t1, t2)
+    t1 = cc.np.zeros((1, 1))
+    t2 = cc.np.zeros((1, 1, 1, 1))
+
+    with cc.byteqc_energy_checkpoint(
+        cluster,
+        tmp_path / "restart.h5",
+        {"basis": "cc-pVQZ"},
+        checkpoint_scf(2),
+        base_cycle=4,
+    ) as checkpoint:
+        cluster.energy(t1, t2, None)  # Initial MP2 energy.
+        t1, t2 = cluster.update_amps(t1, t2, None)
+        cluster.energy(t1, t2, None)  # Durable cycle 5.
+        converged = True  # Models ByteQC's check after post-DIIS energy.
+        if not converged:
+            cluster.update_amps(t1, t2, None)
+
+    assert checkpoint.checkpoints_written == 1
+    assert writes[0]["completed_cycle"] == 5
+
+
+def test_failed_checkpoint_write_is_not_counted_as_progress(tmp_path, monkeypatch):
+    checkpoint = cc.ByteQCEnergyCheckpoint(
+        tmp_path / "restart.h5",
+        {"basis": "cc-pVQZ"},
+        checkpoint_scf(2),
+        base_cycle=4,
+    )
+
+    def fail_write(*_args, **_kwargs):
+        raise OSError("write failed")
+
+    monkeypatch.setattr(cc, "write_ccsd_checkpoint", fail_write)
+    energies = iter((-2.0, -2.1))
+    wrapped = checkpoint.wrap(lambda *_args: (next(energies), None))
+    t1 = cc.np.zeros((1, 1))
+    t2 = cc.np.zeros((1, 1, 1, 1))
+
     wrapped(t1, t2, None)
-    assert calls[1][1]["completed_cycle"] == 6
-    assert calls[1][1]["ccsd_correlation_hartree"] == -2.2
-    assert set(checkpoint_scf(2)) <= set(calls[1][1])
+    with pytest.raises(OSError, match="write failed"):
+        wrapped(t1, t2, None)
+    assert checkpoint.checkpoints_written == 0
+    assert checkpoint.last_checkpoint is None
+
+
+def test_checkpoint_context_restores_methods_on_boundary(tmp_path, monkeypatch):
+    monkeypatch.setattr(cc, "write_ccsd_checkpoint", lambda _path, **kwargs: kwargs)
+
+    def original_energy(*_args):
+        return (-2.0, None)
+
+    def original_update(t1, t2, _eris):
+        return (t1, t2)
+
+    cluster = SimpleNamespace(energy=original_energy, update_amps=original_update)
+    t1 = cc.np.zeros((1, 1))
+    t2 = cc.np.zeros((1, 1, 1, 1))
+
+    with (
+        pytest.raises(cc.CCSDLaunchCheckpointed),
+        cc.byteqc_energy_checkpoint(
+            cluster,
+            tmp_path / "restart.h5",
+            {"basis": "cc-pVQZ"},
+            checkpoint_scf(2),
+            base_cycle=4,
+        ),
+    ):
+        cluster.energy(t1, t2, None)
+        cluster.update_amps(t1, t2, None)
+        cluster.energy(t1, t2, None)
+        cluster.update_amps(t1, t2, None)
+
+    assert cluster.energy is original_energy
+    assert cluster.update_amps is original_update
 
 
 def test_v2_rejects_legacy_without_overwrite(tmp_path):

@@ -81,6 +81,17 @@ BYTEQC_TRANSFORM_CONTRACT = {
 }
 
 
+class CCSDLaunchCheckpointed(RuntimeError):
+    """Stop a non-converged launch after one crash-durable CCSD cycle."""
+
+    def __init__(self, checkpoint: dict[str, Any]) -> None:
+        self.checkpoint = checkpoint
+        cycle = checkpoint.get("completed_cycle")
+        super().__init__(
+            f"ByteQC launch stopped after durable CCSD cycle {cycle}; resume required"
+        )
+
+
 def sha256_path(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -782,6 +793,8 @@ class ByteQCEnergyCheckpoint:
         self.scf_state = scf_state
         self.base_cycle = base_cycle
         self.energy_calls = 0
+        self.max_checkpoints = 1
+        self.checkpoints_written = 0
         self.last_checkpoint: dict[str, Any] | None = None
 
     def wrap(self, original):
@@ -791,7 +804,7 @@ class ByteQCEnergyCheckpoint:
             # later call occurs after damping/DIIS and is the completed cycle
             # printed to the engine log. Persist before the next update starts.
             if self.energy_calls > 0:
-                self.last_checkpoint = write_ccsd_checkpoint(
+                checkpoint = write_ccsd_checkpoint(
                     self.path,
                     identity=self.identity,
                     completed_cycle=self.base_cycle + self.energy_calls,
@@ -800,10 +813,22 @@ class ByteQCEnergyCheckpoint:
                     t1=t1,
                     t2=t2,
                 )
+                self.last_checkpoint = checkpoint
+                self.checkpoints_written += 1
             self.energy_calls += 1
             return result
 
         return checkpointing_energy
+
+    def wrap_update_amps(self, original):
+        def bounded_update(*args, **kwargs):
+            if self.checkpoints_written >= self.max_checkpoints:
+                if self.last_checkpoint is None:
+                    raise RuntimeError("CCSD checkpoint count has no durable state")
+                raise CCSDLaunchCheckpointed(self.last_checkpoint)
+            return original(*args, **kwargs)
+
+        return bounded_update
 
 
 @contextmanager
@@ -818,12 +843,15 @@ def byteqc_energy_checkpoint(
     checkpoint = ByteQCEnergyCheckpoint(
         path, identity, scf_state, base_cycle=base_cycle
     )
-    original = coupled_cluster.energy
-    coupled_cluster.energy = checkpoint.wrap(original)
+    original_energy = coupled_cluster.energy
+    original_update_amps = coupled_cluster.update_amps
+    coupled_cluster.energy = checkpoint.wrap(original_energy)
+    coupled_cluster.update_amps = checkpoint.wrap_update_amps(original_update_amps)
     try:
         yield checkpoint
     finally:
-        coupled_cluster.energy = original
+        coupled_cluster.energy = original_energy
+        coupled_cluster.update_amps = original_update_amps
 
 
 def clean_git_head(path: Path) -> str:
