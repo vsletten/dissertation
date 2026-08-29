@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,6 +29,14 @@ def receipt(engine: str, basis: str, scf: float, correlation: float) -> dict:
 def test_frozen_core_orbitals_for_si_neutral_cluster():
     # H8O8Si2: 8 oxygen 1s orbitals + 2 silicon Ne cores (5 each).
     assert cc.frozen_core_orbitals(["H"] * 8 + ["O"] * 8 + ["Si"] * 2) == 18
+
+
+def test_byteqc_frozen_core_df_uses_one_complete_auxiliary_block():
+    with_df = SimpleNamespace(blockdim=240, get_naoaux=lambda: 1337)
+    coupled_cluster = SimpleNamespace(with_df=with_df)
+
+    assert cc.configure_byteqc_frozen_core_blocking(coupled_cluster) == 1337
+    assert with_df.blockdim == 1337
 
 
 def test_two_point_extrapolations_recover_synthetic_limits():

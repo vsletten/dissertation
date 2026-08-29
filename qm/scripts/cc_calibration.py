@@ -96,6 +96,13 @@ def frozen_core_orbitals(symbols: list[str]) -> int:
     return count
 
 
+def configure_byteqc_frozen_core_blocking(coupled_cluster: Any) -> int:
+    """Avoid ByteQC 2.5's undersized reused DF buffer with frozen orbitals."""
+    naux = int(coupled_cluster.with_df.get_naoaux())
+    coupled_cluster.with_df.blockdim = naux
+    return naux
+
+
 def existing_receipt(
     path: Path,
     *,
@@ -217,6 +224,7 @@ def byteqc_job(args: argparse.Namespace) -> dict[str, Any]:
         "basis": args.basis,
         "freeze_core_orbitals": frozen,
         "density_fit": True,
+        "df_aux_blocking": "single-block-frozen-core-v1",
         "charge": args.charge,
         "spin_2s": args.spin,
     }
@@ -250,6 +258,11 @@ def byteqc_job(args: argparse.Namespace) -> dict[str, Any]:
         frozen=frozen,
         gpulim=args.gpu_memory_gb << 30,
     )
+    # ByteQC 2.5 reuses the MO-sized transform output as the next AO-sized
+    # scratch buffer. That buffer is too small whenever frozen core makes
+    # nmo < nao. One complete auxiliary block avoids the invalid reuse while
+    # preserving the exact frozen-core canonical calculation.
+    configure_byteqc_frozen_core_blocking(coupled_cluster)
     coupled_cluster.max_cycle = 100
     coupled_cluster.conv_tol = 1e-8
     ccsd_correlation, _, _ = coupled_cluster.kernel()
