@@ -1,11 +1,21 @@
 # D3b-co-hydrogenation-deck — surface-valid methanol ladder
 
-- status: blocked (D2b)
+- status: blocked (D2c)
 - track: D (astrochemistry)
 - priority: P2
 - machine: any
-- depends: D3, D2b
+- depends: D3, D2c
 - claimed-by:
+
+## Progress
+
+- 2026-08-29 — fable — re-blocked on D2c: D2b completed but its gate
+  verdict was NO-GO, so the rate table this card consumes was withheld
+  (docs/program/results/D2b-explicit-surface-rates.md). D2c-instanton-tier
+  emits the table when its gate passes. This frontmatter had gone stale
+  against PLAN.md and the board feeder dispatched a premature pointer
+  (mission-control TASK-243, since parked); one source of truth is the
+  card file — keep it current in the same PR that changes the board.
 
 ## Objective
 
