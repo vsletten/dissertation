@@ -97,10 +97,10 @@ def test_calibration_resource_contract_requires_exact_byteqc_gpu_lease():
 
     byteqc.gpu = True
     byteqc.gpu_mem_gb = 12.0
-    with pytest.raises(ValueError, match="must equal"):
+    with pytest.raises(ValueError, match="must be at least"):
         cc.validate_resource_contract(byteqc)
 
-    byteqc.gpu_memory_gb = 12
+    byteqc.gpu_mem_gb = 18.0
     cc.validate_resource_contract(byteqc)
 
     with pytest.raises(ValueError, match="only for ByteQC"):

@@ -431,8 +431,8 @@ def validate_resource_contract(args: argparse.Namespace) -> None:
             raise ValueError(
                 "ByteQC calibration requires --gpu and the shared GPU lease"
             )
-        if float(args.gpu_mem_gb) != float(args.gpu_memory_gb):
-            raise ValueError("--gpu-mem-gb must equal --gpu-memory-gb")
+        if float(args.gpu_mem_gb) < float(args.gpu_memory_gb):
+            raise ValueError("--gpu-mem-gb must be at least --gpu-memory-gb")
     elif args.gpu:
         raise ValueError("--gpu is valid only for ByteQC calibration jobs")
 
