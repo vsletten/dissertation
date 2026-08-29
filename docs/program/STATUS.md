@@ -16,6 +16,23 @@ appended by the PR that did it: `date — actor — what + pointer`.
   (Simons+20 document the S&K fits as overestimates). New card
   D2c-instanton-tier (READY) flips the gate; D3b re-blocked on D2c.
   Results: docs/program/results/D2b-explicit-surface-rates.md.
+
+- 2026-08-28 — (hermes-8d9e30fee91548; profile=laptop) — E2b runs seven
+  32-replica muscovite volumes through 559,872 sites: the old-first-step
+  staircase stabilizes at 49,152 sites and stays stable across two larger
+  volumes; 559,872 is the completed host ceiling after the 1,327,104-site rung
+  exits by `SIGKILL`. Full bootstrap bands, isotope-release distributions,
+  exact-seed replay receipts, and scaling are in
+  `docs/program/results/E2b-grain-size-sweep.md`.
+
+- 2026-08-28 — (hermes-8d9e30fee91548; profile=laptop) — A5 Phase 1 runs
+  4×64 finite-defect kaolinite-aging ensembles: all replicas are defect-free
+  by step 90 at the latest, fresh/aged apparent-rate drops grow 36.36×→363.06×
+  with initial damage density, spectra transiently broaden then down-shift
+  three orders, and BET-like area rises while rate falls. The honest
+  mechanism-tier verdict is partial plausibility (1.53–2.56 log units), not a
+  calibrated field attribution. `docs/program/results/A5p1-aging-study.md`.
+
 - 2026-08-27 — fable — Track E phase-3/paper-1 path carded: E3a
   classical-NEB barrier campaign (READY — the "uncomputed middle": Nteme
   replication gate, then dehydroxylate/defect-zone/trap/Xe barriers), E3b

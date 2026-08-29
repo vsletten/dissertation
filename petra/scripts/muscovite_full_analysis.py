@@ -15,14 +15,21 @@ import argparse
 import csv
 import json
 import math
-import tomllib
+import random
+import statistics
 from dataclasses import asdict, dataclass
+from itertools import pairwise
 from pathlib import Path
+
+import tomllib
 
 K40_TOTAL_DECAY_PER_YEAR = 5.543e-10
 YEARS_PER_MA = 1.0e6
 GAS_CONSTANT_KCAL = 1.98720425864083e-3
 PROXY_LABEL = "proxy ±5 kcal/mol; not computed kinetics"
+MUSCOVITE_SITES_PER_CELL = 8
+BOOTSTRAP_RESAMPLES = 2_000
+MATERIAL_AR39_RELEASE_FRACTION = 0.001
 
 
 @dataclass(frozen=True)
@@ -58,6 +65,89 @@ class SensitivityBracket:
     offset_kcal_mol: float
     rate_multiplier: float
     provenance: str
+
+
+@dataclass(frozen=True)
+class DistributionBand:
+    mean: float
+    ci95: tuple[float, float]
+    values: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class EnsembleSpectrumStep:
+    segment: int
+    temperature_k: float
+    duration_s: float
+    released_ar40: DistributionBand
+    released_ar39: DistributionBand
+    released_ar36: DistributionBand
+    cumulative_ar40_fraction: DistributionBand
+    cumulative_ar39_fraction: DistributionBand
+    cumulative_ar36_fraction: DistributionBand
+    apparent_age_ma: DistributionBand
+    ar36_ar40: DistributionBand
+
+
+@dataclass(frozen=True)
+class EnsembleAnalysis:
+    dims: tuple[int, int, int]
+    sites: int
+    replicas: int
+    steps: tuple[EnsembleSpectrumStep, ...]
+
+
+@dataclass(frozen=True)
+class SizeRunReceipt:
+    dims: tuple[int, int, int]
+    sites: int
+    replicas: int
+    elapsed_seconds: float
+    total_events: int
+    replay_verified: bool
+
+
+@dataclass(frozen=True)
+class SizeStabilityComparison:
+    previous_sites: int
+    current_sites: int
+    max_release_fraction_delta: float
+    max_age_relative_delta: float | None
+    max_age_defined_fraction_delta: float | None
+    stable: bool
+
+
+@dataclass(frozen=True)
+class StabilityAssessment:
+    stabilized_at_sites: int | None
+    max_release_fraction_delta: float
+    max_age_relative_delta: float | None
+    max_age_defined_fraction_delta: float | None
+    comparisons: tuple[SizeStabilityComparison, ...]
+
+
+def _percentile(values: list[float], fraction: float) -> float:
+    ordered = sorted(values)
+    return ordered[round((len(ordered) - 1) * fraction)]
+
+
+def distribution_band(values: list[float], seed: int) -> DistributionBand:
+    if not values:
+        return DistributionBand(float("nan"), (float("nan"), float("nan")), ())
+    data = tuple(float(value) for value in values)
+    mean = statistics.fmean(data)
+    if len(data) == 1:
+        return DistributionBand(mean, (mean, mean), data)
+    rng = random.Random(seed)
+    bootstrap = [
+        statistics.fmean(data[rng.randrange(len(data))] for _ in data)
+        for _ in range(BOOTSTRAP_RESAMPLES)
+    ]
+    return DistributionBand(
+        mean,
+        (_percentile(bootstrap, 0.025), _percentile(bootstrap, 0.975)),
+        data,
+    )
 
 
 def _schedule(deck_path: Path) -> list[dict[str, float]]:
@@ -130,6 +220,389 @@ def _boundary_row(
             f"no population report at schedule boundary {target_s:g}; tail={observed}"
         )
     return matches[-1]
+
+
+def _ensemble_state_rows(
+    deck_path: Path,
+    observables_path: Path,
+    expected_seeds: tuple[int, ...] | None = None,
+) -> dict[int, list[tuple[float, dict[str, int]]]]:
+    with deck_path.open("rb") as handle:
+        deck = tomllib.load(handle)
+    isotope_by_index: dict[int, str] = {}
+    index = 0
+    for kind in deck.get("structure", {}).get("kinds", []):
+        for state in kind.get("states", []):
+            isotope = _isotope_for_column(str(state["name"]))
+            if isotope is not None:
+                isotope_by_index[index] = isotope
+            index += 1
+
+    grouped: dict[tuple[int, float], dict[str, int]] = {}
+    seen_indices: dict[tuple[int, float], set[int]] = {}
+    replica_seeds: dict[int, int] = {}
+    sample_steps: dict[tuple[int, float], int] = {}
+    with observables_path.open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            if row["kind"] != "state_counts":
+                continue
+            replica = int(row["replica"])
+            seed = int(row["seed"])
+            step = int(row["step"])
+            time_s = float(row["time"])
+            sample = (replica, time_s)
+            if replica in replica_seeds and replica_seeds[replica] != seed:
+                raise ValueError(f"{observables_path}: replica {replica} changed seed")
+            replica_seeds[replica] = seed
+            if sample in sample_steps and sample_steps[sample] != step:
+                raise ValueError(f"{observables_path}: sample {sample} mixed steps")
+            sample_steps[sample] = step
+            totals = grouped.setdefault(sample, {"Ar40": 0, "Ar39": 0, "Ar36": 0})
+            state_index = int(row["index"])
+            if state_index < 0 or state_index >= index:
+                raise ValueError(
+                    f"{observables_path}: state index {state_index} is outside deck range"
+                )
+            seen = seen_indices.setdefault(sample, set())
+            if state_index in seen:
+                raise ValueError(
+                    f"{observables_path}: duplicate state index {state_index} in sample {sample}"
+                )
+            seen.add(state_index)
+            try:
+                value = float(row["value"])
+            except ValueError as exc:
+                raise ValueError(
+                    f"{observables_path}: state count must be a non-negative integer"
+                ) from exc
+            if not math.isfinite(value) or value < 0 or not value.is_integer():
+                raise ValueError(
+                    f"{observables_path}: state count must be a non-negative integer"
+                )
+            isotope = isotope_by_index.get(state_index)
+            if isotope is not None:
+                totals[isotope] += int(value)
+    expected_indices = set(range(index))
+    for sample in grouped:
+        if seen_indices.get(sample, set()) != expected_indices:
+            raise ValueError(
+                f"{observables_path}: incomplete state-count sample {sample}"
+            )
+    replicas: dict[int, list[tuple[float, dict[str, int]]]] = {}
+    for (replica, time_s), totals in sorted(grouped.items()):
+        replicas.setdefault(replica, []).append((time_s, totals))
+    if not replicas:
+        raise ValueError(f"{observables_path}: no ensemble state-count samples")
+    if sorted(replicas) != list(range(len(replicas))):
+        raise ValueError(
+            f"{observables_path}: replica IDs must be contiguous from zero"
+        )
+    ordered_seeds = tuple(replica_seeds[index] for index in range(len(replicas)))
+    if expected_seeds is not None and ordered_seeds != expected_seeds:
+        raise ValueError(
+            f"{observables_path}: replica seeds do not match ensemble receipt"
+        )
+    return replicas
+
+
+def analyze_ensemble(
+    deck_path: Path,
+    observables_path: Path,
+    dims: tuple[int, int, int],
+    j_factor: float,
+    expected_seeds: tuple[int, ...] | None = None,
+) -> EnsembleAnalysis:
+    if len(dims) != 3 or any(value <= 0 for value in dims):
+        raise ValueError("lattice dimensions must be three positive integers")
+    if not math.isfinite(j_factor) or j_factor <= 0.0:
+        raise ValueError("J factor must be finite and positive")
+    with deck_path.open("rb") as handle:
+        deck = tomllib.load(handle)
+    deck_dims = tuple(deck.get("structure", {}).get("lattice", {}).get("dims", ()))
+    if deck_dims and deck_dims != dims:
+        raise ValueError(f"deck dimensions {deck_dims} do not match requested {dims}")
+    schedule = _schedule(deck_path)
+    replicas = _ensemble_state_rows(deck_path, observables_path, expected_seeds)
+    per_segment: list[dict[str, list[float]]] = [
+        {
+            "released_ar40": [],
+            "released_ar39": [],
+            "released_ar36": [],
+            "cumulative_ar40_fraction": [],
+            "cumulative_ar39_fraction": [],
+            "cumulative_ar36_fraction": [],
+            "apparent_age_ma": [],
+            "ar36_ar40": [],
+        }
+        for _ in schedule
+    ]
+    for replica, rows in sorted(replicas.items()):
+        initial = _boundary_row(rows, 0.0)
+        previous = initial
+        cumulative = {isotope: 0 for isotope in initial}
+        boundary = 0.0
+        for segment_index, segment in enumerate(schedule):
+            boundary += segment["duration"]
+            remaining = _boundary_row(rows, boundary)
+            released = {
+                isotope: previous[isotope] - remaining[isotope] for isotope in initial
+            }
+            if any(value < 0 for value in released.values()):
+                raise ValueError(
+                    f"replica {replica}: isotope inventory increased in segment {segment_index + 1}"
+                )
+            metrics = per_segment[segment_index]
+            for isotope in ("Ar40", "Ar39", "Ar36"):
+                cumulative[isotope] += released[isotope]
+                metrics[f"released_{isotope.lower()}"].append(float(released[isotope]))
+                if initial[isotope] > 0:
+                    metrics[f"cumulative_{isotope.lower()}_fraction"].append(
+                        cumulative[isotope] / initial[isotope]
+                    )
+            if released["Ar39"] > 0:
+                metrics["apparent_age_ma"].append(
+                    math.log1p(j_factor * released["Ar40"] / released["Ar39"])
+                    / (K40_TOTAL_DECAY_PER_YEAR * YEARS_PER_MA)
+                )
+            if released["Ar40"] > 0:
+                metrics["ar36_ar40"].append(released["Ar36"] / released["Ar40"])
+            previous = remaining
+
+    steps = []
+    for segment_index, (segment, metrics) in enumerate(
+        zip(schedule, per_segment, strict=True), start=1
+    ):
+        bands = {
+            name: distribution_band(
+                values, seed=0xE2B000 + segment_index * 100 + offset
+            )
+            for offset, (name, values) in enumerate(metrics.items())
+        }
+        steps.append(
+            EnsembleSpectrumStep(
+                segment=segment_index,
+                temperature_k=segment["temperature"],
+                duration_s=segment["duration"],
+                **bands,
+            )
+        )
+    return EnsembleAnalysis(
+        dims=dims,
+        sites=math.prod(dims) * MUSCOVITE_SITES_PER_CELL,
+        replicas=len(replicas),
+        steps=tuple(steps),
+    )
+
+
+def _band_cells(band: DistributionBand, replicas: int) -> list[float | int | str]:
+    def finite_or_blank(value: float) -> float | str:
+        return value if math.isfinite(value) else ""
+
+    return [
+        finite_or_blank(band.mean),
+        finite_or_blank(band.ci95[0]),
+        finite_or_blank(band.ci95[1]),
+        len(band.values),
+        replicas - len(band.values),
+        ";".join(str(value) for value in band.values),
+    ]
+
+
+def write_ensemble_products(
+    results: list[EnsembleAnalysis], receipts: list[SizeRunReceipt], out_dir: Path
+) -> None:
+    if not results or len(results) != len(receipts):
+        raise ValueError("results and receipts must be non-empty and have equal length")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    metrics = (
+        "released_ar40",
+        "released_ar39",
+        "released_ar36",
+        "cumulative_ar40_fraction",
+        "cumulative_ar39_fraction",
+        "cumulative_ar36_fraction",
+        "apparent_age_ma",
+        "ar36_ar40",
+    )
+    with (out_dir / "spectrum-bands.csv").open(
+        "w", newline="", encoding="utf-8"
+    ) as handle:
+        writer = csv.writer(handle, lineterminator="\n")
+        writer.writerow(
+            [
+                "dims",
+                "sites",
+                "replicas",
+                "segment",
+                "temperature_k",
+                "duration_s",
+            ]
+            + [
+                field
+                for metric in metrics
+                for field in (
+                    f"{metric}_mean",
+                    f"{metric}_ci95_low",
+                    f"{metric}_ci95_high",
+                    f"{metric}_defined_replicas",
+                    f"{metric}_missing_replicas",
+                    f"{metric}_distribution",
+                )
+            ]
+        )
+        for result in results:
+            dims = "x".join(str(value) for value in result.dims)
+            for step in result.steps:
+                row: list[float | int | str] = [
+                    dims,
+                    result.sites,
+                    result.replicas,
+                    step.segment,
+                    step.temperature_k,
+                    step.duration_s,
+                ]
+                for metric in metrics:
+                    row.extend(_band_cells(getattr(step, metric), result.replicas))
+                writer.writerow(row)
+
+    with (out_dir / "size-scaling.csv").open(
+        "w", newline="", encoding="utf-8"
+    ) as handle:
+        writer = csv.writer(handle, lineterminator="\n")
+        writer.writerow(
+            [
+                "dims",
+                "sites",
+                "replicas",
+                "elapsed_seconds",
+                "total_events",
+                "events_per_second",
+                "replay_verified",
+            ]
+        )
+        for receipt in receipts:
+            writer.writerow(
+                [
+                    "x".join(str(value) for value in receipt.dims),
+                    receipt.sites,
+                    receipt.replicas,
+                    receipt.elapsed_seconds,
+                    receipt.total_events,
+                    receipt.total_events / receipt.elapsed_seconds,
+                    str(receipt.replay_verified).lower(),
+                ]
+            )
+
+
+def assess_stability(
+    results: list[EnsembleAnalysis],
+    release_fraction_tolerance: float = 0.05,
+    age_relative_tolerance: float = 0.10,
+    age_defined_fraction_tolerance: float = 0.05,
+    material_ar39_release_fraction: float = MATERIAL_AR39_RELEASE_FRACTION,
+) -> StabilityAssessment:
+    if len(results) < 2:
+        raise ValueError("stability assessment requires at least two lattice sizes")
+    ordered = sorted(results, key=lambda result: result.sites)
+    comparisons = []
+    release_metrics = (
+        "cumulative_ar40_fraction",
+        "cumulative_ar39_fraction",
+        "cumulative_ar36_fraction",
+    )
+    for previous, current in pairwise(ordered):
+        if len(previous.steps) != len(current.steps):
+            raise ValueError("all lattice sizes must have the same schedule")
+        if any(
+            (old.segment, old.temperature_k, old.duration_s)
+            != (new.segment, new.temperature_k, new.duration_s)
+            for old, new in zip(previous.steps, current.steps, strict=True)
+        ):
+            raise ValueError("all lattice sizes must have the same schedule")
+        release_deltas = []
+        age_deltas = []
+        age_defined_deltas = []
+        age_comparable = True
+        previous_ar39_cumulative = 0.0
+        current_ar39_cumulative = 0.0
+        for old_step, new_step in zip(previous.steps, current.steps, strict=True):
+            for metric in release_metrics:
+                old_band = getattr(old_step, metric)
+                new_band = getattr(new_step, metric)
+                old = old_band.mean
+                new = new_band.mean
+                release_deltas.append(abs(new - old))
+            old_ar39_segment = (
+                old_step.cumulative_ar39_fraction.mean - previous_ar39_cumulative
+            )
+            new_ar39_segment = (
+                new_step.cumulative_ar39_fraction.mean - current_ar39_cumulative
+            )
+            previous_ar39_cumulative = old_step.cumulative_ar39_fraction.mean
+            current_ar39_cumulative = new_step.cumulative_ar39_fraction.mean
+            if max(old_ar39_segment, new_ar39_segment) < material_ar39_release_fraction:
+                continue
+            old_age = old_step.apparent_age_ma.mean
+            new_age = new_step.apparent_age_ma.mean
+            age_defined_deltas.append(
+                abs(
+                    len(old_step.apparent_age_ma.values) / previous.replicas
+                    - len(new_step.apparent_age_ma.values) / current.replicas
+                )
+            )
+            if math.isfinite(old_age) and math.isfinite(new_age):
+                age_deltas.append(abs(new_age - old_age) / max(abs(old_age), 1.0))
+            elif math.isfinite(old_age) != math.isfinite(new_age):
+                age_comparable = False
+        max_release = max(release_deltas, default=float("inf"))
+        max_age = max(age_deltas) if age_comparable and age_deltas else None
+        max_age_defined = max(age_defined_deltas) if age_defined_deltas else None
+        comparisons.append(
+            SizeStabilityComparison(
+                previous_sites=previous.sites,
+                current_sites=current.sites,
+                max_release_fraction_delta=max_release,
+                max_age_relative_delta=max_age,
+                max_age_defined_fraction_delta=max_age_defined,
+                stable=max_release <= release_fraction_tolerance
+                and max_age is not None
+                and max_age <= age_relative_tolerance
+                and max_age_defined is not None
+                and max_age_defined <= age_defined_fraction_tolerance,
+            )
+        )
+    stabilized_at = None
+    for index, comparison in enumerate(comparisons):
+        if all(item.stable for item in comparisons[index:]):
+            stabilized_at = comparison.current_sites
+            break
+    return StabilityAssessment(
+        stabilized_at_sites=stabilized_at,
+        max_release_fraction_delta=max(
+            item.max_release_fraction_delta for item in comparisons
+        ),
+        max_age_relative_delta=(
+            max(
+                item.max_age_relative_delta
+                for item in comparisons
+                if item.max_age_relative_delta is not None
+            )
+            if all(item.max_age_relative_delta is not None for item in comparisons)
+            else None
+        ),
+        max_age_defined_fraction_delta=(
+            max(
+                item.max_age_defined_fraction_delta
+                for item in comparisons
+                if item.max_age_defined_fraction_delta is not None
+            )
+            if all(
+                item.max_age_defined_fraction_delta is not None for item in comparisons
+            )
+            else None
+        ),
+        comparisons=tuple(comparisons),
+    )
 
 
 def analyze(
