@@ -4,6 +4,18 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-28 — fable (hermes-custom-build-001; profile=workstation) —
+  D2b done: explicit-surface rate campaign, 10/10 reactions clean on
+  the 4090 (surface PFs + open-shell UCCSD(T)/CBS + (H₂O)₁,₂ site
+  sampling). Gate verdict NO-GO with receipts — no D3b rate table
+  (addition/H+CO 25–1600× under the Simons-corrected anchor at
+  10–20 K; Eckart-vs-instanton is the isolated residual) — but the
+  barrier tier validates (1w abstraction = S&K's surface 3030 K to
+  2 K) and abstraction k(T) lands in-spread at every anchor. D2a's
+  "4–5 orders" decomposed; much of it was the anchor itself
+  (Simons+20 document the S&K fits as overestimates). New card
+  D2c-instanton-tier (READY) flips the gate; D3b re-blocked on D2c.
+  Results: docs/program/results/D2b-explicit-surface-rates.md.
 - 2026-08-27 — fable — Track E phase-3/paper-1 path carded: E3a
   classical-NEB barrier campaign (READY — the "uncomputed middle": Nteme
   replication gate, then dehydroxylate/defect-zone/trap/Xe barriers), E3b

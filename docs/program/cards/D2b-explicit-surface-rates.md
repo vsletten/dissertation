@@ -1,6 +1,6 @@
 # D2b-explicit-surface-rates — surface-valid astrochemical LH rates
 
-- status: in-progress
+- status: done
 - track: D (astrochemistry)
 - priority: P1
 - machine: workstation
@@ -77,3 +77,32 @@ surface rates and state a validity floor.
   workloads (email pipelines + honcho deriver/api — dead-man
   `d2b-deadman-restart.timer` fires 08:30 regardless) and stop the
   `d2b` monitor.
+- 2026-08-28 — fable (hermes-custom-build-001; profile=workstation) —
+  campaign complete: 10/10 reactions, 0 failures (23:05 the night
+  before). GPU workloads restored (dead-man revived the email
+  pipelines at 08:30; honcho containers restarted by hand at
+  closeout). Verdict written: docs/program/results/
+  D2b-explicit-surface-rates.md. Card closed.
+
+## Result
+
+**Split verdict, receipts in the results doc.** NO-GO for the D3b
+rate table: at 10–20 K the addition and H+CO channels sit 25–1600×
+below the Simons-corrected literature anchor with a ~60× site spread,
+and the implied branching contradicts the experiment-benchmarked
+network — per acceptance, no machine-readable table ships. GO for the
+protocol tier: the 1-water CC abstraction barrier reproduces Song &
+Kästner's published surface value to 2 K (3028 vs 3030 K), the
+abstraction channel's k(T) lands inside the documented spread at every
+anchor, and D2a's "4–5 orders" is fully decomposed (≈2× partition
+functions + ≤10² barrier error + up to 10³·⁵ *anchor overestimate*
+documented by Simons+20 + 1.5–3 orders Eckart-vs-instanton in deep
+tunneling, independently confirmed by the T_c mismatch on H+CO: 149 K
+at PWB6K width vs Andersson's 79 K). Validity floor stated: ≥100 K
+≲1 order; 59–100 K ≲2 orders; <59 K not publishable as absolute
+surface rates without instanton-class tunneling. Follow-up:
+D2c-instanton-tier (READY) is the single upgrade that flips the gate.
+Surprises for the next worker: the anchor itself carried much of
+D2a's discrepancy; water moves barriers ±450 K by site; four driver
+fixes landed from live failures (shallow-crest fallback, name-blind
+geometry hashes, tiered spectator-mode gates, wet-seed pre-opt).

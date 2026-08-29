@@ -49,9 +49,10 @@ on main). Priority P0 > P1 > P2 within READY.
 | [B5-execution-schedule](cards/B5-execution-schedule.md) | B | P1 | any | done | B2 ✅ |
 | [C2-corrosion-deck](cards/C2-corrosion-deck.md) | C | P2 | any | done | B3 ✅ |
 | [D2a-astro-rate-reproduction](cards/D2a-astro-rate-reproduction.md) | D | P1 | workstation | done | — |
-| [D2b-explicit-surface-rates](cards/D2b-explicit-surface-rates.md) | D | P1 | workstation | ready | D2a ✅ |
+| [D2b-explicit-surface-rates](cards/D2b-explicit-surface-rates.md) | D | P1 | workstation | done | gate NO-GO with receipts; barrier tier validated |
+| [D2c-instanton-tier](cards/D2c-instanton-tier.md) | D | P2 | workstation | ready | D2b ✅ |
 | [D3-ice-mantle-deck](cards/D3-ice-mantle-deck.md) | D | P2 | any | done | B3 ✅, D2a ✅ |
-| [D3b-co-hydrogenation-deck](cards/D3b-co-hydrogenation-deck.md) | D | P2 | any | blocked: D2b | D3 ✅, D2b |
+| [D3b-co-hydrogenation-deck](cards/D3b-co-hydrogenation-deck.md) | D | P2 | any | blocked: D2c | D3 ✅, D2b ✅ (table withheld — D2c gate) |
 | [A5p0-aging-observables](cards/A5p0-aging-observables.md) | A | P1 | any | done | B4 ✅ |
 | [A5p1-aging-study](cards/A5p1-aging-study.md) | A | P1 | any | ready | A5p0 ✅ |
 | [E2b-grain-size-sweep](cards/E2b-grain-size-sweep.md) | E | P1 | any | ready | E2 ✅, B4 ✅ |
