@@ -4,6 +4,8 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-29 02:38 PDT (hermes-custom-build-001; profile=workstation) — A2a's corrected canonical reactant/cc-pVQZ restart again crossed the frozen-core transform ceiling, converged RHF/MP2, and reached CCSD cycle 2 before its finite 115-minute cgroup terminated. No receipt or partial energy was accepted; the identical 115-minute replay is exhausted, and the next continuation needs a longer finite GPU envelope or verified restart-capable route. All shared services, the QI2 lane, and the clean worktree are restored.
+
 - 2026-08-29 00:03 PDT (hermes-custom-build-001; profile=workstation) — A2a's first canonical reactant/cc-pVQZ attempt exposed the cc-pVTZ full-auxiliary-block workaround as a 7.73 GB QZ OOM. Pushed head `28d801d` restores bounded DF blocks with a numerically verified frozen-core-safe transform, scoped monkeypatch, and source-hashed receipt identity; 466 QM tests and whole-tree Ruff gates pass. A 40-minute physical proof crossed the former OOM through converged RHF and into CCSD before deliberate stop, emitted no partial receipt, and restored services/QI2. Six CC receipts plus the focal-point/docs/PR closeout remain.
 
 - 2026-08-28 22:37 PDT (hermes-custom-build-001; profile=workstation) — A2a's exact addition-TS/cc-pVTZ ByteQC canonical CCSD(T) receipt completed in `4477.6269 s`; with the accepted reactant/TZ receipt it gives a finite-basis canonical electronic barrier of `128.085164 kJ/mol`. Two of eight CC receipts are now complete; six receipts, the focal-point gate, final docs/store, and one PR remain. Runtime/services and the QI2 lane are restored.
