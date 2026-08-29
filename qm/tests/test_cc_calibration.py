@@ -31,72 +31,84 @@ def test_frozen_core_orbitals_for_si_neutral_cluster():
     assert cc.frozen_core_orbitals(["H"] * 8 + ["O"] * 8 + ["Si"] * 2) == 18
 
 
-def test_byteqc_frozen_core_df_retains_bounded_blocks_and_installs_safe_transform():
+def test_byteqc_frozen_core_df_transform_is_bounded_and_scoped():
     with_df = SimpleNamespace(blockdim=240, get_naoaux=lambda: 1337)
     coupled_cluster = SimpleNamespace(with_df=with_df)
-    dfccsd = SimpleNamespace(nr_e2=object())
+    original = object()
+    dfccsd = SimpleNamespace(nr_e2=original)
 
-    assert (
-        cc.configure_byteqc_frozen_core_blocking(coupled_cluster, dfccsd_module=dfccsd)
-        == 240
-    )
+    with cc.byteqc_frozen_core_transform(
+        coupled_cluster, dfccsd_module=dfccsd
+    ) as blockdim:
+        assert blockdim == 240
+        assert dfccsd.nr_e2 is cc.byteqc_frozen_core_nr_e2
     assert with_df.blockdim == 240
-    assert dfccsd.nr_e2 is cc.byteqc_frozen_core_nr_e2
+    assert dfccsd.nr_e2 is original
+
+    with_df.blockdim = 0
+    with (
+        pytest.raises(ValueError, match="block size must be positive"),
+        cc.byteqc_frozen_core_transform(coupled_cluster, dfccsd_module=dfccsd),
+    ):
+        pass
+    assert dfccsd.nr_e2 is original
 
 
-def test_byteqc_frozen_core_nr_e2_keeps_ao_scratch_separate_from_mo_output():
-    class FakeArray:
-        dtype = cc.np.double
-        flags = SimpleNamespace(c_contiguous=True)
-
-        def __init__(self, shape):
-            self.shape = shape
-
-        def __getitem__(self, _key):
-            return self
-
-        @property
-        def T(self):
-            return self
-
-        def reshape(self, *shape):
-            normalized = (
-                shape[0] if len(shape) == 1 and isinstance(shape[0], tuple) else shape
-            )
-            return FakeArray(tuple(normalized))
-
-    reusable_mo_output = object()
-    calls = {}
+def test_byteqc_frozen_core_nr_e2_is_numerical_across_full_and_tail_blocks():
+    rng = cc.np.random.default_rng(220)
+    nao = 5
+    nmo = 3
+    coefficients = rng.normal(size=(nmo, nao))
+    blocks = [rng.normal(size=(rows, nao, nao)) for rows in (4, 4, 1)]
+    blocks = [(block + block.transpose(0, 2, 1)) / 2 for block in blocks]
+    lower = cc.np.tril_indices(nao)
+    packed = [block[:, lower[0], lower[1]].copy() for block in blocks]
+    calls = {"unpack_out": [], "gemm_buf": []}
 
     def unpack_tril(eri, out=None):
-        calls["unpack_out"] = out
-        return FakeArray((eri.shape[0], 5, 5))
+        calls["unpack_out"].append(out)
+        matrices = cc.np.zeros((eri.shape[0], nao, nao))
+        matrices[:, lower[0], lower[1]] = eri
+        matrices[:, lower[1], lower[0]] = eri
+        return matrices
 
-    def contraction(*_args):
-        return FakeArray((2, 5, 4))
+    def contraction(_inda, a, _indb, b, _indc):
+        return cc.np.einsum("ij,mjk->mik", a, b)
 
-    def gemm(*_args, buf=None):
-        calls["gemm_buf"] = buf
-        return FakeArray((10, 4))
+    def gemm(_transa, _transb, a, b, buf=None):
+        calls["gemm_buf"].append(buf)
+        value = a @ b.T
+        if buf is None:
+            return value
+        view = buf.reshape(-1)[: value.size].reshape(value.shape)
+        view[:] = value
+        return view
 
-    result = cc.byteqc_frozen_core_nr_e2(
-        FakeArray((2, 15)),
-        FakeArray((5, 4)),
-        (0, 4, 0, 4),
-        aosym="s2",
-        mosym="s1",
-        out=reusable_mo_output,
-        array_module=SimpleNamespace(empty=lambda shape: FakeArray(shape)),
-        lib_module=SimpleNamespace(unpack_tril=unpack_tril),
-        contraction_module=SimpleNamespace(
-            contraction=contraction,
-            gemm=gemm,
-        ),
-    )
+    output = None
+    results = []
+    for ao_block, packed_block in zip(blocks, packed, strict=True):
+        output = cc.byteqc_frozen_core_nr_e2(
+            packed_block,
+            coefficients,
+            (0, nmo, 0, nmo),
+            aosym="s2",
+            mosym="s1",
+            out=output,
+            array_module=cc.np,
+            lib_module=SimpleNamespace(unpack_tril=unpack_tril),
+            contraction_module=SimpleNamespace(
+                contraction=contraction,
+                gemm=gemm,
+            ),
+        )
+        expected = cc.np.einsum("ia,mab,jb->mij", coefficients, ao_block, coefficients)
+        assert output == pytest.approx(expected, abs=1e-12)
+        results.append(output)
 
-    assert result.shape == (2, 5, -1)
-    assert calls["unpack_out"] is None
-    assert calls["gemm_buf"] is reusable_mo_output
+    assert calls["unpack_out"] == [None, None, None]
+    assert calls["gemm_buf"][0] is None
+    assert calls["gemm_buf"][1] is results[0]
+    assert cc.np.shares_memory(calls["gemm_buf"][2], results[2])
 
 
 def test_two_point_extrapolations_recover_synthetic_limits():

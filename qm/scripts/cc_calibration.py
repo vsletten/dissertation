@@ -14,6 +14,7 @@ import hashlib
 import json
 import subprocess
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -148,20 +149,23 @@ def byteqc_frozen_core_nr_e2(
     return result.reshape((tmp.shape[0], tmp.shape[1], -1))
 
 
-def configure_byteqc_frozen_core_blocking(
-    coupled_cluster: Any, *, dfccsd_module: Any = None
-) -> int:
-    """Install the frozen-core-safe DF transform and retain bounded blocks."""
+@contextmanager
+def byteqc_frozen_core_transform(coupled_cluster: Any, *, dfccsd_module: Any = None):
+    """Install the frozen-core-safe DF transform for one bounded CC job."""
     if dfccsd_module is None:
         from byteqc.cucc import dfccsd as dfccsd_module
 
-    dfccsd_module.nr_e2 = byteqc_frozen_core_nr_e2
     naux = int(coupled_cluster.with_df.get_naoaux())
     blockdim = min(int(coupled_cluster.with_df.blockdim), naux)
     if blockdim < 1:
         raise ValueError("ByteQC DF block size must be positive")
     coupled_cluster.with_df.blockdim = blockdim
-    return blockdim
+    original = dfccsd_module.nr_e2
+    dfccsd_module.nr_e2 = byteqc_frozen_core_nr_e2
+    try:
+        yield blockdim
+    finally:
+        dfccsd_module.nr_e2 = original
 
 
 def existing_receipt(
@@ -278,8 +282,10 @@ def byteqc_job(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError("ByteQC module has no source path")
     byteqc_root = Path(byteqc.__file__).resolve().parent
     byteqc_commit = clean_git_head(byteqc_root)
+    driver_source_sha256 = sha256_path(Path(__file__).resolve())
     identity = {
         "engine_commit": byteqc_commit,
+        "driver_source_sha256": driver_source_sha256,
         "pyscf_version": pyscf.__version__,
         "method": "canonical-ccsd(t)",
         "basis": args.basis,
@@ -319,18 +325,17 @@ def byteqc_job(args: argparse.Namespace) -> dict[str, Any]:
         frozen=frozen,
         gpulim=args.gpu_memory_gb << 30,
     )
-    # ByteQC 2.5 reuses the MO-sized transform output as the next AO-sized
-    # scratch buffer. That buffer is too small whenever frozen core makes
-    # nmo < nao. One complete auxiliary block avoids the invalid reuse while
-    # preserving the exact frozen-core canonical calculation.
-    configure_byteqc_frozen_core_blocking(coupled_cluster)
     coupled_cluster.max_cycle = 100
     coupled_cluster.conv_tol = 1e-8
-    ccsd_correlation, _, _ = coupled_cluster.kernel()
-    if not coupled_cluster.converged:
-        raise RuntimeError("ByteQC CCSD did not converge")
-    eris = coupled_cluster.ao2mo()
-    triples = float(triples_kernel(coupled_cluster, eris))
+    # ByteQC 2.5 reuses an MO-sized DF result as larger AO-unpack scratch when
+    # frozen core makes nmo < nao. Keep bounded auxiliary blocks and replace
+    # only that transform route for both CCSD and the later triples ERIs.
+    with byteqc_frozen_core_transform(coupled_cluster):
+        ccsd_correlation, _, _ = coupled_cluster.kernel()
+        if not coupled_cluster.converged:
+            raise RuntimeError("ByteQC CCSD did not converge")
+        eris = coupled_cluster.ao2mo()
+        triples = float(triples_kernel(coupled_cluster, eris))
     ccsd_correlation = float(ccsd_correlation)
     total = scf_energy + ccsd_correlation + triples
     elapsed = time.time() - started
