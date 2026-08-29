@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import inspect
 import json
 import os
+import platform
 import shutil
 import subprocess
 import time
@@ -33,8 +35,48 @@ import numpy as np
 
 HARTREE_TO_KJ = 2625.4996394798254
 HF_CBS_ALPHA = 1.63
-CCSD_RESTART_SCHEMA = "byteqc-ccsd-amplitudes-v1"
-CCSD_CONVERGED_SCHEMA = "byteqc-ccsd-converged-v1"
+CCSD_RESTART_SCHEMA_V1 = "byteqc-ccsd-amplitudes-v1"
+CCSD_RESTART_SCHEMA = "byteqc-ccsd-amplitudes-v2"
+CCSD_CONVERGED_SCHEMA = "byteqc-ccsd-converged-v2"
+CHECKPOINT_ARRAY_NAMES = (
+    "mo_coeff",
+    "mo_energy",
+    "mo_occ",
+    "scf_energy",
+    "t1",
+    "t2",
+)
+CHECKPOINT_DTYPE = np.dtype("float64")
+BYTEQC_SCF_SETTINGS = {
+    "method": "RHF",
+    "density_fit": True,
+    "max_cycle": 150,
+    "conv_tol": 1e-10,
+}
+BYTEQC_CCSD_SETTINGS = {
+    "max_cycle": 100,
+    "conv_tol": 1e-8,
+    "conv_tol_normt": 1e-5,
+    "diis": True,
+    "diis_space": 6,
+    "diis_start_cycle": 0,
+    "diis_start_energy_diff": 1e9,
+    "iterative_damping": 1.0,
+    "level_shift": 0.0,
+}
+BYTEQC_RESTART_CONTRACT = {
+    "schema": CCSD_RESTART_SCHEMA,
+    "generation": "single-atomic-hdf5-scf-and-amplitudes",
+    "resume": "restore-scf-before-ccsd-and-ao2mo;rerun-ccsd-kernel",
+    "cycle_numbering": "completed-cycle-is-cumulative;max-cycle-is-per-launch",
+    "convergence_marker": "validated-provenance-only;never-skips-kernel",
+    "array_dtype": str(CHECKPOINT_DTYPE),
+}
+BYTEQC_TRANSFORM_CONTRACT = {
+    "density_fit": True,
+    "implementation": "bounded-frozen-core-safe-transform-v2",
+    "aux_blocking": "min(configured-blockdim,naux)",
+}
 
 
 def sha256_path(path: Path) -> str:
@@ -66,6 +108,48 @@ def atomic_json(path: Path, payload: dict[str, Any]) -> None:
 def canonical_json_sha256(payload: dict[str, Any]) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def byteqc_restart_identity(
+    *,
+    input_sha256: str,
+    engine_commit: str,
+    pyscf_version: str,
+    cupy_version: str,
+    numpy_version: str,
+    python_version: str,
+    basis: str,
+    charge: int,
+    spin_2s: int,
+    frozen_core_orbitals: int,
+) -> dict[str, Any]:
+    """Build the stable numerical/contract identity for a ByteQC restart.
+
+    SCF results and resource-only controls are deliberately absent. A resume
+    restores the exact stored SCF state instead of requiring a repeat SCF to
+    reproduce orbital bytes.
+    """
+    return {
+        "input_sha256": input_sha256,
+        "runtime": {
+            "byteqc_commit": engine_commit,
+            "pyscf_version": pyscf_version,
+            "cupy_version": cupy_version,
+            "numpy_version": numpy_version,
+            "python_version": python_version,
+        },
+        "electronic_structure": {
+            "method": "canonical-ccsd(t)",
+            "basis": basis,
+            "charge": charge,
+            "spin_2s": spin_2s,
+            "frozen_core_orbitals": frozen_core_orbitals,
+        },
+        "restart_contract": dict(BYTEQC_RESTART_CONTRACT),
+        "transform_contract": dict(BYTEQC_TRANSFORM_CONTRACT),
+        "scf_settings": dict(BYTEQC_SCF_SETTINGS),
+        "ccsd_settings": dict(BYTEQC_CCSD_SETTINGS),
+    }
 
 
 def ccsd_converged_marker_path(checkpoint_path: Path) -> Path:
@@ -136,26 +220,174 @@ def _numpy_chunk(value: Any, start: int, stop: int) -> np.ndarray:
     return np.ascontiguousarray(chunk)
 
 
-def _checkpoint_dataset(store: Any, name: str, value: Any) -> str:
+def _checkpoint_dataset(store: Any, name: str, value: Any) -> dict[str, Any]:
     shape = tuple(int(item) for item in value.shape)
-    if not shape or shape[0] < 1:
-        raise ValueError(f"{name}: amplitude tensor must be non-empty")
     dtype = np.dtype(value.dtype)
-    dataset = store.create_dataset(
-        name, shape=shape, dtype=dtype, chunks=(1, *shape[1:])
-    )
+    if dtype != CHECKPOINT_DTYPE:
+        raise ValueError(f"{name}: checkpoint dtype must be {CHECKPOINT_DTYPE}")
+    if shape:
+        if shape[0] < 1:
+            raise ValueError(f"{name}: checkpoint array must be non-empty")
+        chunks = (1, *shape[1:])
+    else:
+        chunks = None
+    dataset = store.create_dataset(name, shape=shape, dtype=dtype, chunks=chunks)
     digest = hashlib.sha256()
     digest.update(str(dtype).encode())
     digest.update(json.dumps(shape).encode())
-    for start in range(shape[0]):
-        chunk = _numpy_chunk(value, start, start + 1)
-        if chunk.shape != (1, *shape[1:]):
-            raise ValueError(f"{name}: amplitude chunk shape drift")
+    if not shape:
+        chunk = np.ascontiguousarray(value).reshape(())
         if not np.isfinite(chunk).all():
-            raise ValueError(f"{name}: amplitude checkpoint contains non-finite values")
-        digest.update(memoryview(chunk).cast("B"))
-        dataset[start : start + 1] = chunk
-    return digest.hexdigest()
+            raise ValueError(f"{name}: checkpoint contains non-finite values")
+        digest.update(memoryview(chunk.reshape(1)).cast("B"))
+        dataset[()] = chunk
+    else:
+        for start in range(shape[0]):
+            chunk = _numpy_chunk(value, start, start + 1)
+            if chunk.shape != (1, *shape[1:]):
+                raise ValueError(f"{name}: checkpoint chunk shape drift")
+            if not np.isfinite(chunk).all():
+                raise ValueError(f"{name}: checkpoint contains non-finite values")
+            digest.update(memoryview(chunk).cast("B"))
+            dataset[start : start + 1] = chunk
+    return {
+        "shape": list(shape),
+        "dtype": str(dtype),
+        "nbytes": int(value.nbytes),
+        "sha256": digest.hexdigest(),
+    }
+
+
+def _checkpoint_manifest(store: Any, path: Path) -> dict[str, Any]:
+    try:
+        metadata_raw = store.attrs["manifest_json"]
+        if isinstance(metadata_raw, bytes):
+            metadata_raw = metadata_raw.decode()
+        if not isinstance(metadata_raw, str):
+            raise TypeError("manifest_json is not text")
+        metadata = json.loads(metadata_raw)
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{path}: malformed CCSD checkpoint metadata") from exc
+    schema = metadata.get("schema")
+    if schema == CCSD_RESTART_SCHEMA_V1:
+        raise ValueError(
+            f"{path}: legacy v1 CCSD checkpoint is unsupported; "
+            "it will not be migrated or overwritten"
+        )
+    if schema != CCSD_RESTART_SCHEMA:
+        raise ValueError(f"{path}: unsupported CCSD checkpoint schema {schema!r}")
+    if canonical_json_sha256(metadata) != store.attrs.get("manifest_sha256"):
+        raise ValueError(f"{path}: CCSD checkpoint manifest checksum mismatch")
+    if set(metadata.get("arrays", {})) != set(CHECKPOINT_ARRAY_NAMES):
+        raise ValueError(f"{path}: CCSD checkpoint array manifest drift")
+    return metadata
+
+
+def _validate_checkpoint_identity(
+    path: Path, metadata: dict[str, Any], identity: dict[str, Any]
+) -> None:
+    expected_identity_sha = canonical_json_sha256(identity)
+    if (
+        metadata.get("identity") != identity
+        or metadata.get("identity_sha256") != expected_identity_sha
+    ):
+        raise ValueError(f"{path}: CCSD checkpoint identity drift")
+    completed_cycle = metadata.get("completed_cycle")
+    energy = metadata.get("ccsd_correlation_hartree")
+    if (
+        not isinstance(completed_cycle, int)
+        or completed_cycle < 1
+        or not isinstance(energy, (int, float))
+        or not np.isfinite(float(energy))
+    ):
+        raise ValueError(f"{path}: invalid CCSD checkpoint state")
+
+
+def _validate_dataset_header(
+    store: Any,
+    path: Path,
+    metadata: dict[str, Any],
+    name: str,
+    *,
+    expected_shape: tuple[int, ...] | None = None,
+) -> Any:
+    if name not in store:
+        raise ValueError(f"{path}: missing {name} checkpoint dataset")
+    dataset = store[name]
+    shape = tuple(int(item) for item in dataset.shape)
+    dtype = np.dtype(dataset.dtype)
+    array_metadata = metadata["arrays"].get(name, {})
+    if expected_shape is not None and shape != expected_shape:
+        raise ValueError(f"{path}: {name} checkpoint shape drift")
+    if dtype != CHECKPOINT_DTYPE:
+        raise ValueError(f"{path}: {name} checkpoint dtype drift")
+    if (
+        array_metadata.get("shape") != list(shape)
+        or array_metadata.get("dtype") != str(dtype)
+        or array_metadata.get("nbytes") != int(dataset.nbytes)
+        or not isinstance(array_metadata.get("sha256"), str)
+    ):
+        raise ValueError(f"{path}: {name} checkpoint manifest drift")
+    return dataset
+
+
+def _read_validated_dataset(
+    store: Any,
+    path: Path,
+    metadata: dict[str, Any],
+    name: str,
+    *,
+    expected_shape: tuple[int, ...] | None = None,
+    target: Any = None,
+) -> Any:
+    dataset = _validate_dataset_header(
+        store, path, metadata, name, expected_shape=expected_shape
+    )
+    shape = tuple(int(item) for item in dataset.shape)
+    digest = hashlib.sha256()
+    digest.update(str(CHECKPOINT_DTYPE).encode())
+    digest.update(json.dumps(shape).encode())
+    if not shape:
+        value = np.asarray(dataset[()], dtype=CHECKPOINT_DTYPE).reshape(())
+        if not np.isfinite(value).all():
+            raise ValueError(f"{path}: {name} checkpoint is non-finite")
+        digest.update(memoryview(value.reshape(1)).cast("B"))
+        result = value
+    else:
+        result = np.empty(shape, dtype=CHECKPOINT_DTYPE) if target is None else target
+        for start in range(shape[0]):
+            chunk = np.ascontiguousarray(dataset[start : start + 1])
+            if not np.isfinite(chunk).all():
+                raise ValueError(f"{path}: {name} checkpoint is non-finite")
+            digest.update(memoryview(chunk).cast("B"))
+            result[start : start + 1] = chunk
+    if digest.hexdigest() != metadata["arrays"][name]["sha256"]:
+        raise ValueError(f"{path}: {name} checkpoint checksum mismatch")
+    return result
+
+
+def _validate_dataset_payload(
+    store: Any,
+    path: Path,
+    metadata: dict[str, Any],
+    name: str,
+    *,
+    expected_shape: tuple[int, ...],
+) -> None:
+    """Stream-validate a large dataset without retaining a second host copy."""
+    dataset = _validate_dataset_header(
+        store, path, metadata, name, expected_shape=expected_shape
+    )
+    digest = hashlib.sha256()
+    digest.update(str(CHECKPOINT_DTYPE).encode())
+    digest.update(json.dumps(expected_shape).encode())
+    for start in range(expected_shape[0]):
+        chunk = np.ascontiguousarray(dataset[start : start + 1])
+        if not np.isfinite(chunk).all():
+            raise ValueError(f"{path}: {name} checkpoint is non-finite")
+        digest.update(memoryview(chunk).cast("B"))  # type: ignore[arg-type]
+    if digest.hexdigest() != metadata["arrays"][name]["sha256"]:
+        raise ValueError(f"{path}: {name} checkpoint checksum mismatch")
 
 
 def write_ccsd_checkpoint(
@@ -164,20 +396,66 @@ def write_ccsd_checkpoint(
     identity: dict[str, Any],
     completed_cycle: int,
     ccsd_correlation_hartree: float,
+    mo_coeff: Any,
+    mo_energy: Any,
+    mo_occ: Any,
+    scf_energy: float,
     t1: Any,
     t2: Any,
 ) -> dict[str, Any]:
-    """Atomically persist one fully evaluated ByteQC CCSD amplitude state."""
+    """Atomically persist one exact SCF and evaluated ByteQC CCSD state."""
     import h5py
 
+    if not isinstance(completed_cycle, int) or isinstance(completed_cycle, bool):
+        raise ValueError("CCSD checkpoint cycle must be an integer")
     if completed_cycle < 1:
         raise ValueError("CCSD checkpoint cycle must be positive")
-    energy = float(ccsd_correlation_hartree)
-    if not np.isfinite(energy):
-        raise ValueError("CCSD checkpoint energy must be finite")
+    correlation_energy = float(ccsd_correlation_hartree)
+    scf_energy_array = np.asarray(float(scf_energy), dtype=CHECKPOINT_DTYPE)
+    if not np.isfinite(correlation_energy) or not np.isfinite(scf_energy_array).all():
+        raise ValueError("CCSD and SCF checkpoint energies must be finite")
+    arrays = {
+        "mo_coeff": mo_coeff,
+        "mo_energy": mo_energy,
+        "mo_occ": mo_occ,
+        "scf_energy": scf_energy_array,
+        "t1": t1,
+        "t2": t2,
+    }
+    shapes = {
+        name: tuple(int(item) for item in value.shape) for name, value in arrays.items()
+    }
+    nmo = shapes["mo_coeff"][1] if len(shapes["mo_coeff"]) == 2 else -1
+    nocc = shapes["t1"][0] if len(shapes["t1"]) == 2 else -1
+    nvir = shapes["t1"][1] if len(shapes["t1"]) == 2 else -1
+    if (
+        nmo < 1
+        or shapes["mo_energy"] != (nmo,)
+        or shapes["mo_occ"] != (nmo,)
+        or shapes["scf_energy"] != ()
+        or nocc < 1
+        or nvir < 1
+        or shapes["t2"] != (nocc, nocc, nvir, nvir)
+    ):
+        raise ValueError("CCSD checkpoint SCF/amplitude shape contract drift")
+    for name, value in arrays.items():
+        if np.dtype(value.dtype) != CHECKPOINT_DTYPE:
+            raise ValueError(f"{name}: checkpoint dtype must be {CHECKPOINT_DTYPE}")
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    checkpoint_bytes = int(t1.nbytes) + int(t2.nbytes)
-    required_free = checkpoint_bytes * 2 + (1 << 30)
+    if path.exists():
+        try:
+            with h5py.File(path, "r") as existing:
+                _checkpoint_manifest(existing, path)
+        except OSError as exc:
+            raise ValueError(
+                f"{path}: existing file is not a supported CCSD checkpoint; "
+                "refusing to overwrite it"
+            ) from exc
+    checkpoint_bytes = sum(int(value.nbytes) for value in arrays.values())
+    # disk_usage().free already excludes the old checkpoint. Atomic replacement
+    # needs one complete temporary generation plus a 1 GiB safety reserve.
+    required_free = checkpoint_bytes + (1 << 30)
     available_free = shutil.disk_usage(path.parent).free
     if available_free < required_free:
         raise RuntimeError(
@@ -187,21 +465,18 @@ def write_ccsd_checkpoint(
     temporary = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
     try:
         with h5py.File(temporary, "w") as store:
-            tensors = {}
-            for name, value in (("t1", t1), ("t2", t2)):
-                tensors[name] = {
-                    "shape": list(value.shape),
-                    "dtype": str(np.dtype(value.dtype)),
-                    "sha256": _checkpoint_dataset(store, name, value),
-                }
+            array_manifest = {
+                name: _checkpoint_dataset(store, name, value)
+                for name, value in arrays.items()
+            }
             metadata = {
                 "schema": CCSD_RESTART_SCHEMA,
                 "identity": identity,
                 "identity_sha256": canonical_json_sha256(identity),
                 "completed_cycle": completed_cycle,
-                "ccsd_correlation_hartree": energy,
+                "ccsd_correlation_hartree": correlation_energy,
                 "checkpoint_bytes": checkpoint_bytes,
-                "tensors": tensors,
+                "arrays": array_manifest,
                 "written_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             }
             store.attrs["manifest_json"] = json.dumps(metadata, sort_keys=True)
@@ -212,8 +487,14 @@ def write_ccsd_checkpoint(
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
+        marker_path = ccsd_converged_marker_path(path)
+        marker_path.unlink(missing_ok=True)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
         os.replace(temporary, path)
-        ccsd_converged_marker_path(path).unlink(missing_ok=True)
         directory = os.open(path.parent, os.O_RDONLY)
         try:
             os.fsync(directory)
@@ -224,75 +505,256 @@ def write_ccsd_checkpoint(
     return metadata
 
 
-def load_ccsd_checkpoint(
+def _validate_restored_scf_state(
     path: Path,
     *,
     identity: dict[str, Any],
-    coupled_cluster: Any,
-) -> tuple[dict[str, Any], Any, Any] | None:
-    """Load a validated restart directly into ByteQC's selected buffer backends."""
+    mean_field: Any,
+    mo_coeff: np.ndarray,
+    mo_energy: np.ndarray,
+    mo_occ: np.ndarray,
+    scf_energy: float,
+    t1_shape: tuple[int, ...],
+) -> None:
+    """Reject physically inconsistent orbitals before mutating the SCF object."""
+    electron_count = int(mean_field.mol.nelectron)
+    if electron_count < 1 or electron_count % 2:
+        raise ValueError(f"{path}: restored RHF electron count is invalid")
+    occupation_is_closed_shell = np.logical_or(
+        np.isclose(mo_occ, 0.0, atol=1e-12, rtol=0.0),
+        np.isclose(mo_occ, 2.0, atol=1e-12, rtol=0.0),
+    )
+    if not occupation_is_closed_shell.all() or not np.isclose(
+        mo_occ.sum(), electron_count, atol=1e-10, rtol=0.0
+    ):
+        raise ValueError(f"{path}: restored RHF occupations are invalid")
+    if np.any(np.diff(mo_energy) < -1e-10):
+        raise ValueError(f"{path}: restored RHF orbital energies are not ordered")
+
+    overlap = np.asarray(mean_field.get_ovlp(), dtype=CHECKPOINT_DTYPE)
+    if overlap.shape != (mo_coeff.shape[0], mo_coeff.shape[0]):
+        raise ValueError(f"{path}: restored RHF overlap shape drift")
+    metric = mo_coeff.T @ overlap @ mo_coeff
+    if not np.allclose(
+        metric,
+        np.eye(mo_coeff.shape[1], dtype=CHECKPOINT_DTYPE),
+        atol=1e-8,
+        rtol=1e-8,
+    ):
+        raise ValueError(f"{path}: restored RHF orbitals are not orthonormal")
+
+    density = mean_field.make_rdm1(mo_coeff, mo_occ)
+    hcore = mean_field.get_hcore()
+    veff = mean_field.get_veff(mean_field.mol, density)
+    recomputed_energy = float(mean_field.energy_tot(dm=density, h1e=hcore, vhf=veff))
+    if not np.isclose(recomputed_energy, scf_energy, atol=1e-8, rtol=0.0):
+        raise ValueError(f"{path}: restored RHF total energy is inconsistent")
+    fock = np.asarray(
+        mean_field.get_fock(h1e=hcore, s1e=overlap, vhf=veff, dm=density),
+        dtype=CHECKPOINT_DTYPE,
+    )
+    if fock.shape != overlap.shape or not np.isfinite(fock).all():
+        raise ValueError(f"{path}: restored RHF Fock matrix is invalid")
+    mo_fock = mo_coeff.T @ fock @ mo_coeff
+    off_diagonal = mo_fock - np.diag(np.diag(mo_fock))
+    if not np.allclose(off_diagonal, 0.0, atol=1e-7, rtol=0.0) or not np.allclose(
+        np.diag(mo_fock), mo_energy, atol=1e-7, rtol=1e-9
+    ):
+        raise ValueError(f"{path}: restored RHF orbitals do not diagonalize Fock")
+
+    electronic_structure = identity.get("electronic_structure")
+    if not isinstance(electronic_structure, dict):
+        raise ValueError(f"{path}: restart identity lacks electronic structure")
+    frozen = electronic_structure.get("frozen_core_orbitals")
+    if not isinstance(frozen, int) or isinstance(frozen, bool) or frozen < 0:
+        raise ValueError(f"{path}: restart identity has invalid frozen core")
+    occupied = electron_count // 2
+    expected_t1_shape = (occupied - frozen, mo_coeff.shape[1] - occupied)
+    if min(expected_t1_shape) < 1 or t1_shape != expected_t1_shape:
+        raise ValueError(f"{path}: amplitudes disagree with restored RHF occupations")
+
+
+def restore_ccsd_checkpoint_scf(
+    path: Path,
+    *,
+    identity: dict[str, Any],
+    mean_field: Any,
+) -> dict[str, Any] | None:
+    """Validate and restore exact v2 SCF state before CCSD construction."""
     import h5py
 
     if not path.exists():
         return None
     with h5py.File(path, "r") as store:
-        try:
-            metadata_raw = store.attrs["manifest_json"]
-            if isinstance(metadata_raw, bytes):
-                metadata_raw = metadata_raw.decode()
-            if not isinstance(metadata_raw, str):
-                raise TypeError("manifest_json is not text")
-            metadata = json.loads(metadata_raw)
-        except (KeyError, TypeError, json.JSONDecodeError) as exc:
-            raise ValueError(f"{path}: malformed CCSD checkpoint metadata") from exc
-        if canonical_json_sha256(metadata) != store.attrs.get("manifest_sha256"):
-            raise ValueError(f"{path}: CCSD checkpoint manifest checksum mismatch")
-        expected_identity_sha = canonical_json_sha256(identity)
-        if (
-            metadata.get("schema") != CCSD_RESTART_SCHEMA
-            or metadata.get("identity") != identity
-            or metadata.get("identity_sha256") != expected_identity_sha
+        metadata = _checkpoint_manifest(store, path)
+        _validate_checkpoint_identity(path, metadata, identity)
+        t1_shape = tuple(metadata["arrays"]["t1"].get("shape", ()))
+        t2_shape = tuple(metadata["arrays"]["t2"].get("shape", ()))
+        if len(t1_shape) != 2 or t2_shape != (
+            t1_shape[0],
+            t1_shape[0],
+            t1_shape[1],
+            t1_shape[1],
         ):
-            raise ValueError(f"{path}: CCSD checkpoint identity drift")
-        completed_cycle = metadata.get("completed_cycle")
-        energy = metadata.get("ccsd_correlation_hartree")
-        if (
-            not isinstance(completed_cycle, int)
-            or completed_cycle < 1
-            or not isinstance(energy, (int, float))
-            or not np.isfinite(float(energy))
-        ):
-            raise ValueError(f"{path}: invalid CCSD checkpoint state")
+            raise ValueError(f"{path}: amplitude checkpoint shape drift")
+        _validate_dataset_header(store, path, metadata, "t1", expected_shape=t1_shape)
+        _validate_dataset_header(store, path, metadata, "t2", expected_shape=t2_shape)
 
+        coeff_dataset = _validate_dataset_header(store, path, metadata, "mo_coeff")
+        coeff_shape = tuple(int(item) for item in coeff_dataset.shape)
+        if len(coeff_shape) != 2 or min(coeff_shape) < 1:
+            raise ValueError(f"{path}: mo_coeff checkpoint shape drift")
+        nmo = coeff_shape[1]
+        expected_nao = int(mean_field.mol.nao_nr())
+        if coeff_shape[0] != expected_nao:
+            raise ValueError(f"{path}: mo_coeff checkpoint shape drift")
+        mo_coeff = _read_validated_dataset(
+            store, path, metadata, "mo_coeff", expected_shape=coeff_shape
+        )
+        mo_energy = _read_validated_dataset(
+            store, path, metadata, "mo_energy", expected_shape=(nmo,)
+        )
+        mo_occ = _read_validated_dataset(
+            store, path, metadata, "mo_occ", expected_shape=(nmo,)
+        )
+        scf_energy = _read_validated_dataset(
+            store, path, metadata, "scf_energy", expected_shape=()
+        )
+
+    _validate_restored_scf_state(
+        path,
+        identity=identity,
+        mean_field=mean_field,
+        mo_coeff=mo_coeff,
+        mo_energy=mo_energy,
+        mo_occ=mo_occ,
+        scf_energy=float(scf_energy),
+        t1_shape=t1_shape,
+    )
+
+    # Validate the multi-gigabyte amplitude payload before expensive AO→MO work,
+    # but only after the cheap SCF state has passed its physical checks.
+    with h5py.File(path, "r") as store:
+        current_metadata = _checkpoint_manifest(store, path)
+        _validate_checkpoint_identity(path, current_metadata, identity)
+        if current_metadata != metadata:
+            raise ValueError(
+                f"{path}: CCSD checkpoint generation changed during resume"
+            )
+        _validate_dataset_payload(store, path, metadata, "t1", expected_shape=t1_shape)
+        _validate_dataset_payload(store, path, metadata, "t2", expected_shape=t2_shape)
+
+    mean_field.mo_coeff = mo_coeff
+    mean_field.mo_energy = mo_energy
+    mean_field.mo_occ = mo_occ
+    mean_field.e_tot = float(scf_energy)
+    mean_field.converged = True
+    return metadata
+
+
+def load_ccsd_checkpoint_amplitudes(
+    path: Path,
+    *,
+    identity: dict[str, Any],
+    coupled_cluster: Any,
+    expected_metadata: dict[str, Any],
+) -> tuple[Any, Any]:
+    """Validate/load amplitudes into ByteQC-owned selected buffer backends."""
+    import h5py
+
+    with h5py.File(path, "r") as store:
+        metadata = _checkpoint_manifest(store, path)
+        _validate_checkpoint_identity(path, metadata, identity)
+        if metadata != expected_metadata:
+            raise ValueError(
+                f"{path}: CCSD checkpoint generation changed during resume"
+            )
         nocc = int(coupled_cluster.nocc)
         nvir = int(coupled_cluster.nmo - nocc)
         expected_shapes = {"t1": (nocc, nvir), "t2": (nocc, nocc, nvir, nvir)}
         loaded = {}
         for name, shape in expected_shapes.items():
-            if name not in store or tuple(store[name].shape) != shape:
-                raise ValueError(f"{path}: {name} amplitude shape drift")
-            dataset: Any = store[name]
-            tensor_metadata = metadata.get("tensors", {}).get(name, {})
-            if tensor_metadata.get("shape") != list(shape) or tensor_metadata.get(
-                "dtype"
-            ) != str(np.dtype(dataset.dtype)):
-                raise ValueError(f"{path}: {name} amplitude manifest drift")
-            target = coupled_cluster.pool.new(name, shape, dataset.dtype)
-            digest = hashlib.sha256()
-            digest.update(str(np.dtype(dataset.dtype)).encode())
-            digest.update(json.dumps(shape).encode())
-            for start in range(shape[0]):
-                chunk = np.ascontiguousarray(dataset[start : start + 1])
-                if not np.isfinite(chunk).all():
-                    raise ValueError(
-                        f"{path}: {name} amplitude checkpoint is non-finite"
-                    )
-                digest.update(memoryview(chunk).cast("B"))
-                target[start : start + 1] = chunk
-            if digest.hexdigest() != tensor_metadata.get("sha256"):
-                raise ValueError(f"{path}: {name} amplitude checksum mismatch")
-            loaded[name] = target
-    return metadata, loaded["t1"], loaded["t2"]
+            target = coupled_cluster.pool.new(name, shape, CHECKPOINT_DTYPE)
+            loaded[name] = _read_validated_dataset(
+                store,
+                path,
+                metadata,
+                name,
+                expected_shape=shape,
+                target=target,
+            )
+    return loaded["t1"], loaded["t2"]
+
+
+def scf_checkpoint_state(mean_field: Any, scf_energy: float) -> dict[str, Any]:
+    """Snapshot the exact finite host SCF state used to construct ByteQC."""
+    state = {
+        "mo_coeff": np.ascontiguousarray(mean_field.mo_coeff),
+        "mo_energy": np.ascontiguousarray(mean_field.mo_energy),
+        "mo_occ": np.ascontiguousarray(mean_field.mo_occ),
+        "scf_energy": float(scf_energy),
+    }
+    nmo = state["mo_coeff"].shape[1] if state["mo_coeff"].ndim == 2 else -1
+    if (
+        nmo < 1
+        or state["mo_energy"].shape != (nmo,)
+        or state["mo_occ"].shape != (nmo,)
+        or any(
+            np.dtype(state[name].dtype) != CHECKPOINT_DTYPE
+            for name in ("mo_coeff", "mo_energy", "mo_occ")
+        )
+        or not all(
+            np.isfinite(state[name]).all()
+            for name in ("mo_coeff", "mo_energy", "mo_occ")
+        )
+        or not np.isfinite(state["scf_energy"])
+    ):
+        raise ValueError("SCF checkpoint state shape/dtype/finiteness drift")
+    return state
+
+
+def _constructor_supports_orbitals(constructor: Any) -> bool:
+    parameters = inspect.signature(constructor).parameters.values()
+    names = {parameter.name for parameter in parameters}
+    return {"mo_coeff", "mo_occ"} <= names or any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters
+    )
+
+
+def prepare_byteqc_coupled_cluster(
+    *,
+    mean_field: Any,
+    cucc_module: Any,
+    frozen: int,
+    gpulim: int,
+    restart_path: Path,
+    restart_identity: dict[str, Any],
+) -> tuple[Any, float, dict[str, Any], dict[str, Any] | None]:
+    """Restore/run SCF, then construct CCSD with the exact orbital state."""
+    for name, value in BYTEQC_SCF_SETTINGS.items():
+        if name not in {"method", "density_fit"}:
+            setattr(mean_field, name, value)
+    restart_metadata = restore_ccsd_checkpoint_scf(
+        restart_path, identity=restart_identity, mean_field=mean_field
+    )
+    if restart_metadata is None:
+        scf_energy = float(mean_field.kernel())
+        if not mean_field.converged:
+            raise RuntimeError("ByteQC calibration RHF did not converge")
+    else:
+        scf_energy = float(mean_field.e_tot)
+    scf_state = scf_checkpoint_state(mean_field, scf_energy)
+
+    constructor_kwargs = {"frozen": frozen, "gpulim": gpulim}
+    if _constructor_supports_orbitals(cucc_module.CCSD):
+        constructor_kwargs.update(
+            mo_coeff=mean_field.mo_coeff,
+            mo_occ=mean_field.mo_occ,
+        )
+    coupled_cluster = cucc_module.CCSD(mean_field, **constructor_kwargs)
+    for name, value in BYTEQC_CCSD_SETTINGS.items():
+        setattr(coupled_cluster, name, value)
+    return coupled_cluster, scf_energy, scf_state, restart_metadata
 
 
 class ByteQCEnergyCheckpoint:
@@ -302,11 +764,13 @@ class ByteQCEnergyCheckpoint:
         self,
         path: Path,
         identity: dict[str, Any],
+        scf_state: dict[str, Any],
         *,
         base_cycle: int = 0,
     ) -> None:
         self.path = path
         self.identity = identity
+        self.scf_state = scf_state
         self.base_cycle = base_cycle
         self.energy_calls = 0
         self.last_checkpoint: dict[str, Any] | None = None
@@ -323,6 +787,7 @@ class ByteQCEnergyCheckpoint:
                     identity=self.identity,
                     completed_cycle=self.base_cycle + self.energy_calls,
                     ccsd_correlation_hartree=float(result[0]),
+                    **self.scf_state,
                     t1=t1,
                     t2=t2,
                 )
@@ -337,10 +802,13 @@ def byteqc_energy_checkpoint(
     coupled_cluster: Any,
     path: Path,
     identity: dict[str, Any],
+    scf_state: dict[str, Any],
     *,
     base_cycle: int = 0,
 ):
-    checkpoint = ByteQCEnergyCheckpoint(path, identity, base_cycle=base_cycle)
+    checkpoint = ByteQCEnergyCheckpoint(
+        path, identity, scf_state, base_cycle=base_cycle
+    )
     original = coupled_cluster.energy
     coupled_cluster.energy = checkpoint.wrap(original)
     try:
@@ -628,92 +1096,70 @@ def byteqc_job(args: argparse.Namespace) -> dict[str, Any]:
         max_memory=args.memory_gb * 1024,
     )
     started = time.time()
-    mean_field = scf.RHF(molecule).density_fit()
-    mean_field.max_cycle = 150
-    mean_field.conv_tol = 1e-10
-    scf_energy = float(mean_field.kernel())
-    if not mean_field.converged:
-        raise RuntimeError("ByteQC calibration RHF did not converge")
-    coupled_cluster = cucc.CCSD(
-        mean_field,
-        frozen=frozen,
-        gpulim=args.gpu_memory_gb << 30,
+    restart_identity = byteqc_restart_identity(
+        input_sha256=source_sha,
+        engine_commit=byteqc_commit,
+        pyscf_version=pyscf.__version__,
+        cupy_version=cupy.__version__,
+        numpy_version=np.__version__,
+        python_version=platform.python_version(),
+        basis=args.basis,
+        charge=args.charge,
+        spin_2s=args.spin,
+        frozen_core_orbitals=frozen,
     )
-    coupled_cluster.max_cycle = 100
-    coupled_cluster.conv_tol = 1e-8
-    restart_identity = {
-        **identity,
-        "checkpoint_schema": CCSD_RESTART_SCHEMA,
-        "input_sha256": source_sha,
-        "scf_contract": {
-            "method": "RHF-density-fit",
-            "max_cycle": mean_field.max_cycle,
-            "conv_tol": mean_field.conv_tol,
-            "energy_hartree": scf_energy,
-            "mo_coeff_sha256": numpy_sha256(mean_field.mo_coeff),
-            "mo_energy_sha256": numpy_sha256(mean_field.mo_energy),
-            "mo_occ_sha256": numpy_sha256(mean_field.mo_occ),
-        },
-        "ccsd_convergence_contract": {
-            "max_cycle_semantics": "100-per-launch; completed_cycle-is-cumulative",
-            "max_cycle": coupled_cluster.max_cycle,
-            "conv_tol": coupled_cluster.conv_tol,
-            "conv_tol_normt": coupled_cluster.conv_tol_normt,
-            "diis_space": coupled_cluster.diis_space,
-            "diis_start_cycle": coupled_cluster.diis_start_cycle,
-            "diis_start_energy_diff": coupled_cluster.diis_start_energy_diff,
-            "iterative_damping": coupled_cluster.iterative_damping,
-            "level_shift": coupled_cluster.level_shift,
-        },
-    }
+    mean_field = scf.RHF(molecule).density_fit()
+    coupled_cluster, scf_energy, scf_state, restart_metadata = (
+        prepare_byteqc_coupled_cluster(
+            mean_field=mean_field,
+            cucc_module=cucc,
+            frozen=frozen,
+            gpulim=args.gpu_memory_gb << 30,
+            restart_path=restart_path,
+            restart_identity=restart_identity,
+        )
+    )
     # ByteQC 2.5 reuses an MO-sized DF result as larger AO-unpack scratch when
     # frozen core makes nmo < nao. Keep bounded auxiliary blocks and replace
     # only that transform route for both CCSD and the later triples ERIs.
     with byteqc_frozen_core_transform(coupled_cluster):
         eris = coupled_cluster.ao2mo()
-        restart = load_ccsd_checkpoint(
-            restart_path,
-            identity=restart_identity,
-            coupled_cluster=coupled_cluster,
-        )
         base_cycle = 0
         initial_t1 = initial_t2 = None
-        restart_metadata = None
-        convergence_marker = None
-        if restart is not None:
-            restart_metadata, initial_t1, initial_t2 = restart
+        resumed_convergence_marker = None
+        if restart_metadata is not None:
             base_cycle = int(restart_metadata["completed_cycle"])
-            convergence_marker = load_ccsd_converged_marker(
+            resumed_convergence_marker = load_ccsd_converged_marker(
                 restart_path, restart_metadata
             )
-        if convergence_marker is not None:
-            assert restart_metadata is not None
-            coupled_cluster.t1 = initial_t1
-            coupled_cluster.t2 = initial_t2
-            coupled_cluster.e_corr = float(restart_metadata["ccsd_correlation_hartree"])
-            coupled_cluster.converged = True
-            ccsd_correlation = coupled_cluster.e_corr
-            final_checkpoint_metadata = restart_metadata
-        else:
-            with byteqc_energy_checkpoint(
-                coupled_cluster,
+            initial_t1, initial_t2 = load_ccsd_checkpoint_amplitudes(
                 restart_path,
-                restart_identity,
-                base_cycle=base_cycle,
-            ) as energy_checkpoint:
-                ccsd_correlation, _, _ = coupled_cluster.kernel(
-                    t1=initial_t1,
-                    t2=initial_t2,
-                    eris=eris,
-                )
-            final_checkpoint_metadata = energy_checkpoint.last_checkpoint
-            if not coupled_cluster.converged:
-                raise RuntimeError("ByteQC CCSD did not converge")
-            if final_checkpoint_metadata is None:
-                raise RuntimeError("ByteQC CCSD converged without a durable checkpoint")
-            convergence_marker = write_ccsd_converged_marker(
-                restart_path, final_checkpoint_metadata
+                identity=restart_identity,
+                coupled_cluster=coupled_cluster,
+                expected_metadata=restart_metadata,
             )
+        # A marker is provenance only. Re-enter ByteQC's convergence contract
+        # from the stored amplitudes instead of trusting it as final evidence.
+        with byteqc_energy_checkpoint(
+            coupled_cluster,
+            restart_path,
+            restart_identity,
+            scf_state,
+            base_cycle=base_cycle,
+        ) as energy_checkpoint:
+            ccsd_correlation, _, _ = coupled_cluster.kernel(
+                t1=initial_t1,
+                t2=initial_t2,
+                eris=eris,
+            )
+        final_checkpoint_metadata = energy_checkpoint.last_checkpoint
+        if not coupled_cluster.converged:
+            raise RuntimeError("ByteQC CCSD did not converge")
+        if final_checkpoint_metadata is None:
+            raise RuntimeError("ByteQC CCSD converged without a durable checkpoint")
+        convergence_marker = write_ccsd_converged_marker(
+            restart_path, final_checkpoint_metadata
+        )
         triples = float(triples_kernel(coupled_cluster, eris))
     ccsd_correlation = float(ccsd_correlation)
     total = scf_energy + ccsd_correlation + triples
@@ -743,7 +1189,11 @@ def byteqc_job(args: argparse.Namespace) -> dict[str, Any]:
         "ccsd_restart": {
             "schema": CCSD_RESTART_SCHEMA,
             "used": restart_metadata is not None,
+            "scf_state_source": "checkpoint"
+            if restart_metadata is not None
+            else "fresh",
             "resumed_manifest": restart_metadata,
+            "resumed_convergence_marker": resumed_convergence_marker,
             "final_ccsd_manifest": final_checkpoint_metadata,
             "convergence_marker": convergence_marker,
             "identity_sha256": canonical_json_sha256(restart_identity),
