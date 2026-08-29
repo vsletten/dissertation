@@ -12,6 +12,11 @@ import pytest
 from scripts import cc_calibration as cc
 
 
+class ArrayPool:
+    def new(self, _name, shape, dtype):
+        return cc.np.empty(shape, dtype=dtype)
+
+
 def receipt(engine: str, basis: str, scf: float, correlation: float) -> dict:
     return {
         "engine": engine,
@@ -109,6 +114,245 @@ def test_byteqc_frozen_core_nr_e2_is_numerical_across_full_and_tail_blocks():
     assert calls["gemm_buf"][0] is None
     assert calls["gemm_buf"][1] is results[0]
     assert cc.np.shares_memory(calls["gemm_buf"][2], results[2])
+
+
+def test_ccsd_checkpoint_round_trip_is_atomic_and_fingerprint_bound(tmp_path):
+    path = tmp_path / "restart.h5"
+    identity = {
+        "input_sha256": "reactant-geometry",
+        "basis": "cc-pVQZ",
+        "engine_commit": "byteqc-head",
+        "driver_source_sha256": "driver-head",
+        "mo_coeff_sha256": "orbitals",
+    }
+    t1 = cc.np.arange(6, dtype=float).reshape(2, 3) / 10
+    t2 = cc.np.arange(36, dtype=float).reshape(2, 2, 3, 3) / 100
+    metadata = cc.write_ccsd_checkpoint(
+        path,
+        identity=identity,
+        completed_cycle=4,
+        ccsd_correlation_hartree=-2.5,
+        t1=t1,
+        t2=t2,
+    )
+    cluster = SimpleNamespace(nocc=2, nmo=5, pool=ArrayPool())
+    loaded = cc.load_ccsd_checkpoint(
+        path,
+        identity=identity,
+        coupled_cluster=cluster,
+    )
+    assert loaded is not None
+    loaded_metadata, loaded_t1, loaded_t2 = loaded
+    assert loaded_metadata == metadata
+    assert loaded_t1 == pytest.approx(t1)
+    assert loaded_t2 == pytest.approx(t2)
+
+    for key, value in (
+        ("input_sha256", "transition-state-geometry"),
+        ("basis", "cc-pVTZ"),
+        ("engine_commit", "other-byteqc-head"),
+        ("driver_source_sha256", "other-driver-head"),
+        ("mo_coeff_sha256", "other-orbitals"),
+    ):
+        drifted = {**identity, key: value}
+        with pytest.raises(ValueError, match="identity drift"):
+            cc.load_ccsd_checkpoint(
+                path,
+                identity=drifted,
+                coupled_cluster=cluster,
+            )
+
+
+def test_ccsd_checkpoint_refuses_corruption_nonfinite_and_shape_drift(tmp_path):
+    import h5py
+
+    identity = {"input_sha256": "geometry", "basis": "cc-pVQZ"}
+    cluster = SimpleNamespace(nocc=2, nmo=4, pool=ArrayPool())
+    path = tmp_path / "restart.h5"
+    cc.write_ccsd_checkpoint(
+        path,
+        identity=identity,
+        completed_cycle=2,
+        ccsd_correlation_hartree=-1.0,
+        t1=cc.np.zeros((2, 2)),
+        t2=cc.np.zeros((2, 2, 2, 2)),
+    )
+    with h5py.File(path, "r+") as store:
+        dataset = store["t2"]
+        assert isinstance(dataset, h5py.Dataset)
+        dataset[0, 0, 0, 0] = 1.0
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        cc.load_ccsd_checkpoint(path, identity=identity, coupled_cluster=cluster)
+
+    with pytest.raises(ValueError, match="non-finite"):
+        cc.write_ccsd_checkpoint(
+            tmp_path / "nonfinite.h5",
+            identity=identity,
+            completed_cycle=2,
+            ccsd_correlation_hartree=-1.0,
+            t1=cc.np.zeros((2, 2)),
+            t2=cc.np.full((2, 2, 2, 2), cc.np.nan),
+        )
+
+    wrong_shape = tmp_path / "wrong-shape.h5"
+    cc.write_ccsd_checkpoint(
+        wrong_shape,
+        identity=identity,
+        completed_cycle=2,
+        ccsd_correlation_hartree=-1.0,
+        t1=cc.np.zeros((1, 2)),
+        t2=cc.np.zeros((1, 1, 2, 2)),
+    )
+    with pytest.raises(ValueError, match="shape drift"):
+        cc.load_ccsd_checkpoint(
+            wrong_shape,
+            identity=identity,
+            coupled_cluster=cluster,
+        )
+
+
+def test_ccsd_checkpoint_binds_cycle_metadata_and_preflights_disk(
+    tmp_path, monkeypatch
+):
+    import h5py
+
+    identity = {"input_sha256": "geometry", "basis": "cc-pVQZ"}
+    cluster = SimpleNamespace(nocc=1, nmo=2, pool=ArrayPool())
+    path = tmp_path / "restart.h5"
+    arrays = {
+        "t1": cc.np.zeros((1, 1)),
+        "t2": cc.np.zeros((1, 1, 1, 1)),
+    }
+    cc.write_ccsd_checkpoint(
+        path,
+        identity=identity,
+        completed_cycle=2,
+        ccsd_correlation_hartree=-1.0,
+        **arrays,
+    )
+    with h5py.File(path, "r+") as store:
+        manifest_raw = store.attrs["manifest_json"]
+        assert isinstance(manifest_raw, str)
+        manifest = json.loads(manifest_raw)
+        manifest["completed_cycle"] = 99
+        store.attrs["manifest_json"] = json.dumps(manifest, sort_keys=True)
+    with pytest.raises(ValueError, match="manifest checksum mismatch"):
+        cc.load_ccsd_checkpoint(path, identity=identity, coupled_cluster=cluster)
+
+    monkeypatch.setattr(
+        cc.shutil,
+        "disk_usage",
+        lambda _path: SimpleNamespace(free=0),
+    )
+    with pytest.raises(RuntimeError, match="insufficient disk"):
+        cc.write_ccsd_checkpoint(
+            tmp_path / "no-space.h5",
+            identity=identity,
+            completed_cycle=1,
+            ccsd_correlation_hartree=-1.0,
+            **arrays,
+        )
+
+
+def test_converged_cycle_100_marker_is_restartable_and_fingerprint_bound(tmp_path):
+    checkpoint = tmp_path / "restart.h5"
+    identity = {"input_sha256": "geometry", "basis": "cc-pVQZ"}
+    metadata = cc.write_ccsd_checkpoint(
+        checkpoint,
+        identity=identity,
+        completed_cycle=100,
+        ccsd_correlation_hartree=-2.5,
+        t1=cc.np.zeros((1, 1)),
+        t2=cc.np.zeros((1, 1, 1, 1)),
+    )
+    marker = cc.write_ccsd_converged_marker(checkpoint, metadata)
+    assert marker["completed_cycle"] == 100
+    assert cc.load_ccsd_converged_marker(checkpoint, metadata) == marker
+
+    drifted = {**metadata, "ccsd_correlation_hartree": -2.4}
+    with pytest.raises(ValueError, match="identity drift"):
+        cc.load_ccsd_converged_marker(checkpoint, drifted)
+
+
+def test_ccsd_checkpoint_failed_replacement_preserves_last_good_state(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "restart.h5"
+    identity = {"input_sha256": "geometry"}
+    arrays = {
+        "t1": cc.np.zeros((2, 2)),
+        "t2": cc.np.zeros((2, 2, 2, 2)),
+    }
+    cc.write_ccsd_checkpoint(
+        path,
+        identity=identity,
+        completed_cycle=1,
+        ccsd_correlation_hartree=-1.0,
+        **arrays,
+    )
+    original = path.read_bytes()
+
+    def fail_replace(_source, _destination):
+        raise OSError("simulated interrupted atomic replace")
+
+    monkeypatch.setattr(cc.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="interrupted atomic replace"):
+        cc.write_ccsd_checkpoint(
+            path,
+            identity=identity,
+            completed_cycle=2,
+            ccsd_correlation_hartree=-1.1,
+            **arrays,
+        )
+    assert path.read_bytes() == original
+
+
+def test_byteqc_energy_checkpoint_persists_each_completed_cycle_before_next_update(
+    tmp_path, monkeypatch
+):
+    calls = []
+    monkeypatch.setattr(
+        cc,
+        "write_ccsd_checkpoint",
+        lambda path, **kwargs: calls.append((path, kwargs)) or kwargs,
+    )
+    checkpoint = cc.ByteQCEnergyCheckpoint(
+        tmp_path / "restart.h5", {"basis": "cc-pVQZ"}, base_cycle=4
+    )
+    energies = iter((-2.0, -2.1, -2.2))
+    wrapped = checkpoint.wrap(lambda *_args: (next(energies), None))
+    t1 = cc.np.zeros((1, 1))
+    t2 = cc.np.zeros((1, 1, 1, 1))
+
+    wrapped(t1, t2, None)
+    assert calls == []
+    wrapped(t1, t2, None)
+    assert calls[0][1]["completed_cycle"] == 5
+    assert calls[0][1]["ccsd_correlation_hartree"] == -2.1
+    # A kill during the following update cannot roll back cycle 5: its atomic
+    # state was written by the preceding post-DIIS energy evaluation.
+    assert checkpoint.last_checkpoint is not None
+    wrapped(t1, t2, None)
+    assert calls[1][1]["completed_cycle"] == 6
+    assert calls[1][1]["ccsd_correlation_hartree"] == -2.2
+
+
+def test_restart_checkpoint_path_rejects_job_artifact_aliases(tmp_path):
+    source = tmp_path / "input.xyz"
+    output = tmp_path / "receipt.json"
+    engine_log = tmp_path / "engine.log"
+    for collision in (source, output, engine_log):
+        args = argparse.Namespace(
+            restart_checkpoint=collision,
+            output=output,
+            log=engine_log,
+        )
+        with pytest.raises(ValueError, match="must differ"):
+            cc.restart_checkpoint_path(args, source)
+    args = argparse.Namespace(restart_checkpoint=None, output=output, log=engine_log)
+    assert (
+        cc.restart_checkpoint_path(args, source) == tmp_path / "receipt.ccsd-restart.h5"
+    )
 
 
 def test_two_point_extrapolations_recover_synthetic_limits():

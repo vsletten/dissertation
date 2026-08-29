@@ -12,6 +12,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import shutil
 import subprocess
 import time
 from contextlib import contextmanager
@@ -31,6 +33,8 @@ import numpy as np
 
 HARTREE_TO_KJ = 2625.4996394798254
 HF_CBS_ALPHA = 1.63
+CCSD_RESTART_SCHEMA = "byteqc-ccsd-amplitudes-v1"
+CCSD_CONVERGED_SCHEMA = "byteqc-ccsd-converged-v1"
 
 
 def sha256_path(path: Path) -> str:
@@ -44,8 +48,305 @@ def sha256_path(path: Path) -> str:
 def atomic_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
-    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-    temporary.replace(path)
+    try:
+        with temporary.open("w") as stream:
+            stream.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def canonical_json_sha256(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def ccsd_converged_marker_path(checkpoint_path: Path) -> Path:
+    return checkpoint_path.with_suffix(checkpoint_path.suffix + ".converged.json")
+
+
+def write_ccsd_converged_marker(
+    checkpoint_path: Path,
+    checkpoint_metadata: dict[str, Any],
+) -> dict[str, Any]:
+    marker = {
+        "schema": CCSD_CONVERGED_SCHEMA,
+        "checkpoint_manifest_sha256": canonical_json_sha256(checkpoint_metadata),
+        "identity_sha256": checkpoint_metadata["identity_sha256"],
+        "completed_cycle": checkpoint_metadata["completed_cycle"],
+        "ccsd_correlation_hartree": checkpoint_metadata["ccsd_correlation_hartree"],
+        "written_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+    atomic_json(ccsd_converged_marker_path(checkpoint_path), marker)
+    return marker
+
+
+def load_ccsd_converged_marker(
+    checkpoint_path: Path,
+    checkpoint_metadata: dict[str, Any],
+) -> dict[str, Any] | None:
+    path = ccsd_converged_marker_path(checkpoint_path)
+    if not path.exists():
+        return None
+    try:
+        marker = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{path}: malformed CCSD convergence marker") from exc
+    expected = (
+        CCSD_CONVERGED_SCHEMA,
+        canonical_json_sha256(checkpoint_metadata),
+        checkpoint_metadata["identity_sha256"],
+        checkpoint_metadata["completed_cycle"],
+        checkpoint_metadata["ccsd_correlation_hartree"],
+    )
+    actual = (
+        marker.get("schema"),
+        marker.get("checkpoint_manifest_sha256"),
+        marker.get("identity_sha256"),
+        marker.get("completed_cycle"),
+        marker.get("ccsd_correlation_hartree"),
+    )
+    if actual != expected:
+        raise ValueError(f"{path}: CCSD convergence marker identity drift")
+    return marker
+
+
+def numpy_sha256(value: Any) -> str:
+    array = np.ascontiguousarray(value)
+    digest = hashlib.sha256()
+    digest.update(str(array.dtype).encode())
+    digest.update(json.dumps(array.shape).encode())
+    digest.update(memoryview(array).cast("B"))
+    return digest.hexdigest()
+
+
+def _numpy_chunk(value: Any, start: int, stop: int) -> np.ndarray:
+    chunk = value[start:stop]
+    if hasattr(chunk, "asnumpy"):
+        chunk = chunk.asnumpy()
+    elif hasattr(chunk, "get"):
+        chunk = chunk.get()
+    return np.ascontiguousarray(chunk)
+
+
+def _checkpoint_dataset(store: Any, name: str, value: Any) -> str:
+    shape = tuple(int(item) for item in value.shape)
+    if not shape or shape[0] < 1:
+        raise ValueError(f"{name}: amplitude tensor must be non-empty")
+    dtype = np.dtype(value.dtype)
+    dataset = store.create_dataset(
+        name, shape=shape, dtype=dtype, chunks=(1, *shape[1:])
+    )
+    digest = hashlib.sha256()
+    digest.update(str(dtype).encode())
+    digest.update(json.dumps(shape).encode())
+    for start in range(shape[0]):
+        chunk = _numpy_chunk(value, start, start + 1)
+        if chunk.shape != (1, *shape[1:]):
+            raise ValueError(f"{name}: amplitude chunk shape drift")
+        if not np.isfinite(chunk).all():
+            raise ValueError(f"{name}: amplitude checkpoint contains non-finite values")
+        digest.update(memoryview(chunk).cast("B"))
+        dataset[start : start + 1] = chunk
+    return digest.hexdigest()
+
+
+def write_ccsd_checkpoint(
+    path: Path,
+    *,
+    identity: dict[str, Any],
+    completed_cycle: int,
+    ccsd_correlation_hartree: float,
+    t1: Any,
+    t2: Any,
+) -> dict[str, Any]:
+    """Atomically persist one fully evaluated ByteQC CCSD amplitude state."""
+    import h5py
+
+    if completed_cycle < 1:
+        raise ValueError("CCSD checkpoint cycle must be positive")
+    energy = float(ccsd_correlation_hartree)
+    if not np.isfinite(energy):
+        raise ValueError("CCSD checkpoint energy must be finite")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint_bytes = int(t1.nbytes) + int(t2.nbytes)
+    required_free = checkpoint_bytes * 2 + (1 << 30)
+    available_free = shutil.disk_usage(path.parent).free
+    if available_free < required_free:
+        raise RuntimeError(
+            "insufficient disk for atomic CCSD checkpoint: "
+            f"need {required_free} bytes, have {available_free}"
+        )
+    temporary = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
+    try:
+        with h5py.File(temporary, "w") as store:
+            tensors = {}
+            for name, value in (("t1", t1), ("t2", t2)):
+                tensors[name] = {
+                    "shape": list(value.shape),
+                    "dtype": str(np.dtype(value.dtype)),
+                    "sha256": _checkpoint_dataset(store, name, value),
+                }
+            metadata = {
+                "schema": CCSD_RESTART_SCHEMA,
+                "identity": identity,
+                "identity_sha256": canonical_json_sha256(identity),
+                "completed_cycle": completed_cycle,
+                "ccsd_correlation_hartree": energy,
+                "checkpoint_bytes": checkpoint_bytes,
+                "tensors": tensors,
+                "written_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            }
+            store.attrs["manifest_json"] = json.dumps(metadata, sort_keys=True)
+            store.attrs["manifest_sha256"] = canonical_json_sha256(metadata)
+            store.flush()
+        descriptor = os.open(temporary, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        os.replace(temporary, path)
+        ccsd_converged_marker_path(path).unlink(missing_ok=True)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return metadata
+
+
+def load_ccsd_checkpoint(
+    path: Path,
+    *,
+    identity: dict[str, Any],
+    coupled_cluster: Any,
+) -> tuple[dict[str, Any], Any, Any] | None:
+    """Load a validated restart directly into ByteQC's selected buffer backends."""
+    import h5py
+
+    if not path.exists():
+        return None
+    with h5py.File(path, "r") as store:
+        try:
+            metadata_raw = store.attrs["manifest_json"]
+            if isinstance(metadata_raw, bytes):
+                metadata_raw = metadata_raw.decode()
+            if not isinstance(metadata_raw, str):
+                raise TypeError("manifest_json is not text")
+            metadata = json.loads(metadata_raw)
+        except (KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"{path}: malformed CCSD checkpoint metadata") from exc
+        if canonical_json_sha256(metadata) != store.attrs.get("manifest_sha256"):
+            raise ValueError(f"{path}: CCSD checkpoint manifest checksum mismatch")
+        expected_identity_sha = canonical_json_sha256(identity)
+        if (
+            metadata.get("schema") != CCSD_RESTART_SCHEMA
+            or metadata.get("identity") != identity
+            or metadata.get("identity_sha256") != expected_identity_sha
+        ):
+            raise ValueError(f"{path}: CCSD checkpoint identity drift")
+        completed_cycle = metadata.get("completed_cycle")
+        energy = metadata.get("ccsd_correlation_hartree")
+        if (
+            not isinstance(completed_cycle, int)
+            or completed_cycle < 1
+            or not isinstance(energy, (int, float))
+            or not np.isfinite(float(energy))
+        ):
+            raise ValueError(f"{path}: invalid CCSD checkpoint state")
+
+        nocc = int(coupled_cluster.nocc)
+        nvir = int(coupled_cluster.nmo - nocc)
+        expected_shapes = {"t1": (nocc, nvir), "t2": (nocc, nocc, nvir, nvir)}
+        loaded = {}
+        for name, shape in expected_shapes.items():
+            if name not in store or tuple(store[name].shape) != shape:
+                raise ValueError(f"{path}: {name} amplitude shape drift")
+            dataset: Any = store[name]
+            tensor_metadata = metadata.get("tensors", {}).get(name, {})
+            if tensor_metadata.get("shape") != list(shape) or tensor_metadata.get(
+                "dtype"
+            ) != str(np.dtype(dataset.dtype)):
+                raise ValueError(f"{path}: {name} amplitude manifest drift")
+            target = coupled_cluster.pool.new(name, shape, dataset.dtype)
+            digest = hashlib.sha256()
+            digest.update(str(np.dtype(dataset.dtype)).encode())
+            digest.update(json.dumps(shape).encode())
+            for start in range(shape[0]):
+                chunk = np.ascontiguousarray(dataset[start : start + 1])
+                if not np.isfinite(chunk).all():
+                    raise ValueError(
+                        f"{path}: {name} amplitude checkpoint is non-finite"
+                    )
+                digest.update(memoryview(chunk).cast("B"))
+                target[start : start + 1] = chunk
+            if digest.hexdigest() != tensor_metadata.get("sha256"):
+                raise ValueError(f"{path}: {name} amplitude checksum mismatch")
+            loaded[name] = target
+    return metadata, loaded["t1"], loaded["t2"]
+
+
+class ByteQCEnergyCheckpoint:
+    """Wrap ByteQC energy evaluation and persist every completed CCSD cycle."""
+
+    def __init__(
+        self,
+        path: Path,
+        identity: dict[str, Any],
+        *,
+        base_cycle: int = 0,
+    ) -> None:
+        self.path = path
+        self.identity = identity
+        self.base_cycle = base_cycle
+        self.energy_calls = 0
+        self.last_checkpoint: dict[str, Any] | None = None
+
+    def wrap(self, original):
+        def checkpointing_energy(t1=None, t2=None, eris=None, with_em=False):
+            result = original(t1, t2, eris, with_em)
+            # ByteQC evaluates the initial MP2 guess once before its loop. Every
+            # later call occurs after damping/DIIS and is the completed cycle
+            # printed to the engine log. Persist before the next update starts.
+            if self.energy_calls > 0:
+                self.last_checkpoint = write_ccsd_checkpoint(
+                    self.path,
+                    identity=self.identity,
+                    completed_cycle=self.base_cycle + self.energy_calls,
+                    ccsd_correlation_hartree=float(result[0]),
+                    t1=t1,
+                    t2=t2,
+                )
+            self.energy_calls += 1
+            return result
+
+        return checkpointing_energy
+
+
+@contextmanager
+def byteqc_energy_checkpoint(
+    coupled_cluster: Any,
+    path: Path,
+    identity: dict[str, Any],
+    *,
+    base_cycle: int = 0,
+):
+    checkpoint = ByteQCEnergyCheckpoint(path, identity, base_cycle=base_cycle)
+    original = coupled_cluster.energy
+    coupled_cluster.energy = checkpoint.wrap(original)
+    try:
+        yield checkpoint
+    finally:
+        coupled_cluster.energy = original
 
 
 def clean_git_head(path: Path) -> str:
@@ -191,6 +492,18 @@ def existing_receipt(
     return payload
 
 
+def restart_checkpoint_path(args: argparse.Namespace, source: Path) -> Path:
+    path = (
+        args.restart_checkpoint or args.output.with_suffix(".ccsd-restart.h5")
+    ).resolve()
+    protected_paths = {source.resolve(), args.output.resolve(), args.log.resolve()}
+    if path in protected_paths:
+        raise ValueError(
+            "CCSD restart checkpoint must differ from XYZ, receipt, and engine log"
+        )
+    return path
+
+
 def psi4_job(args: argparse.Namespace) -> dict[str, Any]:
     if args.spin != 0:
         raise ValueError("Psi4 DLPNO calibration currently supports spin=0 only")
@@ -295,6 +608,7 @@ def byteqc_job(args: argparse.Namespace) -> dict[str, Any]:
         "charge": args.charge,
         "spin_2s": args.spin,
     }
+    restart_path = restart_checkpoint_path(args, source)
     if cached := existing_receipt(
         args.output,
         engine="byteqc-canonical-ccsd(t)",
@@ -327,14 +641,79 @@ def byteqc_job(args: argparse.Namespace) -> dict[str, Any]:
     )
     coupled_cluster.max_cycle = 100
     coupled_cluster.conv_tol = 1e-8
+    restart_identity = {
+        **identity,
+        "checkpoint_schema": CCSD_RESTART_SCHEMA,
+        "input_sha256": source_sha,
+        "scf_contract": {
+            "method": "RHF-density-fit",
+            "max_cycle": mean_field.max_cycle,
+            "conv_tol": mean_field.conv_tol,
+            "energy_hartree": scf_energy,
+            "mo_coeff_sha256": numpy_sha256(mean_field.mo_coeff),
+            "mo_energy_sha256": numpy_sha256(mean_field.mo_energy),
+            "mo_occ_sha256": numpy_sha256(mean_field.mo_occ),
+        },
+        "ccsd_convergence_contract": {
+            "max_cycle_semantics": "100-per-launch; completed_cycle-is-cumulative",
+            "max_cycle": coupled_cluster.max_cycle,
+            "conv_tol": coupled_cluster.conv_tol,
+            "conv_tol_normt": coupled_cluster.conv_tol_normt,
+            "diis_space": coupled_cluster.diis_space,
+            "diis_start_cycle": coupled_cluster.diis_start_cycle,
+            "diis_start_energy_diff": coupled_cluster.diis_start_energy_diff,
+            "iterative_damping": coupled_cluster.iterative_damping,
+            "level_shift": coupled_cluster.level_shift,
+        },
+    }
     # ByteQC 2.5 reuses an MO-sized DF result as larger AO-unpack scratch when
     # frozen core makes nmo < nao. Keep bounded auxiliary blocks and replace
     # only that transform route for both CCSD and the later triples ERIs.
     with byteqc_frozen_core_transform(coupled_cluster):
-        ccsd_correlation, _, _ = coupled_cluster.kernel()
-        if not coupled_cluster.converged:
-            raise RuntimeError("ByteQC CCSD did not converge")
         eris = coupled_cluster.ao2mo()
+        restart = load_ccsd_checkpoint(
+            restart_path,
+            identity=restart_identity,
+            coupled_cluster=coupled_cluster,
+        )
+        base_cycle = 0
+        initial_t1 = initial_t2 = None
+        restart_metadata = None
+        convergence_marker = None
+        if restart is not None:
+            restart_metadata, initial_t1, initial_t2 = restart
+            base_cycle = int(restart_metadata["completed_cycle"])
+            convergence_marker = load_ccsd_converged_marker(
+                restart_path, restart_metadata
+            )
+        if convergence_marker is not None:
+            assert restart_metadata is not None
+            coupled_cluster.t1 = initial_t1
+            coupled_cluster.t2 = initial_t2
+            coupled_cluster.e_corr = float(restart_metadata["ccsd_correlation_hartree"])
+            coupled_cluster.converged = True
+            ccsd_correlation = coupled_cluster.e_corr
+            final_checkpoint_metadata = restart_metadata
+        else:
+            with byteqc_energy_checkpoint(
+                coupled_cluster,
+                restart_path,
+                restart_identity,
+                base_cycle=base_cycle,
+            ) as energy_checkpoint:
+                ccsd_correlation, _, _ = coupled_cluster.kernel(
+                    t1=initial_t1,
+                    t2=initial_t2,
+                    eris=eris,
+                )
+            final_checkpoint_metadata = energy_checkpoint.last_checkpoint
+            if not coupled_cluster.converged:
+                raise RuntimeError("ByteQC CCSD did not converge")
+            if final_checkpoint_metadata is None:
+                raise RuntimeError("ByteQC CCSD converged without a durable checkpoint")
+            convergence_marker = write_ccsd_converged_marker(
+                restart_path, final_checkpoint_metadata
+            )
         triples = float(triples_kernel(coupled_cluster, eris))
     ccsd_correlation = float(ccsd_correlation)
     total = scf_energy + ccsd_correlation + triples
@@ -361,9 +740,19 @@ def byteqc_job(args: argparse.Namespace) -> dict[str, Any]:
         "threads": args.threads,
         "memory_gb": args.memory_gb,
         "gpu_memory_gb": args.gpu_memory_gb,
+        "ccsd_restart": {
+            "schema": CCSD_RESTART_SCHEMA,
+            "used": restart_metadata is not None,
+            "resumed_manifest": restart_metadata,
+            "final_ccsd_manifest": final_checkpoint_metadata,
+            "convergence_marker": convergence_marker,
+            "identity_sha256": canonical_json_sha256(restart_identity),
+        },
         "completed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
     atomic_json(args.output, payload)
+    restart_path.unlink(missing_ok=True)
+    ccsd_converged_marker_path(restart_path).unlink(missing_ok=True)
     return payload
 
 
@@ -497,6 +886,7 @@ def parser() -> argparse.ArgumentParser:
         job.add_argument("--engine-log", dest="engine_log", type=Path, required=True)
         if command == "byteqc":
             job.add_argument("--gpu-memory-gb", type=int, default=16)
+            job.add_argument("--restart-checkpoint", type=Path)
     summary = subparsers.add_parser("summarize")
     summary.add_argument("--canonical", action="append", default=[], required=True)
     summary.add_argument("--dlpno", action="append", default=[], required=True)
