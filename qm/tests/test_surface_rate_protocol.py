@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from quarry.rates import (
+    eckart_kappa,
     surface_thermo_from_frequencies,
     thermo_from_frequencies,
 )
@@ -189,6 +190,53 @@ def test_rate_table_without_cc_falls_back_to_dft_headline():
     assert "k_surface_cc_s" not in row
     assert row["fit_extrapolated"] is True
     assert row["eckart_extrapolated"] is True
+
+
+def test_cc_electronic_barrier_deltas_use_product_well_for_reverse():
+    # Product CC-vs-DFT correction differs from the reactant well.
+    cc_kj = {"reactant": 0.0, "ts": 20.0, "product": 5.0}
+    dft_kj = {"reactant": 0.0, "ts": 15.0, "product": -10.0}
+    forward, reverse = surf.cc_electronic_barrier_deltas(cc_kj, dft_kj)
+    assert forward == pytest.approx((20.0 - 0.0) - (15.0 - 0.0))
+    assert reverse == pytest.approx((20.0 - 5.0) - (15.0 - (-10.0)))
+    assert reverse != pytest.approx(forward)
+
+
+def test_rate_table_applies_independent_reverse_cc_correction():
+    class FakeFreq:
+        def __init__(self, elec, freqs):
+            self.electronic_hartree = elec
+            self.frequencies_cm = np.array(freqs)
+            self.imaginary_cm = np.array([])
+            self.molar_mass_kg = 0.031
+            self.rotational_temperatures_k = [4.0, 1.0, 0.9]
+            self.linear = False
+
+    reactant = FakeFreq(-100.0, [100.0, 900.0, 2000.0])
+    ts = FakeFreq(-99.995, [850.0, 1900.0])
+    forward_delta = 3.0
+    reverse_delta = -8.0
+    rows = surf.rate_table(
+        reactant,
+        ts,
+        imag_cm=900.0,
+        barrier_zpe_dft_kj=15.0,
+        reverse_zpe_dft_kj=120.0,
+        cc_delta_kj=forward_delta,
+        cc_reverse_delta_kj=reverse_delta,
+        literature_fit=None,
+        temperatures=(100.0,),
+        extrapolated=False,
+    )
+    (row,) = rows
+    expected_kappa = eckart_kappa(
+        900.0, 15.0 + forward_delta, 120.0 + reverse_delta, 100.0
+    )
+    reused_forward_kappa = eckart_kappa(
+        900.0, 15.0 + forward_delta, 120.0 + forward_delta, 100.0
+    )
+    assert row["eckart_kappa_cc"] == pytest.approx(expected_kappa, rel=1e-12)
+    assert row["eckart_kappa_cc"] != pytest.approx(reused_forward_kappa, rel=1e-9)
 
 
 def test_geometry_hash_ignores_cluster_name():

@@ -631,6 +631,25 @@ def cc_electronic_kj(
 # ---------------------------------------------------------------------------
 
 
+def cc_electronic_barrier_deltas(
+    cc_electronic_kj: dict[str, float],
+    dft_electronic_kj: dict[str, float],
+) -> tuple[float, float]:
+    """Forward and reverse CC-minus-DFT electronic barrier corrections (kJ/mol).
+
+    Each well (reactant / product) has its own CC vs DFT shift; reusing the
+    TS-minus-reactant delta on the reverse barrier builds the wrong Eckart
+    asymmetry whenever those corrections differ.
+    """
+
+    def delta(well: str) -> float:
+        cc_barrier = cc_electronic_kj["ts"] - cc_electronic_kj[well]
+        dft_barrier = dft_electronic_kj["ts"] - dft_electronic_kj[well]
+        return cc_barrier - dft_barrier
+
+    return delta("reactant"), delta("product")
+
+
 def rate_table(
     reactant_freq: FrequencyResult,
     ts_freq: FrequencyResult,
@@ -642,11 +661,17 @@ def rate_table(
     literature_fit: LiteratureFit | None,
     temperatures: tuple[float, ...],
     extrapolated: bool,
+    cc_reverse_delta_kj: float | None = None,
 ) -> list[dict]:
     """Per-temperature decomposition: gas vs surface PFs x DFT vs CC barrier."""
     rows = []
     barrier_cc = barrier_zpe_dft_kj + cc_delta_kj if cc_delta_kj is not None else None
-    reverse_cc = reverse_zpe_dft_kj + cc_delta_kj if cc_delta_kj is not None else None
+    reverse_delta = (
+        cc_reverse_delta_kj if cc_reverse_delta_kj is not None else cc_delta_kj
+    )
+    reverse_cc = (
+        reverse_zpe_dft_kj + reverse_delta if reverse_delta is not None else None
+    )
     for t in temperatures:
         classical = KB * t / H
         gas_dg = gas_thermo(ts_freq, t).gibbs - gas_thermo(reactant_freq, t).gibbs
@@ -853,20 +878,24 @@ def run_reaction(
             else ("tz" if reaction.n_water == 1 else "skip")
         )
     cc = cc_electronic_kj(stationary, run_dir, mode=reaction_cc_mode, threads=threads)
-    dft_barrier_electronic = (
-        ts_freq.electronic_hartree - reactant_freq.electronic_hartree
-    ) * HARTREE_TO_KJ
+    dft_electronic_kj = {
+        "reactant": reactant_freq.electronic_hartree * HARTREE_TO_KJ,
+        "ts": ts_freq.electronic_hartree * HARTREE_TO_KJ,
+        "product": product_freq.electronic_hartree * HARTREE_TO_KJ,
+    }
+    dft_barrier_electronic = dft_electronic_kj["ts"] - dft_electronic_kj["reactant"]
     cc_delta = None
+    cc_reverse_delta = None
     cc_delta_source = None
     if cc is not None:
-        cc_barrier_electronic = (
-            cc["electronic_kj"]["ts"] - cc["electronic_kj"]["reactant"]
+        cc_delta, cc_reverse_delta = cc_electronic_barrier_deltas(
+            cc["electronic_kj"], dft_electronic_kj
         )
-        cc_delta = cc_barrier_electronic - dft_barrier_electronic
         cc_delta_source = f"direct-{cc['mode']}"
     elif cc_mode != "skip" and reaction.family in gas_cc_delta_kj:
         # Additive gas-phase Delta-Delta transfer for clusters without direct CC.
         cc_delta = gas_cc_delta_kj[reaction.family]
+        cc_reverse_delta = cc_delta
         cc_delta_source = "gas-phase-transfer"
 
     rates = rate_table(
@@ -876,6 +905,7 @@ def run_reaction(
         barrier_zpe_dft_kj=barrier_zpe,
         reverse_zpe_dft_kj=reverse_zpe,
         cc_delta_kj=cc_delta,
+        cc_reverse_delta_kj=cc_reverse_delta,
         literature_fit=reaction.literature_fit,
         temperatures=TEMPERATURES,
         extrapolated=False,
@@ -887,6 +917,7 @@ def run_reaction(
         barrier_zpe_dft_kj=barrier_zpe,
         reverse_zpe_dft_kj=reverse_zpe,
         cc_delta_kj=cc_delta,
+        cc_reverse_delta_kj=cc_reverse_delta,
         literature_fit=reaction.literature_fit,
         temperatures=DEEP_TEMPERATURES,
         extrapolated=True,
@@ -903,6 +934,7 @@ def run_reaction(
         "reverse_barrier_zpe_dft_kj_mol": reverse_zpe,
         "dft_barrier_electronic_kj_mol": dft_barrier_electronic,
         "cc_delta_kj_mol": cc_delta,
+        "cc_reverse_delta_kj_mol": cc_reverse_delta,
         "cc_delta_source": cc_delta_source,
         "cc": cc,
         "imaginary_frequency_cm": imag,
