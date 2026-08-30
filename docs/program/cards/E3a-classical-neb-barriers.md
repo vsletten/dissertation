@@ -3,7 +3,7 @@
 - status: ready
 - track: E (muscovite / the perfect circle)
 - priority: P1
-- machine: workstation (classical-NEB campaign; GPU/CPU)
+- machine: any (classical-potential NEB is CPU work; large-cell sweeps or DFT escalation go to the workstation)
 - depends: —
 - claimed-by:
 
@@ -57,6 +57,11 @@ Validation gate first, then the campaign:
 - Tests/lint green per repo gates; card/PLAN/STATUS bookkeeping in the PR.
 
 ## Progress
+
+- 2026-08-29 — Fable — re-scoped machine: any per Victor's fleet-routing
+  directive (POLICY v13 §10): the route-1 replication gate and barrier matrix
+  run on classical potentials (CPU, laptop-feasible at unit-cell scale). Record
+  any host ceiling per the E2b pattern; DFT-tier work stays in E3b.
 
 - 2026-08-27 — filed by Fable. Phase 2 (E2) is done on proxy barriers; this
   card is the route-1 campaign that upgrades them to computed kinetics.
