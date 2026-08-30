@@ -4,6 +4,14 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-08-29 — fable — Fleet routing widened per Victor (POLICY v13 §10):
+  workstation runs two concurrent lanes (GPU stays single-lease via QI2),
+  macbots default-active for machine:any, cloud Hermes may hold one queue
+  task alongside PR watch. Board: E3a re-scoped machine:any (classical
+  potentials are CPU work), new C3-pit-statistics (READY, any) so
+  laptop/cloud workers have C-track science. A8 enqueued into the
+  workstation's second lane.
+
 - 2026-08-28 — fable (hermes-custom-build-001; profile=workstation) —
   D2b done: explicit-surface rate campaign, 10/10 reactions clean on
   the 4090 (surface PFs + open-shell UCCSD(T)/CBS + (H₂O)₁,₂ site
