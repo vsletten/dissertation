@@ -4,6 +4,13 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-01 — (hermes-8d9e30fee91548; profile=laptop) — C3 pit
+  statistics DONE: 12,032 deterministic passive-film replicas, censor-aware
+  Weibull/bootstrap and survival/hazard diagnostics, pit size/event-depth +
+  fixed-occupancy clustering distributions, 157.0× nucleation-rate scaling,
+  and a four-size half-initiation crossover point estimate land at
+  `docs/program/results/C3-pit-statistics.md`.
+
 - 2026-08-29 — fable — Fleet routing widened per Victor (POLICY v13 §10):
   workstation runs two concurrent lanes (GPU stays single-lease via QI2),
   macbots default-active for machine:any, cloud Hermes may hold one queue
