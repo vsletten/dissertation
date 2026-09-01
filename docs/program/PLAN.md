@@ -48,7 +48,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [B4-ensembles-observables](cards/B4-ensembles-observables.md) | B | P1 | any | done | B2 ✅ |
 | [B5-execution-schedule](cards/B5-execution-schedule.md) | B | P1 | any | done | B2 ✅ |
 | [C2-corrosion-deck](cards/C2-corrosion-deck.md) | C | P2 | any | done | B3 ✅ |
-| [C3-pit-statistics](cards/C3-pit-statistics.md) | C | P2 | any | ready | C2 ✅ |
+| [C3-pit-statistics](cards/C3-pit-statistics.md) | C | P2 | any | done | C2 ✅ |
 | [D2a-astro-rate-reproduction](cards/D2a-astro-rate-reproduction.md) | D | P1 | workstation | done | — |
 | [D2b-explicit-surface-rates](cards/D2b-explicit-surface-rates.md) | D | P1 | workstation | done | gate NO-GO with receipts; barrier tier validated |
 | [D2c-instanton-tier](cards/D2c-instanton-tier.md) | D | P2 | workstation | ready | D2b ✅ |
@@ -61,7 +61,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [E3b-periodic-dft-spot-checks](cards/E3b-periodic-dft-spot-checks.md) | E | P2 | workstation | blocked: E3a | E3a |
 | [E4-1998-comparison](cards/E4-1998-comparison.md) | E | P1 | any | blocked: E3a, E2b, A8 | E3a, E2b, A8 |
 
-**Done** (acceptance verified on main): E2b-grain-size-sweep,
+**Done** (acceptance verified on main): C3-pit-statistics, E2b-grain-size-sweep,
 A5p1-aging-study, C2-corrosion-deck,
 QI2-gpu-lease,
 A1g-acid-bridge-side-hydronium-neutral-attacker,
