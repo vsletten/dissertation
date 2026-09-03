@@ -279,7 +279,9 @@ def _run_process(command: Sequence[str], cwd: Optional[Path], timeout: int) -> D
     }
     if os.name == "posix":
         kwargs["start_new_session"] = True
-    process = subprocess.Popen(list(command), **kwargs)
+    # argv sequence, shell=False: trusted compiler or locally built replay binary plus static flags.
+    # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
+    process = subprocess.Popen(list(command), shell=False, **kwargs)
     timed_out = False
     try:
         stdout, stderr = process.communicate(timeout=timeout)
