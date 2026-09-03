@@ -1,6 +1,6 @@
 # E3a-classical-neb-barriers — the uncomputed middle, route 1
 
-- status: blocked
+- status: done
 - track: E (muscovite / the perfect circle)
 - priority: P1
 - machine: any (classical-potential NEB is CPU work; large-cell sweeps or DFT escalation go to the workstation)
@@ -59,6 +59,21 @@ Validation gate first, then the campaign:
 - Tests/lint green per repo gates; card/PLAN/STATUS bookkeeping in the PR.
 
 ## Progress
+
+- 2026-09-03 02:42 PDT (hermes-custom-build-001; profile=workstation) — DONE as
+  a bounded sensitivity campaign. The neutral reconstructed route-1 gate is
+  68.414811 vs 67.644151 kcal/mol (+0.770660; +1.1393%), inside the predeclared
+  ±5 kcal/mol tolerance. Six 8-image CI-NEBs completed: local-dehydroxylate Ar
+  64.095991; three extended-zone geometries 68.410690–68.411538; and Xe
+  90.744700 kcal/mol. All are explicitly `incomplete-convergence` because their
+  whole-replica norms remain 0.0272–0.0633 vs 0.01, despite ≤0.0101 kcal/mol
+  final-500-step barrier spans. The vacant-M1 Ar seed relaxed 2.316 Å out of its
+  assigned cage and lacks an index-zero Hessian, so trap escape remains
+  `incomplete-index-gate` and its proxy is retained. Delamination remains
+  `incomplete-input-contract`: the merged contract defines no atom-resolved
+  delamination/surface-release endpoints. The deck-ready typed fragment,
+  methods, limitations, and hash-verified 253-file evidence manifest are in
+  `docs/program/results/E3a-classical-neb-barriers.md`.
 
 - 2026-09-02 — `(hermes-custom-build-001; profile=workstation)` — recovered the
   atomistic input prerequisite on `agents/E3a-atomistic-input-contract`.

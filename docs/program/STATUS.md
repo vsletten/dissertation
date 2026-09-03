@@ -4,6 +4,17 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-03 02:42 PDT — (hermes-custom-build-001; profile=workstation) — E3a
+  bounded classical-NEB campaign DONE: neutral route-1 replication is 68.414811
+  vs 67.644151 kcal/mol (+1.1393%); local-dehydroxylate Ar is 64.095991; three
+  extended-zone geometries are 68.410690–68.411538; and the Xe screen is
+  90.744700 kcal/mol. All six NEBs are honestly `incomplete-convergence` at the
+  requested whole-replica norm despite ≤0.0101 kcal/mol late barrier spans.
+  The octahedral seed leaves its assigned cage and remains
+  `incomplete-index-gate`; delamination remains `incomplete-input-contract`, so
+  both proxies stay. Typed deck fragment and hash-verified 253-file evidence:
+  `docs/program/results/E3a-classical-neb-barriers.md`.
+
 - 2026-09-02 — (hermes-macbot-zero; profile=laptop) — A8a legacy C KMC
   conformance harness DONE: content-locked GCC 12.2.0/Linux ARM container,
   source-byte-preserving header and allocator compatibility layers, five bounded
