@@ -27,13 +27,14 @@ other bridge-site pathways, the dissertation's table defines fourteen elementary
 reactions before directionality and ancillary adsorption/desorption expand the
 runtime reaction list.
 
-## Why the shipped rate deck is flat
+## Why the hydrolysis and adsorption tables are flat
 
-The environment-dependent rate machinery was designed to receive barriers from
-the dissertation's other half: ab-initio electronic-structure calculations plus
-transition-state theory. Those kaolinite barriers were not available when the
-model was written. A flat `data.rxn` is therefore an unfilled scientific input,
-not evidence that local-environment machinery has no physical purpose.
+The shipped hydrolysis and adsorption tables in `data.rxn` are flat because
+barriers from the dissertation's other half: ab-initio electronic-structure
+calculations plus transition-state theory, were not available when the model
+was written. Desorption retains distinct environment-dependent rate buckets
+across its environment variants; the flatness of the hydrolysis and adsorption
+tables does not mean that local-environment machinery has no physical purpose.
 
 Any future environment-dependent rate deck must preserve the dissertation's
 thermodynamic constraints, including microscopic reversibility and consistency
