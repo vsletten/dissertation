@@ -162,9 +162,10 @@ Canonical heavy evidence root:
 
 `/mnt/data/vsletten/dissertation-data/e3a-classical-neb-campaign-grid-20260903/`
 
-- 253 manifest-listed files; 296,414,715 bytes including `manifest.json`;
+- 253 listed files (`manifest.json` is omitted from the listing by design);
+- 296,414,715 bytes on disk including the unlisted `manifest.json`;
 - every listed size and SHA-256 independently rechecked against disk;
-- manifest path set exactly matches every non-manifest file;
+- listed path set exactly matches every non-manifest file;
 - `campaign-result.json` SHA-256:
   `2d4c13acad030b12955684af66e6abe91db6cc9a821d2ff7beec4da7eaa1f5a7`;
 - `manifest.json` SHA-256:

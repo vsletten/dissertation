@@ -72,7 +72,9 @@ Validation gate first, then the campaign:
   `incomplete-index-gate` and its proxy is retained. Delamination remains
   `incomplete-input-contract`: the merged contract defines no atom-resolved
   delamination/surface-release endpoints. The deck-ready typed fragment,
-  methods, limitations, and hash-verified 253-file evidence manifest are in
+  methods, limitations, and hash-verified 253-file evidence listing
+  (excludes `manifest.json`; sealed by the independent SHA-256 in the
+  results doc) are in
   `docs/program/results/E3a-classical-neb-barriers.md`.
 
 - 2026-09-02 — `(hermes-custom-build-001; profile=workstation)` — recovered the

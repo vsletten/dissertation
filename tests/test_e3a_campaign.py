@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -171,3 +172,28 @@ def test_prepare_output_dir_refuses_existing_file(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="new or empty directory"):
         campaign.prepare_output_dir(path)
     assert path.read_text(encoding="utf-8") == "stale\n"
+
+
+def test_write_campaign_manifest_excludes_self_even_when_leftover_exists(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "campaign"
+    out.mkdir()
+    nested = out / "model" / "result.json"
+    nested.parent.mkdir()
+    nested.write_text("{}\n", encoding="utf-8")
+    (out / "campaign-result.json").write_text('{"schema": "e3a"}\n', encoding="utf-8")
+    leftover = out / "manifest.json"
+    leftover.write_text('{"files": [{"path": "stale"}]}\n', encoding="utf-8")
+
+    listed = campaign.write_campaign_manifest(out)
+
+    paths = [entry["path"] for entry in listed]
+    assert "manifest.json" not in paths
+    assert paths == ["campaign-result.json", "model/result.json"]
+    payload = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert [entry["path"] for entry in payload["files"]] == paths
+    for entry in payload["files"]:
+        path = out / entry["path"]
+        assert entry["bytes"] == path.stat().st_size
+        assert entry["sha256"] == campaign.sha256(path)

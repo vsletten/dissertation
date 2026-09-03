@@ -461,20 +461,37 @@ def command_run(args: argparse.Namespace) -> None:
     aggregate_path.write_text(
         json.dumps(aggregate, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+    write_campaign_manifest(args.out)
+    print(json.dumps(aggregate, indent=2, sort_keys=True))
+
+
+def write_campaign_manifest(out_dir: pathlib.Path) -> list[dict[str, object]]:
+    """Write a non-self-inclusive evidence listing.
+
+    ``manifest.json`` is omitted from the path set even if a leftover copy
+    already exists. Including it would record a digest of the previous
+    bytes, then overwrite the file. Seal the written document with an
+    independent SHA-256 of the on-disk bytes.
+    """
+    manifest_path = out_dir / "manifest.json"
     manifest = []
-    for path in sorted(item for item in args.out.rglob("*") if item.is_file()):
+    for path in sorted(
+        item
+        for item in out_dir.rglob("*")
+        if item.is_file() and item.resolve() != manifest_path.resolve()
+    ):
         manifest.append(
             {
-                "path": str(path.relative_to(args.out)),
+                "path": str(path.relative_to(out_dir)),
                 "bytes": path.stat().st_size,
                 "sha256": sha256(path),
             }
         )
-    (args.out / "manifest.json").write_text(
+    manifest_path.write_text(
         json.dumps({"files": manifest}, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    print(json.dumps(aggregate, indent=2, sort_keys=True))
+    return manifest
 
 
 def build_parser() -> argparse.ArgumentParser:
