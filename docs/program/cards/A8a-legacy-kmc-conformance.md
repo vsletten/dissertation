@@ -1,11 +1,11 @@
 # A8a-legacy-kmc-conformance — execute the curated 1999 C model against golden runs
 
-- status: ready
+- status: active
 - track: A (geochemistry / archaeology)
 - priority: P2
 - machine: any
 - depends: A8-thesis-archive-intake
-- claimed-by: —
+- claimed-by: hermes-macbot-zero
 
 ## Objective
 
@@ -32,4 +32,5 @@ Turn A8's curated C source and five representative run fixtures into an executab
 
 ## Progress
 
+- 2026-09-02 — Claimed atomically at `f76a73d`; froze the modern-clang failure before compatibility work. Added a digest-pinned GCC/Python container recipe, a source-byte-preserving forced-include compatibility layer, structural/numeric comparator, diffusion-disable audit, historical cross-host control, and sabotage regression. Six focused tests pass; five full 5,000,000-step replays are next. (hermes-macbot-zero; profile=laptop)
 - 2026-09-02 — card filed from A8 intake after five compact, cross-host/parameter-span golden runs were curated. (hermes-custom-build-001; profile=workstation)

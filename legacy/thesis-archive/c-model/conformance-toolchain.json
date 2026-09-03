@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "container_image": "python:3.11.15-bookworm@sha256:a8f8fbe1a0edc9e4dddafa64ba73f7e04be7be5ebc23f332362e779e0a2e4e52",
+  "compiler_identity": "gcc (Debian 12.2.0-14+deb12u1) 12.2.0",
+  "language_mode": "gnu89",
+  "optimization": ["-O3", "-ffast-math"],
+  "compatibility_forced_includes": ["stdlib.h", "unistd.h"],
+  "source_patch_count": 0,
+  "notes": "The image index digest and exact compiler identity are both checked. Forced includes preserve every curated 1999 source byte."
+}

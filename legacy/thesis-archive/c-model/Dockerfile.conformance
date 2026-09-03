@@ -1,0 +1,6 @@
+FROM python:3.11.15-bookworm@sha256:a8f8fbe1a0edc9e4dddafa64ba73f7e04be7be5ebc23f332362e779e0a2e4e52
+
+WORKDIR /repo
+COPY . /repo
+
+ENTRYPOINT ["python3", "legacy/thesis-archive/tools/run_c_model_conformance.py", "--source", "legacy/thesis-archive/c-model/source", "--fixtures", "legacy/thesis-archive/golden-runs", "--report", "/out/conformance-report.json", "--markdown", "/out/conformance-report.md", "--compiler", "gcc", "--canonical-compiler", "gcc (Debian 12.2.0-14+deb12u1) 12.2.0", "--jobs", "4", "--run-root", "/out/runs"]
