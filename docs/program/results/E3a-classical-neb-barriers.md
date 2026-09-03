@@ -1,7 +1,7 @@
 # E3a classical NEB barriers — replication gate and input-contract stop
 
-**State:** `incomplete-replication-hamiltonian`  
-**Run date:** 2026-09-02  
+**State:** `incomplete-replication-hamiltonian`
+**Run date:** 2026-09-02
 **Operator:** `(hermes-custom-build-001; profile=workstation)`
 
 ## Verdict
