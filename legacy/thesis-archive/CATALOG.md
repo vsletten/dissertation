@@ -79,6 +79,8 @@ The source also contains `thesis.tex`, `thesis.bib`, old generated TeX artifacts
 - `RCS/`: byte-for-byte copies of the 30 original RCS archives from `mc/model/RCS/`, preserving revision history and commit-era metadata.
 - `input/`: byte-for-byte copies of the four prototype input files from `mc/model/input/`.
 
+As implemented, reactions 24–27 are the diffusion slots (`NDES=24` … `NRXN=28` in `rxnlist.h`). `readRxns` copies desorption rates into those slots and `doReaction`'s default branch calls `diffuse()`, but `isActive` in both `source/envrn.c` and `appendix-source/envrn.c` returns `FALSE` for every ID that falls into the final “diffusion” branch. `new_evtList` therefore never creates a diffusion event. This is historical evidence, not a defect to patch in the curated copy: the C++ snapshot has the same dead-diffusion `IsActive` path, and `kmc-rs` omits reactions 24–27. A8a must preserve that disable while capturing semantics.
+
 No encoding conversion was necessary. The inventory and parser read historical text as ISO-8859-1/Latin-1, which is byte-preserving for this material. Original hashes remain in `ARCHIVE-INVENTORY.csv`.
 
 ### Representative KMC golden runs

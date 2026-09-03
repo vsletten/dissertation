@@ -21,6 +21,7 @@ Turn A8's curated C source and five representative run fixtures into an executab
 - Never write to `/home/vsletten/Documents/personal/science/thesis`.
 - Do not normalize a mismatch away. Preserve compiler, libc, architecture, seed, and floating-point provenance.
 - If the historical source does not compile, freeze the unmodified failure first, then make the smallest reviewed compatibility patch in the curated copy.
+- Diffusion IDs 24–27 are historically inactive: `isActive` returns `FALSE`, so `new_evtList` never schedules them even though `doReaction` can `diffuse()`. Do not implement diffusion activity/target selection or delete the unreachable entries in the curated byte copies; pin the as-implemented disable.
 
 ## Acceptance
 
