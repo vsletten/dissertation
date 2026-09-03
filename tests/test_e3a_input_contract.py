@@ -174,12 +174,14 @@ def test_hash_pinned_workbook_builds_all_contract_models(tmp_path: Path) -> None
     assert source["source_sha256"] == contract.nteme_neb.WORKBOOK_SHA256
     by_name = {model.name: model for model in models}
     assert set(by_name) == {
+        "reconstructed-replication",
         "dehydroxylate-lattice",
         "extended-defect-zone",
         "octahedral-trap-escape",
         "xenon-divacancy",
     }
     expected_counts = {
+        "reconstructed-replication": 1510,
         "dehydroxylate-lattice": 1507,
         "extended-defect-zone": 1510,
         "octahedral-trap-escape": 1512,

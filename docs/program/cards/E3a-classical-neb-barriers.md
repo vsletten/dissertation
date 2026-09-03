@@ -1,12 +1,12 @@
 # E3a-classical-neb-barriers — the uncomputed middle, route 1
 
-- status: ready
+- status: done
 - track: E (muscovite / the perfect circle)
 - priority: P1
 - machine: any (classical-potential NEB is CPU work; large-cell sweeps or DFT escalation go to the workstation)
 - depends: —
 - input-contract: `docs/program/results/E3a-atomistic-input-contract.md`
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## Objective
 
@@ -60,6 +60,23 @@ Validation gate first, then the campaign:
 
 ## Progress
 
+- 2026-09-03 02:42 PDT (hermes-custom-build-001; profile=workstation) — DONE as
+  a bounded sensitivity campaign. The neutral reconstructed route-1 gate is
+  68.414811 vs 67.644151 kcal/mol (+0.770660; +1.1393%), inside the predeclared
+  ±5 kcal/mol tolerance. Six 8-image CI-NEBs completed: local-dehydroxylate Ar
+  64.095991; three extended-zone geometries 68.410690–68.411538; and Xe
+  90.744700 kcal/mol. All are explicitly `incomplete-convergence` because their
+  whole-replica norms remain 0.0272–0.0633 vs 0.01, despite ≤0.0101 kcal/mol
+  final-500-step barrier spans. The vacant-M1 Ar seed relaxed 2.316 Å out of its
+  assigned cage and lacks an index-zero Hessian, so trap escape remains
+  `incomplete-index-gate` and its proxy is retained. Delamination remains
+  `incomplete-input-contract`: the merged contract defines no atom-resolved
+  delamination/surface-release endpoints. The deck-ready typed fragment,
+  methods, limitations, and hash-verified 253-file evidence listing
+  (excludes `manifest.json`; sealed by the independent SHA-256 in the
+  results doc) are in
+  `docs/program/results/E3a-classical-neb-barriers.md`.
+
 - 2026-09-02 — `(hermes-custom-build-001; profile=workstation)` — recovered the
   atomistic input prerequisite on `agents/E3a-atomistic-input-contract`.
   `docs/program/results/E3a-atomistic-input-contract.md` and
@@ -69,6 +86,21 @@ Validation gate first, then the campaign:
   geometric vacant-M1 trap/escape, and Xe models. Do not start those NEBs until
   the input-contract PR merges; the octahedral route must additionally clear
   its typed index-zero minimum gate.
+
+- 2026-09-02 22:17 PDT (hermes-custom-build-001; profile=workstation) —
+  DEVIATION: Replication gate attempted against the recovered Nteme 2022
+  supplement. An eight-image ClayFF/LAMMPS CI-NEB near-match put exact
+  divacancy route 1 at 68.956 vs 67.644 kcal/mol (+1.312; +1.94%), inside a
+  predeclared ±5 kcal/mol numerical tolerance, but the scientific gate remained
+  CLOSED: the source requires remote charge-compensation substitutions and does
+  not identify their sites. The run therefore used a different net -3 e
+  Hamiltonian. The bounded 13,000-step run reached max atom force 5.08e-5 but
+  whole-replica norm 0.0411 vs requested 0.01, so tighter convergence remained
+  `incomplete-convergence`. No campaign numbers were fabricated: the sources
+  contain no atomistic dehydroxylate, extended-zone, octahedral-trap, or Xe
+  endpoints and omit route-specific charge-compensation sites. The harness,
+  exact 1,080-row catalogue, hashes, commands, and run receipt are in
+  `docs/program/results/E3a-classical-neb-barriers.md`.
 
 - 2026-08-29 — Fable — re-scoped machine: any per Victor's fleet-routing
   directive (POLICY v13 §10): the route-1 replication gate and barrier matrix

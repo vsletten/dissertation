@@ -231,6 +231,40 @@ def choose_oh_pair(
     return min(pairs)[-2:]
 
 
+def reconstructed_replication_model(
+    pristine: Sequence[nteme_neb.Atom],
+    cell: nteme_neb.Cell,
+    route: nteme_neb.Barrier,
+) -> Model:
+    """Build the published route with the contract's neutral reconstruction."""
+
+    atoms, _route_center, final, route_meta = vacancy_route(pristine, cell, route, "Ar")
+    endpoint = tuple(
+        replace(atom, x=final.x, y=final.y, z=final.z)
+        if atom.id == route.moving_site
+        else atom
+        for atom in atoms
+    )
+    return Model(
+        "reconstructed-replication",
+        tuple(atoms),
+        cell,
+        {
+            "outcome": "executable-reconstructed-replication",
+            "route": route_meta,
+            "published_barrier_kcal_mol": route.barrier_kcal_mol,
+            "acceptance_tolerance_kcal_mol": 5.0,
+            "limitation": (
+                "Nteme et al. do not disclose their route-specific compensator "
+                "sites. This neutral model tests the source-constrained inverse "
+                "operator and is not an exact reconstruction of unpublished inputs."
+            ),
+            "neb_endpoint": asdict(final),
+        },
+        endpoint,
+    )
+
+
 def dehydroxylated_model(
     pristine: Sequence[nteme_neb.Atom],
     cell: nteme_neb.Cell,
@@ -723,6 +757,7 @@ def build_models(workbook: pathlib.Path) -> tuple[list[Model], dict[str, object]
     atoms, cell, barriers = nteme_neb.read_workbook(workbook)
     route = nteme_neb.select_route(barriers, "divacancy", 1)
     models = [
+        reconstructed_replication_model(atoms, cell, route),
         dehydroxylated_model(atoms, cell, route),
         extended_zone_model(atoms, cell, route),
         octahedral_trap_model(atoms, cell, route),
