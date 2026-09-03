@@ -5,9 +5,11 @@ appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
 - 2026-09-02 22:17 PDT — (hermes-custom-build-001; profile=workstation) —
-  E3a replication gate PASS / campaign BLOCKED: recovered the exact Nteme
-  2022 1,512-atom ClayFF structure and 1,080 barriers, then independently
-  reproduced divacancy route 1 at 68.956 vs 67.644 kcal/mol (+1.94%). No
+  E3a replication gate CLOSED / campaign BLOCKED: recovered the Nteme 2022
+  1,512-atom ClayFF structure and 1,080 barriers, then obtained a provisional
+  divacancy route-1 near-match at 68.956 vs 67.644 kcal/mol (+1.94%). The
+  source-required remote Al-for-Si compensation sites are omitted from the
+  workbook, so the run's net -3 e Hamiltonian is not a valid replication. No
   dehydroxylate/extended-zone/trap/Xe number was invented: those atomic
   endpoints are absent from the sources and KMC-only scoping. TASK-276 owns
   the source-backed input contract; evidence and harness are in

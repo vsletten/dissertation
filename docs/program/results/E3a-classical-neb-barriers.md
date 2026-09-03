@@ -1,19 +1,22 @@
 # E3a classical NEB barriers — replication gate and input-contract stop
 
-**State:** `incomplete-input-contract`  
+**State:** `incomplete-replication-hamiltonian`  
 **Run date:** 2026-09-02  
 **Operator:** `(hermes-custom-build-001; profile=workstation)`
 
 ## Verdict
 
-The Nteme et al. (2022) classical-potential setup is reproducible from the
-open paper and its supplementary workbook. A real eight-image LAMMPS
-climbing-image NEB calculation for published divacancy route 1 returned a
+Most of the Nteme et al. (2022) classical-potential setup is recoverable from
+the open paper and its supplementary workbook. A real eight-image LAMMPS
+climbing-image NEB **near-match** for published divacancy route 1 returned a
 forward barrier of **68.956 kcal/mol**, versus **67.644 kcal/mol** for that
 exact route in the workbook: **+1.312 kcal/mol (+1.94%)**. This passes the
-replication gate under the predeclared tolerance below and independently
-supports the paper's rounded divacancy diffusion activation energy of
-~66 kcal/mol.
+numerical tolerance below, but it does **not** pass the scientific replication
+gate: the source says it introduced remote Al-for-Si charge-compensation
+substitutions for every defective route, while the workbook does not identify
+those sites. This run therefore used a different, net -3 e Hamiltonian with
+LAMMPS's Ewald neutralizing background. A close number is not permission to
+call two Hamiltonians the same.
 
 The requested new-barrier campaign is **not complete**. Neither the paper,
 its supplement, nor the current E3a/scoping specification defines atomistic
@@ -22,13 +25,15 @@ models. Producing numbers by inventing those structures during execution
 would be false precision. The executable reconstruction is retained; the
 campaign remains blocked pending an explicit atomistic input contract.
 
-## Replication tolerance
+## Provisional numerical tolerance
 
-The gate tolerance is **±5 kcal/mol** for one route. This is justified by the
+The provisional tolerance is **±5 kcal/mol** for one route. This is justified by the
 published route distributions rather than chosen after seeing the answer:
 Nteme et al. report 69 ± 6 kcal/mol (1σ) across 432 Ar divacancy routes, and
 the E2 model already uses ±5 kcal/mol sensitivity bands for uncomputed
-proxies. The observed +1.312 kcal/mol difference is well inside both.
+proxies. The observed +1.312 kcal/mol difference is well inside both, but the
+replication gate remains closed until the published charge-compensation
+construction is recovered or a source-backed equivalent is specified.
 
 The run reached a maximum per-atom force of
 `5.08e-5 kcal mol^-1 Å^-1`; the LAMMPS whole-replica norm was
@@ -60,7 +65,11 @@ Reconstructed method:
 - Route: Ar at K-gallery site 3 hopping to vacancy site 4, with the second
   divacancy site at 88.
 
-The source workbook's complete barrier catalogue was extracted without
+The paper states that the route defects were charge-compensated by substituting
+Al for Si at tetrahedral sites several unit cells away from each migration path
+(methods lines 291–294 in the open manuscript). The supplement gives neither
+the selected sites nor per-route modified coordinates. The source workbook's
+complete barrier catalogue was otherwise extracted without
 rounding:
 
 | Species / mechanism | n | mean ± sample σ (kcal/mol) | range |
@@ -73,10 +82,10 @@ rounding:
 A pristine static-energy check returned `PE=-348835.31 kcal/mol`; adding the
 classical 0.5 K kinetic expectation gives `-348833.06 kcal/mol`, only
 1.68 kcal/mol (4.8 ppm) from the workbook's final reported total energy.
-This is an independent check that the force-field typing, bonds, cell, and
-units were reconstructed consistently.
+This independently checks the pristine force-field typing, bonds, cell, and
+units. It does not validate the missing defective-route substitutions.
 
-## Actual NEB result
+## Actual provisional NEB result
 
 | Quantity | Value |
 |---|---:|

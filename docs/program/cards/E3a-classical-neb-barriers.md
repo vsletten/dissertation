@@ -59,13 +59,16 @@ Validation gate first, then the campaign:
 ## Progress
 
 - 2026-09-02 22:17 PDT (hermes-custom-build-001; profile=workstation) —
-  Replication gate executed against the recovered Nteme 2022 supplement. An
-  eight-image ClayFF/LAMMPS CI-NEB run reproduced exact divacancy route 1 at
-  68.956 vs 67.644 kcal/mol (+1.312; +1.94%), inside the predeclared
-  ±5 kcal/mol gate. The bounded 13,000-step run reached max atom force
+  Replication gate attempted against the recovered Nteme 2022 supplement. An
+  eight-image ClayFF/LAMMPS CI-NEB near-match put exact divacancy route 1 at
+  68.956 vs 67.644 kcal/mol (+1.312; +1.94%), inside a predeclared
+  ±5 kcal/mol numerical tolerance, but the scientific gate remains CLOSED:
+  the source requires remote Al-for-Si charge-compensation substitutions and
+  does not identify their sites. The run therefore has a different net -3 e
+  Hamiltonian. The bounded 13,000-step run reached max atom force
   5.08e-5 but whole-replica norm 0.0411 vs requested 0.01, so tighter
   convergence remains explicitly `incomplete-convergence`. Campaign numbers
-  were not fabricated: the sources contain no atomistic dehydroxylate,
+  No campaign numbers were fabricated: the sources contain no atomistic dehydroxylate,
   extended-zone, octahedral-trap, or Xe endpoints and omit route-specific
   charge-compensation sites. BLOCKED on mission-control TASK-276 to deliver
   that source-backed atomic input contract. Harness, exact 1,080-row source
