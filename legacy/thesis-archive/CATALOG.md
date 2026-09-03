@@ -120,7 +120,7 @@ The parser:
 6. reproduces the 45 reaction energies printed in Chapter 4 Tables 4.4, 4.5, 4.7, 4.8, and 4.10–4.14; and
 7. refuses to calculate a barrier without a defensible reactant/TS/product assignment.
 
-The generated reaction energies reproduce the printed rounded values within 2.01 kcal/mol. Forty-four of forty-five agree within rounding tolerance; the archived files reproduce Table 4.10(c) as 185.6 kcal/mol while the thesis prints 183.6 kcal/mol. The ledger preserves and flags the discrepancy instead of coercing the archive to the publication.
+The generated reaction energies reproduce the printed rounded values within 2.01 kcal/mol. Forty-four of forty-five agree within rounding tolerance; the archived files reproduce Table 4.10(c) as 185.6 kcal/mol while the thesis prints 183.6 kcal/mol. The ledger preserves and flags the discrepancy instead of coercing the archive to the publication. The independent source-log arithmetic and provenance chain are resolved in [`TABLE-4.10C-ERRATUM.md`](TABLE-4.10C-ERRATUM.md): the available archive evidence identifies a high-confidence transcription error in the hand-authored table source, while preserving both historical claims.
 
 Adversarial checks are encoded in the parser validator: exact fixed schema; enumerated status/treatment values; exhaustive source-log row count; no `ok` row without a TS and forward barrier; deterministic regeneration; exact 45-reaction map; and bounded comparison against the independent thesis tables.
 
