@@ -572,6 +572,7 @@ def write_lammps_data(path: pathlib.Path, model: Model) -> None:
 
 def write_static_input(path: pathlib.Path, data_name: str) -> None:
     type_id, _mass, sigma, epsilon = type_tables()
+    names = (*nteme_neb.TYPE_ORDER, "Xe")
     lines = [
         "units           real",
         "atom_style      full",
@@ -579,12 +580,19 @@ def write_static_input(path: pathlib.Path, data_name: str) -> None:
         "boundary        p p p",
         f"read_data       {data_name}",
         "pair_style      lj/cut/coul/long 10.0",
-        "pair_modify     mix arithmetic",
     ]
-    for name in (*nteme_neb.TYPE_ORDER, "Xe"):
+    for name in names:
         lines.append(
             f"pair_coeff      {type_id[name]} {type_id[name]} {epsilon[name]:.10g} {sigma[name]:.10g}"
         )
+    for index, name_i in enumerate(names):
+        for name_j in names[index + 1 :]:
+            mixed_eps = math.sqrt(epsilon[name_i] * epsilon[name_j])
+            mixed_sig = 0.5 * (sigma[name_i] + sigma[name_j])
+            lines.append(
+                f"pair_coeff      {type_id[name_i]} {type_id[name_j]} "
+                f"{mixed_eps:.10g} {mixed_sig:.10g}"
+            )
     lines.extend(
         (
             "bond_style      harmonic",

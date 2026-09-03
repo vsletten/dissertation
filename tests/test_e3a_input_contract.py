@@ -154,3 +154,27 @@ def test_hash_pinned_workbook_builds_all_contract_models(tmp_path: Path) -> None
         628,
         707,
     ]
+
+
+def test_static_input_uses_lorentz_berthelot_unlike_pairs(tmp_path: Path) -> None:
+    path = tmp_path / "in.static"
+    contract.write_static_input(path, "structure.data")
+    text = path.read_text(encoding="utf-8")
+    assert "pair_modify" not in text
+    type_id, _mass, sigma, epsilon = contract.type_tables()
+    names = (*nteme.TYPE_ORDER, "Xe")
+    for name in names:
+        self_coeff = (
+            f"pair_coeff      {type_id[name]} {type_id[name]} "
+            f"{epsilon[name]:.10g} {sigma[name]:.10g}"
+        )
+        assert self_coeff in text
+    for index, name_i in enumerate(names):
+        for name_j in names[index + 1 :]:
+            mixed_eps = math.sqrt(epsilon[name_i] * epsilon[name_j])
+            mixed_sig = 0.5 * (sigma[name_i] + sigma[name_j])
+            unlike = (
+                f"pair_coeff      {type_id[name_i]} {type_id[name_j]} "
+                f"{mixed_eps:.10g} {mixed_sig:.10g}"
+            )
+            assert unlike in text
