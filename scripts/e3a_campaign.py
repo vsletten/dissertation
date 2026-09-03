@@ -339,6 +339,12 @@ def build_campaign_models(
     return [by_name[name] for name in MODEL_ORDER], source
 
 
+def prepare_output_dir(path: pathlib.Path) -> None:
+    if path.exists() and (not path.is_dir() or any(path.iterdir())):
+        raise ValueError(f"output path must be a new or empty directory: {path}")
+    path.mkdir(parents=True, exist_ok=True)
+
+
 def command_run(args: argparse.Namespace) -> None:
     if args.neb_relax_steps % 100 or args.neb_climb_steps % 100:
         raise ValueError("NEB relax/climb steps must be multiples of thermo every=100")
@@ -348,7 +354,7 @@ def command_run(args: argparse.Namespace) -> None:
     unknown = sorted(set(selected) - set(by_name))
     if unknown:
         raise ValueError(f"unknown model(s): {unknown}")
-    args.out.mkdir(parents=True, exist_ok=True)
+    prepare_output_dir(args.out)
     model_results: dict[str, object] = {}
     aggregate: dict[str, object] = {
         "schema": "e3a-classical-neb-campaign-v1",

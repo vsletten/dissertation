@@ -143,3 +143,31 @@ def test_real_workbook_exposes_campaign_models() -> None:
         if model.name.startswith("extended-defect-zone")
     ]
     assert zone_dimensions == [(6.0, 3.0, 0.5), (8.0, 5.0, 1.0), (10.0, 7.0, 1.5)]
+
+
+def test_prepare_output_dir_refuses_nonempty_directory(tmp_path: Path) -> None:
+    stale = tmp_path / "out"
+    stale.mkdir()
+    (stale / "old-model").mkdir()
+    (stale / "old-model" / "result.json").write_text("{}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="new or empty directory"):
+        campaign.prepare_output_dir(stale)
+    assert (stale / "old-model" / "result.json").is_file()
+
+
+def test_prepare_output_dir_creates_missing_or_empty_directory(tmp_path: Path) -> None:
+    missing = tmp_path / "nested" / "out"
+    campaign.prepare_output_dir(missing)
+    assert missing.is_dir()
+    assert list(missing.iterdir()) == []
+    campaign.prepare_output_dir(missing)
+    assert missing.is_dir()
+    assert list(missing.iterdir()) == []
+
+
+def test_prepare_output_dir_refuses_existing_file(tmp_path: Path) -> None:
+    path = tmp_path / "out"
+    path.write_text("stale\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="new or empty directory"):
+        campaign.prepare_output_dir(path)
+    assert path.read_text(encoding="utf-8") == "stale\n"
