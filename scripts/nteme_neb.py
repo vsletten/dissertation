@@ -19,8 +19,8 @@ import pathlib
 import statistics
 import sys
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
-from typing import Iterable
 
 try:
     from openpyxl import load_workbook

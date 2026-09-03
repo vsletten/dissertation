@@ -4,16 +4,36 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-02 — (hermes-macbot-zero; profile=laptop) — A8a legacy C KMC
+  conformance harness DONE: content-locked GCC 12.2.0/Linux ARM container,
+  source-byte-preserving header and allocator compatibility layers, five bounded
+  5,000,000-step replays, strict output comparator, diffusion/cross-host controls,
+  and a fail-closed sabotage gate. DEVIATION: all five executions completed but
+  differ behaviorally from the archive (first trajectory divergences 97/1/1/1/38;
+  terminal-surface row counts differ), so canonical conformance is honestly red.
+  ASAN exposed preserved allocator-dependent reads at `rxnlist.c:93` and
+  `lattice.c:271`; evidence and Rust-port follow-up live in
+  `legacy/thesis-archive/c-model/PORTABILITY-LIMITATIONS.md`, with exact outcomes
+  in `conformance-report.{json,md}`.
+
+- 2026-09-02 — (hermes-custom-build-001; profile=workstation) — E3a atomistic
+  input contract implemented: source-constrained, hash-pinned fixture generation
+  now defines the local dehydroxylate, extended-defect sensitivity family,
+  geometric vacant-M1 seed for the recoil-derived reservoir, Xe/ClayFF screen,
+  reconstructed neutral charge compensation, and two-end LAMMPS run-0
+  validation. The octahedral candidate remains honestly typed
+  `incomplete-no-minimum`; E3a may run it only after the prescribed minimum
+  gate. Results:
+  `docs/program/results/E3a-atomistic-input-contract.md`.
+
 - 2026-09-02 22:17 PDT — (hermes-custom-build-001; profile=workstation) —
   E3a replication gate CLOSED / campaign BLOCKED: recovered the Nteme 2022
   1,512-atom ClayFF structure and 1,080 barriers, then obtained a provisional
   divacancy route-1 near-match at 68.956 vs 67.644 kcal/mol (+1.94%). The
-  source-required remote Al-for-Si compensation sites are omitted from the
-  workbook, so the run's net -3 e Hamiltonian is not a valid replication. No
-  dehydroxylate/extended-zone/trap/Xe number was invented: those atomic
-  endpoints are absent from the sources and KMC-only scoping. TASK-276 owns
-  the source-backed input contract; evidence and harness are in
-  `docs/program/results/E3a-classical-neb-barriers.md`.
+  source-required remote compensation sites are omitted from the workbook, so
+  the run's net -3 e Hamiltonian is not a valid replication. No
+  dehydroxylate/extended-zone/trap/Xe number was invented; evidence and harness
+  are in `docs/program/results/E3a-classical-neb-barriers.md`.
 
 - 2026-09-02 — (hermes-custom-build-001; profile=workstation) — A8 thesis
   archive intake DONE: all 1,426 source files independently inventoried/rehashed;

@@ -4,7 +4,8 @@
 - track: E (muscovite / the perfect circle)
 - priority: P1
 - machine: any (classical-potential NEB is CPU work; large-cell sweeps or DFT escalation go to the workstation)
-- depends: TASK-276-e3a-atomistic-input-contract (mission-control)
+- depends: —
+- input-contract: `docs/program/results/E3a-atomistic-input-contract.md`
 - claimed-by: hermes-custom-build-001
 
 ## Objective
@@ -22,8 +23,9 @@ Validation gate first, then the campaign:
    migration barrier (~66 kcal/mol, Nteme 2022) in the pristine gallery
    before any new number is trusted. This is the go/no-go for the setup.
 2. **The missing barriers** (~6–10 types × 2 species, provenance-stamped):
-   - Ar hop in the **dehydroxylate lattice** (collapsed interlayer) — the
-     key missing number; 1998 had only the Robbins 1972 proxy.
+   - Ar hop in the **local dehydroxylate lattice** (no collapsed-interlayer
+     assumption; use the contract's post-reaction topology and cell relaxation
+     gate) — the key missing number; 1998 had only the Robbins 1972 proxy.
    - Ar hop in **extended-defect zones** — test whether Nteme 2023's 10⁶×
      diffusivity enhancement is barrier-equivalent (~26 kcal/mol lower).
    - **Octahedral trap escape** for recoil-implanted ³⁹Ar (E2 proxy: 64).
@@ -58,21 +60,29 @@ Validation gate first, then the campaign:
 
 ## Progress
 
+- 2026-09-02 — `(hermes-custom-build-001; profile=workstation)` — recovered the
+  atomistic input prerequisite on `agents/E3a-atomistic-input-contract`.
+  `docs/program/results/E3a-atomistic-input-contract.md` and
+  `scripts/e3a_input_contract.py` now specify exact transformations, typed
+  reconstructed charge compensation, source limits, validation gates, and
+  generated two-end LAMMPS run-0 fixtures for dehydroxylate, extended-zone,
+  geometric vacant-M1 trap/escape, and Xe models. Do not start those NEBs until
+  the input-contract PR merges; the octahedral route must additionally clear
+  its typed index-zero minimum gate.
+
 - 2026-09-02 22:17 PDT (hermes-custom-build-001; profile=workstation) —
-  DEVIATION: Replication gate attempted against the recovered Nteme 2022 supplement. An
-  eight-image ClayFF/LAMMPS CI-NEB near-match put exact divacancy route 1 at
-  68.956 vs 67.644 kcal/mol (+1.312; +1.94%), inside a predeclared
-  ±5 kcal/mol numerical tolerance, but the scientific gate remains CLOSED:
-  the source requires remote Al-for-Si charge-compensation substitutions and
-  does not identify their sites. The run therefore has a different net -3 e
-  Hamiltonian. The bounded 13,000-step run reached max atom force
-  5.08e-5 but whole-replica norm 0.0411 vs requested 0.01, so tighter
-  convergence remains explicitly `incomplete-convergence`. Campaign numbers
-  No campaign numbers were fabricated: the sources contain no atomistic dehydroxylate,
-  extended-zone, octahedral-trap, or Xe endpoints and omit route-specific
-  charge-compensation sites. BLOCKED on mission-control TASK-276 to deliver
-  that source-backed atomic input contract. Harness, exact 1,080-row source
-  catalogue, hashes, commands, and run receipt are in
+  DEVIATION: Replication gate attempted against the recovered Nteme 2022
+  supplement. An eight-image ClayFF/LAMMPS CI-NEB near-match put exact
+  divacancy route 1 at 68.956 vs 67.644 kcal/mol (+1.312; +1.94%), inside a
+  predeclared ±5 kcal/mol numerical tolerance, but the scientific gate remained
+  CLOSED: the source requires remote charge-compensation substitutions and does
+  not identify their sites. The run therefore used a different net -3 e
+  Hamiltonian. The bounded 13,000-step run reached max atom force 5.08e-5 but
+  whole-replica norm 0.0411 vs requested 0.01, so tighter convergence remained
+  `incomplete-convergence`. No campaign numbers were fabricated: the sources
+  contain no atomistic dehydroxylate, extended-zone, octahedral-trap, or Xe
+  endpoints and omit route-specific charge-compensation sites. The harness,
+  exact 1,080-row catalogue, hashes, commands, and run receipt are in
   `docs/program/results/E3a-classical-neb-barriers.md`.
 
 - 2026-08-29 — Fable — re-scoped machine: any per Victor's fleet-routing
