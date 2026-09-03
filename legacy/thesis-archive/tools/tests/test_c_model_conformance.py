@@ -98,6 +98,28 @@ class HistoricalContractTests(unittest.TestCase):
         gate = MODULE.run_sabotage_gate()
         self.assertTrue(gate["passed"])
         self.assertEqual(gate["observed_classification"], "numeric_divergence")
+        self.assertFalse(gate["conformance_gate_passed"])
+
+    def test_drift_candidates_never_pass_the_conformance_gate(self) -> None:
+        runs = [
+            {
+                "fixture": fixture,
+                "classification": "compiler_prng_drift_candidate",
+                "returncode": 0,
+                "timed_out": False,
+            }
+            for fixture in MODULE.GOLDEN_RUNS
+        ]
+        passed = MODULE.conformance_gate_passes(
+            runs=runs,
+            diffusion={"status": "pinned_disabled"},
+            duplicate={"all_byte_equal": True},
+            sabotage={"passed": True},
+            source_matches=True,
+            fixtures_match=True,
+            setup_error=None,
+        )
+        self.assertFalse(passed)
 
 
 if __name__ == "__main__":

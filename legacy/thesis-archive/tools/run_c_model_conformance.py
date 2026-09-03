@@ -202,6 +202,30 @@ def audit_diffusion_disabled(source: Path) -> Dict[str, Any]:
     }
 
 
+def conformance_gate_passes(
+    runs: Sequence[Dict[str, Any]],
+    diffusion: Dict[str, Any],
+    duplicate: Dict[str, Any],
+    sabotage: Dict[str, Any],
+    source_matches: bool,
+    fixtures_match: bool,
+    setup_error: Optional[str],
+) -> bool:
+    """Canonical success is exact parity; drift candidates remain non-passing."""
+    return (
+        setup_error is None
+        and len(runs) == len(GOLDEN_RUNS)
+        and [run.get("fixture") for run in runs] == list(GOLDEN_RUNS)
+        and all(run.get("returncode") == 0 and not run.get("timed_out") for run in runs)
+        and all(run.get("classification") == "byte_parity" for run in runs)
+        and diffusion.get("status") == "pinned_disabled"
+        and bool(duplicate.get("all_byte_equal"))
+        and bool(sabotage.get("passed"))
+        and source_matches
+        and fixtures_match
+    )
+
+
 def run_sabotage_gate() -> Dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="a8a-sabotage-") as raw:
         root = Path(raw)
@@ -218,11 +242,30 @@ def run_sabotage_gate() -> Dict[str, Any]:
         and comparison["first_mismatch_row"] == 12
         and not comparison["byte_equal"]
     )
+    synthetic_runs = [
+        {
+            "fixture": fixture,
+            "classification": "compiler_prng_drift_candidate",
+            "returncode": 0,
+            "timed_out": False,
+        }
+        for fixture in GOLDEN_RUNS
+    ]
+    synthetic_gate = conformance_gate_passes(
+        runs=synthetic_runs,
+        diffusion={"status": "pinned_disabled"},
+        duplicate={"all_byte_equal": True},
+        sabotage={"passed": passed},
+        source_matches=True,
+        fixtures_match=True,
+        setup_error=None,
+    )
     return {
         "passed": passed,
         "perturbed_row": 12,
         "observed_classification": comparison["classification"],
         "first_mismatch_row": comparison["first_mismatch_row"],
+        "conformance_gate_passed": synthetic_gate,
     }
 
 
@@ -432,7 +475,8 @@ def render_markdown(report: Dict[str, Any]) -> str:
         "`compiler_prng_drift_candidate` is explicitly non-canonical evidence: content",
         "manifests match, the compiler/architecture differs, every schema and row count",
         "matches, and at least ten initial trajectory rows are exact. It remains a",
-        "candidate rather than a normalized fact. Anything else is a",
+        "candidate rather than a normalized fact and never passes the canonical gate.",
+        "Anything else is a",
         "`behavioral_mismatch` and fails the gate.", "",
         "## Independent controls", "",
         "- Historical identical-input Hotrox/Jasper outputs byte-equal: `{}`.".format(
@@ -466,21 +510,17 @@ def main() -> int:
     args = parse_args()
     if args.jobs < 1 or args.jobs > 4:
         raise SystemExit("--jobs must be between 1 and 4")
-    source_info = source_manifest(args.source)
-    fixture_info = fixture_manifest(args.fixtures)
     if args.print_manifests:
-        print(json.dumps({"source_manifest_sha256": source_info["sha256"], "fixture_inputs_manifest_sha256": fixture_info["sha256"]}, sort_keys=True))
+        source_info = source_manifest(args.source)
+        fixture_info = fixture_manifest(args.fixtures)
+        print(json.dumps({
+            "source_manifest_sha256": source_info["sha256"],
+            "fixture_inputs_manifest_sha256": fixture_info["sha256"],
+        }, sort_keys=True))
         return 0
     if not args.report:
         raise SystemExit("--report is required unless --print-manifests is used")
 
-    lock_path = args.toolchain_lock or (args.source.parent / "conformance-toolchain.json")
-    lock = json.loads(lock_path.read_text(encoding="utf-8"))
-    source_matches = source_info["sha256"] == lock.get("source_manifest_sha256")
-    fixtures_match = fixture_info["sha256"] == lock.get("fixture_inputs_manifest_sha256")
-    diffusion = audit_diffusion_disabled(args.source)
-    duplicate = verify_historical_duplicate(args.fixtures)
-    sabotage = run_sabotage_gate()
     runtime = {
         "platform": platform.platform(),
         "architecture": platform.machine(),
@@ -490,27 +530,56 @@ def main() -> int:
         "schema_version": 2,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "git_commit": _git_commit(),
-        "source_manifest": source_info,
-        "fixture_input_manifest": fixture_info,
-        "content_lock": {"source_matches": source_matches, "fixture_inputs_match": fixtures_match},
-        "toolchain_lock": lock,
+        "source_manifest": {"sha256": None, "files": []},
+        "fixture_input_manifest": {"sha256": None, "files": []},
+        "content_lock": {"source_matches": False, "fixture_inputs_match": False},
+        "toolchain_lock": {},
         "runtime": runtime,
-        "diffusion_audit": diffusion,
-        "historical_cross_host_duplicate": duplicate,
-        "sabotage_test": sabotage,
+        "diffusion_audit": {"status": "behavioral_mismatch", "reason": "not run"},
+        "historical_cross_host_duplicate": {"all_byte_equal": False, "reason": "not run"},
+        "sabotage_test": {"passed": False, "reason": "not run"},
         "runs": [],
     }
-
     setup_error: Optional[str] = None
+    source_matches = False
+    fixtures_match = False
     try:
+        lock_path = args.toolchain_lock or (args.source.parent / "conformance-toolchain.json")
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        report["toolchain_lock"] = lock
+        source_info = source_manifest(args.source)
+        fixture_info = fixture_manifest(args.fixtures)
+        report["source_manifest"] = source_info
+        report["fixture_input_manifest"] = fixture_info
+        source_matches = source_info["sha256"] == lock.get("source_manifest_sha256")
+        fixtures_match = fixture_info["sha256"] == lock.get("fixture_inputs_manifest_sha256")
+        report["content_lock"] = {
+            "source_matches": source_matches,
+            "fixture_inputs_match": fixtures_match,
+        }
+        diffusion = audit_diffusion_disabled(args.source)
+        duplicate = verify_historical_duplicate(args.fixtures)
+        sabotage = run_sabotage_gate()
+        report["diffusion_audit"] = diffusion
+        report["historical_cross_host_duplicate"] = duplicate
+        report["sabotage_test"] = sabotage
         if not source_matches or not fixtures_match:
             raise RuntimeError("source or fixture-input content manifest does not match toolchain lock")
+        if diffusion.get("status") != "pinned_disabled":
+            raise RuntimeError("historical diffusion-disable audit failed")
+        if not duplicate.get("all_byte_equal"):
+            raise RuntimeError("historical cross-host duplicate control failed")
+        if not sabotage.get("passed") or sabotage.get("conformance_gate_passed"):
+            raise RuntimeError("end-to-end sabotage gate failed")
+
         compiler = compiler_provenance(args.compiler, args.build_timeout_seconds)
         compiler_matches = compiler["identity"] == lock.get("compiler_identity")
         architecture_matches = runtime["architecture"] == lock.get("canonical_architecture")
         report["compiler"] = {
-            "actual": compiler["identity"], "target": compiler["target"],
-            "canonical": lock.get("compiler_identity"), "lock_matched": compiler_matches,
+            "actual": compiler["identity"],
+            "target": compiler["target"],
+            "canonical": lock.get("compiler_identity"),
+            "lock_matched": compiler_matches,
             "architecture_lock_matched": architecture_matches,
             "drift_explicitly_allowed": args.allow_compiler_drift,
         }
@@ -519,7 +588,9 @@ def main() -> int:
         drift_candidate_allowed = args.allow_compiler_drift and (not compiler_matches or not architecture_matches)
         with tempfile.TemporaryDirectory(prefix="a8a-build-") as build_raw:
             build_dir = Path(build_raw)
-            report["build"] = build_model(args.source, args.compiler, build_dir, args.build_timeout_seconds)
+            report["build"] = build_model(
+                args.source, args.compiler, build_dir, args.build_timeout_seconds
+            )
             base_root = args.run_root or Path(tempfile.mkdtemp(prefix="a8a-runs-"))
             base_root.mkdir(parents=True, exist_ok=True)
             execution_root = base_root / ("execution-" + uuid.uuid4().hex)
@@ -529,8 +600,13 @@ def main() -> int:
             with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as executor:
                 for fixture_id in GOLDEN_RUNS:
                     future = executor.submit(
-                        _run_one, fixture_id, args.fixtures, build_dir / "mckaol",
-                        execution_root, args.timeout_seconds, drift_candidate_allowed,
+                        _run_one,
+                        fixture_id,
+                        args.fixtures,
+                        build_dir / "mckaol",
+                        execution_root,
+                        args.timeout_seconds,
+                        drift_candidate_allowed,
                     )
                     future_to_fixture[future] = fixture_id
                 run_map: Dict[str, Dict[str, Any]] = {}
@@ -545,27 +621,29 @@ def main() -> int:
     except Exception as exc:
         setup_error = "{}: {}".format(type(exc).__name__, exc)
         report["setup_error"] = setup_error
-        if not report["runs"]:
-            report["runs"] = [_failed_run(fixture, setup_error) for fixture in GOLDEN_RUNS]
 
+    if not report["runs"]:
+        failure = setup_error or "run stage produced no outcomes"
+        report["runs"] = [_failed_run(fixture, failure) for fixture in GOLDEN_RUNS]
     classifications = [run["classification"] for run in report["runs"]]
-    gate_passed = (
-        setup_error is None
-        and len(report["runs"]) == len(GOLDEN_RUNS)
-        and [run["fixture"] for run in report["runs"]] == list(GOLDEN_RUNS)
-        and all(run.get("returncode") == 0 and not run.get("timed_out") for run in report["runs"])
-        and all(value != "behavioral_mismatch" for value in classifications)
-        and diffusion["status"] == "pinned_disabled"
-        and duplicate["all_byte_equal"]
-        and sabotage["passed"]
-        and source_matches and fixtures_match
+    gate_passed = conformance_gate_passes(
+        runs=report["runs"],
+        diffusion=report["diffusion_audit"],
+        duplicate=report["historical_cross_host_duplicate"],
+        sabotage=report["sabotage_test"],
+        source_matches=source_matches,
+        fixtures_match=fixtures_match,
+        setup_error=setup_error,
     )
     report["summary"] = {
         "fixture_count": len(report["runs"]),
         "byte_parity": classifications.count("byte_parity"),
         "compiler_prng_drift_candidate": classifications.count("compiler_prng_drift_candidate"),
         "behavioral_mismatch": classifications.count("behavioral_mismatch"),
-        "all_completed": all(run.get("returncode") == 0 and not run.get("timed_out") for run in report["runs"]),
+        "all_completed": all(
+            run.get("returncode") == 0 and not run.get("timed_out")
+            for run in report["runs"]
+        ),
         "gate_passed": gate_passed,
     }
     args.report.parent.mkdir(parents=True, exist_ok=True)

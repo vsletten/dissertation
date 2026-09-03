@@ -67,6 +67,8 @@ mismatch row, and maximum numeric delta.
   output has the historical shape and row count, and at least ten initial
   `results.dat` rows are exact before the stochastic trajectory diverges. The
   mismatch stays visible and the label remains a candidate, not a fact.
+  Drift candidates never pass the canonical conformance gate; only five exact
+  `byte_parity` outcomes do.
 - `behavioral_mismatch`: nonzero/timeout, missing or malformed output, changed row
   count, or divergence beginning at the first trajectory row.
 
