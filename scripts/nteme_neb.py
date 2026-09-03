@@ -543,16 +543,24 @@ def command_summarize(args: argparse.Namespace) -> None:
         raise ValueError(f"expected 25 NEB columns, got {len(row)}")
     published = float(manifest["route"]["barrier_kcal_mol"])
     computed = row[6]
+    signed_error = computed - published
+    final_step = int(row[0])
+    recent_barriers = [
+        progress[6] for progress in numeric_rows if int(progress[0]) >= final_step - 500
+    ]
     result = {
         "route": manifest["route"],
-        "final_step": int(row[0]),
+        "final_step": final_step,
         "max_replica_force_kcal_mol_angstrom": row[1],
         "max_atom_force_kcal_mol_angstrom": row[2],
         "computed_forward_barrier_kcal_mol": computed,
         "computed_reverse_barrier_kcal_mol": row[7],
         "published_route_barrier_kcal_mol": published,
-        "absolute_error_kcal_mol": computed - published,
-        "absolute_percent_error": 100.0 * (computed - published) / published,
+        "signed_error_kcal_mol": signed_error,
+        "absolute_error_kcal_mol": abs(signed_error),
+        "signed_percent_error": 100.0 * signed_error / published,
+        "barrier_span_last_500_steps_kcal_mol": max(recent_barriers)
+        - min(recent_barriers),
         "converged_to_requested_ftol": row[1]
         <= float(manifest["ftol_kcal_mol_angstrom"]),
         "screen_sha256": sha256(screen_path),

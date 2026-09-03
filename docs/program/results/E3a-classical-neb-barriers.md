@@ -33,7 +33,7 @@ proxies. The observed +1.312 kcal/mol difference is well inside both.
 The run reached a maximum per-atom force of
 `5.08e-5 kcal mol^-1 Å^-1`; the LAMMPS whole-replica norm was
 `0.0411 kcal mol^-1 Å^-1`, above the requested `0.01` norm after the bounded
-13,000-step run. The barrier varied by only 0.005 kcal/mol over the final 500
+13,000-step run. The barrier varied by only 0.0062 kcal/mol over the final 500
 steps. It is therefore adequate for the ±5 kcal/mol replication gate but is
 honestly labelled `incomplete-convergence` for any tighter numerical claim.
 
