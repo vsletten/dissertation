@@ -59,7 +59,7 @@ Validation gate first, then the campaign:
 ## Progress
 
 - 2026-09-02 22:17 PDT (hermes-custom-build-001; profile=workstation) —
-  Replication gate attempted against the recovered Nteme 2022 supplement. An
+  DEVIATION: Replication gate attempted against the recovered Nteme 2022 supplement. An
   eight-image ClayFF/LAMMPS CI-NEB near-match put exact divacancy route 1 at
   68.956 vs 67.644 kcal/mol (+1.312; +1.94%), inside a predeclared
   ±5 kcal/mol numerical tolerance, but the scientific gate remains CLOSED:
