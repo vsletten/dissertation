@@ -22,8 +22,9 @@ READ of size 4
 allocated by readRxns /archive/c-model/source/rxnlist.c:80
 ```
 
-`rxnlist.c:91` allocates every diffusion rate array using the stale final
-`nrts`, while lines 92–93 copy using that reaction's source rate count.
+`rxnlist.c:91–93` uses the stale final desorption `nrts` value for both the
+diffusion allocation and copy loop. In these fixtures that value is five, so the
+first two diffusion copies read a fifth float from four-float source arrays.
 
 After adding suffix-only allocation slack externally, AddressSanitizer exposed a
 second independent pre-buffer read:
