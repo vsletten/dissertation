@@ -18,7 +18,8 @@ GPU-accelerated quantum chemistry pipeline that feeds it.
 
 `kmc-rs/` and `graph-viz/` were imported from their standalone repos as
 subtree merges on 2026-07-13 — their full commit histories are in this
-repo's log.
+repo's log. The physical interpretation shared by the historical model and its
+successors is summarized in [`docs/kmc-model-domain.md`](docs/kmc-model-domain.md).
 
 ## Quick start
 
