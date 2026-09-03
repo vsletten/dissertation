@@ -1,0 +1,3 @@
+# Preserve historical bytes; do not normalize archival fixtures.
+c-model/** -whitespace
+golden-runs/** -whitespace

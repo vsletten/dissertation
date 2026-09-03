@@ -1,13 +1,13 @@
 # A8-thesis-archive-intake — catalog and curate the 1999 dissertation archive
 
-- status: ready
+- status: done
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (the archive lives only at
   /home/vsletten/Documents/personal/science/thesis — 538 MB, 1,426
   files, recovered from Victor's NAS 2026-08-20; READ-ONLY source)
 - depends: —
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## What the archive is
 Victor's complete PhD archive: *"Playing Dice with the Universe: Monte
@@ -122,4 +122,16 @@ repo:
 - Follow-up cards filed.
 
 ## Progress
+- 2026-09-02 — cataloged and independently rehashed all 1,426 files; curated both C source snapshots, 30 RCS archives, prototype inputs, and five complete 1999 KMC runs spanning hosts, temperature, and chemical potential. (hermes-custom-build-001; profile=workstation)
+- 2026-09-02 — parsed all 83 Gaussian result logs into exhaustive source coverage plus a fixed-schema 89-row ledger. Forty-five Chapter 4 thermochemical reactions reproduce the thesis tables; no defensible transition-state calculation exists, so barriers remain explicitly unmatched. (hermes-custom-build-001; profile=workstation)
+- 2026-09-02 — rebuilt the thesis cleanly through LaTeX/BibTeX/DVI/PDF, retained the original 134-page PDF beside the 133-page clean rebuild, and filed A8a/A8b/A8c/A8d follow-ups. Independent acceptance verifier passed seven evidence groups. (hermes-custom-build-001; profile=workstation)
 - 2026-08-20 — card created (fable), night the archive came off the NAS.
+
+## Result
+
+- `legacy/thesis-archive/CATALOG.md` documents provenance, the complete archive map, curation choices, five golden runs, DFT semantics, thesis build, toolchain, and exclusions.
+- `ARCHIVE-INVENTORY.csv` hashes all 1,426 files; `MC-RUN-INVENTORY.csv` catalogs all 88 KMC runs. Reproducible generators and independent verifier are committed under `tools/`.
+- `DFT-SOURCE-LOGS.csv` covers all 83 Gaussian result logs exactly once. `DFT-LEDGER.csv` has the required 19-column schema, 44 unmatched source calculations, and 45 mapped Chapter 4 reaction energies. No reactant/TS/product triplet exists in the archive; no barrier was fabricated.
+- Pre/post GNU-find metadata manifests are byte-identical at SHA-256 `edf7dea5a690823c9a131d0e28cac5ca68634a0538b3df424dd8c91235198fdb`.
+- Independent closeout receipt: 1,426 files rehashed; DFT coverage/schema/arithmetic/TS-premise checked; 96 model/input and 36 golden-run copies byte-compared; both PDFs parsed and text-probed; seven checks passed.
+- Follow-ups filed: A8a KMC conformance, A8b modern TS/barrier bridge, A8c Table 4.10(c) erratum, and A8d ligand-promotion scoping.

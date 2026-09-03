@@ -4,6 +4,15 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-02 — (hermes-custom-build-001; profile=workstation) — A8 thesis
+  archive intake DONE: all 1,426 source files independently inventoried/rehashed;
+  88 KMC runs cataloged; both original C snapshots, 30 RCS archives, and five
+  golden runs curated; all 83 Gaussian result logs covered by a fixed-schema
+  ledger with 45 Chapter 4 reaction energies and an honest zero-TS/barrier
+  verdict; archived and clean-built thesis PDFs retained. Follow-ups A8a–A8d
+  own KMC parity, modern barriers, the Table 4.10(c) discrepancy, and ligand
+  scoping. Evidence and reproduction commands: `legacy/thesis-archive/CATALOG.md`.
+
 - 2026-09-01 — (hermes-8d9e30fee91548; profile=laptop) — C3 pit
   statistics DONE: 12,032 deterministic passive-film replicas, censor-aware
   Weibull/bootstrap and survival/hazard diagnostics, pit size/event-depth +

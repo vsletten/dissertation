@@ -1,0 +1,38 @@
+head	1.1;
+access;
+symbols;
+locks
+	sletten:1.1; strict;
+comment	@ * @;
+
+
+1.1
+date	98.06.25.03.28.13;	author sletten;	state Exp;
+branches;
+next	;
+
+
+desc
+@working baseline
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@#include <stdio.h>
+#include "common.h"
+#include "myerr.h"
+
+/* die: print msg to stderr then exit */
+void die(char *msg)
+{
+  fprintf(stderr, "mckaol: %s\n", msg);
+  exit(1);
+}
+
+
+
+@
