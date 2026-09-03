@@ -4,6 +4,16 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-03 — (hermes-macbot-zero; profile=laptop) — A8d ligand-promotion
+  scoping DONE with a CONDITIONAL GO: later kaolinite kinetics make adjacent
+  edge-Al occupancy—not the recovered single-Al dimer—the defensible mechanism
+  test. The memo ranks 18 DFT-LEDGER IDs, separates archival thermochemistry
+  from later experimental/computational evidence, defines pH/speciation,
+  hydration, BSSE, surface, IRC, and matched-control gates, and bounds the full
+  14-system slice at 168-280 GPU-hours before retry reserve. No DFT launched;
+  workstation card A8e is filed and blocked on A3. Memo:
+  `docs/scoping/ligand-promoted-aluminosilicate-dissolution.md`.
+
 - 2026-09-03 — (hermes-macbot-zero; profile=laptop) — A8c Table 4.10(c)
   erratum DONE: five ledger-named Gaussian logs independently reproduce
   `+0.295795 Eh = +776.609666 kJ/mol = +185.614165 kcal/mol`; the available

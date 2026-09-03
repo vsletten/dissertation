@@ -36,7 +36,8 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A8a-legacy-kmc-conformance](cards/A8a-legacy-kmc-conformance.md) | A | P2 | any | ready | A8 ✅ |
 | [A8b-legacy-dft-transition-state-gap](cards/A8b-legacy-dft-transition-state-gap.md) | A | P2 | workstation | blocked: A3 | archival ledger → modern barriers |
 | [A8c-thesis-table-4-10c-erratum](cards/A8c-thesis-table-4-10c-erratum.md) | A | P2 | any | done | A8 ✅; 185.6 source-supported, 183.6 transcription error |
-| [A8d-ligand-promotion-track-scoping](cards/A8d-ligand-promotion-track-scoping.md) | A | P2 | any | ready | A8 ✅ |
+| [A8d-ligand-promotion-track-scoping](cards/A8d-ligand-promotion-track-scoping.md) | A | P2 | any | done | A8 ✅; CONDITIONAL GO for bounded dual-site oxalate pilot |
+| [A8e-dual-site-oxalate-pilot](cards/A8e-dual-site-oxalate-pilot.md) | A | P2 | workstation | blocked: A3 | A8d ✅; six-system falsification pilot only |
 | [A1b-acid-mechanisms](cards/A1b-acid-mechanisms.md) | A | P1 | workstation | blocked: A1i | production-tier revisit after A2 |
 | [A1c-acid-microsolvation-conformers](cards/A1c-acid-microsolvation-conformers.md) | A | P1 | workstation | done | 16/16 conclusive Si rejections via A1d |
 | [A1d-acid-3w-bridge-convergence](cards/A1d-acid-3w-bridge-convergence.md) | A | P1 | workstation | done | A1c infrastructure + archived receipts |
