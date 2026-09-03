@@ -32,7 +32,11 @@ on main). Priority P0 > P1 > P2 within READY.
 | [QI3-fenwick-total-cancellation](cards/QI3-fenwick-total-cancellation.md) | B | P1 | any | done | — |
 | [E1-muscovite-deck](cards/E1-muscovite-deck.md) | E | P1 | any | done | — (phase 1 isothermal) |
 | [E2-muscovite-full-mechanism](cards/E2-muscovite-full-mechanism.md) | E | P1 | any | done | B5 ✅ |
-| [A8-thesis-archive-intake](cards/A8-thesis-archive-intake.md) | A | P1 | workstation | ready | — |
+| [A8-thesis-archive-intake](cards/A8-thesis-archive-intake.md) | A | P1 | workstation | done | — |
+| [A8a-legacy-kmc-conformance](cards/A8a-legacy-kmc-conformance.md) | A | P2 | any | ready | A8 ✅ |
+| [A8b-legacy-dft-transition-state-gap](cards/A8b-legacy-dft-transition-state-gap.md) | A | P2 | workstation | blocked: A3 | archival ledger → modern barriers |
+| [A8c-thesis-table-4-10c-erratum](cards/A8c-thesis-table-4-10c-erratum.md) | A | P2 | any | ready | A8 ✅ |
+| [A8d-ligand-promotion-track-scoping](cards/A8d-ligand-promotion-track-scoping.md) | A | P2 | any | ready | A8 ✅ |
 | [A1b-acid-mechanisms](cards/A1b-acid-mechanisms.md) | A | P1 | workstation | blocked: A1i | production-tier revisit after A2 |
 | [A1c-acid-microsolvation-conformers](cards/A1c-acid-microsolvation-conformers.md) | A | P1 | workstation | done | 16/16 conclusive Si rejections via A1d |
 | [A1d-acid-3w-bridge-convergence](cards/A1d-acid-3w-bridge-convergence.md) | A | P1 | workstation | done | A1c infrastructure + archived receipts |

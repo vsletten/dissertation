@@ -1,0 +1,193 @@
+head	1.3;
+access;
+symbols;
+locks
+	sletten:1.3; strict;
+comment	@ * @;
+
+
+1.3
+date	98.08.06.16.28.05;	author sletten;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	98.08.06.00.56.38;	author sletten;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	98.06.25.03.28.13;	author sletten;	state Exp;
+branches;
+next	;
+
+
+desc
+@working baseline
+@
+
+
+1.3
+log
+@adaptive solid size determination based on saturation state
+@
+text
+@#include <stdio.h>
+#include <stdlib.h>
+#include "common.h"
+#include "futil.h"
+#include "rxnlist.h"
+#include "math.h"
+
+static float dmsi, dmal;
+
+void free_rxnList(reactionList rl)
+{
+  int i;
+
+  for (i = 0; i < NRXN; i++)
+    free(rl[i].rate);
+  free(rl);
+}
+
+
+
+/* readRxns: read in rates, dE's for forward rxns
+ *           calculate rates for reverse
+ *           complete reactionList */
+reactionList readRxns(void)
+{
+  FILE *f;
+  reactionList l;
+  int rct, prd, i, j, nrts;
+  float kp, de, t, a, rt, kt;
+
+
+  f = openFile("data.rxn","r");
+  fscanf(f, "%f", &t); eatComment(f, '#');
+  fscanf(f, "%f", &dmsi); eatComment(f, '#');
+  fscanf(f, "%f", &dmal); eatComment(f, '#');
+  l = (reactionList) malloc (sizeof(*l) * NRXN);
+  rt = R * t;
+  kt = Kb * t;
+
+  /* hydrolysis reactions 
+   * de is in kcal/mol/K */
+  for (i = 0; i < NHYD; i += 2) {
+    fscanf(f, " %d %d", &rct, &prd); eatComment(f, '#');
+    l[i].reactant = rct;
+    l[i+1].reactant = prd;
+    fscanf(f, "%d", &nrts); eatComment(f, '#');
+    l[i].nrates = l[i+1].nrates = nrts;
+    l[i].rate = (float *) malloc (sizeof(float) * nrts);
+    l[i+1].rate = (float *) malloc (sizeof(float) * nrts);
+    for (j = 0; j < nrts; j++) {
+      fscanf(f, " %f %f", &kp, &de);
+      l[i].rate[j] = kp;
+      l[i+1].rate[j] = kp * exp(de / rt);
+    }
+  }
+
+  /* adsorption : a is \nu * exp(\mu_solid / RT) 
+   * dm's are in kcal/mol/K                      */
+  eatComment(f, '#');
+  for (i = NHYD; i < NADS; i++) {
+    fscanf(f, " %d %d", &rct, &prd); eatComment(f, '#');
+    fscanf(f, " %f %f", &a, &de); eatComment(f, '#');
+    l[i].reactant = rct;
+    l[i].info = prd;
+    l[i].nrates = 1;
+    l[i].rate = (float *) malloc (sizeof(float));
+    if (i < 18)  /* si adsorption or al adsorption */
+      l[i].rate[0] = a * exp(de / rt) * exp(dmsi / rt);
+    else
+      l[i].rate[0] = a * exp(de / rt) * exp(dmal / rt);
+  }
+
+  /* desorption */
+  eatComment(f, '#');
+  for (i = NADS; i < NDES; i++) {
+    fscanf(f, " %d", &rct); eatComment(f, '#');
+    l[i].reactant = rct;
+    fscanf(f, " %d", &nrts);
+    l[i].nrates = nrts;
+    l[i].rate = (float *) malloc (sizeof(float) * nrts);
+    for (j = 0; j < nrts; j++) {
+      fscanf(f," %f %f", &a, &de);
+      l[i].rate[j] = a * exp(- de / rt);
+    }
+  }
+  
+  /* diffusion */
+  for (i = NDES; i < NRXN; i++) {
+    l[i].reactant = l[i-4].reactant;
+    l[i].nrates = l[i-4].nrates;
+    l[i].rate = (float *) malloc (sizeof(float) * nrts);
+    for (j = 0; j < nrts; j++)
+      l[i].rate[j] = l[i-4].rate[j];
+  }
+  
+
+  fclose(f);
+  return l;
+}
+
+
+
+void getChem(float *si, float *al)
+{
+  *si = dmsi;
+  *al = dmal;
+}
+@
+
+
+1.2
+log
+@..
+@
+text
+@d8 1
+d29 1
+a29 1
+  float kp, de, t, dmsi, dmal, a, rt, kt;
+d103 5
+a107 1
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d28 1
+a28 1
+  float kp, de, t, dmsi, dmal, a;
+d36 2
+d39 2
+a40 1
+  /* hydrolysis reactions */
+d52 1
+a52 1
+      l[i+1].rate[j] = kp * exp(de / (Kb * t));
+d56 2
+a57 1
+  /* adsorption */
+d61 1
+a61 1
+    fscanf(f, " %f", &a); eatComment(f, '#');
+d66 2
+a67 2
+    if (i < 18)
+      *(l[i].rate) = a * exp(dmsi);
+d69 1
+a69 1
+      *(l[i].rate) = a * exp(dmal);
+d80 4
+a83 2
+    for (j = 0; j < nrts; j++)
+      fscanf(f," %f", &(l[i].rate[j]));
+d95 1
+@

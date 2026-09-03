@@ -1,0 +1,8 @@
+% Compatibility shim for the obsolete 1990s doublespace package.
+% The thesis only uses \setstretch and \doublespace.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{doublespace}[2026/09/02 compatibility shim]
+\RequirePackage{setspace}
+\providecommand{\doublespace}{\doublespacing}
+\providecommand{\singlespace}{\singlespacing}
+\endinput
