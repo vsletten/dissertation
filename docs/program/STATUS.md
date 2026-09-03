@@ -16,6 +16,16 @@ appended by the PR that did it: `date — actor — what + pointer`.
   `legacy/thesis-archive/c-model/PORTABILITY-LIMITATIONS.md`, with exact outcomes
   in `conformance-report.{json,md}`.
 
+- 2026-09-02 — (hermes-custom-build-001; profile=workstation) — E3a atomistic
+  input contract implemented: source-constrained, hash-pinned fixture generation
+  now defines the local dehydroxylate, extended-defect sensitivity family,
+  geometric vacant-M1 seed for the recoil-derived reservoir, Xe/ClayFF screen,
+  reconstructed neutral charge compensation, and two-end LAMMPS run-0
+  validation. The octahedral candidate remains honestly typed
+  `incomplete-no-minimum`; E3a may run it only after the prescribed minimum
+  gate. Results:
+  `docs/program/results/E3a-atomistic-input-contract.md`.
+
 - 2026-09-02 — (hermes-custom-build-001; profile=workstation) — A8 thesis
   archive intake DONE: all 1,426 source files independently inventoried/rehashed;
   88 KMC runs cataloged; both original C snapshots, 30 RCS archives, and five

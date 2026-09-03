@@ -5,6 +5,7 @@
 - priority: P1
 - machine: any (classical-potential NEB is CPU work; large-cell sweeps or DFT escalation go to the workstation)
 - depends: —
+- input-contract: `docs/program/results/E3a-atomistic-input-contract.md`
 - claimed-by:
 
 ## Objective
@@ -22,8 +23,9 @@ Validation gate first, then the campaign:
    migration barrier (~66 kcal/mol, Nteme 2022) in the pristine gallery
    before any new number is trusted. This is the go/no-go for the setup.
 2. **The missing barriers** (~6–10 types × 2 species, provenance-stamped):
-   - Ar hop in the **dehydroxylate lattice** (collapsed interlayer) — the
-     key missing number; 1998 had only the Robbins 1972 proxy.
+   - Ar hop in the **local dehydroxylate lattice** (no collapsed-interlayer
+     assumption; use the contract's post-reaction topology and cell relaxation
+     gate) — the key missing number; 1998 had only the Robbins 1972 proxy.
    - Ar hop in **extended-defect zones** — test whether Nteme 2023's 10⁶×
      diffusivity enhancement is barrier-equivalent (~26 kcal/mol lower).
    - **Octahedral trap escape** for recoil-implanted ³⁹Ar (E2 proxy: 64).
@@ -57,6 +59,16 @@ Validation gate first, then the campaign:
 - Tests/lint green per repo gates; card/PLAN/STATUS bookkeeping in the PR.
 
 ## Progress
+
+- 2026-09-02 — `(hermes-custom-build-001; profile=workstation)` — recovered the
+  atomistic input prerequisite on `agents/E3a-atomistic-input-contract`.
+  `docs/program/results/E3a-atomistic-input-contract.md` and
+  `scripts/e3a_input_contract.py` now specify exact transformations, typed
+  reconstructed charge compensation, source limits, validation gates, and
+  generated two-end LAMMPS run-0 fixtures for dehydroxylate, extended-zone,
+  geometric vacant-M1 trap/escape, and Xe models. Do not start those NEBs until
+  the input-contract PR merges; the octahedral route must additionally clear
+  its typed index-zero minimum gate.
 
 - 2026-08-29 — Fable — re-scoped machine: any per Victor's fleet-routing
   directive (POLICY v13 §10): the route-1 replication gate and barrier matrix
