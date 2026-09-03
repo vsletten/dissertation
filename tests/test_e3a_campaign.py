@@ -126,10 +126,20 @@ WORKBOOK = Path(
 @pytest.mark.skipif(not WORKBOOK.exists(), reason="hash-pinned workbook unavailable")
 def test_real_workbook_exposes_campaign_models() -> None:
     pytest.importorskip("openpyxl")
-    models, _source = campaign.contract.build_models(WORKBOOK)
+    models, _source = campaign.build_campaign_models(WORKBOOK)
     assert tuple(model.name for model in models) == campaign.MODEL_ORDER
     replication = models[0]
     assert replication.metadata["published_barrier_kcal_mol"] == pytest.approx(
         67.644151
     )
     assert abs(campaign.contract.net_charge(replication.atoms)) <= 1.0e-8
+    zone_dimensions = [
+        (
+            model.metadata["transformation"]["radius_a_angstrom"],
+            model.metadata["transformation"]["radius_b_angstrom"],
+            model.metadata["transformation"]["peak_opening_angstrom"],
+        )
+        for model in models
+        if model.name.startswith("extended-defect-zone")
+    ]
+    assert zone_dimensions == [(6.0, 3.0, 0.5), (8.0, 5.0, 1.0), (10.0, 7.0, 1.5)]

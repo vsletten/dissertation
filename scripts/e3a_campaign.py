@@ -28,9 +28,17 @@ import e3a_input_contract as contract
 MODEL_ORDER = (
     "reconstructed-replication",
     "dehydroxylate-lattice",
+    "extended-defect-zone-small",
     "extended-defect-zone",
+    "extended-defect-zone-large",
     "octahedral-trap-escape",
     "xenon-divacancy",
+)
+
+EXTENDED_ZONE_GRID = (
+    ("extended-defect-zone-small", 6.0, 3.0, 0.5),
+    ("extended-defect-zone", 8.0, 5.0, 1.0),
+    ("extended-defect-zone-large", 10.0, 7.0, 1.5),
 )
 
 
@@ -305,10 +313,32 @@ def trap_gate(
     }
 
 
+def build_campaign_models(
+    workbook: pathlib.Path,
+) -> tuple[list[contract.Model], dict[str, object]]:
+    models, source = contract.build_models(workbook)
+    by_name = {model.name: model for model in models}
+    pristine, cell, barriers = contract.nteme_neb.read_workbook(workbook)
+    route = contract.nteme_neb.select_route(barriers, "divacancy", 1)
+    for name, radius_a, radius_b, opening in EXTENDED_ZONE_GRID:
+        if name == "extended-defect-zone":
+            continue
+        model = contract.extended_zone_model(
+            pristine,
+            cell,
+            route,
+            radius_a=radius_a,
+            radius_b=radius_b,
+            opening=opening,
+        )
+        by_name[name] = contract.replace(model, name=name)
+    return [by_name[name] for name in MODEL_ORDER], source
+
+
 def command_run(args: argparse.Namespace) -> None:
     if args.neb_relax_steps % 100 or args.neb_climb_steps % 100:
         raise ValueError("NEB relax/climb steps must be multiples of thermo every=100")
-    models, source = contract.build_models(args.workbook)
+    models, source = build_campaign_models(args.workbook)
     by_name = {model.name: model for model in models}
     selected = MODEL_ORDER if not args.model else tuple(args.model)
     unknown = sorted(set(selected) - set(by_name))
