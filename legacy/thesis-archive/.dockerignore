@@ -2,6 +2,8 @@
 !c-model/
 !c-model/source/
 !c-model/source/**
+!c-model/compat/
+!c-model/compat/**
 !c-model/conformance-toolchain.json
 !c-model/Dockerfile.conformance
 !golden-runs/

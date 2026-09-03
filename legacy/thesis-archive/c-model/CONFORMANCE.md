@@ -26,8 +26,20 @@ The Dockerfile pins the complete multi-architecture image index by digest and fi
 the selected platform to `linux/amd64`. Its restricted build context excludes the
 worktree's host-only `.git` pointer and unrelated files. The harness additionally
 refuses to run unless compiler identity, architecture, all curated source bytes,
-and all 20 fixture input files match `conformance-toolchain.json`. Use a new reviewed
-lock if any changes; do not pass `--allow-compiler-drift` for the canonical oracle.
+the external allocator-compatibility shim, and all 20 fixture input files match
+`conformance-toolchain.json`. Use a new reviewed lock if any changes; do not pass
+`--allow-compiler-drift` for the canonical oracle.
+
+### Preserved allocator wart
+
+Modern AddressSanitizer found one pre-buffer and one post-buffer initialization read
+that relied on historical allocator slack; the unshimmed canonical container
+therefore terminated all five fixtures with `SIGSEGV`. The content-locked external
+wrapper at `compat/historical_malloc_slack.c` supplies explicit 64-byte prefix and
+suffix slack around `malloc` allocations while leaving archived source bytes
+untouched. This is visible compatibility provenance, not a silent bug fix. Exact
+evidence and the Rust-port semantics boundary are in `PORTABILITY-LIMITATIONS.md`.
+The original compiler failure is frozen in `UNMODIFIED-BUILD-FAILURE.md`.
 
 Outputs:
 
@@ -83,5 +95,5 @@ controls and the diffusion guard are hard success gates.
 python3 -m unittest legacy/thesis-archive/tools/tests/test_c_model_conformance.py -v
 ```
 
-The compatibility history and unmodified failure are frozen in
-`UNMODIFIED-BUILD-FAILURE.md`.
+The compile failure and allocator portability evidence are frozen in
+`UNMODIFIED-BUILD-FAILURE.md` and `PORTABILITY-LIMITATIONS.md`.

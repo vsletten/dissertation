@@ -313,17 +313,41 @@ def compiler_provenance(compiler: str, timeout: int) -> Dict[str, str]:
     }
 
 
-def build_model(source: Path, compiler: str, output_dir: Path, timeout: int) -> Dict[str, Any]:
+def build_model(
+    source: Path,
+    compiler: str,
+    output_dir: Path,
+    timeout: int,
+    compatibility_shim: Path,
+    apply_allocator_shim: bool,
+) -> Dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     executable = output_dir / "mckaol"
     command = [compiler, *COMPATIBILITY_FLAGS, "-o", str(executable)]
     command.extend(str(source / name) for name in SOURCE_NAMES)
+    if apply_allocator_shim:
+        command.extend([
+            str(compatibility_shim),
+            "-Wl,--wrap=malloc",
+            "-Wl,--wrap=free",
+        ])
     command.append("-lm")
     record = _run_process(command, None, timeout)
     record["compatibility_flags"] = list(COMPATIBILITY_FLAGS)
     if record["timed_out"] or record["returncode"] != 0:
         raise RuntimeError("compiler failed: {}".format(json.dumps(record, indent=2)))
     record["executable_sha256"] = sha256_file(executable)
+    record["compatibility_shim"] = {
+        "path": str(compatibility_shim),
+        "sha256": sha256_file(compatibility_shim),
+        "linker_wrappers": ["malloc", "free"],
+        "applied": apply_allocator_shim,
+        "reason": (
+            "GNU/Linux allocator compatibility"
+            if apply_allocator_shim
+            else "non-Linux observational run; GNU ld --wrap is unavailable"
+        ),
+    }
     return record
 
 
@@ -451,6 +475,9 @@ def render_markdown(report: Dict[str, Any]) -> str:
         "- Canonical container: `{}`".format(report["toolchain_lock"].get("container_image")),
         "- Compiler lock matched: `{}`".format(str(compiler.get("lock_matched", False)).lower()),
         "- Compatibility flags: `{}`".format(" ".join(build.get("compatibility_flags", []))),
+        "- Allocator compatibility shim SHA-256: `{}`".format(
+            build.get("compatibility_shim", {}).get("sha256", "unavailable")
+        ),
         "- Diffusion IDs 24–27: `{}`".format(report["diffusion_audit"]["status"]),
         "", "## Fixture outcomes", "",
         "| fixture | outcome | results parity | first divergence | surfAl rows | surfSi rows | seconds |",
@@ -496,6 +523,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--report", type=Path)
     parser.add_argument("--markdown", type=Path)
     parser.add_argument("--toolchain-lock", type=Path)
+    parser.add_argument("--compatibility-shim", type=Path)
     parser.add_argument("--compiler", default=os.environ.get("CC", "gcc"))
     parser.add_argument("--allow-compiler-drift", action="store_true")
     parser.add_argument("--jobs", type=int, default=1)
@@ -532,7 +560,11 @@ def main() -> int:
         "git_commit": _git_commit(),
         "source_manifest": {"sha256": None, "files": []},
         "fixture_input_manifest": {"sha256": None, "files": []},
-        "content_lock": {"source_matches": False, "fixture_inputs_match": False},
+        "content_lock": {
+            "source_matches": False,
+            "fixture_inputs_match": False,
+            "compatibility_shim_matches": False,
+        },
         "toolchain_lock": {},
         "runtime": runtime,
         "diffusion_audit": {"status": "behavioral_mismatch", "reason": "not run"},
@@ -545,6 +577,9 @@ def main() -> int:
     fixtures_match = False
     try:
         lock_path = args.toolchain_lock or (args.source.parent / "conformance-toolchain.json")
+        compatibility_shim = args.compatibility_shim or (
+            args.source.parent / "compat" / "historical_malloc_slack.c"
+        )
         lock = json.loads(lock_path.read_text(encoding="utf-8"))
         report["toolchain_lock"] = lock
         source_info = source_manifest(args.source)
@@ -556,6 +591,10 @@ def main() -> int:
         report["content_lock"] = {
             "source_matches": source_matches,
             "fixture_inputs_match": fixtures_match,
+            "compatibility_shim_matches": (
+                sha256_file(compatibility_shim)
+                == lock.get("compatibility_shim_sha256")
+            ),
         }
         diffusion = audit_diffusion_disabled(args.source)
         duplicate = verify_historical_duplicate(args.fixtures)
@@ -563,8 +602,14 @@ def main() -> int:
         report["diffusion_audit"] = diffusion
         report["historical_cross_host_duplicate"] = duplicate
         report["sabotage_test"] = sabotage
-        if not source_matches or not fixtures_match:
-            raise RuntimeError("source or fixture-input content manifest does not match toolchain lock")
+        if (
+            not source_matches
+            or not fixtures_match
+            or not report["content_lock"]["compatibility_shim_matches"]
+        ):
+            raise RuntimeError(
+                "source, fixture-input, or compatibility-shim content does not match toolchain lock"
+            )
         if diffusion.get("status") != "pinned_disabled":
             raise RuntimeError("historical diffusion-disable audit failed")
         if not duplicate.get("all_byte_equal"):
@@ -589,7 +634,12 @@ def main() -> int:
         with tempfile.TemporaryDirectory(prefix="a8a-build-") as build_raw:
             build_dir = Path(build_raw)
             report["build"] = build_model(
-                args.source, args.compiler, build_dir, args.build_timeout_seconds
+                args.source,
+                args.compiler,
+                build_dir,
+                args.build_timeout_seconds,
+                compatibility_shim,
+                platform.system() == "Linux",
             )
             base_root = args.run_root or Path(tempfile.mkdtemp(prefix="a8a-runs-"))
             base_root.mkdir(parents=True, exist_ok=True)
