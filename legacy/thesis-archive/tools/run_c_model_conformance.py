@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import contextlib
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -23,7 +24,7 @@ import signal
 import subprocess
 import tempfile
 import time
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 import uuid
 
 OUTPUT_COLUMNS = {"results.dat": 15, "surfAl.out": 2, "surfSi.out": 2}
@@ -73,6 +74,16 @@ def source_manifest(source: Path) -> Dict[str, Any]:
 def fixture_manifest(fixtures: Path) -> Dict[str, Any]:
     paths = [fixtures / fixture / name for fixture in GOLDEN_RUNS for name in INPUT_NAMES]
     return manifest(paths, fixtures)
+
+
+@contextlib.contextmanager
+def managed_run_root(explicit: Optional[Path]) -> Iterator[Path]:
+    if explicit is not None:
+        explicit.mkdir(parents=True, exist_ok=True)
+        yield explicit
+        return
+    with tempfile.TemporaryDirectory(prefix="a8a-runs-") as raw:
+        yield Path(raw)
 
 
 def _parse_numeric(path: Path, expected_columns: int) -> Tuple[List[Tuple[float, ...]], Optional[str]]:
@@ -653,33 +664,32 @@ def main() -> int:
                 compatibility_shim,
                 platform.system() == "Linux",
             )
-            base_root = args.run_root or Path(tempfile.mkdtemp(prefix="a8a-runs-"))
-            base_root.mkdir(parents=True, exist_ok=True)
-            execution_root = base_root / ("execution-" + uuid.uuid4().hex)
-            execution_root.mkdir(parents=True, exist_ok=False)
-            report["execution_root"] = str(execution_root)
-            future_to_fixture: Dict[concurrent.futures.Future, str] = {}
-            with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as executor:
-                for fixture_id in GOLDEN_RUNS:
-                    future = executor.submit(
-                        _run_one,
-                        fixture_id,
-                        args.fixtures,
-                        build_dir / "mckaol",
-                        execution_root,
-                        args.timeout_seconds,
-                        drift_candidate_allowed,
-                    )
-                    future_to_fixture[future] = fixture_id
-                run_map: Dict[str, Dict[str, Any]] = {}
-                for future, fixture_id in future_to_fixture.items():
-                    try:
-                        run_map[fixture_id] = future.result()
-                    except Exception as exc:
-                        run_map[fixture_id] = _failed_run(
-                            fixture_id, "future {}: {}".format(type(exc).__name__, exc)
+            with managed_run_root(args.run_root) as base_root:
+                execution_root = base_root / ("execution-" + uuid.uuid4().hex)
+                execution_root.mkdir(parents=True, exist_ok=False)
+                report["execution_root"] = str(execution_root)
+                future_to_fixture: Dict[concurrent.futures.Future, str] = {}
+                with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as executor:
+                    for fixture_id in GOLDEN_RUNS:
+                        future = executor.submit(
+                            _run_one,
+                            fixture_id,
+                            args.fixtures,
+                            build_dir / "mckaol",
+                            execution_root,
+                            args.timeout_seconds,
+                            drift_candidate_allowed,
                         )
-            report["runs"] = [run_map[fixture] for fixture in GOLDEN_RUNS]
+                        future_to_fixture[future] = fixture_id
+                    run_map: Dict[str, Dict[str, Any]] = {}
+                    for future, fixture_id in future_to_fixture.items():
+                        try:
+                            run_map[fixture_id] = future.result()
+                        except Exception as exc:
+                            run_map[fixture_id] = _failed_run(
+                                fixture_id, "future {}: {}".format(type(exc).__name__, exc)
+                            )
+                report["runs"] = [run_map[fixture] for fixture in GOLDEN_RUNS]
     except Exception as exc:
         setup_error = "{}: {}".format(type(exc).__name__, exc)
         report["setup_error"] = setup_error

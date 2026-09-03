@@ -137,5 +137,24 @@ class HistoricalContractTests(unittest.TestCase):
         self.assertFalse(result["all_byte_equal"])
 
 
+class RunRootLifecycleTests(unittest.TestCase):
+    def test_default_run_root_is_removed_when_context_exits(self) -> None:
+        with MODULE.managed_run_root(None) as root:
+            self.assertTrue(root.is_dir())
+            (root / "artifact.bin").write_bytes(b"x")
+            retained = root
+        self.assertFalse(retained.exists())
+
+    def test_explicit_run_root_is_retained_when_context_exits(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            explicit = Path(raw) / "keep"
+            with MODULE.managed_run_root(explicit) as root:
+                self.assertEqual(root, explicit)
+                (root / "artifact.bin").write_bytes(b"x")
+            self.assertTrue(explicit.is_dir())
+            self.assertTrue((explicit / "artifact.bin").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
+
