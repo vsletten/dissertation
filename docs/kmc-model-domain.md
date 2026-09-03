@@ -16,7 +16,9 @@ changes bonded material; reverse channels represent growth.
 
 At each step the model enumerates valid local events, selects one in proportion
 to its rate, updates the affected site neighborhood, and advances time with the
-N-fold-way expression
+N-fold-way expression. The original dissertation C also removes unattached
+clusters after the event (after desorption and diffusion) before that time
+update; the living C++ and kmc-rs event loops do not run that cleanup.
 
 ```text
 dt = -ln(xi) / sum(k_i)
