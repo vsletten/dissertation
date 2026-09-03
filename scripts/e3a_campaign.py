@@ -125,14 +125,14 @@ def write_minimize_input(
         lines.extend(
             (
                 "group           local-frozen subtract all local-mobile",
-                "fix             local-hold local-frozen setforce 0.0 0.0 0.0",
-                f"minimize        1.0e-10 0.05 {max_steps} {max_steps * 10}",
-                "unfix           local-hold",
+                "fix             local_hold local-frozen setforce 0.0 0.0 0.0",
+                f"minimize        0.0 0.05 {max_steps} {max_steps * 10}",
+                "unfix           local_hold",
             )
         )
     lines.extend(
         (
-            f"minimize        1.0e-10 {ftol:.8g} {max_steps} {max_steps * 10}",
+            f"minimize        0.0 {ftol:.8g} {max_steps} {max_steps * 10}",
             f"write_data      {output_prefix}.data",
             f"write_dump      all custom {output_prefix}.dump id type x y z modify sort id",
         )

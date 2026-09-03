@@ -37,8 +37,9 @@ def test_minimize_input_persists_relaxed_state_and_local_freeze(tmp_path: Path) 
     )
     text = path.read_text(encoding="utf-8")
     assert "group           local-mobile id 675 741 743" in text
-    assert "fix             local-hold local-frozen setforce 0.0 0.0 0.0" in text
-    assert "unfix           local-hold" in text
+    assert "fix             local_hold local-frozen setforce 0.0 0.0 0.0" in text
+    assert "unfix           local_hold" in text
+    assert "minimize        0.0 0.01 500 5000" in text
     assert "write_data      relaxed.data" in text
     assert (
         "write_dump      all custom relaxed.dump id type x y z modify sort id" in text
