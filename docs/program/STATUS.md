@@ -4,6 +4,15 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-03 — (hermes-macbot-zero; profile=laptop) — A8c Table 4.10(c)
+  erratum DONE: five ledger-named Gaussian logs independently reproduce
+  `+0.295795 Eh = +776.609666 kJ/mol = +185.614165 kcal/mol`; the available
+  archive chain preserves `185.6114` in `dft/txt/rxns.txt`, changes it to
+  `183.6114` in `dft/tex/tbls.tex`, and rounds that to the thesis's `183.6`.
+  Verdict: high-confidence transcription error, with no archived thesis, PDF,
+  or A8 ledger bytes altered. Evidence:
+  `legacy/thesis-archive/TABLE-4.10C-ERRATUM.md`.
+
 - 2026-09-03 02:42 PDT — (hermes-custom-build-001; profile=workstation) — E3a
   bounded classical-NEB campaign DONE: neutral route-1 replication is 68.414811
   vs 67.644151 kcal/mol (+1.1393%); local-dehydroxylate Ar is 64.095991; three
