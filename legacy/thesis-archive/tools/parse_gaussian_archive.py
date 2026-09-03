@@ -455,10 +455,16 @@ def validate(rows: list[dict[str, str]], coverage: list[dict[str, str]], source:
     # Independent numerical check against the rounded thesis tables.
     for row, reaction in zip(reaction_rows, REACTIONS, strict=True):
         parsed_kcal = float(row["reaction_energy_kj_mol"]) / 4.184
-        # Most rows round-trip to 0.1 kcal/mol. The archived files reproduce
-        # Table 4.10(c) as 185.6 rather than the printed 183.6; retain and flag
-        # that evidence instead of forcing the published number.
-        assert abs(parsed_kcal - reaction.thesis_kcal_mol) <= 2.1, (reaction.reaction_id, parsed_kcal)
+        # Ordinary rows round-trip within 0.1 kcal/mol. Table 4.10(c) is an
+        # explicit archived-versus-printed exception (185.6 vs 183.6), not a
+        # blanket 2.1 kcal/mol window that would also hide mapping errors.
+        if reaction.reaction_id == "ch4-dimer-hydrolysis-c":
+            assert abs(parsed_kcal - 185.6) <= 0.05, (reaction.reaction_id, parsed_kcal)
+        else:
+            assert abs(parsed_kcal - reaction.thesis_kcal_mol) <= 0.10, (
+                reaction.reaction_id,
+                parsed_kcal,
+            )
 
 
 def main() -> int:
