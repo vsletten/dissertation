@@ -4,6 +4,15 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-02 22:17 PDT — (hermes-custom-build-001; profile=workstation) —
+  E3a replication gate PASS / campaign BLOCKED: recovered the exact Nteme
+  2022 1,512-atom ClayFF structure and 1,080 barriers, then independently
+  reproduced divacancy route 1 at 68.956 vs 67.644 kcal/mol (+1.94%). No
+  dehydroxylate/extended-zone/trap/Xe number was invented: those atomic
+  endpoints are absent from the sources and KMC-only scoping. TASK-276 owns
+  the source-backed input contract; evidence and harness are in
+  `docs/program/results/E3a-classical-neb-barriers.md`.
+
 - 2026-09-02 — (hermes-custom-build-001; profile=workstation) — A8 thesis
   archive intake DONE: all 1,426 source files independently inventoried/rehashed;
   88 KMC runs cataloged; both original C snapshots, 30 RCS archives, and five

@@ -1,11 +1,11 @@
 # E3a-classical-neb-barriers — the uncomputed middle, route 1
 
-- status: ready
+- status: blocked
 - track: E (muscovite / the perfect circle)
 - priority: P1
 - machine: any (classical-potential NEB is CPU work; large-cell sweeps or DFT escalation go to the workstation)
-- depends: —
-- claimed-by:
+- depends: TASK-276-e3a-atomistic-input-contract (mission-control)
+- claimed-by: hermes-custom-build-001
 
 ## Objective
 
@@ -57,6 +57,20 @@ Validation gate first, then the campaign:
 - Tests/lint green per repo gates; card/PLAN/STATUS bookkeeping in the PR.
 
 ## Progress
+
+- 2026-09-02 22:17 PDT (hermes-custom-build-001; profile=workstation) —
+  Replication gate executed against the recovered Nteme 2022 supplement. An
+  eight-image ClayFF/LAMMPS CI-NEB run reproduced exact divacancy route 1 at
+  68.956 vs 67.644 kcal/mol (+1.312; +1.94%), inside the predeclared
+  ±5 kcal/mol gate. The bounded 13,000-step run reached max atom force
+  5.08e-5 but whole-replica norm 0.0411 vs requested 0.01, so tighter
+  convergence remains explicitly `incomplete-convergence`. Campaign numbers
+  were not fabricated: the sources contain no atomistic dehydroxylate,
+  extended-zone, octahedral-trap, or Xe endpoints and omit route-specific
+  charge-compensation sites. BLOCKED on mission-control TASK-276 to deliver
+  that source-backed atomic input contract. Harness, exact 1,080-row source
+  catalogue, hashes, commands, and run receipt are in
+  `docs/program/results/E3a-classical-neb-barriers.md`.
 
 - 2026-08-29 — Fable — re-scoped machine: any per Victor's fleet-routing
   directive (POLICY v13 §10): the route-1 replication gate and barrier matrix
