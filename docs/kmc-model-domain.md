@@ -24,10 +24,10 @@ update; the living C++ and kmc-rs event loops do not run that cleanup.
 dt = -ln(xi) / sum(k_i)
 ```
 
-The interlayer Si-O-Al2 site has five hydrolysis pathways. Together with the
-other bridge-site pathways, the dissertation's table defines fourteen elementary
-reactions before directionality and ancillary adsorption/desorption expand the
-runtime reaction list.
+The dissertation's bridge-site table, not the full implemented model, defines
+fourteen elementary reactions. Its 4xx Si-O-Al2 family contains six forward
+hydrolysis mechanisms (R2, R4, R6, R8, R10, and R12), each paired with a reverse
+channel; the implemented reaction map contains sixteen hydrolysis reactions total.
 
 ## Why the hydrolysis and adsorption tables are flat
 
