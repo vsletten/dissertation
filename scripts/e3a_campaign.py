@@ -271,6 +271,9 @@ def _run(argv: Sequence[str], *, cwd: pathlib.Path, log: pathlib.Path) -> None:
         }
     )
     with log.open("w", encoding="utf-8") as handle:
+        # argv sequence, shell=False: trusted lmp/mpirun plus internally
+        # built input-deck tokens. Not a shell string.
+        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
         completed = subprocess.run(
             list(argv),
             cwd=cwd,
@@ -279,6 +282,7 @@ def _run(argv: Sequence[str], *, cwd: pathlib.Path, log: pathlib.Path) -> None:
             stdout=handle,
             stderr=subprocess.STDOUT,
             check=False,
+            shell=False,
         )
     if completed.returncode != 0:
         raise RuntimeError(f"command exited {completed.returncode}: {argv}; see {log}")
