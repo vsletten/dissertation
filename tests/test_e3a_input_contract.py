@@ -23,6 +23,16 @@ def toy_cell() -> object:
     return nteme.Cell(30.0, 30.0, 30.0, 90.0, 90.0, 90.0)
 
 
+def _al2_tetrahedron(base_id: int, x: float, y: float, z: float) -> list[object]:
+    atoms = [nteme.Atom(base_id, "Al2", x, y, z)]
+    for offset, (dx, dy, dz) in enumerate(
+        ((1.6, 0.0, 0.0), (-1.6, 0.0, 0.0), (0.0, 1.6, 0.0), (0.0, 0.0, 1.6)),
+        1,
+    ):
+        atoms.append(nteme.Atom(base_id + offset, "O3", x + dx, y + dy, z + dz))
+    return atoms
+
+
 def test_charge_compensation_is_exact_per_removed_k() -> None:
     cell = toy_cell()
     # One Al2 tetrahedron is -3.1 e in the published partial-charge scheme;
@@ -47,16 +57,60 @@ def test_charge_compensation_is_exact_per_removed_k() -> None:
 
 def test_extended_zone_taper_has_bounded_peak_opening() -> None:
     cell = toy_cell()
-    center = nteme.Atom(0, "X", 15.0, 15.0, 15.0)
-    # Exercise the same cosine-squared taper algebra used by the builder.
-    radial = 0.25
-    weight = math.cos(math.pi * math.sqrt(radial) / 2.0) ** 2
-    assert 0.0 < weight < 1.0
-    assert math.isclose(weight, 0.5, abs_tol=1e-12)
-    sx, sy, sz = contract.fractional(center, cell)
-    assert math.isclose(sx, 0.5, abs_tol=1e-12)
-    assert math.isclose(sy, 0.5, abs_tol=1e-12)
-    assert math.isclose(sz, 0.5, abs_tol=1e-12)
+    # Two remote Al2 tetrahedra neutralize moving-K→Ar plus one K vacancy.
+    atoms: list[object] = []
+    atoms.extend(_al2_tetrahedron(1, 2.0, 2.0, 2.0))
+    atoms.extend(_al2_tetrahedron(10, 2.0, 20.0, 2.0))
+    atoms.extend(
+        (
+            nteme.Atom(100, "K", 15.0, 14.0, 15.0),
+            nteme.Atom(101, "K", 15.0, 16.0, 15.0),
+            # Radial 0 at the route midpoint; must open by the full peak/2.
+            nteme.Atom(200, "Si", 15.0, 15.0, 16.0),
+            # Same site plus one lattice vector — periodic wrap must match.
+            nteme.Atom(201, "Si", 45.0, 15.0, 16.0),
+            # Outside the 8×5 Å ellipse: no displacement.
+            nteme.Atom(202, "Ar", 15.0, 21.0, 16.0),
+            # Midplane of the lenticular opening: dz == 0, no displacement.
+            nteme.Atom(203, "Ar", 15.0, 15.0, 15.0),
+        )
+    )
+    route = nteme.Barrier(
+        "divacancy",
+        "Ar",
+        100,
+        101,
+        None,
+        0.0,
+        None,
+    )
+    model = contract.extended_zone_model(
+        atoms, cell, route, radius_a=8.0, radius_b=5.0, opening=1.0
+    )
+    by_id = {atom.id: atom for atom in model.atoms}
+    assert 101 not in by_id
+    assert by_id[100].element == "Ar"
+    assert math.isclose(by_id[200].x, 15.0, abs_tol=1e-12)
+    assert math.isclose(by_id[200].y, 15.0, abs_tol=1e-12)
+    assert math.isclose(by_id[200].z, 16.5, abs_tol=1e-12)
+    assert math.isclose(by_id[201].x, 45.0, abs_tol=1e-12)
+    assert math.isclose(by_id[201].y, 15.0, abs_tol=1e-12)
+    assert math.isclose(by_id[201].z, 16.5, abs_tol=1e-12)
+    assert math.isclose(by_id[202].z, 16.0, abs_tol=1e-12)
+    assert math.isclose(by_id[203].z, 15.0, abs_tol=1e-12)
+    moved_ids = {
+        atom.id
+        for atom in model.atoms
+        if atom.id in {200, 201, 202, 203}
+        and not math.isclose(
+            atom.z,
+            {200: 16.0, 201: 16.0, 202: 16.0, 203: 15.0}[atom.id],
+            abs_tol=1e-12,
+        )
+    }
+    assert moved_ids == {200, 201}
+    assert model.metadata["transformation"]["moved_atoms"] == 2
+    assert model.metadata["transformation"]["peak_opening_angstrom"] == 1.0
 
 
 def test_xe_parameter_conversion_and_charge() -> None:
