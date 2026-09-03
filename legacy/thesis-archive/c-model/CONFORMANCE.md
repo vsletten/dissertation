@@ -12,18 +12,18 @@ From the repository root, with Docker available:
 mkdir -p /tmp/a8a-conformance
 rm -rf /tmp/a8a-conformance/runs
 
-docker build --platform linux/amd64 \
+docker build --platform linux/arm64 \
   -f legacy/thesis-archive/c-model/Dockerfile.conformance \
   -t dissertation-a8a-conformance \
   legacy/thesis-archive
 
-docker run --rm --platform linux/amd64 \
+docker run --rm --platform linux/arm64 \
   -v /tmp/a8a-conformance:/out \
   dissertation-a8a-conformance
 ```
 
 The Dockerfile pins the complete multi-architecture image index by digest and fixes
-the selected platform to `linux/amd64`. Its restricted build context excludes the
+the selected platform to `linux/arm64`. Its restricted build context excludes the
 worktree's host-only `.git` pointer and unrelated files. The harness additionally
 refuses to run unless compiler identity, architecture, all curated source bytes,
 the external allocator-compatibility shim, and all 20 fixture input files match

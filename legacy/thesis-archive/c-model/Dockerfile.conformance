@@ -1,4 +1,4 @@
-FROM --platform=linux/amd64 python:3.11.15-bookworm@sha256:a8f8fbe1a0edc9e4dddafa64ba73f7e04be7be5ebc23f332362e779e0a2e4e52
+FROM --platform=linux/arm64 python:3.11.15-bookworm@sha256:a8f8fbe1a0edc9e4dddafa64ba73f7e04be7be5ebc23f332362e779e0a2e4e52
 
 WORKDIR /archive
 COPY c-model/source /archive/c-model/source
