@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Build and replay the curated 1999 C KMC model against golden runs.
+"""Replay the curated 1999 C KMC model against five golden runs.
 
-The curated source bytes stay unchanged. Modern-header compatibility is supplied
-only through forced-include compiler flags. The JSON report is a porting oracle:
-it records build provenance, hashes, structural comparisons, divergence points,
-and the historical diffusion-disable audit.
+The curated C bytes remain unchanged. Modern-header compatibility is supplied
+only by forced-include compiler flags. Reports retain every mismatch and include
+content-addressed source, input, toolchain, and runtime provenance.
 """
 
 from __future__ import annotations
@@ -20,10 +19,12 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+import uuid
 
 OUTPUT_COLUMNS = {"results.dat": 15, "surfAl.out": 2, "surfSi.out": 2}
 INPUT_NAMES = ("data.cell", "data.lattice", "data.rxn", "data.sim")
@@ -54,6 +55,26 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def manifest(paths: Sequence[Path], base: Path) -> Dict[str, Any]:
+    rows = []
+    aggregate = hashlib.sha256()
+    for path in sorted(paths, key=lambda item: item.relative_to(base).as_posix()):
+        relative = path.relative_to(base).as_posix()
+        digest = sha256_file(path)
+        rows.append({"path": relative, "bytes": path.stat().st_size, "sha256": digest})
+        aggregate.update(relative.encode("utf-8") + b"\0" + digest.encode("ascii") + b"\0")
+    return {"sha256": aggregate.hexdigest(), "files": rows}
+
+
+def source_manifest(source: Path) -> Dict[str, Any]:
+    return manifest([path for path in source.iterdir() if path.is_file()], source)
+
+
+def fixture_manifest(fixtures: Path) -> Dict[str, Any]:
+    paths = [fixtures / fixture / name for fixture in GOLDEN_RUNS for name in INPUT_NAMES]
+    return manifest(paths, fixtures)
+
+
 def _parse_numeric(path: Path, expected_columns: int) -> Tuple[List[Tuple[float, ...]], Optional[str]]:
     rows: List[Tuple[float, ...]] = []
     try:
@@ -77,7 +98,7 @@ def _parse_numeric(path: Path, expected_columns: int) -> Tuple[List[Tuple[float,
 
 
 def compare_numeric_output(expected: Path, actual: Path, expected_columns: int) -> Dict[str, Any]:
-    """Compare one numeric output without normalizing divergent behavior away."""
+    """Compare one output; never infer the cause of a numeric divergence."""
     if not actual.is_file():
         return {
             "expected_sha256": sha256_file(expected),
@@ -90,7 +111,9 @@ def compare_numeric_output(expected: Path, actual: Path, expected_columns: int) 
 
     expected_rows, expected_error = _parse_numeric(expected, expected_columns)
     actual_rows, actual_error = _parse_numeric(actual, expected_columns)
-    byte_equal = sha256_file(expected) == sha256_file(actual)
+    expected_hash = sha256_file(expected)
+    actual_hash = sha256_file(actual)
+    byte_equal = expected_hash == actual_hash
     structural_match = (
         expected_error is None
         and actual_error is None
@@ -112,14 +135,14 @@ def compare_numeric_output(expected: Path, actual: Path, expected_columns: int) 
 
     if byte_equal and structural_match:
         classification = "byte_parity"
-    elif structural_match and matching_prefix > 0:
-        classification = "compiler_prng_drift"
+    elif structural_match:
+        classification = "numeric_divergence"
     else:
         classification = "behavioral_mismatch"
 
     return {
-        "expected_sha256": sha256_file(expected),
-        "actual_sha256": sha256_file(actual),
+        "expected_sha256": expected_hash,
+        "actual_sha256": actual_hash,
         "byte_equal": byte_equal,
         "structural_match": structural_match,
         "classification": classification,
@@ -134,118 +157,208 @@ def compare_numeric_output(expected: Path, actual: Path, expected_columns: int) 
     }
 
 
+def _c_function_body(text: str, name: str) -> Optional[str]:
+    match = re.search(r"\b{}\s*\([^)]*\)\s*\{{".format(re.escape(name)), text)
+    if not match:
+        return None
+    start = match.end() - 1
+    depth = 0
+    for index in range(start, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start + 1:index]
+    return None
+
+
 def audit_diffusion_disabled(source: Path) -> Dict[str, Any]:
     envrn = (source / "envrn.c").read_text(encoding="latin-1")
+    evtlist_path = source / "evtlist.c"
+    evtlist = evtlist_path.read_text(encoding="latin-1") if evtlist_path.exists() else ""
     rxnlist = (source / "rxnlist.h").read_text(encoding="latin-1")
     ndes_match = re.search(r"#define\s+NDES\s+(\d+)", rxnlist)
     nrxn_match = re.search(r"#define\s+NRXN\s+(\d+)", rxnlist)
-    diffusion_false = re.search(
+    body = _c_function_body(envrn, "isActive")
+    diffusion_false = bool(body and re.search(
         r"else\s*\{\s*/\*\s*diffusion\s*\*/\s*result\s*=\s*FALSE\s*;\s*\}",
-        envrn,
+        body,
         re.DOTALL,
-    )
+    ))
+    scheduler_uses_guard = bool(re.search(r"isActive\s*\(\s*s\s*,\s*l\s*,\s*i\s*\)", evtlist))
     if not ndes_match or not nrxn_match:
         return {"status": "behavioral_mismatch", "reason": "NDES/NRXN definitions missing"}
     ndes = int(ndes_match.group(1))
     nrxn = int(nrxn_match.group(1))
+    pinned = (ndes, nrxn) == (24, 28) and diffusion_false and scheduler_uses_guard
     return {
-        "status": "pinned_disabled" if diffusion_false and (ndes, nrxn) == (24, 28) else "behavioral_mismatch",
+        "status": "pinned_disabled" if pinned else "behavioral_mismatch",
         "ndes": ndes,
         "nrxn": nrxn,
         "diffusion_ids": list(range(ndes, nrxn)),
-        "isActive_final_branch_returns_false": bool(diffusion_false),
+        "isActive_final_branch_returns_false": diffusion_false,
+        "new_evtList_calls_isActive": scheduler_uses_guard,
     }
 
 
-def compiler_identity(compiler: str) -> str:
-    result = subprocess.run(
-        [compiler, "--version"], check=True, capture_output=True, text=True
+def run_sabotage_gate() -> Dict[str, Any]:
+    with tempfile.TemporaryDirectory(prefix="a8a-sabotage-") as raw:
+        root = Path(raw)
+        rows = ["{:.1f},{},{}".format(index / 10.0, index + 10, index + 20) for index in range(20)]
+        expected = root / "expected.dat"
+        actual = root / "actual.dat"
+        expected.write_text("\n".join(rows) + "\n", encoding="ascii")
+        sabotaged = list(rows)
+        sabotaged[11] = "1.1,22,32"
+        actual.write_text("\n".join(sabotaged) + "\n", encoding="ascii")
+        comparison = compare_numeric_output(expected, actual, 3)
+    passed = (
+        comparison["classification"] == "numeric_divergence"
+        and comparison["first_mismatch_row"] == 12
+        and not comparison["byte_equal"]
     )
-    return result.stdout.splitlines()[0]
+    return {
+        "passed": passed,
+        "perturbed_row": 12,
+        "observed_classification": comparison["classification"],
+        "first_mismatch_row": comparison["first_mismatch_row"],
+    }
 
 
-def build_model(source: Path, compiler: str, output_dir: Path) -> Dict[str, Any]:
+def _run_process(command: Sequence[str], cwd: Optional[Path], timeout: int) -> Dict[str, Any]:
+    started = time.monotonic()
+    kwargs: Dict[str, Any] = {
+        "cwd": str(cwd) if cwd else None,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+    }
+    if os.name == "posix":
+        kwargs["start_new_session"] = True
+    process = subprocess.Popen(list(command), **kwargs)
+    timed_out = False
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        if os.name == "posix":
+            os.killpg(process.pid, signal.SIGKILL)
+        else:
+            process.kill()
+        stdout, stderr = process.communicate()
+    return {
+        "command": list(command),
+        "returncode": process.returncode,
+        "timed_out": timed_out,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+        "stdout": stdout,
+        "stderr": stderr,
+    }
+
+
+def compiler_provenance(compiler: str, timeout: int) -> Dict[str, str]:
+    version = _run_process([compiler, "--version"], None, timeout)
+    target = _run_process([compiler, "-dumpmachine"], None, timeout)
+    if version["timed_out"] or version["returncode"] != 0:
+        raise RuntimeError("compiler identity failed: {}".format(version))
+    if target["timed_out"] or target["returncode"] != 0:
+        raise RuntimeError("compiler target query failed: {}".format(target))
+    return {
+        "identity": version["stdout"].splitlines()[0],
+        "target": target["stdout"].strip(),
+    }
+
+
+def build_model(source: Path, compiler: str, output_dir: Path, timeout: int) -> Dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     executable = output_dir / "mckaol"
     command = [compiler, *COMPATIBILITY_FLAGS, "-o", str(executable)]
     command.extend(str(source / name) for name in SOURCE_NAMES)
     command.append("-lm")
-    started = time.monotonic()
-    result = subprocess.run(command, capture_output=True, text=True)
-    elapsed = time.monotonic() - started
-    record = {
-        "command": command,
-        "compatibility_flags": list(COMPATIBILITY_FLAGS),
-        "returncode": result.returncode,
-        "elapsed_seconds": round(elapsed, 3),
-        "stdout": result.stdout,
-        "stderr": result.stderr,
-    }
-    if result.returncode != 0:
+    record = _run_process(command, None, timeout)
+    record["compatibility_flags"] = list(COMPATIBILITY_FLAGS)
+    if record["timed_out"] or record["returncode"] != 0:
         raise RuntimeError("compiler failed: {}".format(json.dumps(record, indent=2)))
     record["executable_sha256"] = sha256_file(executable)
     return record
+
+
+def _fixture_metadata(fixture: Path) -> Dict[str, Any]:
+    fields = []
+    for raw in (fixture / "data.sim").read_text(encoding="latin-1").splitlines():
+        fields.append(raw.split("#", 1)[0].strip())
+    return {
+        "steps": int(fields[0]),
+        "write_every_steps": int(fields[1]),
+        "movie_every_steps": int(fields[2]),
+        "seed": int(fields[3]),
+        "draw_bonds": int(fields[4]),
+        "inputs": {name: sha256_file(fixture / name) for name in INPUT_NAMES},
+    }
+
+
+def _failed_run(fixture_id: str, error: str) -> Dict[str, Any]:
+    return {
+        "fixture": fixture_id,
+        "returncode": None,
+        "timed_out": False,
+        "elapsed_seconds": 0.0,
+        "classification": "behavioral_mismatch",
+        "error": error,
+        "outputs": {},
+    }
 
 
 def _run_one(
     fixture_id: str,
     fixtures: Path,
     executable: Path,
-    run_root: Path,
+    execution_root: Path,
     timeout_seconds: int,
+    drift_candidate_allowed: bool,
 ) -> Dict[str, Any]:
     fixture = fixtures / fixture_id
-    run_dir = run_root / fixture_id.replace("/", "-")
-    run_dir.mkdir(parents=True, exist_ok=False)
-    for name in INPUT_NAMES:
-        shutil.copy2(str(fixture / name), str(run_dir / name))
-    shutil.copy2(str(executable), str(run_dir / "mckaol"))
-
-    started = time.monotonic()
-    timed_out = False
+    run_dir = execution_root / fixture_id.replace("/", "-")
     try:
-        result = subprocess.run(
-            [str(run_dir / "mckaol")],
-            cwd=str(run_dir),
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-        )
-        returncode = result.returncode
-        stdout = result.stdout
-        stderr = result.stderr
-    except subprocess.TimeoutExpired as exc:
-        timed_out = True
-        returncode = None
-        stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-        stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-    elapsed = time.monotonic() - started
-
-    outputs = {
-        name: compare_numeric_output(fixture / name, run_dir / name, columns)
-        for name, columns in OUTPUT_COLUMNS.items()
-    }
-    results_class = outputs["results.dat"]["classification"]
-    all_structural = all(item["structural_match"] for item in outputs.values())
-    if returncode != 0 or timed_out or not all_structural:
-        classification = "behavioral_mismatch"
-    elif all(item["classification"] == "byte_parity" for item in outputs.values()):
-        classification = "byte_parity"
-    elif results_class == "compiler_prng_drift":
-        classification = "compiler_prng_drift"
-    else:
-        classification = "behavioral_mismatch"
-
-    return {
-        "fixture": fixture_id,
-        "returncode": returncode,
-        "timed_out": timed_out,
-        "elapsed_seconds": round(elapsed, 3),
-        "classification": classification,
-        "stdout": stdout,
-        "stderr": stderr,
-        "outputs": outputs,
-    }
+        run_dir.mkdir(parents=True, exist_ok=False)
+        for name in INPUT_NAMES:
+            shutil.copy2(str(fixture / name), str(run_dir / name))
+        shutil.copy2(str(executable), str(run_dir / "mckaol"))
+        process = _run_process([str(run_dir / "mckaol")], run_dir, timeout_seconds)
+        outputs = {
+            name: compare_numeric_output(fixture / name, run_dir / name, columns)
+            for name, columns in OUTPUT_COLUMNS.items()
+        }
+        all_structural = all(item.get("structural_match", False) for item in outputs.values())
+        all_byte_equal = all(item.get("byte_equal", False) for item in outputs.values())
+        results_prefix = outputs["results.dat"].get("matching_prefix_rows", 0)
+        if process["returncode"] != 0 or process["timed_out"] or not all_structural:
+            classification = "behavioral_mismatch"
+        elif all_byte_equal:
+            classification = "byte_parity"
+        elif drift_candidate_allowed and results_prefix >= 10:
+            classification = "compiler_prng_drift_candidate"
+        else:
+            classification = "behavioral_mismatch"
+        return {
+            "fixture": fixture_id,
+            "fixture_metadata": _fixture_metadata(fixture),
+            "returncode": process["returncode"],
+            "timed_out": process["timed_out"],
+            "elapsed_seconds": process["elapsed_seconds"],
+            "classification": classification,
+            "drift_candidate_basis": (
+                "content manifests match; compiler/architecture differs from canonical; "
+                "all schemas and row counts match; >=10 initial results rows are exact"
+                if classification == "compiler_prng_drift_candidate" else None
+            ),
+            "stdout": process["stdout"],
+            "stderr": process["stderr"],
+            "outputs": outputs,
+        }
+    except Exception as exc:
+        return _failed_run(fixture_id, "{}: {}".format(type(exc).__name__, exc))
 
 
 def verify_historical_duplicate(fixtures: Path) -> Dict[str, Any]:
@@ -266,63 +379,69 @@ def verify_historical_duplicate(fixtures: Path) -> Dict[str, Any]:
     }
 
 
+def _git_commit() -> Optional[str]:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"], check=True, capture_output=True,
+            text=True, timeout=10,
+        )
+        return result.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def render_markdown(report: Dict[str, Any]) -> str:
+    compiler = report.get("compiler", {})
+    build = report.get("build", {})
     lines = [
-        "# 1999 C KMC conformance report",
-        "",
-        "Generated: `{}`".format(report["generated_at"]),
-        "",
-        "## Provenance",
-        "",
-        "- Git commit: `{}`".format(report["git_commit"]),
-        "- Platform: `{}`".format(report["platform"]),
-        "- Compiler: `{}`".format(report["compiler"]["actual"]),
-        "- Canonical compiler lock: `{}`".format(report["compiler"]["canonical"]),
-        "- Compiler lock matched: `{}`".format(str(report["compiler"]["lock_matched"]).lower()),
-        "- Compatibility flags: `{}`".format(" ".join(report["build"]["compatibility_flags"])),
+        "# 1999 C KMC conformance report", "",
+        "Generated: `{}`".format(report["generated_at"]), "",
+        "## Provenance", "",
+        "- Git commit: `{}`".format(report.get("git_commit") or "unavailable; content manifests govern"),
+        "- Source manifest SHA-256: `{}`".format(report["source_manifest"]["sha256"]),
+        "- Fixture-input manifest SHA-256: `{}`".format(report["fixture_input_manifest"]["sha256"]),
+        "- Platform: `{}`".format(report["runtime"]["platform"]),
+        "- Architecture: `{}`".format(report["runtime"]["architecture"]),
+        "- libc: `{}`".format(report["runtime"]["libc"]),
+        "- Compiler: `{}`".format(compiler.get("actual", "unavailable")),
+        "- Compiler target: `{}`".format(compiler.get("target", "unavailable")),
+        "- Canonical container: `{}`".format(report["toolchain_lock"].get("container_image")),
+        "- Compiler lock matched: `{}`".format(str(compiler.get("lock_matched", False)).lower()),
+        "- Compatibility flags: `{}`".format(" ".join(build.get("compatibility_flags", []))),
         "- Diffusion IDs 24–27: `{}`".format(report["diffusion_audit"]["status"]),
-        "",
-        "## Fixture outcomes",
-        "",
+        "", "## Fixture outcomes", "",
         "| fixture | outcome | results parity | first divergence | surfAl rows | surfSi rows | seconds |",
         "|---|---|---|---:|---:|---:|---:|",
     ]
-    for run in report["runs"]:
-        results = run["outputs"]["results.dat"]
+    for run in report.get("runs", []):
+        outputs = run.get("outputs", {})
+        results = outputs.get("results.dat", {})
+        al = outputs.get("surfAl.out", {})
+        si = outputs.get("surfSi.out", {})
         lines.append(
             "| {fixture} | {classification} | {parity} | {first} | {al} | {si} | {elapsed} |".format(
-                fixture=run["fixture"],
-                classification=run["classification"],
-                parity="byte" if results["byte_equal"] else "diverged",
-                first=results["first_mismatch_row"] or "—",
-                al=run["outputs"]["surfAl.out"].get("actual_rows", "—"),
-                si=run["outputs"]["surfSi.out"].get("actual_rows", "—"),
-                elapsed=run["elapsed_seconds"],
+                fixture=run["fixture"], classification=run["classification"],
+                parity="byte" if results.get("byte_equal") else "diverged",
+                first=results.get("first_mismatch_row") or "—",
+                al=al.get("actual_rows", "—"), si=si.get("actual_rows", "—"),
+                elapsed=run.get("elapsed_seconds", 0),
             )
         )
     lines.extend([
-        "",
-        "`byte_parity` means exact SHA-256 equality. `compiler_prng_drift` means the",
-        "numeric schema and full row counts are preserved, at least one initial trajectory",
-        "row is exact, and later stochastic state diverges. `behavioral_mismatch` means",
-        "the run failed, structure changed, or divergence began at the first row; it is",
-        "never normalized away.",
-        "",
-        "## Historical cross-host control",
-        "",
-        "The Hotrox and Jasper fixtures with identical inputs are byte-identical across",
-        "all three archived outputs: `{}`.".format(
-            str(report["historical_cross_host_duplicate"]["all_byte_equal"]).lower()
-        ),
-        "",
-        "## Sabotage gate",
-        "",
-        "The committed comparator unit test changes a trajectory value in row 1 and",
-        "requires classification as `behavioral_mismatch`: `{}`.".format(
-            report["sabotage_test"]
-        ),
-        "",
+        "", "`byte_parity` is exact SHA-256 equality. A",
+        "`compiler_prng_drift_candidate` is explicitly non-canonical evidence: content",
+        "manifests match, the compiler/architecture differs, every schema and row count",
+        "matches, and at least ten initial trajectory rows are exact. It remains a",
+        "candidate rather than a normalized fact. Anything else is a",
+        "`behavioral_mismatch` and fails the gate.", "",
+        "## Independent controls", "",
+        "- Historical identical-input Hotrox/Jasper outputs byte-equal: `{}`.".format(
+            str(report["historical_cross_host_duplicate"]["all_byte_equal"]).lower()),
+        "- Late-row sabotage detected without being labeled drift: `{}`.".format(
+            str(report["sabotage_test"]["passed"]).lower()), "",
     ])
+    if report.get("setup_error"):
+        lines.extend(["## Setup failure", "", "```text", report["setup_error"], "```", ""])
     return "\n".join(lines)
 
 
@@ -330,17 +449,16 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--fixtures", type=Path, required=True)
-    parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--report", type=Path)
     parser.add_argument("--markdown", type=Path)
+    parser.add_argument("--toolchain-lock", type=Path)
     parser.add_argument("--compiler", default=os.environ.get("CC", "gcc"))
-    parser.add_argument(
-        "--canonical-compiler",
-        default="gcc (Debian 12.2.0-14+deb12u1) 12.2.0",
-    )
     parser.add_argument("--allow-compiler-drift", action="store_true")
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--timeout-seconds", type=int, default=2400)
+    parser.add_argument("--build-timeout-seconds", type=int, default=120)
     parser.add_argument("--run-root", type=Path)
+    parser.add_argument("--print-manifests", action="store_true")
     return parser.parse_args()
 
 
@@ -348,72 +466,107 @@ def main() -> int:
     args = parse_args()
     if args.jobs < 1 or args.jobs > 4:
         raise SystemExit("--jobs must be between 1 and 4")
-    actual_compiler = compiler_identity(args.compiler)
-    lock_matched = actual_compiler == args.canonical_compiler
-    if not lock_matched and not args.allow_compiler_drift:
-        raise SystemExit(
-            "compiler lock mismatch: expected {!r}, got {!r}; run in the pinned "
-            "container or pass --allow-compiler-drift for an explicitly labeled comparison".format(
-                args.canonical_compiler, actual_compiler
-            )
-        )
+    source_info = source_manifest(args.source)
+    fixture_info = fixture_manifest(args.fixtures)
+    if args.print_manifests:
+        print(json.dumps({"source_manifest_sha256": source_info["sha256"], "fixture_inputs_manifest_sha256": fixture_info["sha256"]}, sort_keys=True))
+        return 0
+    if not args.report:
+        raise SystemExit("--report is required unless --print-manifests is used")
 
-    git_commit = subprocess.run(
-        ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True
-    ).stdout.strip()
-    with tempfile.TemporaryDirectory(prefix="a8a-build-") as build_raw:
-        build_dir = Path(build_raw)
-        build = build_model(args.source, args.compiler, build_dir)
-        executable = build_dir / "mckaol"
-        managed_run_root = args.run_root is None
-        if managed_run_root:
-            run_context = tempfile.TemporaryDirectory(prefix="a8a-runs-")
-            run_root = Path(run_context.name)
-        else:
-            args.run_root.mkdir(parents=True, exist_ok=True)
-            run_context = None
-            run_root = args.run_root
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as executor:
-                futures = [
-                    executor.submit(
-                        _run_one,
-                        fixture_id,
-                        args.fixtures,
-                        executable,
-                        run_root,
-                        args.timeout_seconds,
-                    )
-                    for fixture_id in GOLDEN_RUNS
-                ]
-                runs = [future.result() for future in futures]
-        finally:
-            if run_context is not None:
-                run_context.cleanup()
-
-    report: Dict[str, Any] = {
-        "schema_version": 1,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "git_commit": git_commit,
+    lock_path = args.toolchain_lock or (args.source.parent / "conformance-toolchain.json")
+    lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    source_matches = source_info["sha256"] == lock.get("source_manifest_sha256")
+    fixtures_match = fixture_info["sha256"] == lock.get("fixture_inputs_manifest_sha256")
+    diffusion = audit_diffusion_disabled(args.source)
+    duplicate = verify_historical_duplicate(args.fixtures)
+    sabotage = run_sabotage_gate()
+    runtime = {
         "platform": platform.platform(),
-        "compiler": {
-            "canonical": args.canonical_compiler,
-            "actual": actual_compiler,
-            "lock_matched": lock_matched,
-            "drift_explicitly_allowed": args.allow_compiler_drift,
-        },
-        "build": build,
-        "diffusion_audit": audit_diffusion_disabled(args.source),
-        "historical_cross_host_duplicate": verify_historical_duplicate(args.fixtures),
-        "sabotage_test": "PASS (test_sabotage_is_detected_as_behavioral_mismatch)",
-        "runs": runs,
+        "architecture": platform.machine(),
+        "libc": " ".join(part for part in platform.libc_ver() if part) or "unknown",
     }
+    report: Dict[str, Any] = {
+        "schema_version": 2,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "git_commit": _git_commit(),
+        "source_manifest": source_info,
+        "fixture_input_manifest": fixture_info,
+        "content_lock": {"source_matches": source_matches, "fixture_inputs_match": fixtures_match},
+        "toolchain_lock": lock,
+        "runtime": runtime,
+        "diffusion_audit": diffusion,
+        "historical_cross_host_duplicate": duplicate,
+        "sabotage_test": sabotage,
+        "runs": [],
+    }
+
+    setup_error: Optional[str] = None
+    try:
+        if not source_matches or not fixtures_match:
+            raise RuntimeError("source or fixture-input content manifest does not match toolchain lock")
+        compiler = compiler_provenance(args.compiler, args.build_timeout_seconds)
+        compiler_matches = compiler["identity"] == lock.get("compiler_identity")
+        architecture_matches = runtime["architecture"] == lock.get("canonical_architecture")
+        report["compiler"] = {
+            "actual": compiler["identity"], "target": compiler["target"],
+            "canonical": lock.get("compiler_identity"), "lock_matched": compiler_matches,
+            "architecture_lock_matched": architecture_matches,
+            "drift_explicitly_allowed": args.allow_compiler_drift,
+        }
+        if (not compiler_matches or not architecture_matches) and not args.allow_compiler_drift:
+            raise RuntimeError("canonical compiler/architecture lock mismatch")
+        drift_candidate_allowed = args.allow_compiler_drift and (not compiler_matches or not architecture_matches)
+        with tempfile.TemporaryDirectory(prefix="a8a-build-") as build_raw:
+            build_dir = Path(build_raw)
+            report["build"] = build_model(args.source, args.compiler, build_dir, args.build_timeout_seconds)
+            base_root = args.run_root or Path(tempfile.mkdtemp(prefix="a8a-runs-"))
+            base_root.mkdir(parents=True, exist_ok=True)
+            execution_root = base_root / ("execution-" + uuid.uuid4().hex)
+            execution_root.mkdir(parents=True, exist_ok=False)
+            report["execution_root"] = str(execution_root)
+            future_to_fixture: Dict[concurrent.futures.Future, str] = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as executor:
+                for fixture_id in GOLDEN_RUNS:
+                    future = executor.submit(
+                        _run_one, fixture_id, args.fixtures, build_dir / "mckaol",
+                        execution_root, args.timeout_seconds, drift_candidate_allowed,
+                    )
+                    future_to_fixture[future] = fixture_id
+                run_map: Dict[str, Dict[str, Any]] = {}
+                for future, fixture_id in future_to_fixture.items():
+                    try:
+                        run_map[fixture_id] = future.result()
+                    except Exception as exc:
+                        run_map[fixture_id] = _failed_run(
+                            fixture_id, "future {}: {}".format(type(exc).__name__, exc)
+                        )
+            report["runs"] = [run_map[fixture] for fixture in GOLDEN_RUNS]
+    except Exception as exc:
+        setup_error = "{}: {}".format(type(exc).__name__, exc)
+        report["setup_error"] = setup_error
+        if not report["runs"]:
+            report["runs"] = [_failed_run(fixture, setup_error) for fixture in GOLDEN_RUNS]
+
+    classifications = [run["classification"] for run in report["runs"]]
+    gate_passed = (
+        setup_error is None
+        and len(report["runs"]) == len(GOLDEN_RUNS)
+        and [run["fixture"] for run in report["runs"]] == list(GOLDEN_RUNS)
+        and all(run.get("returncode") == 0 and not run.get("timed_out") for run in report["runs"])
+        and all(value != "behavioral_mismatch" for value in classifications)
+        and diffusion["status"] == "pinned_disabled"
+        and duplicate["all_byte_equal"]
+        and sabotage["passed"]
+        and source_matches and fixtures_match
+    )
     report["summary"] = {
-        "fixture_count": len(runs),
-        "byte_parity": sum(run["classification"] == "byte_parity" for run in runs),
-        "compiler_prng_drift": sum(run["classification"] == "compiler_prng_drift" for run in runs),
-        "behavioral_mismatch": sum(run["classification"] == "behavioral_mismatch" for run in runs),
-        "all_completed": all(run["returncode"] == 0 and not run["timed_out"] for run in runs),
+        "fixture_count": len(report["runs"]),
+        "byte_parity": classifications.count("byte_parity"),
+        "compiler_prng_drift_candidate": classifications.count("compiler_prng_drift_candidate"),
+        "behavioral_mismatch": classifications.count("behavioral_mismatch"),
+        "all_completed": all(run.get("returncode") == 0 and not run.get("timed_out") for run in report["runs"]),
+        "gate_passed": gate_passed,
     }
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -421,7 +574,7 @@ def main() -> int:
         args.markdown.parent.mkdir(parents=True, exist_ok=True)
         args.markdown.write_text(render_markdown(report), encoding="utf-8")
     print(json.dumps(report["summary"], sort_keys=True))
-    return 0 if report["summary"]["all_completed"] and report["summary"]["behavioral_mismatch"] == 0 else 1
+    return 0 if gate_passed else 1
 
 
 if __name__ == "__main__":

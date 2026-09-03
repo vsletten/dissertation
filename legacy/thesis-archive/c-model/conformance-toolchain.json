@@ -1,10 +1,13 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "container_image": "python:3.11.15-bookworm@sha256:a8f8fbe1a0edc9e4dddafa64ba73f7e04be7be5ebc23f332362e779e0a2e4e52",
+  "canonical_architecture": "x86_64",
   "compiler_identity": "gcc (Debian 12.2.0-14+deb12u1) 12.2.0",
   "language_mode": "gnu89",
   "optimization": ["-O3", "-ffast-math"],
   "compatibility_forced_includes": ["stdlib.h", "unistd.h"],
   "source_patch_count": 0,
-  "notes": "The image index digest and exact compiler identity are both checked. Forced includes preserve every curated 1999 source byte."
+  "source_manifest_sha256": "73ee92b8cda415f490112bba398c1b7e5e8e010dad733fcbab8dd5ecc5e85482",
+  "fixture_inputs_manifest_sha256": "3612d4136f72aedf32e5fbace72726c720b07fea1da1565b07ea87cec89f4c48",
+  "notes": "The image index digest, linux/amd64 platform, exact compiler identity, curated source bytes, and all 20 fixture inputs are checked before replay."
 }

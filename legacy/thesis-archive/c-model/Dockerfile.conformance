@@ -1,6 +1,9 @@
-FROM python:3.11.15-bookworm@sha256:a8f8fbe1a0edc9e4dddafa64ba73f7e04be7be5ebc23f332362e779e0a2e4e52
+FROM --platform=linux/amd64 python:3.11.15-bookworm@sha256:a8f8fbe1a0edc9e4dddafa64ba73f7e04be7be5ebc23f332362e779e0a2e4e52
 
-WORKDIR /repo
-COPY . /repo
+WORKDIR /archive
+COPY c-model/source /archive/c-model/source
+COPY c-model/conformance-toolchain.json /archive/c-model/conformance-toolchain.json
+COPY golden-runs /archive/golden-runs
+COPY tools/run_c_model_conformance.py /archive/tools/run_c_model_conformance.py
 
-ENTRYPOINT ["python3", "legacy/thesis-archive/tools/run_c_model_conformance.py", "--source", "legacy/thesis-archive/c-model/source", "--fixtures", "legacy/thesis-archive/golden-runs", "--report", "/out/conformance-report.json", "--markdown", "/out/conformance-report.md", "--compiler", "gcc", "--canonical-compiler", "gcc (Debian 12.2.0-14+deb12u1) 12.2.0", "--jobs", "4", "--run-root", "/out/runs"]
+ENTRYPOINT ["python3", "/archive/tools/run_c_model_conformance.py", "--source", "/archive/c-model/source", "--fixtures", "/archive/golden-runs", "--toolchain-lock", "/archive/c-model/conformance-toolchain.json", "--report", "/out/conformance-report.json", "--markdown", "/out/conformance-report.md", "--compiler", "gcc", "--jobs", "4", "--run-root", "/out/runs"]

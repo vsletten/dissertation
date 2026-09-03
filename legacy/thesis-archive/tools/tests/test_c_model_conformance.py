@@ -28,23 +28,23 @@ class CompareOutputTests(unittest.TestCase):
         self.assertTrue(result["structural_match"])
         self.assertEqual(result["matching_prefix_rows"], 2)
 
-    def test_sabotage_is_detected_as_behavioral_mismatch(self) -> None:
+    def test_first_row_sabotage_is_detected_as_numeric_divergence(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             expected = self.write(root, "expected.dat", "0.1,2,3\n0.2,4,5\n")
             sabotaged = self.write(root, "sabotaged.dat", "0.1,2,999\n0.2,4,5\n")
             result = MODULE.compare_numeric_output(expected, sabotaged, expected_columns=3)
-        self.assertEqual(result["classification"], "behavioral_mismatch")
+        self.assertEqual(result["classification"], "numeric_divergence")
         self.assertEqual(result["first_mismatch_row"], 1)
         self.assertFalse(result["byte_equal"])
 
-    def test_late_divergence_is_classified_as_compiler_prng_drift(self) -> None:
+    def test_late_divergence_is_not_assumed_to_be_toolchain_drift(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             expected = self.write(root, "expected.dat", "0.1,2,3\n0.2,4,5\n")
             actual = self.write(root, "actual.dat", "0.1,2,3\n0.3,4,6\n")
             result = MODULE.compare_numeric_output(expected, actual, expected_columns=3)
-        self.assertEqual(result["classification"], "compiler_prng_drift")
+        self.assertEqual(result["classification"], "numeric_divergence")
         self.assertEqual(result["matching_prefix_rows"], 1)
         self.assertEqual(result["first_mismatch_row"], 2)
 
@@ -68,6 +68,7 @@ class HistoricalContractTests(unittest.TestCase):
                 encoding="ascii",
             )
             (root / "rxnlist.h").write_text("#define NDES 24\n#define NRXN 28\n", encoding="ascii")
+            (root / "evtlist.c").write_text("if (isActive(s, l, i)) schedule(i);\n", encoding="ascii")
             audit = MODULE.audit_diffusion_disabled(root)
         self.assertEqual(audit["status"], "pinned_disabled")
         self.assertEqual(audit["diffusion_ids"], [24, 25, 26, 27])
@@ -79,6 +80,24 @@ class HistoricalContractTests(unittest.TestCase):
             (root / "rxnlist.h").write_text("#define NDES 24\n#define NRXN 28\n", encoding="ascii")
             audit = MODULE.audit_diffusion_disabled(root)
         self.assertEqual(audit["status"], "behavioral_mismatch")
+
+    def test_diffusion_audit_ignores_unrelated_matching_text(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "envrn.c").write_text(
+                "int isActive(int rxn) { return 1; }\n"
+                "int unrelated(void) { /* diffusion */ result = FALSE; return result; }\n",
+                encoding="ascii",
+            )
+            (root / "evtlist.c").write_text("if (isActive(s, l, i)) schedule(i);\n", encoding="ascii")
+            (root / "rxnlist.h").write_text("#define NDES 24\n#define NRXN 28\n", encoding="ascii")
+            audit = MODULE.audit_diffusion_disabled(root)
+        self.assertEqual(audit["status"], "behavioral_mismatch")
+
+    def test_sabotage_gate_perturbs_late_plausible_row_and_passes(self) -> None:
+        gate = MODULE.run_sabotage_gate()
+        self.assertTrue(gate["passed"])
+        self.assertEqual(gate["observed_classification"], "numeric_divergence")
 
 
 if __name__ == "__main__":

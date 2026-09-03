@@ -1,0 +1,10 @@
+**
+!c-model/
+!c-model/source/
+!c-model/source/**
+!c-model/conformance-toolchain.json
+!c-model/Dockerfile.conformance
+!golden-runs/
+!golden-runs/**
+!tools/
+!tools/run_c_model_conformance.py

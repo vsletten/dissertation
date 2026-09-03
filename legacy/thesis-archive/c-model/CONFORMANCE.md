@@ -12,19 +12,22 @@ From the repository root, with Docker available:
 mkdir -p /tmp/a8a-conformance
 rm -rf /tmp/a8a-conformance/runs
 
-docker build \
+docker build --platform linux/amd64 \
   -f legacy/thesis-archive/c-model/Dockerfile.conformance \
-  -t dissertation-a8a-conformance .
+  -t dissertation-a8a-conformance \
+  legacy/thesis-archive
 
-docker run --rm \
+docker run --rm --platform linux/amd64 \
   -v /tmp/a8a-conformance:/out \
   dissertation-a8a-conformance
 ```
 
-The Dockerfile pins the complete multi-architecture image index by digest. The
-harness additionally refuses to run unless `gcc --version` exactly matches the
-identity in `conformance-toolchain.json`. Use a new reviewed lock if either changes;
-do not silently pass `--allow-compiler-drift` for the canonical oracle.
+The Dockerfile pins the complete multi-architecture image index by digest and fixes
+the selected platform to `linux/amd64`. Its restricted build context excludes the
+worktree's host-only `.git` pointer and unrelated files. The harness additionally
+refuses to run unless compiler identity, architecture, all curated source bytes,
+and all 20 fixture input files match `conformance-toolchain.json`. Use a new reviewed
+lock if any changes; do not pass `--allow-compiler-drift` for the canonical oracle.
 
 Outputs:
 
@@ -59,15 +62,18 @@ SHA-256 hashes, row/column shape, parse status, exact matching prefix, first
 mismatch row, and maximum numeric delta.
 
 - `byte_parity`: exact SHA-256 equality.
-- `compiler_prng_drift`: every output has the historical shape and row count,
-  `results.dat` starts with at least one exact row, then the stochastic trajectory
-  diverges. The mismatch is retained; no tolerance normalizes it away.
+- `compiler_prng_drift_candidate`: only for an explicitly allowed non-canonical
+  compiler/architecture comparison whose locked source and inputs match, every
+  output has the historical shape and row count, and at least ten initial
+  `results.dat` rows are exact before the stochastic trajectory diverges. The
+  mismatch stays visible and the label remains a candidate, not a fact.
 - `behavioral_mismatch`: nonzero/timeout, missing or malformed output, changed row
   count, or divergence beginning at the first trajectory row.
 
 The two independent 1999 hosts' identical-input fixtures are also required to have
-identical archived hashes. A sabotage unit test perturbs row 1 and must be classified
-as `behavioral_mismatch`.
+identical archived hashes. A sabotage gate perturbs a plausible value after eleven
+matching rows and must remain `numeric_divergence`, never promoted to drift. Both
+controls and the diffusion guard are hard success gates.
 
 ## Tests
 
