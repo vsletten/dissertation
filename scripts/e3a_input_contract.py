@@ -682,6 +682,9 @@ def validate_model(model: Model) -> dict[str, object]:
 def run_static(
     model_dir: pathlib.Path, lammps: str, input_name: str, label: str
 ) -> dict[str, object]:
+    # argv sequence, shell=False: trusted local LAMMPS executable plus
+    # static -log/-in flags and internally chosen input/label tokens.
+    # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
     completed = subprocess.run(
         [lammps, "-log", f"{label}.lammps", "-in", input_name],
         cwd=model_dir,
@@ -689,6 +692,7 @@ def run_static(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         check=False,
+        shell=False,
     )
     (model_dir / f"{label}.stdout.log").write_text(completed.stdout, encoding="utf-8")
     if completed.returncode != 0:
