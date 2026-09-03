@@ -432,19 +432,29 @@ def _run_one(
 
 def verify_historical_duplicate(fixtures: Path) -> Dict[str, Any]:
     left, right = CROSS_HOST_DUPLICATE
-    outputs: Dict[str, Any] = {}
-    for name in OUTPUT_COLUMNS:
-        left_hash = sha256_file(fixtures / left / name)
-        right_hash = sha256_file(fixtures / right / name)
-        outputs[name] = {
-            "left_sha256": left_hash,
-            "right_sha256": right_hash,
-            "byte_equal": left_hash == right_hash,
-        }
+
+    def compare(names: Sequence[str]) -> Dict[str, Any]:
+        rows: Dict[str, Any] = {}
+        for name in names:
+            left_hash = sha256_file(fixtures / left / name)
+            right_hash = sha256_file(fixtures / right / name)
+            rows[name] = {
+                "left_sha256": left_hash,
+                "right_sha256": right_hash,
+                "byte_equal": left_hash == right_hash,
+            }
+        return rows
+
+    inputs = compare(INPUT_NAMES)
+    outputs = compare(tuple(OUTPUT_COLUMNS))
     return {
         "fixtures": list(CROSS_HOST_DUPLICATE),
+        "inputs": inputs,
         "outputs": outputs,
-        "all_byte_equal": all(item["byte_equal"] for item in outputs.values()),
+        "all_byte_equal": (
+            all(item["byte_equal"] for item in inputs.values())
+            and all(item["byte_equal"] for item in outputs.values())
+        ),
     }
 
 

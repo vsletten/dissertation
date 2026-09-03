@@ -121,6 +121,21 @@ class HistoricalContractTests(unittest.TestCase):
         )
         self.assertFalse(passed)
 
+    def test_historical_duplicate_rejects_equal_outputs_from_different_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            left, right = MODULE.CROSS_HOST_DUPLICATE
+            for fixture in (left, right):
+                dest = root / fixture
+                dest.mkdir(parents=True)
+                for name in MODULE.INPUT_NAMES:
+                    (dest / name).write_bytes(b"shared-input\n")
+                for name in MODULE.OUTPUT_COLUMNS:
+                    (dest / name).write_bytes(b"shared-output\n")
+            (root / right / MODULE.INPUT_NAMES[0]).write_bytes(b"different-input\n")
+            result = MODULE.verify_historical_duplicate(root)
+        self.assertFalse(result["all_byte_equal"])
+
 
 if __name__ == "__main__":
     unittest.main()
