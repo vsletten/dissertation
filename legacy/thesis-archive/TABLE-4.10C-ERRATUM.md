@@ -11,7 +11,7 @@ This note records provenance only. It does **not** alter the archived dissertati
 The ledger reaction is:
 
 ```text
-h7sialo7-h2o + h2o -> h4sio4 + h4alo4 + h3o
+h7sialo7+h2o + h2o -> h4sio4 + h4alo4 + h3o
 ```
 
 The final normally terminated `Sum of electronic and zero-point Energies` value from each ledger-named source log is:
