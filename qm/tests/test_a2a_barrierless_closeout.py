@@ -295,7 +295,9 @@ def write_hash_bound_scan_grid(root, *, fabricated_topology_cell=None):
                 "scan_version": closeout.scan_driver.SCAN_VERSION,
                 "cell": [row, column],
                 "settings_fingerprint": settings_fp,
-                "output_geometry_sha256": closeout.production.sha256_path(geometry_path),
+                "output_geometry_sha256": closeout.production.sha256_path(
+                    geometry_path
+                ),
                 "energy_receipt_sha256": closeout.production.sha256_path(energy_path),
                 "output_geometry_fingerprint": geometry_fp,
                 "electronic_hartree": float(energies[row, column]),

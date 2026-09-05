@@ -99,3 +99,29 @@ A first *pinned* scan point that also has to settle a seeded water network
 walks through strained geometries and can diverge the SCF (DFUKS scanner
 death 35 geomeTRIC steps into h-h2co-h2-hco-2w's first point). Relax wet
 seeds unconstrained first (checkpointed), then drive the coordinate.
+
+### Treat terminated-complex HF preoptimization as a bounded seed, not a result (2026-09-05)
+The first Osa-neutral n=1 ladder attempt passed geometry/collision gates but its
+raw crystallographic cluster plus attacker left the B3LYP/def2-SVP DFRKS
+convergence basin after one large geomeTRIC move (0.340 A maximum displacement).
+The initial gradient improved and constraints stayed within 0.0011 A, then the
+next electronic gradient exhausted the existing 150-cycle SCF bound. A required
+HF/STO-3G minimum did not solve the class: it exhausted 100 geomeTRIC steps while
+energy still descended and the late projected gradient remained 3.6--17x above
+the RMS target. Use that finite bounded endpoint only as an explicitly advisory,
+hash-bound basin-conditioning seed: restore the frozen shell exactly, verify
+identity/collision invariants, qualify one finite converged production gradient,
+then leave production optimization and every scientific gate strict. Preserve
+failed receipts; never raise SCF limits, weaken convergence, or report HF energy.
+
+### Basin conditioning must preserve proton ownership and failed endpoints (2026-09-05)
+Osa-neutral n=1's advisory HF endpoint let production DFT run, but it silently
+moved three termination protons to different oxygens. The subsequent strict
+production optimization then exhausted 100 steps near—but outside—every
+geomeTRIC convergence class, and the strict wrapper discarded its final geometry.
+For reactant-basin recovery, gate every hydrogen's unambiguous nearest-oxygen
+owner before production, persist a nonconverged production endpoint with exact
+input/settings/hash provenance, and allow at most one predeclared continuation
+from that endpoint under a fresh optimizer. A finite gradient is an electronic
+qualification only; it neither proves the intended proton microstate nor a
+minimum.

@@ -27,6 +27,7 @@ import json
 import os
 import sys
 import time
+from dataclasses import asdict, replace
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -49,7 +50,9 @@ from quarry.pipeline import (  # noqa: E402
     DftSettings,
     energy,
     frequencies,
+    gradient,
     optimize,
+    optimize_bounded,
 )
 from quarry.rates import rate_from_thermo, thermo_from_frequencies  # noqa: E402
 from quarry.store import Store, geometry_hash  # noqa: E402
@@ -68,11 +71,24 @@ STATES = {"neutral": (water, 0), "acid": (hydronium, +1)}
 KCAL = 4.184
 # Imaginary modes below this are PHVA numerical noise, not reaction modes.
 NOISE_FLOOR_CM = 30.0
+# Phase-1's hydrolysis basin contract uses the same covalent cutoffs.
+HYDROLYSIS_BOND_MAX_A = 2.3
+HYDROLYSIS_OH_MAX_A = 1.25
 # A "barrier" below this is a trivial-rearrangement saddle (learnings).
 MIN_PLAUSIBLE_DE_KJ = 20.0
 # The Phase-1 free-dimer anchor for the lattice-resistance comparison.
 SI_NEUTRAL_FREE_DIMER_DG_KJ = 113.05
 APPROACH_SEED_VERSION = 1
+ADVISORY_PREOPT_VERSION = 2
+ADVISORY_PREOPT_MAX_STEPS = 100
+ADVISORY_PREOPT_MIN_PAIR_A = 0.60
+ADVISORY_PREOPT_MAX_RAW_FROZEN_DRIFT_A = 0.020
+ADVISORY_PREOPT_MAX_PROJECTED_FROZEN_DRIFT_A = 1e-8
+# Reactant conditioning may shorten/lengthen O-H bonds, but it must leave every
+# proton unambiguously bonded to the same oxygen before the production PES runs.
+ADVISORY_PREOPT_MAX_OH_BOND_A = 1.25
+ADVISORY_PREOPT_MIN_OWNER_MARGIN_A = 0.15
+PRODUCTION_COMPLEX_VERSION = 1
 
 # Per-element approach parameters (Angstrom).
 APPROACH = {
@@ -144,14 +160,30 @@ def save_xyz(cluster: Cluster, path: Path) -> None:
 
 
 def load_xyz(path: Path, template: Cluster) -> Cluster:
-    from dataclasses import replace
-
     lines = path.read_text().splitlines()
     n = int(lines[0])
-    coords = np.array(
-        [[float(x) for x in line.split()[1:4]] for line in lines[2 : 2 + n]]
-    )
+    if len(lines) != n + 2:
+        raise ValueError(f"XYZ line-count mismatch: {path}")
+    atom_lines = lines[2:]
+    fields = [line.split() for line in atom_lines]
+    if any(len(field) != 4 for field in fields):
+        raise ValueError(f"XYZ atom records are malformed: {path}")
+    symbols = [field[0] for field in fields]
+    if n != len(template.symbols) or len(fields) != n:
+        raise ValueError(f"XYZ atom-count mismatch: {path}")
+    if symbols != template.symbols:
+        raise ValueError(f"XYZ atom-order or symbol mismatch: {path}")
+    coords = np.array([[float(x) for x in field[1:4]] for field in fields], dtype=float)
+    if coords.shape != template.coords.shape or not np.all(np.isfinite(coords)):
+        raise ValueError(f"XYZ coordinates are malformed or non-finite: {path}")
     return replace(template, coords=coords)
+
+
+def write_json_atomic(path: Path, payload: dict[str, object]) -> None:
+    """Publish a small campaign receipt without exposing a partial JSON file."""
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    temporary.replace(path)
 
 
 def approach_seed_signature(
@@ -211,6 +243,383 @@ def checkpointed(path: Path, template: Cluster, compute) -> Cluster:
     result = compute()
     save_xyz(result, path)
     return result
+
+
+def oxygen_proton_owners(cluster: Cluster) -> dict[int, int]:
+    """Assign every proton to one unambiguous, chemically bonded oxygen."""
+    oxygen = [i for i, symbol in enumerate(cluster.symbols) if symbol == "O"]
+    hydrogen = [i for i, symbol in enumerate(cluster.symbols) if symbol == "H"]
+    if hydrogen and not oxygen:
+        raise RuntimeError("reactant microstate has hydrogen but no oxygen owner")
+
+    owners: dict[int, int] = {}
+    for h_index in hydrogen:
+        distances = sorted(
+            (
+                float(
+                    np.linalg.norm(cluster.coords[h_index] - cluster.coords[o_index])
+                ),
+                o_index,
+            )
+            for o_index in oxygen
+        )
+        nearest_a, owner = distances[0]
+        if nearest_a > ADVISORY_PREOPT_MAX_OH_BOND_A:
+            raise RuntimeError(
+                f"reactant proton H{h_index} is unassigned "
+                f"(nearest O{owner} at {nearest_a:.3f} A)"
+            )
+        if len(distances) > 1:
+            runner_up_a, runner_up = distances[1]
+            if runner_up_a - nearest_a < ADVISORY_PREOPT_MIN_OWNER_MARGIN_A:
+                raise RuntimeError(
+                    f"reactant proton H{h_index} has ambiguous owners "
+                    f"O{owner}/O{runner_up} ({nearest_a:.3f}/{runner_up_a:.3f} A)"
+                )
+        owners[h_index] = owner
+    return owners
+
+
+def reactant_geometry_gate(
+    endpoint: Cluster, reference: Cluster, *, stage: str
+) -> dict[str, object]:
+    """Reject identity, state, shell, collision, or proton-microstate drift."""
+    if endpoint.symbols != reference.symbols:
+        raise RuntimeError(f"{stage} changed atom identity/order")
+    if endpoint.charge != reference.charge or endpoint.spin != reference.spin:
+        raise RuntimeError(f"{stage} changed charge or spin")
+    if endpoint.frozen_indices != reference.frozen_indices:
+        raise RuntimeError(f"{stage} changed the frozen shell")
+    if endpoint.coords.shape != reference.coords.shape:
+        raise RuntimeError(f"{stage} changed coordinate shape")
+    if not np.all(np.isfinite(endpoint.coords)):
+        raise RuntimeError(f"{stage} produced non-finite coordinates")
+
+    expected_owners = oxygen_proton_owners(reference)
+    observed_owners = oxygen_proton_owners(endpoint)
+    if observed_owners != expected_owners:
+        changed = ", ".join(
+            f"H{h}:O{expected_owners.get(h)}->O{observed_owners.get(h)}"
+            for h in sorted(expected_owners.keys() | observed_owners.keys())
+            if expected_owners.get(h) != observed_owners.get(h)
+        )
+        raise RuntimeError(
+            f"{stage} changed the reactant proton microstate ({changed})"
+        )
+
+    delta = endpoint.coords[:, None, :] - endpoint.coords[None, :, :]
+    distances = np.linalg.norm(delta, axis=2)
+    distances[np.diag_indices_from(distances)] = np.inf
+    min_pair_a = float(np.min(distances))
+    if min_pair_a <= ADVISORY_PREOPT_MIN_PAIR_A:
+        raise RuntimeError(f"{stage} produced a collision ({min_pair_a:.3f} A)")
+
+    frozen = sorted(reference.frozen_indices)
+    max_frozen_drift_a = (
+        float(np.max(np.abs(endpoint.coords[frozen] - reference.coords[frozen])))
+        if frozen
+        else 0.0
+    )
+    if max_frozen_drift_a > ADVISORY_PREOPT_MAX_PROJECTED_FROZEN_DRIFT_A:
+        raise RuntimeError(
+            f"{stage} violated the frozen shell ({max_frozen_drift_a:.6f} A)"
+        )
+    return {
+        "minimum_pair_distance_a": min_pair_a,
+        "maximum_frozen_coordinate_drift_a": max_frozen_drift_a,
+        "oxygen_proton_owners": [
+            f"H{h}:O{o}" for h, o in sorted(observed_owners.items())
+        ],
+    }
+
+
+def production_complex_signature(
+    complex_guess: Cluster, settings: DftSettings
+) -> dict[str, object]:
+    return {
+        "version": PRODUCTION_COMPLEX_VERSION,
+        "input_geometry_hash": geometry_hash(complex_guess.to_xyz()),
+        "symbols": complex_guess.symbols,
+        "charge": complex_guess.charge,
+        "spin": complex_guess.spin,
+        "frozen_indices": sorted(complex_guess.frozen_indices),
+        "production_settings": asdict(settings),
+    }
+
+
+def hydrolysis_basin_signature(
+    cluster: Cluster, *, m_index: int, br_index: int, ow_index: int
+) -> tuple[bool, bool, bool]:
+    """Return (M-Ow bonded, M-Obr bonded, attacker proton on Obr)."""
+    h_indices = _attacker_h_indices(cluster, ow_index)
+    return (
+        float(np.linalg.norm(cluster.coords[m_index] - cluster.coords[ow_index]))
+        < HYDROLYSIS_BOND_MAX_A,
+        float(np.linalg.norm(cluster.coords[m_index] - cluster.coords[br_index]))
+        < HYDROLYSIS_BOND_MAX_A,
+        min(
+            float(np.linalg.norm(cluster.coords[br_index] - cluster.coords[h]))
+            for h in h_indices
+        )
+        < HYDROLYSIS_OH_MAX_A,
+    )
+
+
+def quick_irc_acceptance_reason(
+    back: Cluster,
+    fwd: Cluster,
+    *,
+    m_index: int,
+    br_index: int,
+    ow_index: int,
+) -> str | None:
+    """Require the saddle to connect a bonded bridge to hydrolyzed product."""
+    # All physical protons must remain unambiguously owned at both minima.
+    oxygen_proton_owners(back)
+    oxygen_proton_owners(fwd)
+    signatures = {
+        hydrolysis_basin_signature(
+            endpoint, m_index=m_index, br_index=br_index, ow_index=ow_index
+        )
+        for endpoint in (back, fwd)
+    }
+    product = (True, False, True)
+    if len(signatures) != 2 or product not in signatures:
+        return f"quick-IRC endpoints do not span the hydrolysis channel: {signatures}"
+    other = next(signature for signature in signatures if signature != product)
+    if not other[1]:
+        return f"quick-IRC non-product endpoint has no intact M-Obr bond: {other}"
+    return None
+
+
+def reactant_minimum_reason(imaginary_cm: np.ndarray) -> str | None:
+    significant = imaginary_cm[imaginary_cm > NOISE_FLOOR_CM]
+    if significant.size:
+        return (
+            f"reactant has {significant.size} imaginary mode(s) above "
+            f"{NOISE_FLOOR_CM:.0f} cm^-1: {np.round(significant, 1).tolist()}"
+        )
+    return None
+
+
+def quarantine_canonical_outputs(run_dir: Path) -> Path | None:
+    """Revoke stale success artifacts before a new live attempt starts."""
+    names = ("results.json", "store.sqlite", "store.sqlite-wal", "store.sqlite-shm")
+    existing = [run_dir / name for name in names if (run_dir / name).exists()]
+    if not existing:
+        return None
+    quarantine = (
+        run_dir / "quarantine" / (f"{time.strftime('%Y%m%dT%H%M%S')}-{time.time_ns()}")
+    )
+    quarantine.mkdir(parents=True)
+    for path in existing:
+        path.replace(quarantine / path.name)
+    return quarantine
+
+
+def optimize_reactant_complex(
+    run_dir: Path, complex_guess: Cluster, settings: DftSettings
+) -> Cluster:
+    """Relax a raw ladder complex into the production SCF convergence basin.
+
+    The terminated crystallographic cluster plus newly placed attacker can be
+    electronically strained even when its geometry passes collision gates.  A
+    bounded HF/STO-3G relaxation conditions that guess before the advertised
+    production optimization.  HF convergence is explicitly advisory: only the
+    unchanged production optimizer and downstream minimum/saddle gates can
+    qualify a scientific result. Production checkpoints are resumable only with
+    exact identity, settings, geometry-hash, and chemistry-gate receipts.
+    """
+    complex_path = run_dir / "complex.xyz"
+    complex_receipt_path = run_dir / "complex.json"
+    if complex_path.exists():
+        if not complex_receipt_path.exists():
+            raise RuntimeError("refusing unchecked complex.xyz without complex.json")
+        completed = load_xyz(complex_path, complex_guess)
+        gate = reactant_geometry_gate(
+            completed, complex_guess, stage="production optimization"
+        )
+        receipt = json.loads(complex_receipt_path.read_text())
+        if receipt.get("signature") != production_complex_signature(
+            complex_guess, settings
+        ):
+            raise RuntimeError("production complex receipt signature mismatch")
+        if receipt.get("endpoint_geometry_hash") != geometry_hash(completed.to_xyz()):
+            raise RuntimeError("production complex endpoint hash mismatch")
+        if receipt.get("geometry_gate") != gate:
+            raise RuntimeError("production complex geometry receipt mismatch")
+        log("  resume: verified production complex checkpoint")
+        return completed
+
+    def signature() -> dict[str, object]:
+        return {
+            "version": ADVISORY_PREOPT_VERSION,
+            "input_geometry_hash": geometry_hash(complex_guess.to_xyz()),
+            "method": "hf/sto-3g",
+            "max_steps": ADVISORY_PREOPT_MAX_STEPS,
+            "convergence_is_advisory": True,
+            "symbols": complex_guess.symbols,
+            "charge": complex_guess.charge,
+            "spin": complex_guess.spin,
+            "frozen_indices": sorted(complex_guess.frozen_indices),
+            "production_settings": asdict(settings),
+        }
+
+    def geometry_gate(endpoint: Cluster) -> dict[str, object]:
+        return reactant_geometry_gate(
+            endpoint, complex_guess, stage="advisory preoptimization"
+        )
+
+    preopt_settings = DftSettings(xc="hf", basis="sto-3g")
+    preopt_path = run_dir / "complex_preopt.xyz"
+    receipt_path = run_dir / "complex_preopt.json"
+    if preopt_path.exists():
+        existing_receipt = (
+            json.loads(receipt_path.read_text()) if receipt_path.exists() else None
+        )
+        qualification = (
+            existing_receipt.get("production_qualification")
+            if isinstance(existing_receipt, dict)
+            else None
+        )
+        if existing_receipt is None or (
+            isinstance(qualification, dict) and qualification.get("status") == "pending"
+        ):
+            # A crash between checkpoint and qualification leaves no canonical
+            # reusable seed. Preserve it as evidence, then recompute from the
+            # authoritative raw geometry. A recorded qualification failure is
+            # deliberately not retried: that requires a changed scientific route.
+            checkpoint_hash = geometry_hash(preopt_path.read_text())[:12]
+            preopt_path.replace(
+                run_dir / f"complex_preopt.incomplete-{checkpoint_hash}.xyz"
+            )
+            if receipt_path.exists():
+                receipt_path.replace(
+                    run_dir / f"complex_preopt.incomplete-{checkpoint_hash}.json"
+                )
+            log("  incomplete advisory preoptimization preserved; recomputing")
+    if preopt_path.exists():
+        receipt = json.loads(receipt_path.read_text())
+        preoptimized = load_xyz(preopt_path, complex_guess)
+        gate = geometry_gate(preoptimized)
+        if receipt.get("signature") != signature():
+            raise RuntimeError("advisory preoptimization receipt signature mismatch")
+        if receipt.get("endpoint_geometry_hash") != geometry_hash(
+            preoptimized.to_xyz()
+        ):
+            raise RuntimeError("advisory preoptimization endpoint hash mismatch")
+        if receipt.get("geometry_gate") != gate:
+            raise RuntimeError("advisory preoptimization geometry receipt mismatch")
+        qualification = receipt.get("production_qualification")
+        if (
+            not isinstance(qualification, dict)
+            or qualification.get("status") != "passed"
+        ):
+            raise RuntimeError(
+                "advisory preoptimization failed production qualification"
+            )
+        log(
+            "  resume: qualified advisory complex_preopt.xyz exists "
+            f"(HF converged={receipt.get('optimizer_converged')})"
+        )
+    else:
+        result = optimize_bounded(
+            complex_guess,
+            preopt_settings,
+            max_steps=ADVISORY_PREOPT_MAX_STEPS,
+        )
+        # Validate the optimizer object before the XYZ/template round trip can
+        # restore metadata and accidentally hide atom-order or state corruption.
+        # Frozen coordinates may drift slightly before exact projection, so run
+        # all non-shell gates on an unfrozen reference for this one raw object.
+        if result.cluster.frozen_indices != complex_guess.frozen_indices:
+            raise RuntimeError("advisory preoptimization changed the frozen shell")
+        raw_reference = replace(complex_guess, frozen_indices=[])
+        raw_endpoint = replace(result.cluster, frozen_indices=[])
+        reactant_geometry_gate(
+            raw_endpoint, raw_reference, stage="advisory preoptimization"
+        )
+        frozen = sorted(complex_guess.frozen_indices)
+        raw_max_frozen_drift_a = (
+            float(
+                np.max(
+                    np.abs(result.cluster.coords[frozen] - complex_guess.coords[frozen])
+                )
+            )
+            if frozen
+            else 0.0
+        )
+        if raw_max_frozen_drift_a > ADVISORY_PREOPT_MAX_RAW_FROZEN_DRIFT_A:
+            raise RuntimeError(
+                "advisory preoptimization exceeded its raw frozen-shell bound "
+                f"({raw_max_frozen_drift_a:.6f} A)"
+            )
+        projected_coords = result.cluster.coords.copy()
+        projected_coords[frozen] = complex_guess.coords[frozen]
+        preoptimized = replace(result.cluster, coords=projected_coords)
+        save_xyz(preoptimized, preopt_path)
+        # The persisted geometry, rather than an unrounded in-memory object, is
+        # the exact seed that production qualification and resume must judge.
+        preoptimized = load_xyz(preopt_path, complex_guess)
+        gate = geometry_gate(preoptimized)
+        receipt: dict[str, object] = {
+            "schema": "phase2-advisory-preopt-v1",
+            "signature": signature(),
+            "endpoint_geometry_hash": geometry_hash(preoptimized.to_xyz()),
+            "optimizer_converged": result.converged,
+            "unprojected_maximum_frozen_coordinate_drift_a": (raw_max_frozen_drift_a),
+            "geometry_gate": gate,
+            "production_qualification": {"status": "pending"},
+        }
+        write_json_atomic(receipt_path, receipt)
+        try:
+            production_gradient = gradient(preoptimized, settings)
+            if not np.all(np.isfinite(production_gradient)):
+                raise RuntimeError(
+                    "production qualification returned a non-finite gradient"
+                )
+        except Exception as exc:
+            receipt["production_qualification"] = {
+                "status": "failed",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            }
+            write_json_atomic(receipt_path, receipt)
+            raise
+        receipt["production_qualification"] = {
+            "status": "passed",
+            "method": (
+                f"{settings.xc}/{settings.basis}{'/df' if settings.density_fit else ''}"
+            ),
+            "gradient_rms_hartree_per_bohr": float(
+                np.sqrt(np.mean(production_gradient**2))
+            ),
+            "gradient_max_hartree_per_bohr": float(np.max(np.abs(production_gradient))),
+        }
+        write_json_atomic(receipt_path, receipt)
+        log(
+            "  advisory HF preoptimization "
+            f"converged={result.converged}; production gradient qualified"
+        )
+    completed = optimize(preoptimized, settings)
+    gate = reactant_geometry_gate(
+        completed, complex_guess, stage="production optimization"
+    )
+    save_xyz(completed, complex_path)
+    completed = load_xyz(complex_path, complex_guess)
+    gate = reactant_geometry_gate(
+        completed, complex_guess, stage="production optimization"
+    )
+    write_json_atomic(
+        complex_receipt_path,
+        {
+            "schema": "phase2-production-complex-v1",
+            "signature": production_complex_signature(complex_guess, settings),
+            "endpoint_geometry_hash": geometry_hash(completed.to_xyz()),
+            "geometry_gate": gate,
+        },
+    )
+    return completed
 
 
 def channel_escape_reason(
@@ -569,16 +978,20 @@ def main() -> int:
     if args.dry_run:
         log("dry run: geometry + metadata written, no DFT")
         return 0
+    quarantined = quarantine_canonical_outputs(run_dir)
+    if quarantined is not None:
+        log(f"stale canonical outputs quarantined at {quarantined}")
 
-    # Stage 1 — optimize reactant complex and separated fragments.
-    # Crystallographic positions are sane starting points; no cheap
-    # pre-opt stage (the crude legacy cell is a logged systematic).
+    # Stage 1 — optimize reactant complex and separated fragments.  The raw
+    # terminated cluster plus attacker gets a cheap checkpointed pre-opt before
+    # production DFT; the bare crystallographic cluster remains on the proven
+    # direct path (the crude legacy cell is still a logged systematic).
     log("stage 1: optimizing reactant complex + fragments")
-    complex_opt = checkpointed(
-        run_dir / "complex.xyz",
-        complex_guess,
-        lambda: optimize(complex_guess, settings),
-    )
+    complex_opt = optimize_reactant_complex(run_dir, complex_guess, settings)
+    cx_freq = frequencies(complex_opt, settings)
+    if reason := reactant_minimum_reason(cx_freq.imaginary_cm):
+        log(f"  !! {reason}; aborting before saddle search")
+        return 1
     cluster_opt = checkpointed(
         run_dir / "cluster_opt.xyz",
         cc.cluster,
@@ -710,7 +1123,21 @@ def main() -> int:
             f"cm^-1, found {significant.size} — inspect ts.xyz; aborting"
         )
         return 1
-    back, fwd = quick_irc(ts, settings, noise_floor_cm=NOISE_FLOOR_CM)
+    back, fwd = quick_irc(
+        ts,
+        settings,
+        frequency=ts_freq,
+        noise_floor_cm=NOISE_FLOOR_CM,
+    )
+    if reason := quick_irc_acceptance_reason(
+        back,
+        fwd,
+        m_index=m_index,
+        br_index=br_index,
+        ow_index=ow_index,
+    ):
+        log(f"  !! {reason}; aborting before thermochemistry")
+        return 1
     save_xyz(back, run_dir / "irc_back.xyz")
     save_xyz(fwd, run_dir / "irc_fwd.xyz")
 
@@ -718,7 +1145,6 @@ def main() -> int:
     # cancel between complex and TS of identical composition).
     trim_gpu_pool()
     log("stage 5: thermochemistry")
-    cx_freq = frequencies(complex_opt, settings)
     t = args.temperature
 
     def thermo(freq):
@@ -787,8 +1213,6 @@ def main() -> int:
             f"{SI_NEUTRAL_FREE_DIMER_DG_KJ:.1f} kJ/mol -> shift {shift:+.1f} kJ/mol "
             "(publishable observable — Pelmenschikov predicts +20 to +70)"
         )
-    (run_dir / "results.json").write_text(json.dumps(results, indent=2))
-
     with Store(run_dir / "store.sqlite") as store:
         for name, cl, freq in (
             ("complex", complex_opt, cx_freq),
@@ -806,6 +1230,7 @@ def main() -> int:
             )
             store.set_job_status(jid, "done")
             store.add_result(jid, "electronic", freq.electronic_hartree, "hartree")
+    write_json_atomic(run_dir / "results.json", results)
 
     log("")
     log(f"=== {cell_name} @ {results['method']} ===")
