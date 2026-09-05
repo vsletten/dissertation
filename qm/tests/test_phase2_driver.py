@@ -633,3 +633,25 @@ def test_resume_persists_proton_route_before_reentering_proton_stage(
 
     with pytest.raises(RuntimeError, match="route checkpoint observed"):
         phase2.main()
+
+
+def test_load_xyz_rejects_extra_atom_fields(tmp_path):
+    template = geometry("template", 3.2)
+    path = tmp_path / "bad.xyz"
+    lines = template.to_xyz().splitlines()
+    lines[2] = f"{lines[2]} extra"
+    path.write_text("\n".join(lines))
+
+    with pytest.raises(ValueError, match="atom records are malformed"):
+        phase2.load_xyz(path, template)
+
+
+def test_load_xyz_rejects_trailing_atom_records(tmp_path):
+    template = geometry("template", 3.2)
+    path = tmp_path / "bad.xyz"
+    lines = template.to_xyz().splitlines()
+    lines.append("H 0.00000000 0.00000000 0.00000000")
+    path.write_text("\n".join(lines))
+
+    with pytest.raises(ValueError, match="line-count mismatch"):
+        phase2.load_xyz(path, template)

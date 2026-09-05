@@ -162,12 +162,16 @@ def save_xyz(cluster: Cluster, path: Path) -> None:
 def load_xyz(path: Path, template: Cluster) -> Cluster:
     lines = path.read_text().splitlines()
     n = int(lines[0])
-    atom_lines = lines[2 : 2 + n]
+    if len(lines) != n + 2:
+        raise ValueError(f"XYZ line-count mismatch: {path}")
+    atom_lines = lines[2:]
     fields = [line.split() for line in atom_lines]
+    if any(len(field) != 4 for field in fields):
+        raise ValueError(f"XYZ atom records are malformed: {path}")
     symbols = [field[0] for field in fields]
     if n != len(template.symbols) or len(fields) != n:
         raise ValueError(f"XYZ atom-count mismatch: {path}")
-    if any(len(field) < 4 for field in fields) or symbols != template.symbols:
+    if symbols != template.symbols:
         raise ValueError(f"XYZ atom-order or symbol mismatch: {path}")
     coords = np.array([[float(x) for x in field[1:4]] for field in fields], dtype=float)
     if coords.shape != template.coords.shape or not np.all(np.isfinite(coords)):
