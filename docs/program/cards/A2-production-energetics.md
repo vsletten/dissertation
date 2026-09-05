@@ -1,13 +1,12 @@
 # A2-production-energetics — production-tier energies + open-source CC calibration
 
-- status: ready
+- status: blocked
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
-- depends: — (re-tiers whatever stationary points are banked in runs/;
-  further points from A1b/A3 are re-tiered as they land — re-tiering is
-  a settings swap by design, not a redo)
-- claimed-by: hermes-workstation
+- depends: A2b-al-neutral-production-energetics, A2c-al-acid-production-energetics, A2d-oss-neutral-n4-production-energetics
+- blocked-on: A2b, A2c, A2d
+- claimed-by: hermes-custom-build-001
 
 
 ## Objective
@@ -26,15 +25,18 @@ qm/SURVEY.md §6 (the tiered protocol) as amended 2026-08-23;
 **qm/CALIBRATION.md — the calibration runbook: installed environments
 (conda `calib-psi4`, `~/venvs/byteqc` + `~/opt/byteqc`), the focal-point
 CBS recipe, and the DLPNO-vs-canonical acceptance gate**; quarry
-pipeline supports solvent="smd" already. Banked stationary points:
-si-neutral (runs/phase1), al-neutral (TASK-168/PR #29), al-acid
-one-water (A1b), oss-neutral-n4 pilot set (runs/phase2). Large single
-points that OOM the 4090 may use a rented H200/B200 (not B300 —
-FP64-gutted); ByteQC checkpoints tolerate preemption.
+pipeline supports solvent="smd" already. Banked stationary points exist for
+si-neutral (A2a), al-neutral (TASK-168/PR #29), and al-acid one-water (A1b).
+The `oss-neutral-n4` pilot result is documented by A3, but its ignored
+stationary-point directory is no longer present and no hash-pinned external
+archive was found on 2026-09-05; A2d must reconstruct it from the committed
+builder and mechanism contract before re-tiering. Large single points that OOM
+the 4090 may use rented H200/B200 capacity only through a separately authorized
+spend gate (not B300 — FP64-gutted).
 
 ## Acceptance
-- Production ΔG‡ table for all banked reactions with method provenance
-  in the runs' store.sqlite.
+- Production ΔG‡ table for every target named above, including the reconstructed
+  embedded pilot, with method provenance in each run's `store.sqlite`.
 - si-neutral calibration: CCSD(T)/CBS focal-point barrier from ByteQC
   (canonical) AND Psi4 (DLPNO, TightPNO), with the DLPNO−canonical
   delta reported (gate: ≤ 2 kJ/mol on the barrier); functional ranking
@@ -44,6 +46,21 @@ FP64-gutted); ByteQC checkpoints tolerate preemption.
   CALCULATIONS.md rows updated to the new tier.
 
 ## Progress
+- 2026-09-05 12:25 PDT (hermes-custom-build-001; profile=workstation) —
+  Receipt-level inventory found that the completed A2a/si-neutral route is the
+  only banked reaction satisfying A2's exact production, full-path, and
+  provenance-store gates. The remaining targets are not a settings-only batch:
+  TASK-168 al-neutral requires a barrierless-addition/one-saddle route contract;
+  A1b al-acid requires two separately typed full IRCs and strict physical-proton
+  ownership; the 63-atom embedded pilot's ignored stationary points are absent,
+  so it requires deterministic reconstruction plus frozen-shell/PHVA semantics
+  and may exceed the 4090 envelope. Launching them
+  under the si-neutral-only CLI would either reject valid source roles or create
+  scientifically false receipts. A2 is therefore decomposed into sequential,
+  independently bounded cards A2b/A2c/A2d, while retaining this parent as the
+  final table, functional-ranking, Petra-fragment, and CALCULATIONS closeout
+  gate. No heavy calculation or shared-service mutation ran in this inventory
+  slice.
 - 2026-09-05 08:07 PDT (hermes-custom-build-001; profile=workstation) — **UNBLOCKED by A2a.** The exact neutral reactant now reaches the typed hydrolyzed product through a verified addition TS and a complete-grid barrierless cleavage shelf. Production wB97M-V ΔG‡ is `142.806783 kJ/mol`; the directive-adjusted canonical-TZ + TightPNO-CBS focal barrier is `132.960133 kJ/mol`, and the independent TZ DLPNO−canonical gate is `+0.245700 kJ/mol` (pass). The route, DFT values, provenance store, and focal receipt hashes are closed in the A2a card. A2 may resume the remaining banked-reaction production table and functional ranking without rebuilding si-neutral or launching canonical TS/QZ.
 - 2026-08-24 22:53 PDT — bounded production verdict: **BLOCKED on an invalid
   banked si-neutral saddle, not on compute.** Exact r2SCAN-3c D4+gCP minima

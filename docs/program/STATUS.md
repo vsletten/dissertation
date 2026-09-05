@@ -4,6 +4,17 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-05 12:25 PDT — (hermes-custom-build-001; profile=workstation) — A2
+  inventory proved only the completed A2a/si-neutral route currently satisfies
+  production-tier, full-path, and provenance-store gates. The three remaining
+  targets have distinct mechanism and compute contracts, so A2 is split
+  fail-closed into a sequential chain: READY A2b (neutral Si–O–Al), then A2c
+  (one-water Al-acid), then A2d (63-atom embedded pilot). Parent A2 gates the
+  final table, functional ranking, Petra fragments, and CALCULATIONS closeout.
+  The embedded pilot's ignored stationary points are absent, so A2d owns a
+  deterministic, hash-bound rebuild rather than pretending that source is
+  banked. No heavy QM or shared-service mutation ran in this inventory slice.
+
 - 2026-09-05 10:19 PDT — (hermes-custom-build-001; profile=workstation) — A3's adversarial pre-PR pass closed four generic Phase-2 false-green routes: production checkpoints now require exact input/settings/hash/geometry receipts, production-returned geometries reapply proton/frozen-shell/collision gates, reactants must have zero significant imaginary modes, quick-IRC endpoints must span intact bridge to hydrolyzed product, and failed reruns cannot inherit stale result/store artifacts. Thirty focused regressions pass; no GPU calculation ran and A3 remains blocked on A3a.
 
 - 2026-09-05 09:50 PDT — (hermes-custom-build-001; profile=workstation) — A3 Osa-neutral n=1's advisory-seed route also exhausted the strict production reactant optimization after 100 steps and changed three termination-proton owners; no scientific output exists. Exact oxygen-proton ownership is now a fail-closed seed gate, and READY card A3a owns one microstate-preserving, endpoint-checkpointed recovery before A3 may resume.
