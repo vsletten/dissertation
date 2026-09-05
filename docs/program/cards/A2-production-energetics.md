@@ -1,6 +1,6 @@
 # A2-production-energetics — production-tier energies + open-source CC calibration
 
-- status: blocked
+- status: ready
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
@@ -8,7 +8,7 @@
   further points from A1b/A3 are re-tiered as they land — re-tiering is
   a settings swap by design, not a redo)
 - claimed-by: hermes-workstation
-- blocked-on: A2a-si-neutral-production-path-rebuild
+
 
 ## Objective
 Upgrade banked barriers to the survey protocol: r2SCAN-3c geometries
@@ -44,6 +44,7 @@ FP64-gutted); ByteQC checkpoints tolerate preemption.
   CALCULATIONS.md rows updated to the new tier.
 
 ## Progress
+- 2026-09-05 08:07 PDT (hermes-custom-build-001; profile=workstation) — **UNBLOCKED by A2a.** The exact neutral reactant now reaches the typed hydrolyzed product through a verified addition TS and a complete-grid barrierless cleavage shelf. Production wB97M-V ΔG‡ is `142.806783 kJ/mol`; the directive-adjusted canonical-TZ + TightPNO-CBS focal barrier is `132.960133 kJ/mol`, and the independent TZ DLPNO−canonical gate is `+0.245700 kJ/mol` (pass). The route, DFT values, provenance store, and focal receipt hashes are closed in the A2a card. A2 may resume the remaining banked-reaction production table and functional ranking without rebuilding si-neutral or launching canonical TS/QZ.
 - 2026-08-24 22:53 PDT — bounded production verdict: **BLOCKED on an invalid
   banked si-neutral saddle, not on compute.** Exact r2SCAN-3c D4+gCP minima
   converged and central-difference composite Hessians give reactant/product/TS

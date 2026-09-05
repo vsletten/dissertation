@@ -91,6 +91,27 @@ def test_composite_and_production_settings_are_exact():
     assert all(item.use_gpu for item in (r2scan3c, production, b3lyp_d4))
 
 
+def test_energy_checkpoint_rejects_method_and_nonfinite_cache(tmp_path):
+    current = neutral_pair("reactant")
+    settings = DftSettings(xc="hf", basis="sto-3g")
+    path = tmp_path / "energy.json"
+    payload = {
+        "method": "wrong/method",
+        "electronic_hartree": -10.0,
+        "geometry_fingerprint": frequency_geometry_fingerprint(current),
+        "settings_fingerprint": a2.frequency_settings_fingerprint(settings),
+    }
+    path.write_text(json.dumps(payload))
+    with pytest.raises(ValueError, match="cached method drift"):
+        a2.checkpoint_energy(path, current, settings, "hf/sto-3g")
+
+    payload["method"] = "hf/sto-3g"
+    payload["electronic_hartree"] = float("nan")
+    path.write_text(json.dumps(payload))
+    with pytest.raises(ValueError, match="non-finite"):
+        a2.checkpoint_energy(path, current, settings, "hf/sto-3g")
+
+
 def test_ase_minimum_converges_on_cheap_water(tmp_path):
     initial = water()
     cheap = DftSettings(xc="hf", basis="sto-3g")

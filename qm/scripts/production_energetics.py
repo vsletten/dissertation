@@ -422,8 +422,15 @@ def checkpoint_energy(
             raise ValueError(f"{path.name}: cached geometry fingerprint drift")
         if payload.get("settings_fingerprint") != expected_settings:
             raise ValueError(f"{path.name}: cached settings fingerprint drift")
-        return float(payload["electronic_hartree"])
-    value = energy(cluster, settings)
+        if payload.get("method") != method:
+            raise ValueError(f"{path.name}: cached method drift")
+        value = float(payload["electronic_hartree"])
+        if not np.isfinite(value):
+            raise ValueError(f"{path.name}: cached electronic energy is non-finite")
+        return value
+    value = float(energy(cluster, settings))
+    if not np.isfinite(value):
+        raise RuntimeError(f"{path.name}: computed electronic energy is non-finite")
     atomic_json(
         path,
         {

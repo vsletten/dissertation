@@ -122,6 +122,25 @@ were exercised independently on water/cc-pVTZ: Psi4 1.11 TightPNO
 DLPNO-CCSD(T) `-76.3323355604 Eh`; ByteQC canonical CCSD(T)
 `-76.3325745245 Eh` (PySCF 2.5.0, frozen O 1s).
 
+### A2a directive-adjusted production route (2026-09-05)
+
+The canonical reactant/cc-pVQZ slow-mode calculation eventually completed, but
+the matching TS/QZ calculation was explicitly cancelled rather than spending a
+second multi-day canonical triples campaign. `summarize-focal` therefore accepts
+exactly three canonical receipts (reactant TZ/QZ and TS TZ), requires the full
+four-receipt TightPNO reactant/TS × TZ/QZ matrix, and refuses a canonical TS/QZ
+selector. The production focal point is
+
+`canonical barrier(TZ) + [DLPNO barrier(CBS) - DLPNO barrier(TZ)]`.
+
+The scientific agreement gate remains independent and like-for-like at TZ:
+`DLPNO barrier(TZ) - canonical barrier(TZ)`. For A2a this is
+`+0.245700 kJ/mol`, passing the `2 kJ/mol` gate; the focal barrier is
+`132.960133 kJ/mol`. The large reactant-only QZ absolute method offset is retained
+as anchor provenance and is never substituted for a barrier delta. Receipt
+arithmetic, exact role geometry hashes, electronic state, engine, and basis are
+validated before publication. Durable receipt hashes are in the A2a card.
+
 Do not launch the si-neutral matrix until the candidate transition state passes
 A2's repaired nonzero-step full IRC. The first production attempt proved the
 banked TS reaches the associative basin in both directions, so it is ineligible
