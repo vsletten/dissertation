@@ -301,3 +301,24 @@ def test_dft_resume_with_complete_receipts_skips_gpu_import_preflight(
 
     assert result["status"] == "dft-completed"
     assert (tmp_path / "production-closeout/store.sqlite").is_file()
+
+
+def test_release_seed_energy_must_match_classified_product_cell(tmp_path):
+    cell_dir = tmp_path / "cleavage/coupled-scan-v1/r07-c07"
+    cell_dir.mkdir(parents=True)
+    (cell_dir / "electronic-energy.json").write_text(
+        json.dumps({"electronic_hartree": -10.0})
+    )
+
+    with pytest.raises(ValueError, match="classified product cell"):
+        closeout._authoritative_seed_electronic_hartree(
+            tmp_path,
+            product_cell=[7, 7],
+            claimed_seed_hartree=-9.5,
+        )
+
+    assert closeout._authoritative_seed_electronic_hartree(
+        tmp_path,
+        product_cell=[7, 7],
+        claimed_seed_hartree=-10.0,
+    ) == pytest.approx(-10.0)

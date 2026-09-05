@@ -79,6 +79,30 @@ def _require_sha(path: Path, expected: str) -> None:
         raise ValueError(f"{path}: SHA-256 drift; expected {expected}, found {actual}")
 
 
+def _authoritative_seed_electronic_hartree(
+    root: Path,
+    product_cell: list[int],
+    claimed_seed_hartree: float,
+) -> float:
+    row, column = int(product_cell[0]), int(product_cell[1])
+    energy_path = (
+        root
+        / f"cleavage/coupled-scan-v1/r{row:02d}-c{column:02d}"
+        / "electronic-energy.json"
+    )
+    value = float(_json(energy_path).get("electronic_hartree", np.nan))
+    if not np.isfinite(value) or not np.isclose(
+        value,
+        float(claimed_seed_hartree),
+        rtol=0.0,
+        atol=1e-10,
+    ):
+        raise ValueError(
+            "release seed electronic energy does not match classified product cell"
+        )
+    return value
+
+
 def _load_frequency(path: Path, cluster: Cluster) -> FrequencyResult:
     payload = _json(path)
     expected_geometry = production.frequency_geometry_fingerprint(cluster)
@@ -246,9 +270,12 @@ def _classification_and_release(root: Path) -> tuple[dict[str, Any], dict[str, A
         atol=1e-10,
     ):
         raise ValueError("released-product electronic energy drift")
-    expected_delta = (
-        released_energy - float(release.get("seed_electronic_hartree", np.nan))
-    ) * HARTREE_TO_KJ
+    seed_energy = _authoritative_seed_electronic_hartree(
+        root,
+        decision.get("product_cell"),
+        float(release.get("seed_electronic_hartree", np.nan)),
+    )
+    expected_delta = (released_energy - seed_energy) * HARTREE_TO_KJ
     if not np.isclose(
         expected_delta,
         float(release.get("electronic_delta_kj_mol", np.nan)),
