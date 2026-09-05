@@ -43,9 +43,14 @@ with provenance. Closes CALCULATIONS.md rows CALC-002..005 from
 **oss-neutral-n4-s2 @ b3lyp/def2-svp/df, PHVA thermochemistry:**
 ΔG‡(298) = **205.7 kJ/mol** (49.2 kcal/mol), ΔH‡ = 187.0 kJ/mol,
 ΔE_elec = 185.0 (vs complex) / 151.0 (vs fragments) kJ/mol, one
-imaginary mode 128i cm⁻¹, Wigner κ = 1.02. Artifacts:
-`qm/runs/phase2/oss-neutral-n4-s2-b3lyp-def2-svp/` (results.json,
-store.sqlite, all stage checkpoints, teed log with all nine attempts).
+imaginary mode 128i cm⁻¹, Wigner κ = 1.02. The historical ignored
+artifact directory `qm/runs/phase2/oss-neutral-n4-s2-b3lyp-def2-svp/`
+(results.json, store.sqlite, stage checkpoints, teed log) is **not
+currently available** and is not banked source evidence. Reconstruct
+the documented pilot under
+`docs/program/cards/A2d-oss-neutral-n4-production-energetics.md`;
+consume a later-discovered archive only after independent hash-bound
+identity and provenance checks.
 
 **Mechanism**: sequential, not concerted — a PHVA-verified
 pentacoordinate-Si intermediate (r(Si-Ow)=1.80, r(Si-Obr)=1.78, proton
