@@ -93,10 +93,12 @@ spend gate (not B300 — FP64-gutted).
   `agents/A2-production-energetics` from exact `origin/main`
   `4d715c7597edd04ed1a0d180f02d5c600eb74128` and created the congruent
   dedicated worktree. Read-only bank inventory found four current production
-  targets: free-dimer si-neutral, al-neutral, and al-acid plus the 66-atom
-  embedded oss-neutral pilot. Their source stores/results remain byte-preserved
-  in the historical worktrees/external archives. Environment probes verified
-  PySCF 2.14.0 + GPU4PySCF 1.8.1, native def2-mTZVPP, `pyscf-dispersion`
+  targets: free-dimer si-neutral, al-neutral, and al-acid plus the 63-atom
+  embedded oss-neutral pilot. Identity correction: this claim originally
+  identified the same target as a 66-atom pilot; the authoritative A2d
+  geometry identity is 63 atoms. Their source stores/results remain
+  byte-preserved in the historical worktrees/external archives. Environment
+  probes verified PySCF 2.14.0 + GPU4PySCF 1.8.1, native def2-mTZVPP, `pyscf-dispersion`
   r2SCAN-3c D4+gCP primitives, Psi4 1.11, and ByteQC/PySCF 2.5.0. The first
   implementation slice is a tested, resume-safe production/calibration driver;
   no heavy calculation or shared-service mutation has started.
