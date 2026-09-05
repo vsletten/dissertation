@@ -396,6 +396,26 @@ def test_advisory_preoptimization_rejects_changed_proton_owner(tmp_path, monkeyp
     assert not (tmp_path / "complex_preopt.xyz").exists()
 
 
+@pytest.mark.parametrize(
+    ("oxygen_x", "hydrogen_x", "message"),
+    [
+        ([0.0], 1.50, "is unassigned"),
+        ([0.0, 2.0], 1.00, "has ambiguous owners"),
+    ],
+)
+def test_reactant_proton_owner_must_be_bonded_and_unambiguous(
+    oxygen_x, hydrogen_x, message
+):
+    cluster = Cluster(
+        "invalid-owner",
+        [*("O" for _ in oxygen_x), "H"],
+        np.array([[x, 0.0, 0.0] for x in [*oxygen_x, hydrogen_x]]),
+    )
+
+    with pytest.raises(RuntimeError, match=message):
+        phase2.oxygen_proton_owners(cluster)
+
+
 def test_advisory_preoptimization_resume_is_bound_to_production_settings(
     tmp_path, monkeypatch
 ):

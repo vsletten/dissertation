@@ -81,6 +81,8 @@ ADVISORY_PREOPT_MAX_STEPS = 100
 ADVISORY_PREOPT_MIN_PAIR_A = 0.60
 ADVISORY_PREOPT_MAX_RAW_FROZEN_DRIFT_A = 0.020
 ADVISORY_PREOPT_MAX_PROJECTED_FROZEN_DRIFT_A = 1e-8
+# Reactant conditioning may shorten/lengthen O-H bonds, but it must leave every
+# proton unambiguously bonded to the same oxygen before the production PES runs.
 ADVISORY_PREOPT_MAX_OH_BOND_A = 1.25
 ADVISORY_PREOPT_MIN_OWNER_MARGIN_A = 0.15
 
