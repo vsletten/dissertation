@@ -4,6 +4,8 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-05 05:19 PDT — (hermes-custom-build-001; profile=workstation) — A3 Osa-neutral n=1's required HF minimum exhausted 100 steps without convergence, so no result was promoted. The changed one-shot recovery now treats bounded HF only as a hash/settings-bound advisory seed, restores the frozen shell exactly, qualifies one production gradient, and leaves production/scientific gates strict; 73 focused tests are green before relaunch.
+
 - 2026-09-05 01:58 PDT — (hermes-custom-build-001; profile=workstation) — A3 Osa-neutral n=1 stopped fail-closed before any result after a strained raw complex escaped the B3LYP DFRKS convergence basin on its second gradient. Recovery now checkpoint-preoptimizes only the reactant complex at constrained HF/STO-3G before the unchanged production and scientific gates; the failed receipt is preserved and no barrier is claimed.
 
 - 2026-09-05 01:06 PDT — (hermes-custom-build-001; profile=workstation) — A3 Osa-neutral barrier-ladder campaign launched under bounded `task274-a3-osa-neutral.service` for exact n=1..4 connectivity rungs. The first 72-atom cell holds the canonical GPU lease and is optimizing at B3LYP/def2-SVP/DF; atomic progress/terminal receipts live under `/mnt/data/vsletten/dissertation-data/task274-a3-barrier-ladder-20260905/`. No barrier is claimed until the terminal receipt and per-cell scientific gates pass.

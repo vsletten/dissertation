@@ -173,66 +173,117 @@ def test_approach_seed_requires_matching_signature(tmp_path):
 
 def test_reactant_complex_uses_checkpointed_hf_preoptimization(tmp_path, monkeypatch):
     guess = replace(geometry("guess", 3.2), frozen_indices=[0])
-    preoptimized = replace(guess, coords=guess.coords + 0.01)
+    preoptimized = replace(guess, coords=guess.coords.copy())
+    preoptimized.coords[1:] += 0.01
     production = replace(guess, coords=guess.coords + 0.02)
     production_settings = DftSettings(
         xc="b3lyp", basis="def2-svp", density_fit=True, use_gpu=True
     )
-    calls = []
+    bounded_calls = []
+    production_calls = []
+
+    def fake_bounded(cluster, settings, *, max_steps):
+        bounded_calls.append((cluster, settings, max_steps))
+        return SimpleNamespace(cluster=preoptimized, converged=False)
 
     def fake_optimize(cluster, settings):
-        calls.append((cluster, settings))
-        return preoptimized if settings.xc == "hf" else production
+        production_calls.append((cluster, settings))
+        return production
 
+    monkeypatch.setattr(phase2, "optimize_bounded", fake_bounded)
+    monkeypatch.setattr(phase2, "gradient", lambda *_args: np.full((5, 3), 0.01))
     monkeypatch.setattr(phase2, "optimize", fake_optimize)
 
     result = phase2.optimize_reactant_complex(tmp_path, guess, production_settings)
 
-    assert [settings for _, settings in calls] == [
-        DftSettings(xc="hf", basis="sto-3g"),
-        production_settings,
-    ]
-    assert calls[1][0] is preoptimized
+    assert bounded_calls == [(guess, DftSettings(xc="hf", basis="sto-3g"), 100)]
+    assert len(production_calls) == 1
+    production_seed, observed_settings = production_calls[0]
+    assert observed_settings == production_settings
+    assert production_seed.coords == pytest.approx(preoptimized.coords, abs=1e-9)
+    assert production_seed.frozen_indices == guess.frozen_indices
     assert result is production
     assert (tmp_path / "complex_preopt.xyz").exists()
     assert (tmp_path / "complex.xyz").exists()
+    receipt = json.loads((tmp_path / "complex_preopt.json").read_text())
+    assert receipt["optimizer_converged"] is False
+    assert receipt["signature"]["convergence_is_advisory"] is True
+    assert receipt["signature"]["max_steps"] == 100
+    assert receipt["production_qualification"]["status"] == "passed"
+    assert receipt["endpoint_geometry_hash"] == phase2.geometry_hash(
+        preoptimized.to_xyz()
+    )
 
 
 def test_reactant_complex_preoptimization_failure_never_promotes_production(
     tmp_path, monkeypatch
 ):
-    guess = geometry("guess", 3.2)
-    calls = []
+    guess = replace(geometry("guess", 3.2), frozen_indices=[0])
+    preoptimized = replace(guess, coords=guess.coords.copy())
+    monkeypatch.setattr(
+        phase2,
+        "optimize_bounded",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            cluster=preoptimized, converged=False
+        ),
+    )
+    monkeypatch.setattr(
+        phase2,
+        "gradient",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("qualification failed")),
+    )
+    monkeypatch.setattr(
+        phase2,
+        "optimize",
+        lambda *_args: pytest.fail("production optimization was reached"),
+    )
 
-    def fail_preopt(cluster, settings):
-        calls.append(settings)
-        raise RuntimeError("preoptimization failed")
-
-    monkeypatch.setattr(phase2, "optimize", fail_preopt)
-
-    with pytest.raises(RuntimeError, match="preoptimization failed"):
+    with pytest.raises(RuntimeError, match="qualification failed"):
         phase2.optimize_reactant_complex(tmp_path, guess, CHEAP)
 
-    assert calls == [DftSettings(xc="hf", basis="sto-3g")]
-    assert not (tmp_path / "complex_preopt.xyz").exists()
+    assert (tmp_path / "complex_preopt.xyz").exists()
     assert not (tmp_path / "complex.xyz").exists()
+    receipt = json.loads((tmp_path / "complex_preopt.json").read_text())
+    assert receipt["production_qualification"]["status"] == "failed"
+    assert receipt["production_qualification"]["error_type"] == "RuntimeError"
 
 
 def test_reactant_complex_resumes_preoptimization_before_production(
     tmp_path, monkeypatch
 ):
     guess = replace(geometry("guess", 3.2), frozen_indices=[0])
-    preoptimized = replace(guess, coords=guess.coords + 0.01)
-    phase2.save_xyz(preoptimized, tmp_path / "complex_preopt.xyz")
+    preoptimized = replace(guess, coords=guess.coords.copy())
+    preoptimized.coords[1:] += 0.01
     production_settings = DftSettings(
         xc="b3lyp", basis="def2-svp", density_fit=True, use_gpu=True
     )
+    monkeypatch.setattr(
+        phase2,
+        "optimize_bounded",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            cluster=preoptimized, converged=False
+        ),
+    )
+    monkeypatch.setattr(phase2, "gradient", lambda *_args: np.full((5, 3), 0.01))
+    monkeypatch.setattr(phase2, "optimize", lambda cluster, _settings: cluster)
+    phase2.optimize_reactant_complex(tmp_path, guess, production_settings)
+    (tmp_path / "complex.xyz").unlink()
     calls = []
 
     def fake_optimize(cluster, settings):
         calls.append((cluster, settings))
         return replace(cluster, coords=cluster.coords + 0.01)
 
+    monkeypatch.setattr(
+        phase2,
+        "optimize_bounded",
+        lambda *_args, **_kwargs: pytest.fail("qualified preopt was recomputed"),
+    )
+    monkeypatch.setattr(
+        phase2,
+        "gradient",
+        lambda *_args: pytest.fail("production qualification was recomputed"),
+    )
     monkeypatch.setattr(phase2, "optimize", fake_optimize)
 
     phase2.optimize_reactant_complex(tmp_path, guess, production_settings)
@@ -244,6 +295,117 @@ def test_reactant_complex_resumes_preoptimization_before_production(
     assert resumed.spin == guess.spin
     assert resumed.frozen_indices == guess.frozen_indices
     assert resumed.coords == pytest.approx(preoptimized.coords, abs=1e-9)
+
+
+def test_advisory_preoptimization_rejects_frozen_shell_drift(tmp_path, monkeypatch):
+    guess = replace(geometry("guess", 3.2), frozen_indices=[0])
+    drifted = replace(guess, coords=guess.coords.copy())
+    drifted.coords[0, 0] += 0.0201
+    monkeypatch.setattr(
+        phase2,
+        "optimize_bounded",
+        lambda *_args, **_kwargs: SimpleNamespace(cluster=drifted, converged=False),
+    )
+    monkeypatch.setattr(
+        phase2,
+        "gradient",
+        lambda *_args: pytest.fail("raw frozen-shell guard was bypassed"),
+    )
+    monkeypatch.setattr(
+        phase2,
+        "optimize",
+        lambda *_args: pytest.fail("raw frozen-shell guard was bypassed"),
+    )
+
+    with pytest.raises(RuntimeError, match="exceeded its raw frozen-shell bound"):
+        phase2.optimize_reactant_complex(tmp_path, guess, CHEAP)
+
+    assert not (tmp_path / "complex_preopt.xyz").exists()
+
+
+def test_advisory_preoptimization_projects_small_frozen_drift(tmp_path, monkeypatch):
+    guess = replace(geometry("guess", 3.2), frozen_indices=[0])
+    drifted = replace(guess, coords=guess.coords.copy())
+    drifted.coords[0, 0] += 0.0115
+    monkeypatch.setattr(
+        phase2,
+        "optimize_bounded",
+        lambda *_args, **_kwargs: SimpleNamespace(cluster=drifted, converged=False),
+    )
+    monkeypatch.setattr(phase2, "gradient", lambda *_args: np.full((5, 3), 0.01))
+    monkeypatch.setattr(phase2, "optimize", lambda cluster, _settings: cluster)
+
+    endpoint = phase2.optimize_reactant_complex(tmp_path, guess, CHEAP)
+
+    assert endpoint.coords[0] == pytest.approx(guess.coords[0], abs=1e-10)
+    receipt = json.loads((tmp_path / "complex_preopt.json").read_text())
+    assert receipt["unprojected_maximum_frozen_coordinate_drift_a"] == pytest.approx(
+        0.0115
+    )
+    assert receipt["geometry_gate"]["maximum_frozen_coordinate_drift_a"] == 0.0
+
+
+def test_advisory_preoptimization_rejects_changed_atom_order(tmp_path, monkeypatch):
+    guess = replace(geometry("guess", 3.2), frozen_indices=[0])
+    reordered = replace(guess, symbols=["Si", "O", "O", "H", "H"])
+    monkeypatch.setattr(
+        phase2,
+        "optimize_bounded",
+        lambda *_args, **_kwargs: SimpleNamespace(cluster=reordered, converged=False),
+    )
+
+    with pytest.raises(RuntimeError, match="changed atom identity/order"):
+        phase2.optimize_reactant_complex(tmp_path, guess, CHEAP)
+
+
+def test_advisory_preoptimization_resume_is_bound_to_production_settings(
+    tmp_path, monkeypatch
+):
+    guess = replace(geometry("guess", 3.2), frozen_indices=[0])
+    preoptimized = replace(guess, coords=guess.coords.copy())
+    monkeypatch.setattr(
+        phase2,
+        "optimize_bounded",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            cluster=preoptimized, converged=False
+        ),
+    )
+    monkeypatch.setattr(phase2, "gradient", lambda *_args: np.full((5, 3), 0.01))
+    monkeypatch.setattr(phase2, "optimize", lambda cluster, _settings: cluster)
+    phase2.optimize_reactant_complex(tmp_path, guess, CHEAP)
+    (tmp_path / "complex.xyz").unlink()
+
+    with pytest.raises(RuntimeError, match="receipt signature mismatch"):
+        phase2.optimize_reactant_complex(
+            tmp_path, guess, replace(CHEAP, density_fit=True)
+        )
+
+
+@pytest.mark.parametrize("receipt_state", [None, "pending"])
+def test_incomplete_advisory_checkpoint_is_preserved_and_recomputed(
+    tmp_path, monkeypatch, receipt_state
+):
+    guess = replace(geometry("guess", 3.2), frozen_indices=[0])
+    phase2.save_xyz(guess, tmp_path / "complex_preopt.xyz")
+    if receipt_state is not None:
+        (tmp_path / "complex_preopt.json").write_text(
+            json.dumps({"production_qualification": {"status": receipt_state}})
+        )
+    calls = []
+
+    def fake_bounded(*_args, **_kwargs):
+        calls.append("bounded")
+        return SimpleNamespace(cluster=guess, converged=False)
+
+    monkeypatch.setattr(phase2, "optimize_bounded", fake_bounded)
+    monkeypatch.setattr(phase2, "gradient", lambda *_args: np.full((5, 3), 0.01))
+    monkeypatch.setattr(phase2, "optimize", lambda cluster, _settings: cluster)
+
+    phase2.optimize_reactant_complex(tmp_path, guess, CHEAP)
+
+    assert calls == ["bounded"]
+    assert list(tmp_path.glob("complex_preopt.incomplete-*.xyz"))
+    assert (tmp_path / "complex_preopt.json").exists()
 
 
 def test_existing_reactant_complex_skips_both_optimization_rungs(tmp_path, monkeypatch):

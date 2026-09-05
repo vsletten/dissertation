@@ -27,6 +27,7 @@ import json
 import os
 import sys
 import time
+from dataclasses import asdict, replace
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -49,7 +50,9 @@ from quarry.pipeline import (  # noqa: E402
     DftSettings,
     energy,
     frequencies,
+    gradient,
     optimize,
+    optimize_bounded,
 )
 from quarry.rates import rate_from_thermo, thermo_from_frequencies  # noqa: E402
 from quarry.store import Store, geometry_hash  # noqa: E402
@@ -73,6 +76,11 @@ MIN_PLAUSIBLE_DE_KJ = 20.0
 # The Phase-1 free-dimer anchor for the lattice-resistance comparison.
 SI_NEUTRAL_FREE_DIMER_DG_KJ = 113.05
 APPROACH_SEED_VERSION = 1
+ADVISORY_PREOPT_VERSION = 1
+ADVISORY_PREOPT_MAX_STEPS = 100
+ADVISORY_PREOPT_MIN_PAIR_A = 0.60
+ADVISORY_PREOPT_MAX_RAW_FROZEN_DRIFT_A = 0.020
+ADVISORY_PREOPT_MAX_PROJECTED_FROZEN_DRIFT_A = 1e-8
 
 # Per-element approach parameters (Angstrom).
 APPROACH = {
@@ -144,14 +152,19 @@ def save_xyz(cluster: Cluster, path: Path) -> None:
 
 
 def load_xyz(path: Path, template: Cluster) -> Cluster:
-    from dataclasses import replace
-
     lines = path.read_text().splitlines()
     n = int(lines[0])
     coords = np.array(
         [[float(x) for x in line.split()[1:4]] for line in lines[2 : 2 + n]]
     )
     return replace(template, coords=coords)
+
+
+def write_json_atomic(path: Path, payload: dict[str, object]) -> None:
+    """Publish a small campaign receipt without exposing a partial JSON file."""
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    temporary.replace(path)
 
 
 def approach_seed_signature(
@@ -220,21 +233,201 @@ def optimize_reactant_complex(
 
     The terminated crystallographic cluster plus newly placed attacker can be
     electronically strained even when its geometry passes collision gates.  A
-    checkpointed HF/STO-3G relaxation settles that guess before the advertised
-    production optimization.  Existing production checkpoints remain directly
-    resumable and are never mistaken for the cheap pre-optimization.
+    bounded HF/STO-3G relaxation conditions that guess before the advertised
+    production optimization.  HF convergence is explicitly advisory: only the
+    unchanged production optimizer and downstream minimum/saddle gates can
+    qualify a scientific result.  Existing production checkpoints remain
+    directly resumable and are never mistaken for the cheap pre-optimization.
     """
     complex_path = run_dir / "complex.xyz"
     if complex_path.exists():
         log("  resume: complex.xyz exists, skipping reactant pre-optimization")
         return load_xyz(complex_path, complex_guess)
 
+    def signature() -> dict[str, object]:
+        return {
+            "version": ADVISORY_PREOPT_VERSION,
+            "input_geometry_hash": geometry_hash(complex_guess.to_xyz()),
+            "method": "hf/sto-3g",
+            "max_steps": ADVISORY_PREOPT_MAX_STEPS,
+            "convergence_is_advisory": True,
+            "symbols": complex_guess.symbols,
+            "charge": complex_guess.charge,
+            "spin": complex_guess.spin,
+            "frozen_indices": sorted(complex_guess.frozen_indices),
+            "production_settings": asdict(settings),
+        }
+
+    def identity_and_collision_gate(endpoint: Cluster) -> float:
+        if endpoint.symbols != complex_guess.symbols:
+            raise RuntimeError("advisory preoptimization changed atom identity/order")
+        if (
+            endpoint.charge != complex_guess.charge
+            or endpoint.spin != complex_guess.spin
+        ):
+            raise RuntimeError("advisory preoptimization changed charge or spin")
+        if endpoint.frozen_indices != complex_guess.frozen_indices:
+            raise RuntimeError("advisory preoptimization changed the frozen shell")
+        if endpoint.coords.shape != complex_guess.coords.shape:
+            raise RuntimeError("advisory preoptimization changed coordinate shape")
+        if not np.all(np.isfinite(endpoint.coords)):
+            raise RuntimeError(
+                "advisory preoptimization produced non-finite coordinates"
+            )
+
+        delta = endpoint.coords[:, None, :] - endpoint.coords[None, :, :]
+        distances = np.linalg.norm(delta, axis=2)
+        distances[np.diag_indices_from(distances)] = np.inf
+        min_pair_a = float(np.min(distances))
+        if min_pair_a <= ADVISORY_PREOPT_MIN_PAIR_A:
+            raise RuntimeError(
+                f"advisory preoptimization produced a collision ({min_pair_a:.3f} A)"
+            )
+        return min_pair_a
+
+    def geometry_gate(endpoint: Cluster) -> dict[str, float]:
+        min_pair_a = identity_and_collision_gate(endpoint)
+        frozen = sorted(complex_guess.frozen_indices)
+        max_frozen_drift_a = (
+            float(
+                np.max(np.abs(endpoint.coords[frozen] - complex_guess.coords[frozen]))
+            )
+            if frozen
+            else 0.0
+        )
+        if max_frozen_drift_a > ADVISORY_PREOPT_MAX_PROJECTED_FROZEN_DRIFT_A:
+            raise RuntimeError(
+                "advisory preoptimization violated the frozen shell "
+                f"({max_frozen_drift_a:.6f} A)"
+            )
+        return {
+            "minimum_pair_distance_a": min_pair_a,
+            "maximum_frozen_coordinate_drift_a": max_frozen_drift_a,
+        }
+
     preopt_settings = DftSettings(xc="hf", basis="sto-3g")
-    preoptimized = checkpointed(
-        run_dir / "complex_preopt.xyz",
-        complex_guess,
-        lambda: optimize(complex_guess, preopt_settings),
-    )
+    preopt_path = run_dir / "complex_preopt.xyz"
+    receipt_path = run_dir / "complex_preopt.json"
+    if preopt_path.exists():
+        existing_receipt = (
+            json.loads(receipt_path.read_text()) if receipt_path.exists() else None
+        )
+        qualification = (
+            existing_receipt.get("production_qualification")
+            if isinstance(existing_receipt, dict)
+            else None
+        )
+        if existing_receipt is None or (
+            isinstance(qualification, dict) and qualification.get("status") == "pending"
+        ):
+            # A crash between checkpoint and qualification leaves no canonical
+            # reusable seed. Preserve it as evidence, then recompute from the
+            # authoritative raw geometry. A recorded qualification failure is
+            # deliberately not retried: that requires a changed scientific route.
+            checkpoint_hash = geometry_hash(preopt_path.read_text())[:12]
+            preopt_path.replace(
+                run_dir / f"complex_preopt.incomplete-{checkpoint_hash}.xyz"
+            )
+            if receipt_path.exists():
+                receipt_path.replace(
+                    run_dir / f"complex_preopt.incomplete-{checkpoint_hash}.json"
+                )
+            log("  incomplete advisory preoptimization preserved; recomputing")
+    if preopt_path.exists():
+        receipt = json.loads(receipt_path.read_text())
+        preoptimized = load_xyz(preopt_path, complex_guess)
+        gate = geometry_gate(preoptimized)
+        if receipt.get("signature") != signature():
+            raise RuntimeError("advisory preoptimization receipt signature mismatch")
+        if receipt.get("endpoint_geometry_hash") != geometry_hash(
+            preoptimized.to_xyz()
+        ):
+            raise RuntimeError("advisory preoptimization endpoint hash mismatch")
+        if receipt.get("geometry_gate") != gate:
+            raise RuntimeError("advisory preoptimization geometry receipt mismatch")
+        qualification = receipt.get("production_qualification")
+        if (
+            not isinstance(qualification, dict)
+            or qualification.get("status") != "passed"
+        ):
+            raise RuntimeError(
+                "advisory preoptimization failed production qualification"
+            )
+        log(
+            "  resume: qualified advisory complex_preopt.xyz exists "
+            f"(HF converged={receipt.get('optimizer_converged')})"
+        )
+    else:
+        result = optimize_bounded(
+            complex_guess,
+            preopt_settings,
+            max_steps=ADVISORY_PREOPT_MAX_STEPS,
+        )
+        # Validate the optimizer object before the XYZ/template round trip can
+        # restore metadata and accidentally hide atom-order or state corruption.
+        identity_and_collision_gate(result.cluster)
+        frozen = sorted(complex_guess.frozen_indices)
+        raw_max_frozen_drift_a = (
+            float(
+                np.max(
+                    np.abs(result.cluster.coords[frozen] - complex_guess.coords[frozen])
+                )
+            )
+            if frozen
+            else 0.0
+        )
+        if raw_max_frozen_drift_a > ADVISORY_PREOPT_MAX_RAW_FROZEN_DRIFT_A:
+            raise RuntimeError(
+                "advisory preoptimization exceeded its raw frozen-shell bound "
+                f"({raw_max_frozen_drift_a:.6f} A)"
+            )
+        projected_coords = result.cluster.coords.copy()
+        projected_coords[frozen] = complex_guess.coords[frozen]
+        preoptimized = replace(result.cluster, coords=projected_coords)
+        save_xyz(preoptimized, preopt_path)
+        # The persisted geometry, rather than an unrounded in-memory object, is
+        # the exact seed that production qualification and resume must judge.
+        preoptimized = load_xyz(preopt_path, complex_guess)
+        gate = geometry_gate(preoptimized)
+        receipt: dict[str, object] = {
+            "schema": "phase2-advisory-preopt-v1",
+            "signature": signature(),
+            "endpoint_geometry_hash": geometry_hash(preoptimized.to_xyz()),
+            "optimizer_converged": result.converged,
+            "unprojected_maximum_frozen_coordinate_drift_a": (raw_max_frozen_drift_a),
+            "geometry_gate": gate,
+            "production_qualification": {"status": "pending"},
+        }
+        write_json_atomic(receipt_path, receipt)
+        try:
+            production_gradient = gradient(preoptimized, settings)
+            if not np.all(np.isfinite(production_gradient)):
+                raise RuntimeError(
+                    "production qualification returned a non-finite gradient"
+                )
+        except Exception as exc:
+            receipt["production_qualification"] = {
+                "status": "failed",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            }
+            write_json_atomic(receipt_path, receipt)
+            raise
+        receipt["production_qualification"] = {
+            "status": "passed",
+            "method": (
+                f"{settings.xc}/{settings.basis}{'/df' if settings.density_fit else ''}"
+            ),
+            "gradient_rms_hartree_per_bohr": float(
+                np.sqrt(np.mean(production_gradient**2))
+            ),
+            "gradient_max_hartree_per_bohr": float(np.max(np.abs(production_gradient))),
+        }
+        write_json_atomic(receipt_path, receipt)
+        log(
+            "  advisory HF preoptimization "
+            f"converged={result.converged}; production gradient qualified"
+        )
     return checkpointed(
         complex_path,
         preoptimized,
