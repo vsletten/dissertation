@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from types import SimpleNamespace
 
 import numpy as np
@@ -202,3 +203,69 @@ def test_dft_runs_four_by_three_matrix_and_uses_only_addition_ts(monkeypatch, tm
     assert result["cleavage_verified_saddle"] is False
     assert result["rejected_banked_transition_state_used"] is False
     assert (tmp_path / "production-closeout/dft-summary.json").is_file()
+    store_path = tmp_path / "production-closeout/store.sqlite"
+    assert store_path.is_file()
+    with sqlite3.connect(store_path) as connection:
+        assert connection.execute("SELECT count(*) FROM structures").fetchone()[0] == 4
+        assert connection.execute("SELECT count(*) FROM jobs").fetchone()[0] == 17
+        assert connection.execute(
+            "SELECT value FROM results WHERE key = 'production_dg_dagger'"
+        ).fetchone()[0] == pytest.approx(result["production_dg_dagger_kj_mol"])
+        analysis = connection.execute(
+            "SELECT status, detail FROM jobs WHERE kind = 'analysis'"
+        ).fetchone()
+        assert analysis[0] == "done"
+        assert json.loads(analysis[1])["rejected_banked_transition_state_used"] is False
+
+
+def test_dft_resume_with_complete_receipts_skips_gpu_import_preflight(
+    monkeypatch, tmp_path
+):
+    roles = (
+        "reactant",
+        "intermediate",
+        "addition-transition-state",
+        "released-product",
+    )
+    route = closeout.AcceptedRoute(
+        evidence_root=tmp_path,
+        clusters={role: cluster(role) for role in roles},
+        frequencies={role: frequency(-10.0) for role in roles},
+        validation={"route": list(roles)},
+    )
+    energy_root = tmp_path / "production-closeout/energies"
+    energy_root.mkdir(parents=True)
+    for method, settings in closeout.method_settings(use_gpu=True).items():
+        slug = method.split("/")[0].replace("(", "-").replace(")", "")
+        for role, current in route.clusters.items():
+            (energy_root / f"{role}.{slug}.energy.json").write_text(
+                json.dumps(
+                    {
+                        "method": method,
+                        "electronic_hartree": -10.0,
+                        "geometry_fingerprint": (
+                            closeout.production.frequency_geometry_fingerprint(current)
+                        ),
+                        "settings_fingerprint": (
+                            closeout.production.frequency_settings_fingerprint(settings)
+                        ),
+                    }
+                )
+            )
+    monkeypatch.setattr(
+        closeout.path_driver,
+        "preflight_gpu_contraction_engine",
+        lambda *_: pytest.fail("complete receipt resume must not import GPU engine"),
+    )
+    monkeypatch.setattr(
+        closeout.production,
+        "thermo",
+        lambda current_frequency, electronic: SimpleNamespace(
+            gibbs=electronic * closeout.HARTREE_TO_KJ
+        ),
+    )
+
+    result = closeout.run_dft(route, use_gpu=True)
+
+    assert result["status"] == "dft-completed"
+    assert (tmp_path / "production-closeout/store.sqlite").is_file()

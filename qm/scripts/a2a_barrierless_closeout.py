@@ -31,6 +31,7 @@ import numpy as np
 from quarry import pipeline
 from quarry.clusters import Cluster
 from quarry.pipeline import HARTREE_TO_KJ, DftSettings, FrequencyResult
+from quarry.store import Store
 from scripts import a2a_path_rebuild as path_driver
 from scripts import production_energetics as production
 
@@ -282,6 +283,10 @@ def method_settings(use_gpu: bool) -> dict[str, DftSettings]:
     }
 
 
+def method_slug(method: str) -> str:
+    return method.split("/")[0].replace("(", "-").replace(")", "")
+
+
 def checkpoint_closeout_energy(
     path: Path,
     cluster: Cluster,
@@ -340,8 +345,88 @@ def checkpoint_closeout_energy(
     return value
 
 
+def record_store(
+    path: Path,
+    route: AcceptedRoute,
+    energies: dict[str, dict[str, float]],
+    summary: dict[str, Any],
+    *,
+    use_gpu: bool,
+) -> None:
+    """Atomically publish the route's structures, jobs, and derived barriers."""
+    temporary = path.with_name(f".{path.name}.{time.time_ns()}.tmp")
+    temporary.unlink(missing_ok=True)
+    with Store(temporary) as store:
+        structure_ids = {
+            role: store.add_structure(
+                f"si-neutral-{role}",
+                cluster.formula,
+                cluster.to_xyz(),
+                charge=cluster.charge,
+                spin=cluster.spin,
+            )
+            for role, cluster in route.clusters.items()
+        }
+        for role, frequency in route.frequencies.items():
+            job = store.add_job(
+                structure_ids[role],
+                "freq",
+                production.R2SCAN3C_METHOD,
+                "pyscf",
+                detail=json.dumps(
+                    {"closeout_version": CLOSEOUT_VERSION}, sort_keys=True
+                ),
+            )
+            store.set_job_status(job, "done")
+            store.add_result(job, "electronic", frequency.electronic_hartree, "hartree")
+            store.add_result(job, "imaginary_count", frequency.n_imaginary, "count")
+        for method, values in energies.items():
+            for role, value in values.items():
+                job = store.add_job(
+                    structure_ids[role],
+                    "sp",
+                    method,
+                    "gpu4pyscf" if use_gpu else "pyscf",
+                    detail=json.dumps(
+                        {"closeout_version": CLOSEOUT_VERSION}, sort_keys=True
+                    ),
+                )
+                store.set_job_status(job, "done")
+                store.add_result(job, "electronic", value, "hartree")
+        analysis = store.add_job(
+            structure_ids["addition-transition-state"],
+            "analysis",
+            CLOSEOUT_VERSION,
+            "quarry",
+            detail=json.dumps(
+                {
+                    "route_validation_sha256": summary["route_validation_sha256"],
+                    "rejected_banked_transition_state_used": False,
+                    "cleavage_verified_saddle": False,
+                },
+                sort_keys=True,
+            ),
+        )
+        store.set_job_status(analysis, "done")
+        for method, value in summary["electronic_barriers_kj_mol"].items():
+            store.add_result(
+                analysis,
+                f"electronic_barrier::{method}",
+                float(value),
+                "kJ/mol",
+            )
+        for name, value in summary["same_geometry_barrier_shifts_kj_mol"].items():
+            store.add_result(analysis, f"barrier_shift::{name}", float(value), "kJ/mol")
+        store.add_result(
+            analysis,
+            "production_dg_dagger",
+            float(summary["production_dg_dagger_kj_mol"]),
+            "kJ/mol",
+        )
+    temporary.replace(path)
+
+
 def run_dft(route: AcceptedRoute, *, use_gpu: bool) -> dict[str, Any]:
-    path_driver.preflight_gpu_contraction_engine(use_gpu)
     output_root = route.evidence_root / "production-closeout"
     energy_root = output_root / "energies"
     energy_root.mkdir(parents=True, exist_ok=True)
@@ -349,8 +434,15 @@ def run_dft(route: AcceptedRoute, *, use_gpu: bool) -> dict[str, Any]:
 
     energies: dict[str, dict[str, float]] = {}
     settings_by_method = method_settings(use_gpu)
+    expected_receipts = [
+        energy_root / f"{role}.{method_slug(method)}.energy.json"
+        for method in settings_by_method
+        for role in route.clusters
+    ]
+    if not all(path.is_file() for path in expected_receipts):
+        path_driver.preflight_gpu_contraction_engine(use_gpu)
     for method, settings in settings_by_method.items():
-        slug = method.split("/")[0].replace("(", "-").replace(")", "")
+        slug = method_slug(method)
         energies[method] = {}
         for role, cluster in route.clusters.items():
             energies[method][role] = checkpoint_closeout_energy(
@@ -405,6 +497,9 @@ def run_dft(route: AcceptedRoute, *, use_gpu: bool) -> dict[str, Any]:
         "cleavage_verified_saddle": False,
         "rejected_banked_transition_state_used": False,
     }
+    store_path = output_root / "store.sqlite"
+    record_store(store_path, route, energies, payload, use_gpu=use_gpu)
+    payload["store_sha256"] = production.sha256_path(store_path)
     production.atomic_json(output_root / "dft-summary.json", payload)
     return payload
 

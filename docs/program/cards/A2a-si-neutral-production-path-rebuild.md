@@ -1,6 +1,6 @@
 # A2a-si-neutral-production-path-rebuild — replace the invalid banked saddle
 
-- status: active
+- status: done
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
@@ -65,7 +65,41 @@ CCSD(T)/CBS calibration triangle (ByteQC canonical + Psi4 TightPNO DLPNO).
 - Targeted + complete QM tests, whole-tree Ruff check/format, CLI smokes, and
   `git diff --check` pass. Result updates A2, CALCULATIONS.md, PLAN, and STATUS.
 
+## Result
+
+**DONE.** The accepted production path is sequential: a verified
+reactant→addition-TS→associative-intermediate elementary step followed by a
+complete-grid `barrierless-shelf` cleavage and downhill release into the exact
+typed hydrolyzed-product minimum. The rejected banked transition state is not
+used. The wB97M-V/def2-TZVPD+SMD production barrier is **134.504248 kJ/mol
+electronic** and **142.806783 kJ/mol ΔG‡**; the r2SCAN-3c and B3LYP-D4 electronic
+barriers are **125.742278** and **148.293616 kJ/mol**. All four structures, four
+frequency jobs, twelve single points, and eight derived barrier/shift results
+are published in the 17-job external quarry store.
+
+The directive-adjusted coupled-cluster route uses the canonical cc-pVTZ barrier
+plus the complete TightPNO TZ/QZ CBS basis correction. It yields a
+**132.960133 kJ/mol focal-point barrier**. The independently complete TZ
+barriers are canonical **128.085164** and TightPNO **128.330864 kJ/mol**, so
+DLPNO−canonical is **+0.245700 kJ/mol** and the predeclared `≤2 kJ/mol` gate
+passes. Canonical TS/QZ was deliberately not computed; no value is inferred for
+it. The accepted canonical reactant/QZ receipt remains an absolute anchor and
+the complete TightPNO pair supplies the basis correction.
+
+Durable evidence: `production-closeout/route-validation.json` SHA-256
+`c601ce99604eaad898753ed21651d70b5ade1adad02618c5655c66b28d10be29`;
+`dft-summary.json` SHA-256
+`deedb69d4a2d2f147d722a9df39adfb0741989f0904cd247a4fa4cb240e80efd`;
+`store.sqlite` SHA-256
+`e758680c905d3ea74cef47f4ebeeaed5e42b7ab698b6b156e85a109d9f7ca3b5`;
+`cc-calibration/focal-point-summary.json` SHA-256
+`2df64b9f1987f8e8924199bb51005156031c38e580bbcd958244a3956e340ff1`.
+Fresh closeout gates: **520 passed, 1 skipped**, whole-tree Ruff check and format,
+Python compile, both real CLI closeouts, and `git diff --check`.
+
 ## Progress
+
+- 2026-09-05 08:07 PDT (hermes-custom-build-001; profile=workstation) — **A2a production closeout is complete.** The terminal TightPNO service receipt reports `outcome=success`; TS/QZ, reactant/TZ, and TS/TZ scientific receipts rehash to `4284e741...`, `147f1a60...`, and `1d3294ab...`. A new fail-closed `summarize-focal` route validates exact geometry/state and receipt arithmetic, refuses a canonical TS/QZ selector, and computes the directive-adjusted focal barrier `132.960133 kJ/mol`; the independent TZ barrier delta is `+0.245700 kJ/mol`, passing the `2 kJ/mol` gate. The resume-safe DFT closeout now publishes a 17-job quarry store from the twelve existing receipt-bound single points without importing the unavailable GPU engine. External focal/store hashes and the final scientific verdict are recorded in `## Result`; fresh full gates are `520 passed, 1 skipped`, Ruff/format/compile/diff and real CLI closeouts green.
 
 - 2026-09-05 04:19 PDT (hermes-custom-build-001; profile=workstation) — **the corrected remaining-matrix continuation is durably computing TS/cc-pVQZ TightPNO; no energy or receipt is claimed yet.** Exact clean/pushed launch head `bafd148b743d549a13eaa64db117dbee20f648b9` differs from implementation identity `63d604d51a7aa63b33d677d356e13ac8c758fb3c` only in this card and program STATUS. Finite system unit `a2a-task220-psi4-remaining.service` is active at invocation `ab3045f281ed4db39fbbbd6ef7d88ffd` under the unchanged `30 h`, `42 GiB` RAM, `8 GiB` swap, `16`-core, nice-10 envelope; running receipt stage is `ts-qz`, and engine readback shows the exact `cc-pVQZ` 1,552-function auxiliary basis plus live DF-RHF iterations. Psi4 child PID `414810` accrued 80 CPU-seconds in a fresh five-second sample. Both email pipelines, watchdog/deploy-watch timers, and Honcho are intentionally isolated; the 29-hour restoration dead-man is active. Corrected launcher SHA-256 remains `6cfc535fa1e1146410597e4a8d95f8929f39ce885f1ff5c530a0dd71eb623a87`. Terminal blocker is the atomic `psi4-remaining-20260905.status.json`; the next worker must adjudicate its outcome and all three receipt hashes before focal-point/docs/PR closeout.
 
