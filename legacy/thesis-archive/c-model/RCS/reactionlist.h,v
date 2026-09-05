@@ -1,0 +1,42 @@
+head	1.1;
+access;
+symbols;
+locks
+	sletten:1.1; strict;
+comment	@ * @;
+
+
+1.1
+date	98.06.25.03.29.36;	author sletten;	state Exp;
+branches;
+next	;
+
+
+desc
+@working baseline
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@#ifndef reactionlist_h
+#define reactionlist_h
+
+/* reaction: Gives reactant and product states for given reaction,
+ *           and reaction rate. */
+struct reaction {
+  int   reactant,  /* reactant state */
+        info,      /* multi-purpose info */
+        nrates;    /* number of actual rates */
+  float *rate;     /* reaction rate list since actual rate
+                    * depends on next neighbors' states */
+};
+
+
+typedef struct reaction *reactionList;
+
+#endif
+@

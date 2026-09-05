@@ -77,3 +77,25 @@ and Sella's step radius was capped at `0.03 A`. The 300-step run never escaped
 point: reject wall-supported/nonconverged geometries and pivot to a bounded
 full-system local eigenvector-following or dimer search rather than increasing
 the radius, weakening `fmax`, or replaying the same active-subspace attempt.
+
+### Early-TS crests can sit under the scan peak tolerance (2026-08-28)
+H+CO's crest at r≈1.9 Å cleared its neighbor by only 2e-5 Ha — under
+`scan_to_maximum`'s 5e-5 anti-noise tolerance — so the scan extended into
+the product well and raised ScanNoMaximumError despite a genuine interior
+maximum 9.6 kJ/mol above the entrance. For flat-approach early TSs, fall
+back to the interior *global* maximum (guarded against endpoint maxima and
+noise-level rises) and let Sella + the chemical-mode gate be the acceptance.
+
+### Wet-cluster stationary points carry spectator imaginaries <100 cm⁻¹ (2026-08-28)
+At production convergence, physisorbed water librations sit numerically
+imaginary (observed live: 52.8i beside a healthy 678i TS mode; 76.5i and
+32.8i on pre-reactive complexes). Flat noise floors sized for gas-phase
+work (30–50 cm⁻¹) fail correct wet structures. Tier the gates: gas strict,
+wet sites 100 cm⁻¹ spectator tolerance with the full imaginary list
+disclosed in results; keep the ≥200 cm⁻¹ single-chemical-mode gate.
+
+### Pre-optimize hand-built water networks before constrained scans (2026-08-28)
+A first *pinned* scan point that also has to settle a seeded water network
+walks through strained geometries and can diverge the SCF (DFUKS scanner
+death 35 geomeTRIC steps into h-h2co-h2-hco-2w's first point). Relax wet
+seeds unconstrained first (checkpointed), then drive the coordinate.

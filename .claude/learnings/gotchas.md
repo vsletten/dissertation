@@ -150,3 +150,11 @@ scratch, and MO output at once and OOMs inside an 18 GB QI2 lease. The productio
 adapter now keeps the ordinary bounded auxiliary blocks and replaces only the
 transform helper: AO unpack gets independent scratch, while the prior MO buffer
 is reused only for the equally sized final MO result.
+
+### Cluster.to_xyz embeds the name — never hash it for caching (2026-08-28)
+`to_xyz()` puts `comment or self.name` on line 2, and a checkpoint-resumed
+cluster inherits its load template's name (`load_xyz(path, ts)` → name
+"…-ts", fresh IRC output → "…-ts-back"). D2b's CC receipt cache keyed on
+sha256(to_xyz()) and hit "identity drift" on identical coordinates across a
+resume. Hash `to_xyz(comment="geometry")` (or coords directly) for any
+geometry-keyed cache.

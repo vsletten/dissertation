@@ -1,0 +1,10 @@
+FROM --platform=linux/arm64 python:3.11.15-bookworm@sha256:a8f8fbe1a0edc9e4dddafa64ba73f7e04be7be5ebc23f332362e779e0a2e4e52
+
+WORKDIR /archive
+COPY c-model/source /archive/c-model/source
+COPY c-model/compat /archive/c-model/compat
+COPY c-model/conformance-toolchain.json /archive/c-model/conformance-toolchain.json
+COPY golden-runs /archive/golden-runs
+COPY tools/run_c_model_conformance.py /archive/tools/run_c_model_conformance.py
+
+ENTRYPOINT ["python3", "/archive/tools/run_c_model_conformance.py", "--source", "/archive/c-model/source", "--fixtures", "/archive/golden-runs", "--toolchain-lock", "/archive/c-model/conformance-toolchain.json", "--report", "/out/conformance-report.json", "--markdown", "/out/conformance-report.md", "--compiler", "gcc", "--jobs", "4", "--run-root", "/out/runs"]

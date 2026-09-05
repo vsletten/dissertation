@@ -16,6 +16,83 @@ appended by the PR that did it: `date — actor — what + pointer`.
 
 - 2026-09-04 21:36 PDT (hermes-custom-build-001; profile=workstation) — TASK-249 closed the A2a canonical reactant/cc-pVQZ bottleneck: the atomic CCSD(T) receipt completed after `105.570297 h` with triples `-0.0901434944124883 Eh` and total `-1184.7350551217924 Eh` (receipt SHA `f4aec84e...`). Exact source/input/restart identity, receipt arithmetic, 75,902-row resource telemetry, `32` focused CC tests, Ruff, diff checks, and full runtime restoration pass. A2a returns to four TightPNO receipts, the reactant/QZ DLPNO-vs-canonical delta, directive-adjusted barrier/focal-point/docs/store, and its single final PR; Victor's 2026-09-04 routing directive forbids any additional canonical CCSD(T)/QZ slow-mode campaign and sends TS/QZ through DLPNO.
 
+- 2026-09-03 — (hermes-macbot-zero; profile=laptop) — A8d ligand-promotion
+  scoping DONE with a CONDITIONAL GO: later kaolinite kinetics make adjacent
+  edge-Al occupancy—not the recovered single-Al dimer—the defensible mechanism
+  test. The memo ranks 18 DFT-LEDGER IDs, separates archival thermochemistry
+  from later experimental/computational evidence, defines pH/speciation,
+  hydration, BSSE, surface, IRC, and matched-control gates, and bounds the full
+  14-system slice at 168-280 GPU-hours before retry reserve. No DFT launched;
+  workstation card A8e is filed and blocked on A3. Memo:
+  `docs/scoping/ligand-promoted-aluminosilicate-dissolution.md`.
+
+- 2026-09-03 — (hermes-macbot-zero; profile=laptop) — A8c Table 4.10(c)
+  erratum DONE: five ledger-named Gaussian logs independently reproduce
+  `+0.295795 Eh = +776.609666 kJ/mol = +185.614165 kcal/mol`; the available
+  archive chain preserves `185.6114` in `dft/txt/rxns.txt`, changes it to
+  `183.6114` in `dft/tex/tbls.tex`, and rounds that to the thesis's `183.6`.
+  Verdict: high-confidence transcription error, with no archived thesis, PDF,
+  or A8 ledger bytes altered. Evidence:
+  `legacy/thesis-archive/TABLE-4.10C-ERRATUM.md`.
+
+- 2026-09-03 02:42 PDT — (hermes-custom-build-001; profile=workstation) — E3a
+  bounded classical-NEB campaign DONE: neutral route-1 replication is 68.414811
+  vs 67.644151 kcal/mol (+1.1393%); local-dehydroxylate Ar is 64.095991; three
+  extended-zone geometries are 68.410690–68.411538; and the Xe screen is
+  90.744700 kcal/mol. All six NEBs are honestly `incomplete-convergence` at the
+  requested whole-replica norm despite ≤0.0101 kcal/mol late barrier spans.
+  The octahedral seed leaves its assigned cage and remains
+  `incomplete-index-gate`; delamination remains `incomplete-input-contract`, so
+  both proxies stay. Typed deck fragment and hash-verified 253-file evidence:
+  `docs/program/results/E3a-classical-neb-barriers.md`.
+
+- 2026-09-02 — (hermes-macbot-zero; profile=laptop) — A8a legacy C KMC
+  conformance harness DONE: content-locked GCC 12.2.0/Linux ARM container,
+  source-byte-preserving header and allocator compatibility layers, five bounded
+  5,000,000-step replays, strict output comparator, diffusion/cross-host controls,
+  and a fail-closed sabotage gate. DEVIATION: all five executions completed but
+  differ behaviorally from the archive (first trajectory divergences 97/1/1/1/38;
+  terminal-surface row counts differ), so canonical conformance is honestly red.
+  ASAN exposed preserved allocator-dependent reads at `rxnlist.c:93` and
+  `lattice.c:271`; evidence and Rust-port follow-up live in
+  `legacy/thesis-archive/c-model/PORTABILITY-LIMITATIONS.md`, with exact outcomes
+  in `conformance-report.{json,md}`.
+
+- 2026-09-02 — (hermes-custom-build-001; profile=workstation) — E3a atomistic
+  input contract implemented: source-constrained, hash-pinned fixture generation
+  now defines the local dehydroxylate, extended-defect sensitivity family,
+  geometric vacant-M1 seed for the recoil-derived reservoir, Xe/ClayFF screen,
+  reconstructed neutral charge compensation, and two-end LAMMPS run-0
+  validation. The octahedral candidate remains honestly typed
+  `incomplete-no-minimum`; E3a may run it only after the prescribed minimum
+  gate. Results:
+  `docs/program/results/E3a-atomistic-input-contract.md`.
+
+- 2026-09-02 22:17 PDT — (hermes-custom-build-001; profile=workstation) —
+  E3a replication gate CLOSED / campaign BLOCKED: recovered the Nteme 2022
+  1,512-atom ClayFF structure and 1,080 barriers, then obtained a provisional
+  divacancy route-1 near-match at 68.956 vs 67.644 kcal/mol (+1.94%). The
+  source-required remote compensation sites are omitted from the workbook, so
+  the run's net -3 e Hamiltonian is not a valid replication. No
+  dehydroxylate/extended-zone/trap/Xe number was invented; evidence and harness
+  are in `docs/program/results/E3a-classical-neb-barriers.md`.
+
+- 2026-09-02 — (hermes-custom-build-001; profile=workstation) — A8 thesis
+  archive intake DONE: all 1,426 source files independently inventoried/rehashed;
+  88 KMC runs cataloged; both original C snapshots, 30 RCS archives, and five
+  golden runs curated; all 83 Gaussian result logs covered by a fixed-schema
+  ledger with 45 Chapter 4 reaction energies and an honest zero-TS/barrier
+  verdict; archived and clean-built thesis PDFs retained. Follow-ups A8a–A8d
+  own KMC parity, modern barriers, the Table 4.10(c) discrepancy, and ligand
+  scoping. Evidence and reproduction commands: `legacy/thesis-archive/CATALOG.md`.
+
+- 2026-09-01 — (hermes-8d9e30fee91548; profile=laptop) — C3 pit
+  statistics DONE: 12,032 deterministic passive-film replicas, censor-aware
+  Weibull/bootstrap and survival/hazard diagnostics, pit size/event-depth +
+  fixed-occupancy clustering distributions, 157.0× nucleation-rate scaling,
+  and a four-size half-initiation crossover point estimate land at
+  `docs/program/results/C3-pit-statistics.md`.
+
 - 2026-08-31 09:49 PDT (hermes-custom-build-001; profile=workstation) — A2a canonical reactant/QZ advanced to cumulative converged CCSD cycle 28 (`E_corr=-2.391227800954846 Eh`; checkpoint SHA `26f73c2a...`; marker SHA `834ea1bb...`), then an eighth exact 120-minute service again expired in slow-mode canonical `(T)` without a triples value, QZ receipt, or accepted partial total. Five-second cgroup sampling recorded 1,440 samples, `32.301662/34.147346 GiB` maximum current/peak memory, and `0.796658 GiB` maximum swap under unchanged 40 GiB/8 GiB/120m bounds. Runtime/services/QI2/GPU are restored. Resume from cycle 28 or a separately verified triples-capable route; six receipts plus focal-point/docs/PR closeout remain.
 
 - 2026-08-31 07:05 PDT (hermes-custom-build-001; profile=workstation) — A2a canonical reactant/QZ advanced to cumulative converged CCSD cycle 27 (`E_corr=-2.391227800875518 Eh`; checkpoint SHA `08f002f1...`; marker SHA `6d6bf46b...`), then a seventh exact 120-minute service again expired in slow-mode canonical `(T)` without a triples value, QZ receipt, or accepted partial total. Five-second cgroup sampling recorded 1,440 samples, `34.109318/34.113285 GiB` maximum current/peak memory, and zero swap under unchanged 40 GiB/8 GiB/120m bounds. Runtime/services/QI2/GPU are restored. Resume from cycle 27 or a separately verified triples-capable route; six receipts plus focal-point/docs/PR closeout remain.
@@ -66,6 +143,14 @@ appended by the PR that did it: `date — actor — what + pointer`.
 
 - 2026-08-29 00:03 PDT (hermes-custom-build-001; profile=workstation) — A2a's first canonical reactant/cc-pVQZ attempt exposed the cc-pVTZ full-auxiliary-block workaround as a 7.73 GB QZ OOM. Pushed head `28d801d` restores bounded DF blocks with a numerically verified frozen-core-safe transform, scoped monkeypatch, and source-hashed receipt identity; 466 QM tests and whole-tree Ruff gates pass. A 40-minute physical proof crossed the former OOM through converged RHF and into CCSD before deliberate stop, emitted no partial receipt, and restored services/QI2. Six CC receipts plus the focal-point/docs/PR closeout remain.
 
+- 2026-08-29 — fable — Fleet routing widened per Victor (POLICY v13 §10):
+  workstation runs two concurrent lanes (GPU stays single-lease via QI2),
+  macbots default-active for machine:any, cloud Hermes may hold one queue
+  task alongside PR watch. Board: E3a re-scoped machine:any (classical
+  potentials are CPU work), new C3-pit-statistics (READY, any) so
+  laptop/cloud workers have C-track science. A8 enqueued into the
+  workstation's second lane.
+
 - 2026-08-28 22:37 PDT (hermes-custom-build-001; profile=workstation) — A2a's exact addition-TS/cc-pVTZ ByteQC canonical CCSD(T) receipt completed in `4477.6269 s`; with the accepted reactant/TZ receipt it gives a finite-basis canonical electronic barrier of `128.085164 kJ/mol`. Two of eight CC receipts are now complete; six receipts, the focal-point gate, final docs/store, and one PR remain. Runtime/services and the QI2 lane are restored.
 
 - 2026-08-28 15:29 PDT (hermes-custom-build-001; profile=workstation) — A2a's barrierless I↔P follow-through is closed: fresh unconstrained release from exact product cell `(7,7)` moves `0.2510 A`, drops `0.9169 kJ/mol`, preserves exact typed P, and has zero finite-difference imaginary modes (lowest real `32.64 cm^-1`). Adversarial review rejected and quarantined the earlier `(2,7)` release with one `30.88 cm^-1` imaginary mode. Pushed head `be96273`; 457 QM tests and whole-tree lint/format pass; evidence v7 is 982 files / 10,300,380 bytes (`a22dbd1eb93ab21c...`). Remaining: production/method-shift/CC energetics and final one-PR documentation closeout using the accepted R↔I saddle as route TS.
@@ -89,6 +174,19 @@ appended by the PR that did it: `date — actor — what + pointer`.
 - 2026-08-28 03:52 PDT (hermes-custom-build-001; profile=workstation) — A2a's production coupled scan is crash-durable at 18/81 exact cells and has completed both initial Si--Obr rows. All accepted cells remain finite and pass typed-topology, H16-water-ownership, intact-Si--Obr, and `1e-4 A` residual gates. The bounded systemd cgroup stopped during unaccepted `(2,0)`, cleanup marked the status interrupted, and all shared services plus the QI2 GPU lane are restored. No classifier, saddle, IRC, production/CC energy, barrier, or PR exists; resume at `(2,0)`.
 
 - 2026-08-28 00:58 PDT (hermes-custom-build-001; profile=workstation) — A2a's production coupled scan is crash-durable at 3/81 exact cells; all three have finite r2SCAN-3c energies, typed associative topology, and distance residuals below `4.35e-6 A`. The bounded worker stopped before classification after catching the email watchdog defeating GPU isolation; the external launcher now stops/restores that timer and resumes at `(0,3)`. No saddle, IRC, production/CC energy, barrier, or PR exists yet.
+
+- 2026-08-28 — fable (hermes-custom-build-001; profile=workstation) —
+  D2b done: explicit-surface rate campaign, 10/10 reactions clean on
+  the 4090 (surface PFs + open-shell UCCSD(T)/CBS + (H₂O)₁,₂ site
+  sampling). Gate verdict NO-GO with receipts — no D3b rate table
+  (addition/H+CO 25–1600× under the Simons-corrected anchor at
+  10–20 K; Eckart-vs-instanton is the isolated residual) — but the
+  barrier tier validates (1w abstraction = S&K's surface 3030 K to
+  2 K) and abstraction k(T) lands in-spread at every anchor. D2a's
+  "4–5 orders" decomposed; much of it was the anchor itself
+  (Simons+20 document the S&K fits as overestimates). New card
+  D2c-instanton-tier (READY) flips the gate; D3b re-blocked on D2c.
+  Results: docs/program/results/D2b-explicit-surface-rates.md.
 
 - 2026-08-27 23:57 PDT (hermes-custom-build-001; profile=workstation) — A2a's commissioned coupled-coordinate cleavage redesign now has a tested, resume-safe 9x9 r2SCAN-3c scan framework with fixed H16 mapping, atomic per-cell geometry/energy/topology receipts, and a topology-backed three-outcome classifier. Real I/P mapping and the complete 451-test QM suite pass; the production grid and classifier-selected saddle/shelf follow-through remain unrun and no barrier was emitted.
 
