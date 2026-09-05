@@ -1,11 +1,11 @@
 # A3a-reactant-minimum-recovery — recover the first Osa-neutral reactant basin
 
-- status: ready
+- status: active
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
 - depends: three hash-pinned A3 Osa-neutral n=1 failed receipts
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## Objective
 
@@ -76,6 +76,7 @@ n=2..4, or proceed to a saddle/barrier until the n=1 reactant basin closes.
 
 ## Progress
 
+- 2026-09-05 14:27 PDT (hermes-custom-build-001; profile=workstation) — Implemented the bounded A3a route: exact original O-H distance constraints are combined with the frozen shell for a cheap conditioning rung, then released into a fresh B3LYP/def2-SVP/DF optimizer with one and only one endpoint-bound continuation. Every production endpoint is atomically paired with input/settings/seed/geometry receipts; `complex.xyz` is withheld until optimizer convergence, an independent final-gradient gate, exact microstate/shell/collision checks, and the PHVA zero-significant-imaginary-mode gate pass. Added the hash-gated external runner and mechanically revalidated all three pinned failure receipts; the latest advisory seed was rejected for exactly `H50:O26->O31`, `H52:O27->O32`, and `H57:O29->O20` before any production call. Forty-seven focused CPU-only regressions plus changed-file Ruff/format and diff checks pass; production has not yet launched.
 - 2026-09-05 10:19 PDT (hermes-custom-build-001; profile=workstation) — Pre-PR adversarial review found the generic Phase-2 publication path still trusted unsigned `complex.xyz`, failed to gate the production optimizer's returned geometry, omitted reactant-minimum and quick-IRC basin acceptance, and left stale `results.json`/`store.sqlite` canonical on a failed rerun. The code-only recovery slice now binds production checkpoints to exact input/settings/hash/geometry receipts, applies proton/frozen-shell/collision gates after production, rejects imaginary reactants and wrong IRC endpoints, and quarantines stale canonical outputs before live work. Thirty focused CPU-only tests plus Ruff/format/diff checks pass; no fourth calculation was launched.
 - 2026-09-05 09:50 PDT (hermes-custom-build-001; profile=workstation) — Created from A3's third fail-closed Osa-neutral n=1 attempt. Independent review confirmed strict production geometry-optimization exhaustion, no valid scientific output, a discarded production endpoint, and three changed termination-proton owners in the advisory seed. This card is the only authorized next calculation; identical replay and n=2..4 remain prohibited.
 

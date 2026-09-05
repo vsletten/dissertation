@@ -5,6 +5,8 @@ gate stays green in any session. The thermo cross-check gates quarry's
 own formulas against pyscf's audited harmonic implementation.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -339,6 +341,45 @@ class TestOptimization:
 
         with pytest.raises(RuntimeError, match="did not converge within 7 steps"):
             pipeline.optimize(water(), CHEAP, max_steps=7)
+
+    def test_bounded_optimization_combines_distance_and_frozen_constraints(
+        self, monkeypatch
+    ):
+        from dataclasses import replace
+
+        from pyscf.geomopt import geometric_solver
+
+        cluster = replace(water(), frozen_indices=[2])
+        monkeypatch.setattr(pipeline, "build_mol", lambda cluster, settings: object())
+        monkeypatch.setattr(pipeline, "_make_scf", lambda mol, settings: object())
+        captured = {}
+
+        class FakeMol:
+            natm = len(cluster.symbols)
+
+            def atom_symbol(self, index):
+                return cluster.symbols[index]
+
+            def atom_coords(self):
+                return cluster.coords / pipeline.BOHR_TO_ANGSTROM
+
+        def fake_kernel(method, **kwargs):
+            captured["constraint"] = Path(kwargs["constraints"]).read_text()
+            return False, FakeMol()
+
+        monkeypatch.setattr(geometric_solver, "kernel", fake_kernel)
+
+        result = pipeline.optimize_bounded(
+            cluster,
+            CHEAP,
+            max_steps=9,
+            fixed_distances=[(0, 1, 0.9572)],
+        )
+
+        assert result.converged is False
+        assert captured["constraint"] == (
+            "$set\ndistance 1 2 0.95720000\n$freeze\nxyz 3\n"
+        )
 
     def test_energy_decreases(self, opt_water):
         assert energy(opt_water, CHEAP) < energy(water(), CHEAP)

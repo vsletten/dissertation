@@ -294,17 +294,47 @@ class OptimizationResult:
 
 
 def optimize_bounded(
-    cluster: Cluster, settings: DftSettings, *, max_steps: int = 100
+    cluster: Cluster,
+    settings: DftSettings,
+    *,
+    max_steps: int = 100,
+    fixed_distances: list[tuple[int, int, float]] | None = None,
 ) -> OptimizationResult:
-    """Run a bounded geomeTRIC relaxation while preserving its convergence bit."""
+    """Run a bounded geomeTRIC relaxation while preserving its convergence bit.
+
+    ``fixed_distances`` is intentionally narrow: it supplies exact ``$set``
+    distance constraints for temporary basin conditioning.  A caller must make
+    a fresh unconstrained call when those coordinates are released; optimizer
+    state and the approximate Hessian are never carried across that boundary.
+    """
     from pyscf.geomopt.geometric_solver import kernel as geometric_kernel
 
     mf = _make_scf(build_mol(cluster, settings), settings)
+    constraint = ""
+    if fixed_distances:
+        records: list[str] = []
+        seen: set[tuple[int, int]] = set()
+        for atom_i, atom_j, target_a in fixed_distances:
+            if atom_i == atom_j or not (
+                0 <= atom_i < len(cluster.symbols)
+                and 0 <= atom_j < len(cluster.symbols)
+            ):
+                raise ValueError("fixed-distance atom index is invalid")
+            pair = (min(atom_i, atom_j), max(atom_i, atom_j))
+            if pair in seen:
+                raise ValueError(f"duplicate fixed-distance pair: {pair}")
+            if not np.isfinite(target_a) or target_a <= 0.0:
+                raise ValueError("fixed-distance target must be finite and positive")
+            seen.add(pair)
+            records.append(f"distance {atom_i + 1} {atom_j + 1} {target_a:.8f}")
+        constraint += "$set\n" + "\n".join(records) + "\n"
     if cluster.frozen_indices:
-        # geomeTRIC constraint block: freeze xyz of the peripheral atoms
-        # (the lattice-resistance contract, SURVEY.md §6.2).
+        # geomeTRIC constraint block: freeze xyz of the peripheral atoms (the
+        # lattice-resistance contract, SURVEY.md §6.2).
         atoms = ",".join(str(i + 1) for i in sorted(cluster.frozen_indices))
-        with constraints_file(f"$freeze\nxyz {atoms}\n") as path:
+        constraint += f"$freeze\nxyz {atoms}\n"
+    if constraint:
+        with constraints_file(constraint) as path:
             converged, mol_opt = geometric_kernel(
                 mf,
                 maxsteps=max_steps,

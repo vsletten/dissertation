@@ -23,6 +23,7 @@ metadata, and exits before any DFT — the sizing step.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -89,6 +90,12 @@ ADVISORY_PREOPT_MAX_PROJECTED_FROZEN_DRIFT_A = 1e-8
 ADVISORY_PREOPT_MAX_OH_BOND_A = 1.25
 ADVISORY_PREOPT_MIN_OWNER_MARGIN_A = 0.15
 PRODUCTION_COMPLEX_VERSION = 1
+REACTANT_RECOVERY_VERSION = 1
+REACTANT_CONDITIONING_MAX_STEPS = 100
+REACTANT_PRODUCTION_MAX_STEPS = 100
+REACTANT_PRODUCTION_ATTEMPTS = 2
+REACTANT_FINAL_GRADIENT_RMS_MAX_HARTREE_PER_BOHR = 3.0e-4
+REACTANT_FINAL_GRADIENT_MAX_HARTREE_PER_BOHR = 4.5e-4
 
 # Per-element approach parameters (Angstrom).
 APPROACH = {
@@ -186,6 +193,20 @@ def write_json_atomic(path: Path, payload: dict[str, object]) -> None:
     temporary.replace(path)
 
 
+def sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_xyz_atomic(path: Path, cluster: Cluster) -> None:
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(cluster.to_xyz())
+    temporary.replace(path)
+
+
 def approach_seed_signature(
     complex_guess: Cluster,
     *,
@@ -280,6 +301,16 @@ def oxygen_proton_owners(cluster: Cluster) -> dict[int, int]:
     return owners
 
 
+def proton_owner_changes(reference: Cluster, endpoint: Cluster) -> list[str]:
+    expected = oxygen_proton_owners(reference)
+    observed = oxygen_proton_owners(endpoint)
+    return [
+        f"H{h}:O{expected.get(h)}->O{observed.get(h)}"
+        for h in sorted(expected.keys() | observed.keys())
+        if expected.get(h) != observed.get(h)
+    ]
+
+
 def reactant_geometry_gate(
     endpoint: Cluster, reference: Cluster, *, stage: str
 ) -> dict[str, object]:
@@ -295,16 +326,11 @@ def reactant_geometry_gate(
     if not np.all(np.isfinite(endpoint.coords)):
         raise RuntimeError(f"{stage} produced non-finite coordinates")
 
-    expected_owners = oxygen_proton_owners(reference)
     observed_owners = oxygen_proton_owners(endpoint)
-    if observed_owners != expected_owners:
-        changed = ", ".join(
-            f"H{h}:O{expected_owners.get(h)}->O{observed_owners.get(h)}"
-            for h in sorted(expected_owners.keys() | observed_owners.keys())
-            if expected_owners.get(h) != observed_owners.get(h)
-        )
+    changed = proton_owner_changes(reference, endpoint)
+    if changed:
         raise RuntimeError(
-            f"{stage} changed the reactant proton microstate ({changed})"
+            f"{stage} changed the reactant proton microstate ({', '.join(changed)})"
         )
 
     delta = endpoint.coords[:, None, :] - endpoint.coords[None, :, :]
@@ -345,6 +371,127 @@ def production_complex_signature(
         "frozen_indices": sorted(complex_guess.frozen_indices),
         "production_settings": asdict(settings),
     }
+
+
+def reactant_recovery_signature(
+    complex_guess: Cluster, settings: DftSettings
+) -> dict[str, object]:
+    owners = oxygen_proton_owners(complex_guess)
+    return {
+        "version": REACTANT_RECOVERY_VERSION,
+        "input_geometry_hash": geometry_hash(complex_guess.to_xyz()),
+        "symbols": complex_guess.symbols,
+        "charge": complex_guess.charge,
+        "spin": complex_guess.spin,
+        "frozen_indices": sorted(complex_guess.frozen_indices),
+        "oxygen_proton_owners": [f"H{h}:O{o}" for h, o in sorted(owners.items())],
+        "conditioning": {
+            "method": "hf/sto-3g",
+            "max_steps": REACTANT_CONDITIONING_MAX_STEPS,
+            "owner_bonds_fixed": True,
+        },
+        "production": {
+            "settings": asdict(settings),
+            "max_steps_per_attempt": REACTANT_PRODUCTION_MAX_STEPS,
+            "maximum_attempts": REACTANT_PRODUCTION_ATTEMPTS,
+            "fresh_optimizer_each_attempt": True,
+        },
+    }
+
+
+def owner_bond_constraints(cluster: Cluster) -> list[tuple[int, int, float]]:
+    return [
+        (
+            oxygen,
+            hydrogen,
+            float(np.linalg.norm(cluster.coords[oxygen] - cluster.coords[hydrogen])),
+        )
+        for hydrogen, oxygen in sorted(oxygen_proton_owners(cluster).items())
+    ]
+
+
+def _project_frozen_and_gate(
+    endpoint: Cluster, reference: Cluster, *, stage: str
+) -> tuple[Cluster, dict[str, object], float]:
+    if endpoint.symbols != reference.symbols:
+        raise RuntimeError(f"{stage} changed atom identity/order")
+    if endpoint.charge != reference.charge or endpoint.spin != reference.spin:
+        raise RuntimeError(f"{stage} changed charge or spin")
+    if endpoint.frozen_indices != reference.frozen_indices:
+        raise RuntimeError(f"{stage} changed the frozen shell")
+    raw_reference = replace(reference, frozen_indices=[])
+    raw_endpoint = replace(endpoint, frozen_indices=[])
+    reactant_geometry_gate(raw_endpoint, raw_reference, stage=stage)
+    frozen = sorted(reference.frozen_indices)
+    raw_drift = (
+        float(np.max(np.abs(endpoint.coords[frozen] - reference.coords[frozen])))
+        if frozen
+        else 0.0
+    )
+    if raw_drift > ADVISORY_PREOPT_MAX_RAW_FROZEN_DRIFT_A:
+        raise RuntimeError(
+            f"{stage} exceeded its raw frozen-shell bound ({raw_drift:.6f} A)"
+        )
+    coords = endpoint.coords.copy()
+    coords[frozen] = reference.coords[frozen]
+    projected = replace(endpoint, coords=coords)
+    gate = reactant_geometry_gate(projected, reference, stage=stage)
+    return projected, gate, raw_drift
+
+
+def _recovery_endpoint_paths(run_dir: Path, attempt: int) -> tuple[Path, Path]:
+    stem = f"complex_production_attempt_{attempt}"
+    return run_dir / f"{stem}.xyz", run_dir / f"{stem}.json"
+
+
+def _write_recovery_terminal(
+    run_dir: Path,
+    *,
+    signature: dict[str, object],
+    status: str,
+    stage: str,
+    attempt: int | None,
+    detail: str,
+) -> None:
+    write_json_atomic(
+        run_dir / "production-terminal.json",
+        {
+            "schema": "phase2-reactant-recovery-terminal-v1",
+            "written_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "signature": signature,
+            "status": status,
+            "stage": stage,
+            "attempt": attempt,
+            "detail": detail,
+        },
+    )
+
+
+def _load_recovery_endpoint(
+    run_dir: Path,
+    template: Cluster,
+    signature: dict[str, object],
+    attempt: int,
+) -> tuple[Cluster, dict[str, object]] | None:
+    endpoint_path, receipt_path = _recovery_endpoint_paths(run_dir, attempt)
+    if not endpoint_path.exists() and not receipt_path.exists():
+        return None
+    if not endpoint_path.exists() or not receipt_path.exists():
+        raise RuntimeError(f"production attempt {attempt} checkpoint is incomplete")
+    receipt = json.loads(receipt_path.read_text())
+    if receipt.get("signature") != signature or receipt.get("attempt") != attempt:
+        raise RuntimeError(f"production attempt {attempt} receipt signature mismatch")
+    endpoint = load_xyz(endpoint_path, template)
+    if receipt.get("endpoint_geometry_hash") != geometry_hash(endpoint.to_xyz()):
+        raise RuntimeError(f"production attempt {attempt} endpoint hash mismatch")
+    gate = reactant_geometry_gate(
+        endpoint, template, stage=f"production attempt {attempt}"
+    )
+    if receipt.get("geometry_gate") != gate:
+        raise RuntimeError(f"production attempt {attempt} geometry receipt mismatch")
+    if not isinstance(receipt.get("converged"), bool):
+        raise RuntimeError(f"production attempt {attempt} convergence bit is invalid")
+    return endpoint, receipt
 
 
 def hydrolysis_basin_signature(
@@ -415,6 +562,232 @@ def quarantine_canonical_outputs(run_dir: Path) -> Path | None:
     for path in existing:
         path.replace(quarantine / path.name)
     return quarantine
+
+
+def recover_reactant_minimum(
+    run_dir: Path, complex_guess: Cluster, settings: DftSettings
+) -> Cluster:
+    """Condition and recover one reactant minimum with one continuation.
+
+    O-H ownership constraints exist only in the cheap conditioning optimizer.
+    Production starts from a round-tripped checkpoint in a fresh unconstrained
+    optimizer, and every exhausted endpoint is persisted before the function
+    raises or starts the sole continuation. ``complex.xyz`` is promoted only
+    after a fresh projected production gradient and PHVA minimum gate pass.
+    """
+    signature = reactant_recovery_signature(complex_guess, settings)
+    complex_path = run_dir / "complex.xyz"
+    complex_receipt_path = run_dir / "complex.json"
+    if complex_path.exists() or complex_receipt_path.exists():
+        if not complex_path.exists() or not complex_receipt_path.exists():
+            raise RuntimeError("reactant recovery canonical checkpoint is incomplete")
+        receipt = json.loads(complex_receipt_path.read_text())
+        completed = load_xyz(complex_path, complex_guess)
+        gate = reactant_geometry_gate(
+            completed, complex_guess, stage="accepted reactant minimum"
+        )
+        minimum_gate = receipt.get("minimum_gate")
+        if (
+            receipt.get("schema") != "phase2-reactant-minimum-v1"
+            or receipt.get("signature") != signature
+            or receipt.get("endpoint_geometry_hash")
+            != geometry_hash(completed.to_xyz())
+            or receipt.get("geometry_gate") != gate
+            or not isinstance(minimum_gate, dict)
+            or minimum_gate.get("status") != "passed"
+        ):
+            raise RuntimeError("reactant recovery canonical receipt mismatch")
+        return completed
+
+    conditioning_path = run_dir / "complex_conditioned.xyz"
+    conditioning_receipt_path = run_dir / "complex_conditioned.json"
+    constraints = owner_bond_constraints(complex_guess)
+    serialized_constraints = [[i, j, target] for i, j, target in constraints]
+    if conditioning_path.exists() or conditioning_receipt_path.exists():
+        if not conditioning_path.exists() or not conditioning_receipt_path.exists():
+            raise RuntimeError("reactant conditioning checkpoint is incomplete")
+        conditioning_receipt = json.loads(conditioning_receipt_path.read_text())
+        conditioned = load_xyz(conditioning_path, complex_guess)
+        conditioning_gate = reactant_geometry_gate(
+            conditioned, complex_guess, stage="reactant conditioning"
+        )
+        if (
+            conditioning_receipt.get("signature") != signature
+            or conditioning_receipt.get("endpoint_geometry_hash")
+            != geometry_hash(conditioned.to_xyz())
+            or conditioning_receipt.get("geometry_gate") != conditioning_gate
+            or conditioning_receipt.get("fixed_owner_bonds") != serialized_constraints
+        ):
+            raise RuntimeError("reactant conditioning receipt mismatch")
+    else:
+        conditioning = optimize_bounded(
+            complex_guess,
+            DftSettings(xc="hf", basis="sto-3g"),
+            max_steps=REACTANT_CONDITIONING_MAX_STEPS,
+            fixed_distances=constraints,
+        )
+        conditioned, conditioning_gate, raw_drift = _project_frozen_and_gate(
+            conditioning.cluster,
+            complex_guess,
+            stage="reactant conditioning",
+        )
+        write_xyz_atomic(conditioning_path, conditioned)
+        conditioned = load_xyz(conditioning_path, complex_guess)
+        conditioning_gate = reactant_geometry_gate(
+            conditioned, complex_guess, stage="reactant conditioning"
+        )
+        write_json_atomic(
+            conditioning_receipt_path,
+            {
+                "schema": "phase2-reactant-conditioning-v1",
+                "signature": signature,
+                "endpoint_geometry_hash": geometry_hash(conditioned.to_xyz()),
+                "optimizer_converged": conditioning.converged,
+                "fixed_owner_bonds": serialized_constraints,
+                "unprojected_maximum_frozen_coordinate_drift_a": raw_drift,
+                "geometry_gate": conditioning_gate,
+            },
+        )
+
+    seed = conditioned
+    accepted: Cluster | None = None
+    accepted_attempt: int | None = None
+    for attempt in range(1, REACTANT_PRODUCTION_ATTEMPTS + 1):
+        loaded = _load_recovery_endpoint(run_dir, complex_guess, signature, attempt)
+        if loaded is None:
+            result = optimize_bounded(
+                seed,
+                settings,
+                max_steps=REACTANT_PRODUCTION_MAX_STEPS,
+            )
+            endpoint, endpoint_gate, raw_drift = _project_frozen_and_gate(
+                result.cluster,
+                complex_guess,
+                stage=f"production attempt {attempt}",
+            )
+            endpoint_path, endpoint_receipt_path = _recovery_endpoint_paths(
+                run_dir, attempt
+            )
+            write_xyz_atomic(endpoint_path, endpoint)
+            endpoint = load_xyz(endpoint_path, complex_guess)
+            endpoint_gate = reactant_geometry_gate(
+                endpoint, complex_guess, stage=f"production attempt {attempt}"
+            )
+            endpoint_receipt: dict[str, object] = {
+                "schema": "phase2-reactant-production-attempt-v1",
+                "signature": signature,
+                "attempt": attempt,
+                "seed_geometry_hash": geometry_hash(seed.to_xyz()),
+                "endpoint_geometry_hash": geometry_hash(endpoint.to_xyz()),
+                "converged": result.converged,
+                "max_steps": REACTANT_PRODUCTION_MAX_STEPS,
+                "constraints_released": True,
+                "fresh_optimizer": True,
+                "unprojected_maximum_frozen_coordinate_drift_a": raw_drift,
+                "geometry_gate": endpoint_gate,
+            }
+            write_json_atomic(endpoint_receipt_path, endpoint_receipt)
+        else:
+            endpoint, endpoint_receipt = loaded
+        if endpoint_receipt.get("seed_geometry_hash") != geometry_hash(seed.to_xyz()):
+            raise RuntimeError(f"production attempt {attempt} seed hash mismatch")
+        if endpoint_receipt["converged"]:
+            accepted = endpoint
+            accepted_attempt = attempt
+            break
+        seed = endpoint
+
+    if accepted is None or accepted_attempt is None:
+        detail = (
+            "geometry optimization did not converge after "
+            f"{REACTANT_PRODUCTION_ATTEMPTS} x "
+            f"{REACTANT_PRODUCTION_MAX_STEPS} steps"
+        )
+        _write_recovery_terminal(
+            run_dir,
+            signature=signature,
+            status="failed",
+            stage="production-step-exhaustion",
+            attempt=REACTANT_PRODUCTION_ATTEMPTS,
+            detail=detail,
+        )
+        raise RuntimeError(detail)
+
+    try:
+        final_gradient = gradient(accepted, settings)
+        if final_gradient.shape != accepted.coords.shape or not np.all(
+            np.isfinite(final_gradient)
+        ):
+            raise RuntimeError("independent final production gradient is malformed")
+        free = sorted(set(range(len(accepted.symbols))) - set(accepted.frozen_indices))
+        projected = final_gradient[free]
+        gradient_rms = float(np.sqrt(np.mean(projected**2)))
+        gradient_max = float(np.max(np.abs(projected)))
+        if (
+            gradient_rms > REACTANT_FINAL_GRADIENT_RMS_MAX_HARTREE_PER_BOHR
+            or gradient_max > REACTANT_FINAL_GRADIENT_MAX_HARTREE_PER_BOHR
+        ):
+            raise RuntimeError(
+                "independent final production gradient exceeds the unchanged "
+                f"thresholds (rms={gradient_rms:.6g}, max={gradient_max:.6g} "
+                "Eh/Bohr)"
+            )
+        frequency = frequencies(accepted, settings)
+        if reason := reactant_minimum_reason(frequency.imaginary_cm):
+            raise RuntimeError(reason)
+    except Exception as exc:
+        _write_recovery_terminal(
+            run_dir,
+            signature=signature,
+            status="failed",
+            stage="independent-reactant-minimum-gate",
+            attempt=accepted_attempt,
+            detail=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+
+    geometry_gate = reactant_geometry_gate(
+        accepted, complex_guess, stage="accepted reactant minimum"
+    )
+    minimum_gate = {
+        "status": "passed",
+        "projected_gradient_rms_hartree_per_bohr": gradient_rms,
+        "projected_gradient_max_hartree_per_bohr": gradient_max,
+        "gradient_rms_threshold_hartree_per_bohr": (
+            REACTANT_FINAL_GRADIENT_RMS_MAX_HARTREE_PER_BOHR
+        ),
+        "gradient_max_threshold_hartree_per_bohr": (
+            REACTANT_FINAL_GRADIENT_MAX_HARTREE_PER_BOHR
+        ),
+        "imaginary_cm": [float(value) for value in frequency.imaginary_cm],
+        "noise_floor_cm": NOISE_FLOOR_CM,
+        "electronic_hartree": float(frequency.electronic_hartree),
+    }
+    write_xyz_atomic(complex_path, accepted)
+    accepted = load_xyz(complex_path, complex_guess)
+    geometry_gate = reactant_geometry_gate(
+        accepted, complex_guess, stage="accepted reactant minimum"
+    )
+    write_json_atomic(
+        complex_receipt_path,
+        {
+            "schema": "phase2-reactant-minimum-v1",
+            "signature": signature,
+            "accepted_attempt": accepted_attempt,
+            "endpoint_geometry_hash": geometry_hash(accepted.to_xyz()),
+            "geometry_gate": geometry_gate,
+            "minimum_gate": minimum_gate,
+        },
+    )
+    _write_recovery_terminal(
+        run_dir,
+        signature=signature,
+        status="success",
+        stage="reactant-minimum-accepted",
+        attempt=accepted_attempt,
+        detail="complex.xyz promoted after independent gradient and PHVA gates",
+    )
+    return accepted
 
 
 def optimize_reactant_complex(
@@ -899,11 +1272,32 @@ def main() -> int:
     ap.add_argument("--temperature", type=float, default=298.15)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument(
+        "--reactant-recovery-only",
+        action="store_true",
+        help=(
+            "run the A3a Osa-neutral n=1 conditioning/continuation/minimum gate "
+            "and stop before fragments, saddle search, or barrier publication"
+        ),
+    )
+    ap.add_argument(
         "--run-root",
         default=None,
         help="parent of the run dir (default: qm/runs) — tests redirect this",
     )
     args = ap.parse_args()
+
+    if args.reactant_recovery_only and (
+        args.family != "osa"
+        or args.state != "neutral"
+        or args.n_intact != 1
+        or args.xc != "b3lyp"
+        or args.basis != "def2-svp"
+    ):
+        ap.error(
+            "--reactant-recovery-only is restricted to "
+            "--family osa --state neutral --n-intact 1 "
+            "--xc b3lyp --basis def2-svp"
+        )
 
     os.environ.setdefault("OMP_NUM_THREADS", str(args.threads))
     if args.gpu:
@@ -981,6 +1375,31 @@ def main() -> int:
     quarantined = quarantine_canonical_outputs(run_dir)
     if quarantined is not None:
         log(f"stale canonical outputs quarantined at {quarantined}")
+
+    if args.reactant_recovery_only:
+        log("A3a recovery: conditioning O-H owners, then at most two production runs")
+        complex_opt = recover_reactant_minimum(run_dir, complex_guess, settings)
+        write_json_atomic(
+            run_dir / "reactant-result.json",
+            {
+                "schema": "phase2-reactant-recovery-result-v1",
+                "cell": cell_name,
+                "family": args.family,
+                "state": args.state,
+                "n_intact": cc.n_intact,
+                "method": f"{args.xc}/{args.basis}/df",
+                "complex_path": str(run_dir / "complex.xyz"),
+                "complex_sha256": sha256_path(run_dir / "complex.xyz"),
+                "complex_receipt_sha256": sha256_path(run_dir / "complex.json"),
+                "production_terminal_sha256": sha256_path(
+                    run_dir / "production-terminal.json"
+                ),
+                "stopped_before_saddle_or_barrier": True,
+                "geometry_hash": geometry_hash(complex_opt.to_xyz()),
+            },
+        )
+        log("A3a reactant minimum accepted; stopping before saddle/barrier work")
+        return 0
 
     # Stage 1 — optimize reactant complex and separated fragments.  The raw
     # terminated cluster plus attacker gets a cheap checkpointed pre-opt before

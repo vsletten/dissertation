@@ -655,3 +655,199 @@ def test_load_xyz_rejects_trailing_atom_records(tmp_path):
 
     with pytest.raises(ValueError, match="line-count mismatch"):
         phase2.load_xyz(path, template)
+
+
+def test_reactant_recovery_fixes_owner_bonds_then_releases_once(tmp_path, monkeypatch):
+    guess = replace(geometry("guess", 3.2), frozen_indices=[0])
+    conditioned = replace(guess, coords=guess.coords.copy())
+    attempt_one = replace(guess, coords=guess.coords.copy())
+    attempt_one.coords[1, 1] = 0.01
+    attempt_two = replace(guess, coords=guess.coords.copy())
+    attempt_two.coords[1, 1] = 0.02
+    results = iter(
+        [
+            SimpleNamespace(cluster=conditioned, converged=False),
+            SimpleNamespace(cluster=attempt_one, converged=False),
+            SimpleNamespace(cluster=attempt_two, converged=True),
+        ]
+    )
+    calls = []
+
+    def fake_bounded(cluster, settings, **kwargs):
+        calls.append((cluster, settings, kwargs))
+        return next(results)
+
+    monkeypatch.setattr(phase2, "optimize_bounded", fake_bounded)
+    monkeypatch.setattr(phase2, "gradient", lambda *_args: np.zeros((5, 3)))
+    monkeypatch.setattr(
+        phase2,
+        "frequencies",
+        lambda *_args: SimpleNamespace(
+            imaginary_cm=np.array([]), electronic_hartree=-10.0
+        ),
+    )
+
+    recovered = phase2.recover_reactant_minimum(tmp_path, guess, CHEAP)
+
+    expected_constraints = phase2.owner_bond_constraints(guess)
+    assert calls[0][2] == {
+        "max_steps": phase2.REACTANT_CONDITIONING_MAX_STEPS,
+        "fixed_distances": expected_constraints,
+    }
+    assert calls[0][1] == DftSettings(xc="hf", basis="sto-3g")
+    assert calls[1][2] == {"max_steps": phase2.REACTANT_PRODUCTION_MAX_STEPS}
+    assert calls[2][2] == {"max_steps": phase2.REACTANT_PRODUCTION_MAX_STEPS}
+    assert calls[2][0].coords == pytest.approx(attempt_one.coords, abs=1e-8)
+    assert recovered.coords == pytest.approx(attempt_two.coords, abs=1e-8)
+    assert (tmp_path / "complex_production_attempt_1.xyz").exists()
+    assert (tmp_path / "complex_production_attempt_2.xyz").exists()
+    assert (tmp_path / "complex.xyz").exists()
+    receipt = json.loads((tmp_path / "complex.json").read_text())
+    assert receipt["accepted_attempt"] == 2
+    assert receipt["minimum_gate"]["status"] == "passed"
+    terminal = json.loads((tmp_path / "production-terminal.json").read_text())
+    assert terminal["status"] == "success"
+
+
+def test_reactant_recovery_exhaustion_preserves_both_endpoints(tmp_path, monkeypatch):
+    guess = replace(geometry("guess", 3.2), frozen_indices=[0])
+    calls = []
+
+    def fake_bounded(cluster, settings, **kwargs):
+        calls.append((cluster, settings, kwargs))
+        moved = replace(cluster, coords=cluster.coords.copy())
+        moved.coords[1, 1] += 0.01
+        return SimpleNamespace(cluster=moved, converged=False)
+
+    monkeypatch.setattr(phase2, "optimize_bounded", fake_bounded)
+    monkeypatch.setattr(
+        phase2,
+        "gradient",
+        lambda *_args: pytest.fail("gradient ran after production exhaustion"),
+    )
+    monkeypatch.setattr(
+        phase2,
+        "frequencies",
+        lambda *_args: pytest.fail("Hessian ran after production exhaustion"),
+    )
+
+    with pytest.raises(RuntimeError, match="2 x 100 steps"):
+        phase2.recover_reactant_minimum(tmp_path, guess, CHEAP)
+
+    assert len(calls) == 3  # one conditioning plus exactly two production optimizers
+    for attempt in (1, 2):
+        endpoint = tmp_path / f"complex_production_attempt_{attempt}.xyz"
+        receipt = tmp_path / f"complex_production_attempt_{attempt}.json"
+        assert endpoint.exists() and receipt.exists()
+        assert json.loads(receipt.read_text())["converged"] is False
+    assert not (tmp_path / "complex.xyz").exists()
+    terminal = json.loads((tmp_path / "production-terminal.json").read_text())
+    assert terminal["stage"] == "production-step-exhaustion"
+    assert terminal["attempt"] == 2
+
+
+@pytest.mark.parametrize(
+    ("gradient_value", "imaginary", "message"),
+    [
+        (0.001, np.array([]), "gradient exceeds"),
+        (0.0, np.array([45.0]), "imaginary mode"),
+    ],
+)
+def test_reactant_recovery_never_promotes_failed_minimum(
+    tmp_path, monkeypatch, gradient_value, imaginary, message
+):
+    guess = replace(geometry("guess", 3.2), frozen_indices=[0])
+    results = iter(
+        [
+            SimpleNamespace(cluster=guess, converged=False),
+            SimpleNamespace(cluster=guess, converged=True),
+        ]
+    )
+    monkeypatch.setattr(
+        phase2, "optimize_bounded", lambda *_args, **_kwargs: next(results)
+    )
+    monkeypatch.setattr(
+        phase2, "gradient", lambda *_args: np.full((5, 3), gradient_value)
+    )
+    monkeypatch.setattr(
+        phase2,
+        "frequencies",
+        lambda *_args: SimpleNamespace(
+            imaginary_cm=imaginary, electronic_hartree=-10.0
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match=message):
+        phase2.recover_reactant_minimum(tmp_path, guess, CHEAP)
+
+    assert not (tmp_path / "complex.xyz").exists()
+    terminal = json.loads((tmp_path / "production-terminal.json").read_text())
+    assert terminal["stage"] == "independent-reactant-minimum-gate"
+
+
+def test_reactant_recovery_refuses_ambiguous_owner_before_calculator(
+    tmp_path, monkeypatch
+):
+    guess = Cluster(
+        "ambiguous",
+        ["O", "O", "H"],
+        np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
+    )
+    monkeypatch.setattr(
+        phase2,
+        "optimize_bounded",
+        lambda *_args, **_kwargs: pytest.fail(
+            "calculator reached with ambiguous owner"
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="ambiguous owners"):
+        phase2.recover_reactant_minimum(tmp_path, guess, CHEAP)
+
+
+def test_reactant_recovery_resume_rejects_endpoint_hash_drift(tmp_path, monkeypatch):
+    guess = replace(geometry("guess", 3.2), frozen_indices=[0])
+    results = iter(
+        [
+            SimpleNamespace(cluster=guess, converged=False),
+            SimpleNamespace(cluster=guess, converged=False),
+            SimpleNamespace(cluster=guess, converged=False),
+        ]
+    )
+    monkeypatch.setattr(
+        phase2, "optimize_bounded", lambda *_args, **_kwargs: next(results)
+    )
+    with pytest.raises(RuntimeError, match="2 x 100 steps"):
+        phase2.recover_reactant_minimum(tmp_path, guess, CHEAP)
+    receipt_path = tmp_path / "complex_production_attempt_1.json"
+    receipt = json.loads(receipt_path.read_text())
+    receipt["endpoint_geometry_hash"] = "0" * 64
+    receipt_path.write_text(json.dumps(receipt))
+
+    with pytest.raises(RuntimeError, match="attempt 1 endpoint hash mismatch"):
+        phase2.recover_reactant_minimum(tmp_path, guess, CHEAP)
+
+
+def test_reactant_recovery_resume_rejects_production_settings_drift(
+    tmp_path, monkeypatch
+):
+    guess = replace(geometry("guess", 3.2), frozen_indices=[0])
+    results = iter(
+        [
+            SimpleNamespace(cluster=guess, converged=False),
+            SimpleNamespace(cluster=guess, converged=False),
+            SimpleNamespace(cluster=guess, converged=False),
+        ]
+    )
+    monkeypatch.setattr(
+        phase2, "optimize_bounded", lambda *_args, **_kwargs: next(results)
+    )
+    with pytest.raises(RuntimeError, match="2 x 100 steps"):
+        phase2.recover_reactant_minimum(tmp_path, guess, CHEAP)
+    receipt_path = tmp_path / "complex_production_attempt_1.json"
+    receipt = json.loads(receipt_path.read_text())
+    receipt["signature"]["production"]["settings"]["basis"] = "def2-svp"
+    receipt_path.write_text(json.dumps(receipt))
+
+    with pytest.raises(RuntimeError, match="attempt 1 receipt signature mismatch"):
+        phase2.recover_reactant_minimum(tmp_path, guess, CHEAP)
