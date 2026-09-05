@@ -1272,7 +1272,47 @@ def load_receipt(
         raise ValueError(f"{path}: expected basis {expected_basis}")
     if not isinstance(payload.get("identity"), dict):
         raise ValueError(f"{path}: missing engine/settings identity")
+    if not isinstance(payload.get("input_sha256"), str):
+        raise ValueError(f"{path}: missing geometry SHA-256")
+    for field in ("scf_hartree", "correlation_hartree", "total_hartree"):
+        try:
+            value = float(payload[field])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"{path}: missing finite {field}") from exc
+        if not np.isfinite(value):
+            raise ValueError(f"{path}: non-finite {field}")
+    expected_total = float(payload["scf_hartree"]) + float(
+        payload["correlation_hartree"]
+    )
+    if not np.isclose(
+        float(payload["total_hartree"]), expected_total, rtol=0.0, atol=1e-9
+    ):
+        raise ValueError(f"{path}: total energy arithmetic mismatch")
     return payload
+
+
+def validate_role_receipts(
+    matrices: dict[str, dict[str, dict[str, dict[str, Any]]]],
+) -> None:
+    """Require one exact geometry and electronic state per reaction role."""
+    for role in ("reactant", "ts"):
+        receipts = [
+            receipt for matrix in matrices.values() for receipt in matrix[role].values()
+        ]
+        input_hashes = {receipt.get("input_sha256") for receipt in receipts}
+        states = {
+            (receipt.get("charge"), receipt.get("spin_2s")) for receipt in receipts
+        }
+        if None in input_hashes or len(input_hashes) != 1:
+            raise ValueError(f"{role} receipts do not share one exact geometry")
+        if len(states) != 1:
+            raise ValueError(f"{role} receipts do not share one electronic state")
+
+
+def barrier_kj(reactant: dict[str, Any], ts: dict[str, Any]) -> float:
+    return (
+        float(ts["total_hartree"]) - float(reactant["total_hartree"])
+    ) * HARTREE_TO_KJ
 
 
 def summarize(args: argparse.Namespace) -> dict[str, Any]:
@@ -1293,16 +1333,7 @@ def summarize(args: argparse.Namespace) -> dict[str, Any]:
         }
         for role, paths in args.dlpno.items()
     }
-    for role in ("reactant", "ts"):
-        receipts = [*canonical[role].values(), *dlpno[role].values()]
-        input_hashes = {receipt.get("input_sha256") for receipt in receipts}
-        states = {
-            (receipt.get("charge"), receipt.get("spin_2s")) for receipt in receipts
-        }
-        if None in input_hashes or len(input_hashes) != 1:
-            raise ValueError(f"{role} receipts do not share one exact geometry")
-        if len(states) != 1:
-            raise ValueError(f"{role} receipts do not share one electronic state")
+    validate_role_receipts({"canonical": canonical, "dlpno": dlpno})
     canonical_barrier = (
         cbs_total(canonical["ts"]["tz"], canonical["ts"]["qz"])
         - cbs_total(canonical["reactant"]["tz"], canonical["reactant"]["qz"])
@@ -1336,7 +1367,92 @@ def summarize(args: argparse.Namespace) -> dict[str, Any]:
     return payload
 
 
-def receipt_grid(values: list[str]) -> dict[str, dict[str, Path]]:
+def summarize_focal(args: argparse.Namespace) -> dict[str, Any]:
+    """Build a canonical-TZ focal barrier without inventing canonical TS/QZ.
+
+    The expensive canonical QZ calculation exists only for the reactant.  The
+    complete TightPNO TZ/QZ pair supplies the CBS basis correction, while the
+    independently complete canonical/DLPNO TZ barriers supply the method gate.
+    """
+    canonical_engine = "byteqc-canonical-ccsd(t)"
+    dlpno_engine = "psi4-dlpno-ccsd(t)"
+    basis_names = {"tz": "cc-pVTZ", "qz": "cc-pVQZ"}
+    canonical = {
+        role: {
+            basis: load_receipt(path, canonical_engine, basis_names[basis])
+            for basis, path in paths.items()
+        }
+        for role, paths in args.canonical.items()
+    }
+    dlpno = {
+        role: {
+            basis: load_receipt(path, dlpno_engine, basis_names[basis])
+            for basis, path in paths.items()
+        }
+        for role, paths in args.dlpno.items()
+    }
+    validate_role_receipts({"canonical": canonical, "dlpno": dlpno})
+
+    canonical_tz_barrier = barrier_kj(
+        canonical["reactant"]["tz"], canonical["ts"]["tz"]
+    )
+    dlpno_tz_barrier = barrier_kj(dlpno["reactant"]["tz"], dlpno["ts"]["tz"])
+    dlpno_qz_barrier = barrier_kj(dlpno["reactant"]["qz"], dlpno["ts"]["qz"])
+    dlpno_cbs_barrier = (
+        cbs_total(dlpno["ts"]["tz"], dlpno["ts"]["qz"])
+        - cbs_total(dlpno["reactant"]["tz"], dlpno["reactant"]["qz"])
+    ) * HARTREE_TO_KJ
+    agreement_delta = dlpno_tz_barrier - canonical_tz_barrier
+    basis_correction = dlpno_cbs_barrier - dlpno_tz_barrier
+    reactant_qz_delta_hartree = float(dlpno["reactant"]["qz"]["total_hartree"]) - float(
+        canonical["reactant"]["qz"]["total_hartree"]
+    )
+    payload = {
+        "method": (
+            "canonical CCSD(T)/cc-pVTZ barrier + TightPNO "
+            "DLPNO-CCSD(T) TZ/QZ CBS basis correction"
+        ),
+        "route": "canonical-tz-plus-dlpno-cbs-minus-dlpno-tz",
+        "canonical_ts_qz_computed": False,
+        "canonical_ts_qz_reason": (
+            "directive-adjusted route: no second canonical QZ slow-mode calculation"
+        ),
+        "hf_extrapolation_alpha": HF_CBS_ALPHA,
+        "correlation_extrapolation_power": 3,
+        "canonical_tz_barrier_kj": canonical_tz_barrier,
+        "dlpno_tz_barrier_kj": dlpno_tz_barrier,
+        "dlpno_qz_barrier_kj": dlpno_qz_barrier,
+        "dlpno_cbs_barrier_kj": dlpno_cbs_barrier,
+        "dlpno_cbs_minus_tz_basis_correction_kj": basis_correction,
+        "focal_point_barrier_kj": canonical_tz_barrier + basis_correction,
+        "agreement_basis": "cc-pVTZ",
+        "dlpno_minus_canonical_kj": agreement_delta,
+        "gate_limit_kj": 2.0,
+        "gate_pass": abs(agreement_delta) <= 2.0,
+        "reactant_qz_anchor": {
+            "canonical_total_hartree": float(
+                canonical["reactant"]["qz"]["total_hartree"]
+            ),
+            "dlpno_total_hartree": float(dlpno["reactant"]["qz"]["total_hartree"]),
+            "dlpno_minus_canonical_hartree": reactant_qz_delta_hartree,
+            "dlpno_minus_canonical_kj": reactant_qz_delta_hartree * HARTREE_TO_KJ,
+        },
+        "inputs": {
+            "canonical": {
+                role: {basis: str(path) for basis, path in paths.items()}
+                for role, paths in args.canonical.items()
+            },
+            "dlpno": {
+                role: {basis: str(path) for basis, path in paths.items()}
+                for role, paths in args.dlpno.items()
+            },
+        },
+    }
+    atomic_json(args.output, payload)
+    return payload
+
+
+def _parse_receipt_grid(values: list[str]) -> dict[str, dict[str, Path]]:
     result: dict[str, dict[str, Path]] = {}
     for value in values:
         fields = value.split("=", 2)
@@ -1346,11 +1462,29 @@ def receipt_grid(values: list[str]) -> dict[str, dict[str, Path]]:
         normalized = basis.lower().replace("cc-pv", "").replace("z", "")
         if role not in {"reactant", "ts"} or normalized not in {"t", "q"}:
             raise ValueError(f"invalid receipt selector {value}")
-        result.setdefault(role, {})["tz" if normalized == "t" else "qz"] = Path(path)
+        basis_key = "tz" if normalized == "t" else "qz"
+        if basis_key in result.setdefault(role, {}):
+            raise ValueError(f"duplicate receipt selector {role}/{basis_key}")
+        result[role][basis_key] = Path(path)
+    return result
+
+
+def receipt_grid(values: list[str]) -> dict[str, dict[str, Path]]:
+    result = _parse_receipt_grid(values)
     if set(result) != {"reactant", "ts"} or any(
         set(paths) != {"tz", "qz"} for paths in result.values()
     ):
         raise ValueError("receipts must cover reactant/ts at TZ/QZ")
+    return result
+
+
+def focal_canonical_receipt_grid(values: list[str]) -> dict[str, dict[str, Path]]:
+    result = _parse_receipt_grid(values)
+    expected = {"reactant": {"tz", "qz"}, "ts": {"tz"}}
+    if {role: set(paths) for role, paths in result.items()} != expected:
+        raise ValueError(
+            "focal canonical receipts must cover reactant TZ/QZ and TS TZ exactly"
+        )
     return result
 
 
@@ -1374,10 +1508,11 @@ def parser() -> argparse.ArgumentParser:
         if command == "byteqc":
             job.add_argument("--gpu-memory-gb", type=int, default=16)
             job.add_argument("--restart-checkpoint", type=Path)
-    summary = subparsers.add_parser("summarize")
-    summary.add_argument("--canonical", action="append", default=[], required=True)
-    summary.add_argument("--dlpno", action="append", default=[], required=True)
-    summary.add_argument("--output", type=Path, required=True)
+    for command in ("summarize", "summarize-focal"):
+        summary = subparsers.add_parser(command)
+        summary.add_argument("--canonical", action="append", default=[], required=True)
+        summary.add_argument("--dlpno", action="append", default=[], required=True)
+        summary.add_argument("--output", type=Path, required=True)
     return result
 
 
@@ -1403,10 +1538,14 @@ def main() -> int:
         if args.memory_gb < 1:
             raise ValueError("memory-gb must be positive")
         payload = psi4_job(args) if args.command == "psi4" else byteqc_job(args)
-    else:
+    elif args.command == "summarize":
         args.canonical = receipt_grid(args.canonical)
         args.dlpno = receipt_grid(args.dlpno)
         payload = summarize(args)
+    else:
+        args.canonical = focal_canonical_receipt_grid(args.canonical)
+        args.dlpno = receipt_grid(args.dlpno)
+        payload = summarize_focal(args)
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 

@@ -812,3 +812,99 @@ def test_summarize_reports_barrier_delta_and_gate(tmp_path):
                 output=output,
             )
         )
+
+
+def test_focal_canonical_grid_requires_directive_adjusted_matrix():
+    values = [
+        "reactant=cc-pVTZ=r-tz.json",
+        "reactant=cc-pVQZ=r-qz.json",
+        "ts=cc-pVTZ=t-tz.json",
+    ]
+    grid = cc.focal_canonical_receipt_grid(values)
+    assert set(grid["reactant"]) == {"tz", "qz"}
+    assert set(grid["ts"]) == {"tz"}
+    with pytest.raises(ValueError, match="reactant TZ/QZ and TS TZ exactly"):
+        cc.focal_canonical_receipt_grid(values[:-1])
+    with pytest.raises(ValueError, match="reactant TZ/QZ and TS TZ exactly"):
+        cc.focal_canonical_receipt_grid(
+            [*values, "ts=cc-pVQZ=forbidden-canonical-ts-qz.json"]
+        )
+    with pytest.raises(ValueError, match="duplicate receipt selector"):
+        cc.focal_canonical_receipt_grid([*values, values[-1]])
+
+
+def test_summarize_focal_uses_dlpno_basis_correction_and_tz_gate(tmp_path):
+    engine_names = {
+        "canonical": "byteqc-canonical-ccsd(t)",
+        "dlpno": "psi4-dlpno-ccsd(t)",
+    }
+    energies = {
+        "canonical": {
+            "reactant": {"tz": (-100.0, -1.0), "qz": (-100.2, -1.2)},
+            "ts": {"tz": (-99.95, -1.0)},
+        },
+        "dlpno": {
+            "reactant": {"tz": (-99.99, -1.0), "qz": (-100.19, -1.19)},
+            "ts": {"tz": (-99.9399, -1.0), "qz": (-100.135, -1.19)},
+        },
+    }
+    paths = {engine: {} for engine in engine_names}
+    for engine, roles in energies.items():
+        for role, bases in roles.items():
+            for basis, (scf, correlation) in bases.items():
+                path = tmp_path / f"{engine}-{role}-{basis}.json"
+                path.write_text(
+                    json.dumps(
+                        receipt(
+                            engine_names[engine],
+                            "cc-pVTZ" if basis == "tz" else "cc-pVQZ",
+                            scf,
+                            correlation,
+                        )
+                    )
+                )
+                paths[engine].setdefault(role, {})[basis] = path
+
+    output = tmp_path / "focal-summary.json"
+    result = cc.summarize_focal(
+        argparse.Namespace(
+            canonical=paths["canonical"],
+            dlpno=paths["dlpno"],
+            output=output,
+        )
+    )
+    canonical_tz = cc.barrier_kj(
+        receipt(engine_names["canonical"], "cc-pVTZ", -100.0, -1.0),
+        receipt(engine_names["canonical"], "cc-pVTZ", -99.95, -1.0),
+    )
+    dlpno_tz = cc.barrier_kj(
+        receipt(engine_names["dlpno"], "cc-pVTZ", -99.99, -1.0),
+        receipt(engine_names["dlpno"], "cc-pVTZ", -99.9399, -1.0),
+    )
+    dlpno_cbs = (
+        cc.cbs_total(
+            receipt(engine_names["dlpno"], "cc-pVTZ", -99.9399, -1.0),
+            receipt(engine_names["dlpno"], "cc-pVQZ", -100.135, -1.19),
+        )
+        - cc.cbs_total(
+            receipt(engine_names["dlpno"], "cc-pVTZ", -99.99, -1.0),
+            receipt(engine_names["dlpno"], "cc-pVQZ", -100.19, -1.19),
+        )
+    ) * cc.HARTREE_TO_KJ
+    assert result["canonical_ts_qz_computed"] is False
+    assert result["agreement_basis"] == "cc-pVTZ"
+    assert result["dlpno_minus_canonical_kj"] == pytest.approx(dlpno_tz - canonical_tz)
+    assert result["focal_point_barrier_kj"] == pytest.approx(
+        canonical_tz + dlpno_cbs - dlpno_tz
+    )
+    assert result["gate_pass"] is True
+    assert json.loads(output.read_text()) == result
+
+
+def test_load_receipt_rejects_energy_arithmetic_drift(tmp_path):
+    path = tmp_path / "receipt.json"
+    payload = receipt("psi4-dlpno-ccsd(t)", "cc-pVTZ", -10.0, -1.0)
+    payload["total_hartree"] += 0.01
+    path.write_text(json.dumps(payload))
+    with pytest.raises(ValueError, match="total energy arithmetic mismatch"):
+        cc.load_receipt(path, "psi4-dlpno-ccsd(t)", "cc-pVTZ")
