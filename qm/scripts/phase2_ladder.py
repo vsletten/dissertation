@@ -213,6 +213,35 @@ def checkpointed(path: Path, template: Cluster, compute) -> Cluster:
     return result
 
 
+def optimize_reactant_complex(
+    run_dir: Path, complex_guess: Cluster, settings: DftSettings
+) -> Cluster:
+    """Relax a raw ladder complex into the production SCF convergence basin.
+
+    The terminated crystallographic cluster plus newly placed attacker can be
+    electronically strained even when its geometry passes collision gates.  A
+    checkpointed HF/STO-3G relaxation settles that guess before the advertised
+    production optimization.  Existing production checkpoints remain directly
+    resumable and are never mistaken for the cheap pre-optimization.
+    """
+    complex_path = run_dir / "complex.xyz"
+    if complex_path.exists():
+        log("  resume: complex.xyz exists, skipping reactant pre-optimization")
+        return load_xyz(complex_path, complex_guess)
+
+    preopt_settings = DftSettings(xc="hf", basis="sto-3g")
+    preoptimized = checkpointed(
+        run_dir / "complex_preopt.xyz",
+        complex_guess,
+        lambda: optimize(complex_guess, preopt_settings),
+    )
+    return checkpointed(
+        complex_path,
+        preoptimized,
+        lambda: optimize(preoptimized, settings),
+    )
+
+
 def channel_escape_reason(
     ts_guess: Cluster, ts: Cluster, m_index: int, ow_index: int, limit_a: float
 ) -> str | None:
@@ -570,15 +599,12 @@ def main() -> int:
         log("dry run: geometry + metadata written, no DFT")
         return 0
 
-    # Stage 1 — optimize reactant complex and separated fragments.
-    # Crystallographic positions are sane starting points; no cheap
-    # pre-opt stage (the crude legacy cell is a logged systematic).
+    # Stage 1 — optimize reactant complex and separated fragments.  The raw
+    # terminated cluster plus attacker gets a cheap checkpointed pre-opt before
+    # production DFT; the bare crystallographic cluster remains on the proven
+    # direct path (the crude legacy cell is still a logged systematic).
     log("stage 1: optimizing reactant complex + fragments")
-    complex_opt = checkpointed(
-        run_dir / "complex.xyz",
-        complex_guess,
-        lambda: optimize(complex_guess, settings),
-    )
+    complex_opt = optimize_reactant_complex(run_dir, complex_guess, settings)
     cluster_opt = checkpointed(
         run_dir / "cluster_opt.xyz",
         cc.cluster,

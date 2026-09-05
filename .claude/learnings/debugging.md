@@ -99,3 +99,13 @@ A first *pinned* scan point that also has to settle a seeded water network
 walks through strained geometries and can diverge the SCF (DFUKS scanner
 death 35 geomeTRIC steps into h-h2co-h2-hco-2w's first point). Relax wet
 seeds unconstrained first (checkpointed), then drive the coordinate.
+
+### Pre-optimize terminated ladder complexes before production DFT (2026-09-05)
+The first Osa-neutral n=1 ladder attempt passed geometry/collision gates but its
+raw crystallographic cluster plus attacker left the B3LYP/def2-SVP DFRKS
+convergence basin after one large geomeTRIC move (0.340 A maximum displacement).
+The initial gradient improved and constraints stayed within 0.0011 A, then the
+next electronic gradient exhausted the existing 150-cycle SCF bound. Preserve
+that failure and settle only the reactant complex with checkpointed constrained
+HF/STO-3G before production optimization; do not mask it by raising the SCF
+bound, weakening convergence, or treating the failed trajectory as a checkpoint.

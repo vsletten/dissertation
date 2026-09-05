@@ -4,6 +4,7 @@ import ctypes
 import json
 import sys
 import sysconfig
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -168,6 +169,97 @@ def test_approach_seed_requires_matching_signature(tmp_path):
 
     incompatible = {**signature, "pin_a": 2.0}
     assert phase2.load_compatible_approach_seed(path, template, incompatible) is None
+
+
+def test_reactant_complex_uses_checkpointed_hf_preoptimization(tmp_path, monkeypatch):
+    guess = replace(geometry("guess", 3.2), frozen_indices=[0])
+    preoptimized = replace(guess, coords=guess.coords + 0.01)
+    production = replace(guess, coords=guess.coords + 0.02)
+    production_settings = DftSettings(
+        xc="b3lyp", basis="def2-svp", density_fit=True, use_gpu=True
+    )
+    calls = []
+
+    def fake_optimize(cluster, settings):
+        calls.append((cluster, settings))
+        return preoptimized if settings.xc == "hf" else production
+
+    monkeypatch.setattr(phase2, "optimize", fake_optimize)
+
+    result = phase2.optimize_reactant_complex(tmp_path, guess, production_settings)
+
+    assert [settings for _, settings in calls] == [
+        DftSettings(xc="hf", basis="sto-3g"),
+        production_settings,
+    ]
+    assert calls[1][0] is preoptimized
+    assert result is production
+    assert (tmp_path / "complex_preopt.xyz").exists()
+    assert (tmp_path / "complex.xyz").exists()
+
+
+def test_reactant_complex_preoptimization_failure_never_promotes_production(
+    tmp_path, monkeypatch
+):
+    guess = geometry("guess", 3.2)
+    calls = []
+
+    def fail_preopt(cluster, settings):
+        calls.append(settings)
+        raise RuntimeError("preoptimization failed")
+
+    monkeypatch.setattr(phase2, "optimize", fail_preopt)
+
+    with pytest.raises(RuntimeError, match="preoptimization failed"):
+        phase2.optimize_reactant_complex(tmp_path, guess, CHEAP)
+
+    assert calls == [DftSettings(xc="hf", basis="sto-3g")]
+    assert not (tmp_path / "complex_preopt.xyz").exists()
+    assert not (tmp_path / "complex.xyz").exists()
+
+
+def test_reactant_complex_resumes_preoptimization_before_production(
+    tmp_path, monkeypatch
+):
+    guess = replace(geometry("guess", 3.2), frozen_indices=[0])
+    preoptimized = replace(guess, coords=guess.coords + 0.01)
+    phase2.save_xyz(preoptimized, tmp_path / "complex_preopt.xyz")
+    production_settings = DftSettings(
+        xc="b3lyp", basis="def2-svp", density_fit=True, use_gpu=True
+    )
+    calls = []
+
+    def fake_optimize(cluster, settings):
+        calls.append((cluster, settings))
+        return replace(cluster, coords=cluster.coords + 0.01)
+
+    monkeypatch.setattr(phase2, "optimize", fake_optimize)
+
+    phase2.optimize_reactant_complex(tmp_path, guess, production_settings)
+
+    assert len(calls) == 1
+    resumed, settings = calls[0]
+    assert settings == production_settings
+    assert resumed.charge == guess.charge
+    assert resumed.spin == guess.spin
+    assert resumed.frozen_indices == guess.frozen_indices
+    assert resumed.coords == pytest.approx(preoptimized.coords, abs=1e-9)
+
+
+def test_existing_reactant_complex_skips_both_optimization_rungs(tmp_path, monkeypatch):
+    guess = geometry("guess", 3.2)
+    completed = replace(guess, coords=guess.coords + 0.02)
+    phase2.save_xyz(completed, tmp_path / "complex.xyz")
+    monkeypatch.setattr(
+        phase2,
+        "optimize",
+        lambda *_args, **_kwargs: pytest.fail("completed complex was recomputed"),
+    )
+
+    resumed = phase2.optimize_reactant_complex(tmp_path, guess, CHEAP)
+
+    assert resumed.coords == pytest.approx(completed.coords, abs=1e-9)
+    assert not (tmp_path / "complex_preopt.xyz").exists()
 
 
 def test_resume_persists_proton_route_before_reentering_proton_stage(
