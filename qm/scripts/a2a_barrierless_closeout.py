@@ -169,8 +169,13 @@ def _validate_scan_evidence(root: Path, classification: dict[str, Any]) -> None:
                 atol=1e-10,
             ):
                 raise ValueError(f"scan cell {(row, column)} energy drift")
+            computed_topology = scan_driver._cell_topology(geometry)
+            if scan_driver._json_stable(computed_topology) != scan_driver._json_stable(
+                receipt.get("topology", {})
+            ):
+                raise ValueError(f"scan cell {(row, column)} topology drift")
             energies[row, column] = value
-            topologies[(row, column)] = receipt.get("topology", {})
+            topologies[(row, column)] = computed_topology
 
     recomputed_relative = (energies - energies[0, 0]) * HARTREE_TO_KJ
     if not np.allclose(relative, recomputed_relative, rtol=0.0, atol=1e-8):

@@ -250,6 +250,87 @@ def test_dft_runs_four_by_three_matrix_and_uses_only_addition_ts(monkeypatch, tm
         assert json.loads(analysis[1])["rejected_banked_transition_state_used"] is False
 
 
+def write_hash_bound_scan_grid(root, *, fabricated_topology_cell=None):
+    settings = closeout.production.settings(use_gpu=False)[0]
+    settings_fp = closeout.production.frequency_settings_fingerprint(settings)
+    scan_root = root / "cleavage/coupled-scan-v1"
+    current = Cluster(
+        "scan-cell",
+        ["O", "H", "H"],
+        np.array([[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [-2.0, 0.0, 0.0]]),
+    )
+    xyz = closeout.production.exact_xyz(current)
+    geometry_fp = closeout.production.frequency_geometry_fingerprint(current)
+    honest_topology = closeout.scan_driver._cell_topology(current)
+    energies = np.full((9, 9), -10.0)
+    if fabricated_topology_cell is not None:
+        energies[fabricated_topology_cell] = -10.01
+    topologies = {}
+    for row in range(9):
+        for column in range(9):
+            cell_dir = scan_root / f"r{row:02d}-c{column:02d}"
+            cell_dir.mkdir(parents=True)
+            geometry_path = cell_dir / "optimized.xyz"
+            energy_path = cell_dir / "electronic-energy.json"
+            geometry_path.write_text(xyz)
+            energy_path.write_text(
+                json.dumps(
+                    {
+                        "geometry_fingerprint": geometry_fp,
+                        "settings_fingerprint": settings_fp,
+                        "method": closeout.production.R2SCAN3C_METHOD,
+                        "electronic_hartree": float(energies[row, column]),
+                    }
+                )
+            )
+            topology = honest_topology
+            if fabricated_topology_cell == (row, column):
+                topology = {
+                    "valid_typed_identity": True,
+                    "h16_owner": closeout.scan_driver.BRIDGE_INDEX,
+                    "si_obr_bonded": True,
+                }
+            receipt = {
+                "status": "completed",
+                "scan_version": closeout.scan_driver.SCAN_VERSION,
+                "cell": [row, column],
+                "settings_fingerprint": settings_fp,
+                "output_geometry_sha256": closeout.production.sha256_path(geometry_path),
+                "energy_receipt_sha256": closeout.production.sha256_path(energy_path),
+                "output_geometry_fingerprint": geometry_fp,
+                "electronic_hartree": float(energies[row, column]),
+                "topology": topology,
+            }
+            (cell_dir / "cell-receipt.json").write_text(json.dumps(receipt))
+            topologies[(row, column)] = topology
+    relative = (energies - energies[0, 0]) * closeout.HARTREE_TO_KJ
+    return {
+        "relative_energies_kj_mol": relative.tolist(),
+        "classification": closeout.scan_driver.classify_complete_grid(
+            relative,
+            product_index=7,
+            barrier_threshold_kj_mol=2.0,
+            cell_topologies=topologies,
+        ),
+    }
+
+
+def test_scan_closeout_rejects_fabricated_receipt_topology(tmp_path):
+    classification = write_hash_bound_scan_grid(
+        tmp_path, fabricated_topology_cell=(3, 3)
+    )
+    assert classification["classification"]["outcome"] == (
+        closeout.scan_driver.PROTON_FIRST_MINIMUM
+    )
+    with pytest.raises(ValueError, match="topology"):
+        closeout._validate_scan_evidence(tmp_path, classification)
+
+
+def test_scan_closeout_accepts_topology_recomputed_from_geometry(tmp_path):
+    classification = write_hash_bound_scan_grid(tmp_path)
+    closeout._validate_scan_evidence(tmp_path, classification)
+
+
 def test_dft_resume_with_complete_receipts_skips_gpu_import_preflight(
     monkeypatch, tmp_path
 ):
