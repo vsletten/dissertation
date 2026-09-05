@@ -210,6 +210,7 @@ def test_reactant_complex_uses_checkpointed_hf_preoptimization(tmp_path, monkeyp
     assert receipt["signature"]["convergence_is_advisory"] is True
     assert receipt["signature"]["max_steps"] == 100
     assert receipt["production_qualification"]["status"] == "passed"
+    assert receipt["geometry_gate"]["oxygen_proton_owners"] == ["H3:O2", "H4:O2"]
     assert receipt["endpoint_geometry_hash"] == phase2.geometry_hash(
         preoptimized.to_xyz()
     )
@@ -356,6 +357,43 @@ def test_advisory_preoptimization_rejects_changed_atom_order(tmp_path, monkeypat
 
     with pytest.raises(RuntimeError, match="changed atom identity/order"):
         phase2.optimize_reactant_complex(tmp_path, guess, CHEAP)
+
+
+def test_advisory_preoptimization_rejects_changed_proton_owner(tmp_path, monkeypatch):
+    guess = Cluster(
+        "two-waters",
+        ["O", "O", "H", "H"],
+        np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [3.0, 0.0, 0.0],
+                [0.96, 0.0, 0.0],
+                [3.96, 0.0, 0.0],
+            ]
+        ),
+    )
+    transferred = replace(guess, coords=guess.coords.copy())
+    transferred.coords[2, 0] = 2.04
+    monkeypatch.setattr(
+        phase2,
+        "optimize_bounded",
+        lambda *_args, **_kwargs: SimpleNamespace(cluster=transferred, converged=False),
+    )
+    monkeypatch.setattr(
+        phase2,
+        "gradient",
+        lambda *_args: pytest.fail("microstate-changing seed reached production"),
+    )
+    monkeypatch.setattr(
+        phase2,
+        "optimize",
+        lambda *_args: pytest.fail("microstate-changing seed reached production"),
+    )
+
+    with pytest.raises(RuntimeError, match="changed the reactant proton microstate"):
+        phase2.optimize_reactant_complex(tmp_path, guess, CHEAP)
+
+    assert not (tmp_path / "complex_preopt.xyz").exists()
 
 
 def test_advisory_preoptimization_resume_is_bound_to_production_settings(

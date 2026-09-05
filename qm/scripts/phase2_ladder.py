@@ -76,11 +76,13 @@ MIN_PLAUSIBLE_DE_KJ = 20.0
 # The Phase-1 free-dimer anchor for the lattice-resistance comparison.
 SI_NEUTRAL_FREE_DIMER_DG_KJ = 113.05
 APPROACH_SEED_VERSION = 1
-ADVISORY_PREOPT_VERSION = 1
+ADVISORY_PREOPT_VERSION = 2
 ADVISORY_PREOPT_MAX_STEPS = 100
 ADVISORY_PREOPT_MIN_PAIR_A = 0.60
 ADVISORY_PREOPT_MAX_RAW_FROZEN_DRIFT_A = 0.020
 ADVISORY_PREOPT_MAX_PROJECTED_FROZEN_DRIFT_A = 1e-8
+ADVISORY_PREOPT_MAX_OH_BOND_A = 1.25
+ADVISORY_PREOPT_MIN_OWNER_MARGIN_A = 0.15
 
 # Per-element approach parameters (Angstrom).
 APPROACH = {
@@ -226,6 +228,41 @@ def checkpointed(path: Path, template: Cluster, compute) -> Cluster:
     return result
 
 
+def oxygen_proton_owners(cluster: Cluster) -> dict[int, int]:
+    """Assign every proton to one unambiguous, chemically bonded oxygen."""
+    oxygen = [i for i, symbol in enumerate(cluster.symbols) if symbol == "O"]
+    hydrogen = [i for i, symbol in enumerate(cluster.symbols) if symbol == "H"]
+    if hydrogen and not oxygen:
+        raise RuntimeError("reactant microstate has hydrogen but no oxygen owner")
+
+    owners: dict[int, int] = {}
+    for h_index in hydrogen:
+        distances = sorted(
+            (
+                float(
+                    np.linalg.norm(cluster.coords[h_index] - cluster.coords[o_index])
+                ),
+                o_index,
+            )
+            for o_index in oxygen
+        )
+        nearest_a, owner = distances[0]
+        if nearest_a > ADVISORY_PREOPT_MAX_OH_BOND_A:
+            raise RuntimeError(
+                f"reactant proton H{h_index} is unassigned "
+                f"(nearest O{owner} at {nearest_a:.3f} A)"
+            )
+        if len(distances) > 1:
+            runner_up_a, runner_up = distances[1]
+            if runner_up_a - nearest_a < ADVISORY_PREOPT_MIN_OWNER_MARGIN_A:
+                raise RuntimeError(
+                    f"reactant proton H{h_index} has ambiguous owners "
+                    f"O{owner}/O{runner_up} ({nearest_a:.3f}/{runner_up_a:.3f} A)"
+                )
+        owners[h_index] = owner
+    return owners
+
+
 def optimize_reactant_complex(
     run_dir: Path, complex_guess: Cluster, settings: DftSettings
 ) -> Cluster:
@@ -275,6 +312,19 @@ def optimize_reactant_complex(
                 "advisory preoptimization produced non-finite coordinates"
             )
 
+        expected_owners = oxygen_proton_owners(complex_guess)
+        observed_owners = oxygen_proton_owners(endpoint)
+        if observed_owners != expected_owners:
+            changed = ", ".join(
+                f"H{h}:O{expected_owners.get(h)}->O{observed_owners.get(h)}"
+                for h in sorted(expected_owners.keys() | observed_owners.keys())
+                if expected_owners.get(h) != observed_owners.get(h)
+            )
+            raise RuntimeError(
+                "advisory preoptimization changed the reactant proton microstate "
+                f"({changed})"
+            )
+
         delta = endpoint.coords[:, None, :] - endpoint.coords[None, :, :]
         distances = np.linalg.norm(delta, axis=2)
         distances[np.diag_indices_from(distances)] = np.inf
@@ -285,7 +335,7 @@ def optimize_reactant_complex(
             )
         return min_pair_a
 
-    def geometry_gate(endpoint: Cluster) -> dict[str, float]:
+    def geometry_gate(endpoint: Cluster) -> dict[str, object]:
         min_pair_a = identity_and_collision_gate(endpoint)
         frozen = sorted(complex_guess.frozen_indices)
         max_frozen_drift_a = (
@@ -303,6 +353,9 @@ def optimize_reactant_complex(
         return {
             "minimum_pair_distance_a": min_pair_a,
             "maximum_frozen_coordinate_drift_a": max_frozen_drift_a,
+            "oxygen_proton_owners": [
+                f"H{h}:O{o}" for h, o in oxygen_proton_owners(endpoint).items()
+            ],
         }
 
     preopt_settings = DftSettings(xc="hf", basis="sto-3g")

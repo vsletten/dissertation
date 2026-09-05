@@ -4,6 +4,8 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-05 09:50 PDT — (hermes-custom-build-001; profile=workstation) — A3 Osa-neutral n=1's advisory-seed route also exhausted the strict production reactant optimization after 100 steps and changed three termination-proton owners; no scientific output exists. Exact oxygen-proton ownership is now a fail-closed seed gate, and READY card A3a owns one microstate-preserving, endpoint-checkpointed recovery before A3 may resume.
+
 - 2026-09-05 05:19 PDT — (hermes-custom-build-001; profile=workstation) — A3 Osa-neutral n=1's required HF minimum exhausted 100 steps without convergence, so no result was promoted. The changed one-shot recovery now treats bounded HF only as a hash/settings-bound advisory seed, restores the frozen shell exactly, qualifies one production gradient, and leaves production/scientific gates strict; 73 focused tests are green before relaunch.
 
 - 2026-09-05 01:58 PDT — (hermes-custom-build-001; profile=workstation) — A3 Osa-neutral n=1 stopped fail-closed before any result after a strained raw complex escaped the B3LYP DFRKS convergence basin on its second gradient. Recovery now checkpoint-preoptimizes only the reactant complex at constrained HF/STO-3G before the unchanged production and scientific gates; the failed receipt is preserved and no barrier is claimed.
