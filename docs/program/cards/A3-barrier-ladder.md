@@ -1,13 +1,13 @@
 # A3-barrier-ladder — connectivity × protonation barrier ladder (Phase 2)
 
-- status: ready
+- status: active
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaigns; cluster-builder code is machine-any)
 - depends: — (runs at the validated b3lyp/def2-svp/df tier; A2 re-tiers
   the finished ladder later; acid-state variants may reuse A1b's
   protonated-bridge machinery when it lands but are not blocked by it)
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## Objective
 Execute qm/HANDOFF.md (Phase 2 edition — the full build plan lives
@@ -74,6 +74,7 @@ all scripted in the run log and learnings. ~10 h GPU per cell realistic
 including one saddle retry.
 
 ## Progress
+- 2026-09-05 00:53 PDT (hermes-custom-build-001; profile=workstation) — Claimed `agents/A3-barrier-ladder` atomically from current `origin/main` (`59029f5e98b59ee74bfe1abbe1e34966827ac805`) after the upstream ByteQC QZ receipt released the GPU. Workstation preflight: 15-minute load 16.37 (<24), 30.0 GiB available, GPU at 716 MiB/24 GiB with no scientific compute process.
 - 2026-08-22 — omnibus supervisor — restored `ready` after the pilot PR #67
   merged and released the claim; remaining family campaigns are unclaimed.
 - 2026-08-21 — PILOT CELL DONE: ΔG‡ 205.7 kJ/mol, verified two-step
