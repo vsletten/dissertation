@@ -141,6 +141,16 @@ LD_LIBRARY_PATH (the cutensor-preload gotcha, extended). cupbc (PBC) is
 unneeded for cluster work and wants a tarball/conda cuTENSOR layout —
 skip it. Full working recipe: qm/CALIBRATION.md.
 
+### ByteQC frozen-core DF blocking: do not force QZ into one auxiliary block (2026-08-29)
+ByteQC 2.5 reuses the prior MO-transformed DF block as scratch for the next AO
+unpack. With frozen core, `nmo < nao`, so the stock `nr_e2` buffer reuse is too
+small. Forcing `with_df.blockdim = naux` dodges the second iteration at cc-pVTZ,
+but cc-pVQZ then tries to hold roughly 7.7 GB each of AO scratch, transform
+scratch, and MO output at once and OOMs inside an 18 GB QI2 lease. The production
+adapter now keeps the ordinary bounded auxiliary blocks and replaces only the
+transform helper: AO unpack gets independent scratch, while the prior MO buffer
+is reused only for the equally sized final MO result.
+
 ### Cluster.to_xyz embeds the name — never hash it for caching (2026-08-28)
 `to_xyz()` puts `comment or self.name` on line 2, and a checkpoint-resumed
 cluster inherits its load template's name (`load_xyz(path, ts)` → name

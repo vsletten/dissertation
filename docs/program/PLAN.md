@@ -48,8 +48,8 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | blocked: A3a | Osa-neutral n=1 reactant basin |
 | [A3a-reactant-minimum-recovery](cards/A3a-reactant-minimum-recovery.md) | A | P1 | workstation | ready | three immutable A3 failed receipts |
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
-| [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: A2a | banked si-neutral TS fails production full-IRC |
-| [A2a-si-neutral-production-path-rebuild](cards/A2a-si-neutral-production-path-rebuild.md) | A | P1 | workstation | active | exact r2SCAN-3c minima + A2 infrastructure ✅ |
+| [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | ready | A2a ✅; remaining banked-reaction production table + ranking |
+| [A2a-si-neutral-production-path-rebuild](cards/A2a-si-neutral-production-path-rebuild.md) | A | P1 | workstation | done | exact r2SCAN-3c minima + A2 infrastructure ✅ |
 | [B3-conformance-decks](cards/B3-conformance-decks.md) | B | P1 | any | done | B2 ✅ |
 | [B4-ensembles-observables](cards/B4-ensembles-observables.md) | B | P1 | any | done | B2 ✅ |
 | [B5-execution-schedule](cards/B5-execution-schedule.md) | B | P1 | any | done | B2 ✅ |
@@ -67,7 +67,8 @@ on main). Priority P0 > P1 > P2 within READY.
 | [E3b-periodic-dft-spot-checks](cards/E3b-periodic-dft-spot-checks.md) | E | P2 | workstation | blocked: E3a | E3a |
 | [E4-1998-comparison](cards/E4-1998-comparison.md) | E | P1 | any | blocked: E3a, E2b, A8 | E3a, E2b, A8 |
 
-**Done** (acceptance verified on main): C3-pit-statistics, E2b-grain-size-sweep,
+**Done** (acceptance verified on main): A2a-si-neutral-production-path-rebuild,
+C3-pit-statistics, E2b-grain-size-sweep,
 A5p1-aging-study, C2-corrosion-deck,
 QI2-gpu-lease,
 A1g-acid-bridge-side-hydronium-neutral-attacker,

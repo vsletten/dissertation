@@ -133,7 +133,8 @@ def _write_lease(path: Path, payload: dict[str, object]) -> None:
                 fd = _open_regular(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             except OSError as exc:
                 raise GpuLeaseBusy(
-                    f"GPU lane busy (unrecoverable leftover lease temp {temporary}: {exc})"
+                    "GPU lane busy (unrecoverable leftover lease temp "
+                    f"{temporary}: {exc})"
                 ) from exc
         except OSError as exc:
             raise GpuLeaseBusy(
