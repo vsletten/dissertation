@@ -13,10 +13,23 @@ from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
-from quarry.clusters import Cluster, water
-from quarry.crystal import attack_complex, from_deck_cell
-from quarry.store import geometry_hash
-from scripts import phase2_ladder as phase2
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+if __name__ == "__main__":
+    from quarry.etiquette import bootstrap_cli
+
+    bootstrap_cli(
+        "a3a_reactant_recovery",
+        default_run_root=Path(
+            "/mnt/data/vsletten/dissertation-data/a3a-reactant-minimum-recovery/logs"
+        ),
+        argv=["--nice", "0"],
+    )
+
+from quarry.clusters import Cluster, water  # noqa: E402
+from quarry.crystal import attack_complex, from_deck_cell  # noqa: E402
+from quarry.store import geometry_hash  # noqa: E402
+from scripts import phase2_ladder as phase2  # noqa: E402
 
 DEFAULT_SOURCE_ROOT = Path(
     "/mnt/data/vsletten/dissertation-data/task274-a3-barrier-ladder-20260905"
