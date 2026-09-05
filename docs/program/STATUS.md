@@ -4,6 +4,8 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-05 10:19 PDT — (hermes-custom-build-001; profile=workstation) — A3's adversarial pre-PR pass closed four generic Phase-2 false-green routes: production checkpoints now require exact input/settings/hash/geometry receipts, production-returned geometries reapply proton/frozen-shell/collision gates, reactants must have zero significant imaginary modes, quick-IRC endpoints must span intact bridge to hydrolyzed product, and failed reruns cannot inherit stale result/store artifacts. Thirty focused regressions pass; no GPU calculation ran and A3 remains blocked on A3a.
+
 - 2026-09-05 09:50 PDT — (hermes-custom-build-001; profile=workstation) — A3 Osa-neutral n=1's advisory-seed route also exhausted the strict production reactant optimization after 100 steps and changed three termination-proton owners; no scientific output exists. Exact oxygen-proton ownership is now a fail-closed seed gate, and READY card A3a owns one microstate-preserving, endpoint-checkpointed recovery before A3 may resume.
 
 - 2026-09-05 08:28 PDT (hermes-custom-build-001; profile=workstation) — A2a cold review closed both high-severity evidence-binding findings: the production closeout now rehashes all 81 scan-cell geometry/energy artifacts, reconstructs the finite matrix, recomputes the minimax classification, binds the downhill-release classifier and artifact chain, and binds every frequency receipt to the exact role geometry, r2SCAN-3c settings, and finite-difference Hessian method. Real 81-cell validation and receipt-only DFT/store republish pass; refreshed artifact hashes are in the A2a card.

@@ -175,7 +175,8 @@ def test_reactant_complex_uses_checkpointed_hf_preoptimization(tmp_path, monkeyp
     guess = replace(geometry("guess", 3.2), frozen_indices=[0])
     preoptimized = replace(guess, coords=guess.coords.copy())
     preoptimized.coords[1:] += 0.01
-    production = replace(guess, coords=guess.coords + 0.02)
+    production = replace(guess, coords=guess.coords.copy())
+    production.coords[1:] += 0.02
     production_settings = DftSettings(
         xc="b3lyp", basis="def2-svp", density_fit=True, use_gpu=True
     )
@@ -202,9 +203,10 @@ def test_reactant_complex_uses_checkpointed_hf_preoptimization(tmp_path, monkeyp
     assert observed_settings == production_settings
     assert production_seed.coords == pytest.approx(preoptimized.coords, abs=1e-9)
     assert production_seed.frozen_indices == guess.frozen_indices
-    assert result is production
+    assert result.coords == pytest.approx(production.coords, abs=1e-8)
     assert (tmp_path / "complex_preopt.xyz").exists()
     assert (tmp_path / "complex.xyz").exists()
+    assert (tmp_path / "complex.json").exists()
     receipt = json.loads((tmp_path / "complex_preopt.json").read_text())
     assert receipt["optimizer_converged"] is False
     assert receipt["signature"]["convergence_is_advisory"] is True
@@ -273,7 +275,9 @@ def test_reactant_complex_resumes_preoptimization_before_production(
 
     def fake_optimize(cluster, settings):
         calls.append((cluster, settings))
-        return replace(cluster, coords=cluster.coords + 0.01)
+        coords = cluster.coords.copy()
+        coords[1:] += 0.01
+        return replace(cluster, coords=coords)
 
     monkeypatch.setattr(
         phase2,
@@ -466,10 +470,25 @@ def test_incomplete_advisory_checkpoint_is_preserved_and_recomputed(
     assert (tmp_path / "complex_preopt.json").exists()
 
 
-def test_existing_reactant_complex_skips_both_optimization_rungs(tmp_path, monkeypatch):
+def test_existing_reactant_complex_without_receipt_is_rejected(tmp_path):
     guess = geometry("guess", 3.2)
     completed = replace(guess, coords=guess.coords + 0.02)
     phase2.save_xyz(completed, tmp_path / "complex.xyz")
+
+    with pytest.raises(RuntimeError, match="refusing unchecked complex.xyz"):
+        phase2.optimize_reactant_complex(tmp_path, guess, CHEAP)
+
+
+def test_verified_reactant_complex_skips_both_optimization_rungs(tmp_path, monkeypatch):
+    guess = geometry("guess", 3.2)
+    monkeypatch.setattr(
+        phase2,
+        "optimize_bounded",
+        lambda *_args, **_kwargs: SimpleNamespace(cluster=guess, converged=True),
+    )
+    monkeypatch.setattr(phase2, "gradient", lambda *_args: np.full((5, 3), 0.01))
+    monkeypatch.setattr(phase2, "optimize", lambda cluster, _settings: cluster)
+    completed = phase2.optimize_reactant_complex(tmp_path, guess, CHEAP)
     monkeypatch.setattr(
         phase2,
         "optimize",
@@ -479,7 +498,79 @@ def test_existing_reactant_complex_skips_both_optimization_rungs(tmp_path, monke
     resumed = phase2.optimize_reactant_complex(tmp_path, guess, CHEAP)
 
     assert resumed.coords == pytest.approx(completed.coords, abs=1e-9)
-    assert not (tmp_path / "complex_preopt.xyz").exists()
+
+
+def test_production_endpoint_rejects_changed_proton_owner(tmp_path, monkeypatch):
+    guess = Cluster(
+        "two-waters",
+        ["O", "O", "H", "H"],
+        np.array(
+            [[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [0.96, 0.0, 0.0], [3.96, 0.0, 0.0]]
+        ),
+    )
+    transferred = replace(guess, coords=guess.coords.copy())
+    transferred.coords[2, 0] = 2.04
+    monkeypatch.setattr(
+        phase2,
+        "optimize_bounded",
+        lambda *_args, **_kwargs: SimpleNamespace(cluster=guess, converged=True),
+    )
+    monkeypatch.setattr(phase2, "gradient", lambda *_args: np.full((4, 3), 0.01))
+    monkeypatch.setattr(phase2, "optimize", lambda *_args: transferred)
+
+    with pytest.raises(RuntimeError, match="production optimization changed"):
+        phase2.optimize_reactant_complex(tmp_path, guess, CHEAP)
+
+    assert not (tmp_path / "complex.xyz").exists()
+
+
+def test_load_xyz_rejects_changed_atom_order(tmp_path):
+    template = geometry("template", 3.2)
+    path = tmp_path / "bad.xyz"
+    lines = template.to_xyz().splitlines()
+    lines[2], lines[3] = lines[3], lines[2]
+    path.write_text("\n".join(lines))
+
+    with pytest.raises(ValueError, match="atom-order or symbol mismatch"):
+        phase2.load_xyz(path, template)
+
+
+def test_reactant_minimum_rejects_significant_imaginary_mode():
+    assert phase2.reactant_minimum_reason(np.array([12.0, 35.0])) is not None
+    assert phase2.reactant_minimum_reason(np.array([12.0, 29.0])) is None
+
+
+def test_quick_irc_must_span_intact_bridge_and_hydrolyzed_product():
+    intact = geometry("intact", 3.0, m_obr=1.6)
+    product = geometry("product", 1.9, m_obr=3.0)
+    product.coords[3] = np.array([3.98, 0.0, 0.0])
+    assert (
+        phase2.quick_irc_acceptance_reason(
+            intact, product, m_index=1, br_index=0, ow_index=2
+        )
+        is None
+    )
+    assert (
+        phase2.quick_irc_acceptance_reason(
+            intact, intact, m_index=1, br_index=0, ow_index=2
+        )
+        is not None
+    )
+
+
+def test_new_attempt_quarantines_stale_canonical_outputs(tmp_path):
+    for name in ("results.json", "store.sqlite", "store.sqlite-wal"):
+        (tmp_path / name).write_text(name)
+
+    quarantine = phase2.quarantine_canonical_outputs(tmp_path)
+
+    assert quarantine is not None
+    assert {path.name for path in quarantine.iterdir()} == {
+        "results.json",
+        "store.sqlite",
+        "store.sqlite-wal",
+    }
+    assert not (tmp_path / "results.json").exists()
 
 
 def test_resume_persists_proton_route_before_reentering_proton_stage(
@@ -520,6 +611,16 @@ def test_resume_persists_proton_route_before_reentering_proton_stage(
     monkeypatch.setattr(phase2, "from_deck_cell", lambda *args, **kwargs: cc)
     monkeypatch.setattr(
         phase2, "attack_complex", lambda cc, attacker: (complex_guess, 2)
+    )
+    monkeypatch.setattr(
+        phase2,
+        "optimize_reactant_complex",
+        lambda _run_dir, _guess, _settings: complex_guess,
+    )
+    monkeypatch.setattr(
+        phase2,
+        "frequencies",
+        lambda *_args, **_kwargs: SimpleNamespace(imaginary_cm=np.array([])),
     )
     monkeypatch.setattr(phase2, "optimize", lambda cluster, settings: cluster)
     monkeypatch.setattr(phase2, "trim_gpu_pool", lambda: None)
