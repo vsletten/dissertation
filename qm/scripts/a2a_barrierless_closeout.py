@@ -32,6 +32,7 @@ from quarry import pipeline
 from quarry.clusters import Cluster
 from quarry.pipeline import HARTREE_TO_KJ, DftSettings, FrequencyResult
 from quarry.store import Store
+from scripts import a2a_cleavage_scan as scan_driver
 from scripts import a2a_path_rebuild as path_driver
 from scripts import production_energetics as production
 
@@ -78,8 +79,89 @@ def _require_sha(path: Path, expected: str) -> None:
         raise ValueError(f"{path}: SHA-256 drift; expected {expected}, found {actual}")
 
 
-def _load_frequency(path: Path) -> FrequencyResult:
-    return path_driver.frequency_from_payload(_json(path))
+def _load_frequency(path: Path, cluster: Cluster) -> FrequencyResult:
+    payload = _json(path)
+    expected_geometry = production.frequency_geometry_fingerprint(cluster)
+    expected_settings = production.frequency_settings_fingerprint(
+        production.settings(use_gpu=False)[0]
+    )
+    if payload.get("geometry_fingerprint") != expected_geometry:
+        raise ValueError(f"{path}: frequency geometry drift")
+    if payload.get("settings_fingerprint") != expected_settings:
+        raise ValueError(f"{path}: frequency settings drift")
+    if payload.get("hessian_method") != "finite-difference-gradient":
+        raise ValueError(f"{path}: frequency Hessian method drift")
+    return path_driver.frequency_from_payload(payload)
+
+
+def _validate_scan_evidence(root: Path, classification: dict[str, Any]) -> None:
+    scan_root = root / "cleavage/coupled-scan-v1"
+    try:
+        relative = np.asarray(classification["relative_energies_kj_mol"], dtype=float)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("classification is missing its finite energy matrix") from exc
+    if relative.shape != (9, 9) or not np.all(np.isfinite(relative)):
+        raise ValueError("classification must contain one finite 9x9 energy matrix")
+
+    energies = np.empty((9, 9), dtype=float)
+    topologies: dict[tuple[int, int], dict[str, Any]] = {}
+    expected_settings = production.frequency_settings_fingerprint(
+        production.settings(use_gpu=False)[0]
+    )
+    for row in range(9):
+        for column in range(9):
+            cell_dir = scan_root / f"r{row:02d}-c{column:02d}"
+            receipt = _json(cell_dir / "cell-receipt.json")
+            if receipt.get("status") != "completed":
+                raise ValueError(f"scan cell {(row, column)} is incomplete")
+            if receipt.get("scan_version") != scan_driver.SCAN_VERSION:
+                raise ValueError(f"scan cell {(row, column)} version drift")
+            if receipt.get("cell") != [row, column]:
+                raise ValueError(f"scan cell {(row, column)} index drift")
+            if receipt.get("settings_fingerprint") != expected_settings:
+                raise ValueError(f"scan cell {(row, column)} settings drift")
+            geometry_path = cell_dir / "optimized.xyz"
+            energy_path = cell_dir / "electronic-energy.json"
+            _require_sha(geometry_path, str(receipt.get("output_geometry_sha256", "")))
+            _require_sha(energy_path, str(receipt.get("energy_receipt_sha256", "")))
+            geometry = path_driver.load_reference(
+                geometry_path, role=f"scan-r{row:02d}-c{column:02d}"
+            )
+            geometry_fp = production.frequency_geometry_fingerprint(geometry)
+            if geometry_fp != receipt.get("output_geometry_fingerprint"):
+                raise ValueError(f"scan cell {(row, column)} geometry drift")
+            energy = _json(energy_path)
+            if energy.get("geometry_fingerprint") != geometry_fp:
+                raise ValueError(f"scan cell {(row, column)} energy geometry drift")
+            if energy.get("settings_fingerprint") != expected_settings:
+                raise ValueError(f"scan cell {(row, column)} energy settings drift")
+            if energy.get("method") != production.R2SCAN3C_METHOD:
+                raise ValueError(f"scan cell {(row, column)} method drift")
+            value = float(energy.get("electronic_hartree", np.nan))
+            if not np.isfinite(value) or not np.isclose(
+                value,
+                float(receipt.get("electronic_hartree", np.nan)),
+                rtol=0.0,
+                atol=1e-10,
+            ):
+                raise ValueError(f"scan cell {(row, column)} energy drift")
+            energies[row, column] = value
+            topologies[(row, column)] = receipt.get("topology", {})
+
+    recomputed_relative = (energies - energies[0, 0]) * HARTREE_TO_KJ
+    if not np.allclose(relative, recomputed_relative, rtol=0.0, atol=1e-8):
+        raise ValueError("classification energy matrix does not match cell receipts")
+    decision = classification.get("classification")
+    recomputed = scan_driver.classify_complete_grid(
+        relative,
+        product_index=7,
+        barrier_threshold_kj_mol=2.0,
+        cell_topologies=topologies,
+    )
+    if scan_driver._json_stable(decision) != scan_driver._json_stable(recomputed):
+        raise ValueError(
+            "classification does not match recomputed complete-grid result"
+        )
 
 
 def _classification_and_release(root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -91,6 +173,7 @@ def _classification_and_release(root: Path) -> tuple[dict[str, Any], dict[str, A
     )
     classification = _json(classification_path)
     release = _json(release_path)
+    _validate_scan_evidence(root, classification)
     decision = classification.get("classification", {})
     if classification.get("cell_count") != 81:
         raise RuntimeError(
@@ -126,6 +209,53 @@ def _classification_and_release(root: Path) -> tuple[dict[str, Any], dict[str, A
         release.get("minimum_cartesian_displacement_a", np.inf)
     ):
         raise RuntimeError("released product did not move a nonzero accepted distance")
+    if scan_driver._json_stable(classification.get("downhill_release")) != (
+        scan_driver._json_stable(release)
+    ):
+        raise ValueError("classification embeds a different downhill release receipt")
+    if release.get("classification_fingerprint") != scan_driver._payload_fingerprint(
+        decision
+    ):
+        raise ValueError("downhill release classification fingerprint drift")
+    release_root = root / "cleavage/barrierless-downhill-release-v2"
+    geometry_path = release_root / "released-product.xyz"
+    energy_path = release_root / "released-product.electronic-energy.json"
+    frequency_path = release_root / "released-product.fd.frequency.json"
+    _require_sha(geometry_path, str(release.get("released_geometry_sha256", "")))
+    _require_sha(energy_path, str(release.get("released_energy_sha256", "")))
+    _require_sha(frequency_path, str(release.get("released_frequency_sha256", "")))
+    released = path_driver.load_reference(geometry_path, role="released-product")
+    released_fp = production.frequency_geometry_fingerprint(released)
+    if released_fp != release.get("released_geometry_fingerprint"):
+        raise ValueError("released-product geometry fingerprint drift")
+    energy = _json(energy_path)
+    frequency = _json(frequency_path)
+    expected_settings = production.frequency_settings_fingerprint(
+        production.settings(use_gpu=False)[0]
+    )
+    for payload, label in ((energy, "energy"), (frequency, "frequency")):
+        if payload.get("geometry_fingerprint") != released_fp:
+            raise ValueError(f"released-product {label} geometry drift")
+        if payload.get("settings_fingerprint") != expected_settings:
+            raise ValueError(f"released-product {label} settings drift")
+    released_energy = float(energy.get("electronic_hartree", np.nan))
+    if not np.isclose(
+        released_energy,
+        float(release.get("released_electronic_hartree", np.nan)),
+        rtol=0.0,
+        atol=1e-10,
+    ):
+        raise ValueError("released-product electronic energy drift")
+    expected_delta = (
+        released_energy - float(release.get("seed_electronic_hartree", np.nan))
+    ) * HARTREE_TO_KJ
+    if not np.isclose(
+        expected_delta,
+        float(release.get("electronic_delta_kj_mol", np.nan)),
+        rtol=0.0,
+        atol=1e-8,
+    ):
+        raise ValueError("released-product energy delta drift")
     return classification, release
 
 
@@ -168,14 +298,20 @@ def load_accepted_route(evidence_root: Path, attacker_index: int = 15) -> Accept
     )
 
     frequencies = {
-        "reactant": _load_frequency(root / "reactant.fd-1e-3.frequency.json"),
-        "intermediate": _load_frequency(root / "intermediate.fd-1e-3.frequency.json"),
+        "reactant": _load_frequency(
+            root / "reactant.fd-1e-3.frequency.json", clusters["reactant"]
+        ),
+        "intermediate": _load_frequency(
+            root / "intermediate.fd-1e-3.frequency.json", clusters["intermediate"]
+        ),
         "addition-transition-state": _load_frequency(
-            root / "addition/transition-state.fd-1e-3.frequency.json"
+            root / "addition/transition-state.fd-1e-3.frequency.json",
+            clusters["addition-transition-state"],
         ),
         "released-product": _load_frequency(
             root / "cleavage/barrierless-downhill-release-v2/"
-            "released-product.fd.frequency.json"
+            "released-product.fd.frequency.json",
+            clusters["released-product"],
         ),
     }
     for role in ("reactant", "intermediate", "released-product"):
@@ -183,7 +319,8 @@ def load_accepted_route(evidence_root: Path, attacker_index: int = 15) -> Accept
             raise RuntimeError(f"{role} is not a zero-index minimum")
 
     secondary_ts = _load_frequency(
-        root / "addition/transition-state.fd-2e-3.frequency.json"
+        root / "addition/transition-state.fd-2e-3.frequency.json",
+        clusters["addition-transition-state"],
     )
     neb_crest = path_driver.load_reference(
         root / "addition/neb-crest.xyz",

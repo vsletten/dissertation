@@ -74,13 +74,45 @@ def write_classification(root, *, outcome="barrierless-shelf"):
 
 def test_barrierless_classification_and_release_are_fail_closed(tmp_path):
     write_classification(tmp_path)
-    classification, release = closeout._classification_and_release(tmp_path)
-    assert classification["classification"]["outcome"] == "barrierless-shelf"
-    assert release["zero_index_minimum"] is True
+    with pytest.raises(ValueError, match="finite energy matrix"):
+        closeout._classification_and_release(tmp_path)
 
     write_classification(tmp_path, outcome="interior-saddle")
-    with pytest.raises(RuntimeError, match="not barrierless-shelf"):
+    with pytest.raises(ValueError, match="finite energy matrix"):
         closeout._classification_and_release(tmp_path)
+
+
+def test_frequency_receipt_is_bound_to_geometry_settings_and_hessian(tmp_path):
+    current = cluster("reactant")
+    settings = closeout.production.settings(use_gpu=False)[0]
+    payload = {
+        "electronic_hartree": -10.0,
+        "frequencies_cm": [100.0],
+        "imaginary_cm": [],
+        "molar_mass_kg": 0.1,
+        "rotational_temperatures_k": [1.0, 2.0, 3.0],
+        "linear": False,
+        "geometry_fingerprint": closeout.production.frequency_geometry_fingerprint(
+            current
+        ),
+        "settings_fingerprint": closeout.production.frequency_settings_fingerprint(
+            settings
+        ),
+        "hessian_method": "finite-difference-gradient",
+    }
+    path = tmp_path / "frequency.json"
+    path.write_text(json.dumps(payload))
+    assert closeout._load_frequency(path, current).n_imaginary == 0
+    for field, bad_value, match in (
+        ("geometry_fingerprint", "wrong", "geometry drift"),
+        ("settings_fingerprint", "wrong", "settings drift"),
+        ("hessian_method", "analytic", "Hessian method drift"),
+    ):
+        corrupted = dict(payload)
+        corrupted[field] = bad_value
+        path.write_text(json.dumps(corrupted))
+        with pytest.raises(ValueError, match=match):
+            closeout._load_frequency(path, current)
 
 
 def test_closeout_method_matrix_is_exact():

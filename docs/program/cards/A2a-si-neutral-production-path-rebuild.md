@@ -87,19 +87,21 @@ it. The accepted canonical reactant/QZ receipt remains an absolute anchor and
 the complete TightPNO pair supplies the basis correction.
 
 Durable evidence: `production-closeout/route-validation.json` SHA-256
-`c601ce99604eaad898753ed21651d70b5ade1adad02618c5655c66b28d10be29`;
+`c7c4f4bbe03adb14f02144e0587a396a317f002844f265a702503a8c27e8313e`;
 `dft-summary.json` SHA-256
-`deedb69d4a2d2f147d722a9df39adfb0741989f0904cd247a4fa4cb240e80efd`;
+`b6f074c7351ad22b31b0340426e334b5777f04e081f5c8ceef61c0749b1959f8`;
 `store.sqlite` SHA-256
-`e758680c905d3ea74cef47f4ebeeaed5e42b7ab698b6b156e85a109d9f7ca3b5`;
+`480cc244cf06bf7fd8edce86e4d57c3a8466e24e2793daf39be3fe27207dcd89`;
 `cc-calibration/focal-point-summary.json` SHA-256
 `2df64b9f1987f8e8924199bb51005156031c38e580bbcd958244a3956e340ff1`.
-Fresh closeout gates: **520 passed, 1 skipped**, whole-tree Ruff check and format,
+Fresh closeout gates: **521 passed, 1 skipped**, whole-tree Ruff check and format,
 Python compile, both real CLI closeouts, and `git diff --check`.
 
 ## Progress
 
-- 2026-09-05 08:07 PDT (hermes-custom-build-001; profile=workstation) — **A2a production closeout is complete.** The terminal TightPNO service receipt reports `outcome=success`; TS/QZ, reactant/TZ, and TS/TZ scientific receipts rehash to `4284e741...`, `147f1a60...`, and `1d3294ab...`. A new fail-closed `summarize-focal` route validates exact geometry/state and receipt arithmetic, refuses a canonical TS/QZ selector, and computes the directive-adjusted focal barrier `132.960133 kJ/mol`; the independent TZ barrier delta is `+0.245700 kJ/mol`, passing the `2 kJ/mol` gate. The resume-safe DFT closeout now publishes a 17-job quarry store from the twelve existing receipt-bound single points without importing the unavailable GPU engine. External focal/store hashes and the final scientific verdict are recorded in `## Result`; fresh full gates are `520 passed, 1 skipped`, Ruff/format/compile/diff and real CLI closeouts green.
+- 2026-09-05 08:28 PDT (hermes-custom-build-001; profile=workstation) — **cold adversarial review found and closed two high-severity evidence-binding gaps before PR.** The closeout now rehashes all 81 cell geometries and energy receipts, verifies settings/method/index/status/topology, reconstructs the finite 9×9 matrix, and recomputes the deterministic minimax classifier byte-for-byte. It also binds the downhill release to the classifier fingerprint and embedded receipt, rehashes released geometry/energy/frequency artifacts, checks geometry/settings/energy arithmetic, and requires every route frequency receipt to match its hash-pinned role geometry, exact r2SCAN-3c settings, and finite-difference Hessian method. The real 81-cell validation and no-recompute DFT/store publication pass; refreshed route/summary/store hashes are in `## Result`.
+
+- 2026-09-05 08:07 PDT (hermes-custom-build-001; profile=workstation) — **A2a production closeout is complete.** The terminal TightPNO service receipt reports `outcome=success`; TS/QZ, reactant/TZ, and TS/TZ scientific receipts rehash to `4284e741...`, `147f1a60...`, and `1d3294ab...`. A new fail-closed `summarize-focal` route validates exact geometry/state and receipt arithmetic, refuses a canonical TS/QZ selector, and computes the directive-adjusted focal barrier `132.960133 kJ/mol`; the independent TZ barrier delta is `+0.245700 kJ/mol`, passing the `2 kJ/mol` gate. The resume-safe DFT closeout now publishes a 17-job quarry store from the twelve existing receipt-bound single points without importing the unavailable GPU engine. External focal/store hashes and the final scientific verdict are recorded in `## Result`; fresh full gates are `521 passed, 1 skipped`, Ruff/format/compile/diff and real CLI closeouts green.
 
 - 2026-09-05 04:19 PDT (hermes-custom-build-001; profile=workstation) — **the corrected remaining-matrix continuation is durably computing TS/cc-pVQZ TightPNO; no energy or receipt is claimed yet.** Exact clean/pushed launch head `bafd148b743d549a13eaa64db117dbee20f648b9` differs from implementation identity `63d604d51a7aa63b33d677d356e13ac8c758fb3c` only in this card and program STATUS. Finite system unit `a2a-task220-psi4-remaining.service` is active at invocation `ab3045f281ed4db39fbbbd6ef7d88ffd` under the unchanged `30 h`, `42 GiB` RAM, `8 GiB` swap, `16`-core, nice-10 envelope; running receipt stage is `ts-qz`, and engine readback shows the exact `cc-pVQZ` 1,552-function auxiliary basis plus live DF-RHF iterations. Psi4 child PID `414810` accrued 80 CPU-seconds in a fresh five-second sample. Both email pipelines, watchdog/deploy-watch timers, and Honcho are intentionally isolated; the 29-hour restoration dead-man is active. Corrected launcher SHA-256 remains `6cfc535fa1e1146410597e4a8d95f8929f39ce885f1ff5c530a0dd71eb623a87`. Terminal blocker is the atomic `psi4-remaining-20260905.status.json`; the next worker must adjudicate its outcome and all three receipt hashes before focal-point/docs/PR closeout.
 
