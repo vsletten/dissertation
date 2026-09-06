@@ -2,9 +2,9 @@
 
 - observation time: 2026-09-06 01:12 PDT
 - executor: `(hermes-custom-build-001; profile=workstation)`
-- status: **unverified terminal-decision candidate**
+- status: **independently verified terminal decision**
 - production-calculator calls in this adjudication: **none**
-- decision candidate: **retire the original Osa-neutral n=1 proton assignment**
+- decision: **retire the original Osa-neutral n=1 proton assignment**
 
 ## Scope
 
@@ -99,7 +99,7 @@ electronic-state restart behavior, endpoint canonicalization, or another
 calculator-level cause; resolving that would require the additional calculator
 work this card forbids and is unnecessary to the acceptance decision.
 
-## Decision candidate and parent disposition
+## Decision and parent disposition
 
 **Terminal rejection.** Retire the original Osa-neutral n=1 proton assignment as
 lacking a usable constrained stationary basin under the current builder,
@@ -120,9 +120,27 @@ does not create a separate execution follow-up. A future materially changed
 termination, solvation, proton-assignment, or electronic-tier model would be a
 new scientific design slice, not an A3a/A3b/A3c continuation.
 
-## Verification status
+## Independent verification
 
-The arithmetic and bindings above are the executor's candidate analysis. Per the
-A3d verification edge, the causal diagnosis and terminal decision remain
-**unverified** until a different cold worker starts from the original A3c
-complaint and raw receipts, reproduces the gates, and confirms the disposition.
+`hermes-a3d-cold-verifier`, operating read-only from pushed candidate commit
+`efb839bd53959aaa6bd51d53a29ab5111839fbfb`, returned **PASS** with no
+corrections. The cold pass started from the original A3c complaint and external
+receipts rather than this report, made no calculator call, and modified no file.
+It independently:
+
+- matched the complete promoted A3a/A3b/A3c hash chain and implementation
+  revision;
+- recomputed gradient RMS/max as
+  `1.6196284433660068e-3/1.2292589798438058e-2 Eh/Bohr`, or
+  `5.39876147788669x/27.31686621875124x` over gate;
+- recomputed the maximum constraint residual as
+  `5.134240676829549e-6 A` and recovered exact triad ownership
+  `H50:O26`, `H52:O27`, `H57:O29`;
+- confirmed the geomeTRIC 1.1.1 convergence-semantics distinction from
+  installed source; and
+- confirmed that terminal rejection, replay/n=2–4 refusal for this exact
+  series, and returning A3 to the other independently gated campaigns follows
+  from the evidence.
+
+The verification edge is closed. The diagnosis and terminal decision above are
+verified.
