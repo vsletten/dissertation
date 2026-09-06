@@ -402,7 +402,7 @@ def test_oaa_n4_campaign_pins_exact_crystallographic_center(tmp_path, monkeypatc
     monkeypatch.setattr(
         campaign,
         "validate_result",
-        lambda *_args, **_kwargs: {"n_intact": 4},
+        lambda *_args, **_kwargs: {"n_intact": _kwargs.get("n_intact", 4)},
     )
 
     def run(command, **_kwargs):
@@ -424,13 +424,19 @@ def test_oaa_n4_campaign_pins_exact_crystallographic_center(tmp_path, monkeypatc
                 "--state",
                 "neutral",
                 "--cells",
+                "2",
                 "4",
             ]
         )
         == 0
     )
-    center_flag = commands[0].index("--center-index")
-    assert commands[0][center_flag + 1] == "23"
+    n4 = next(
+        command
+        for command in commands
+        if command[command.index("--n-intact") + 1] == "4"
+    )
+    center_flag = n4.index("--center-index")
+    assert n4[center_flag + 1] == "23"
 
 
 def test_atomic_json_never_emits_nan(tmp_path):
@@ -580,3 +586,24 @@ def test_main_defers_signal_during_terminal_receipt_commit(tmp_path, monkeypatch
     assert injected is True
     assert exit_code == 0
     assert receipt["success"] is True
+
+
+@pytest.mark.parametrize("cells", [("4",), ("6",), ("4", "6"), ("2", "6")])
+def test_oaa_campaign_rejects_cells_that_skip_n2_serial_rung(tmp_path, cells):
+    with pytest.raises(SystemExit, match="serial prefix of 2,4,6 starting at n=2"):
+        campaign.main(
+            [
+                "--worktree",
+                str(tmp_path),
+                "--run-root",
+                str(tmp_path / "run"),
+                "--expected-git-sha",
+                "deadbeef",
+                "--family",
+                "oaa",
+                "--state",
+                "neutral",
+                "--cells",
+                *cells,
+            ]
+        )

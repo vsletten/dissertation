@@ -635,6 +635,11 @@ def main(argv: list[str] | None = None) -> int:
     if not cells or any(cell not in allowed for cell in cells):
         allowed_text = ",".join(str(cell) for cell in allowed)
         raise SystemExit(f"--cells must be drawn from {allowed_text} for {args.family}")
+    if args.family == "oaa" and cells != allowed[: len(cells)]:
+        allowed_text = ",".join(str(cell) for cell in allowed)
+        raise SystemExit(
+            f"Oaa --cells must be a serial prefix of {allowed_text} starting at n=2"
+        )
     if args.threads < 1 or args.threads > 16:
         raise SystemExit("--threads must be within 1..16")
     if args.wait_for_gpu_seconds < 0 or args.gpu_poll_seconds <= 0:
