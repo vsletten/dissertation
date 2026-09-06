@@ -4,7 +4,7 @@
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaigns; cluster-builder code is machine-any)
-- depends: A3b-osa-neutral-n1-proton-microstate-stability (Osa-neutral n=1 reactant basin verdict)
+- depends: A3c-osa-neutral-n1-mobile-proton-triad-conditioning (A3b ended inconclusive)
 - claimed-by:
 
 ## Objective
@@ -77,6 +77,7 @@ all scripted in the run log and learnings. ~10 h GPU per cell realistic
 including one saddle retry.
 
 ## Progress
+- 2026-09-05 20:47 PDT (hermes-custom-build-001; profile=workstation) — A3b ended with an independently verified `inconclusive` outcome before either release route: its dual-owner production seed exhausted 100 steps, remained nonstationary, and exposed a third mobile termination proton `H52:O27->O32` while retaining the constrained H50/H57 bonds. READY A3c owns one materially different three-owner constrained-stationarity test. A3 remains blocked; no A3b replay, n=2-4 launch, saddle, barrier, store, or Petra output is authorized.
 - 2026-09-05 17:37 PDT (hermes-custom-build-001; profile=workstation) — A3a terminated fail-closed after its B3LYP production optimizer converged but transferred `H50:O26->O31` and `H57:O29->O20`; no minimum, barrier, store, or Petra fragment was promoted. A3 now blocks on executable A3b's bounded two-order constraint-release test of whether the requested proton assignment is a production-level basin. No n=2–4 or fourth unconstrained replay is authorized.
 - 2026-09-05 10:19 PDT (hermes-custom-build-001; profile=workstation) — Adversarial pre-PR review found four publication-path blockers beyond the failed advisory seed: unchecked production checkpoint reuse, no post-production microstate/shell gate, no reactant-minimum or quick-IRC basin gate, and stale canonical outputs surviving failed reruns. All four are now closed with strict/hash-bound checkpoint parsing, post-optimizer geometry acceptance, zero-significant-imaginary reactant plus hydrolysis-endpoint checks, stale-output quarantine, and focused adversarial regressions (30 passed). No fourth GPU attempt ran; A3 remains blocked on A3a's endpoint-preserving one-continuation recovery.
 - 2026-09-05 09:50 PDT (hermes-custom-build-001; profile=workstation) — The one-shot advisory-seed recovery also failed honestly with zero completed cells after 13,781.27 s. Its HF/STO-3G endpoint passed finite production-gradient qualification, but the strict B3LYP/def2-SVP/DF reactant optimization exhausted 100 steps: final RMS/max gradients were 3.294e-4/1.274e-3 Eh/Bohr and RMS/max displacements were 3.651e-3/1.685e-2 A, all still above convergence. No `complex.xyz`, barrier, store, or Petra fragment was emitted. Independent read-only review also found the advisory seed changed termination-proton owners H50 O26→O31, H52 O27→O32, and H57 O29→O20. The driver now fails closed on exact oxygen-proton ownership (contract v2; regression-tested), and executable card `A3a-reactant-minimum-recovery` owns one microstate-preserving conditioning plus checkpointed production continuation. A3 remains blocked; no identical replay or n=2..4 launch is allowed.
