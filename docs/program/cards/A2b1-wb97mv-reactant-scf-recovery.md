@@ -1,6 +1,6 @@
 # A2b1-wb97mv-reactant-scf-recovery — bounded reactant SCF adjudication
 
-- status: active
+- status: done
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaign)
@@ -53,6 +53,22 @@ geometry, density fitting, grids, and convergence acceptance do not change.
 
 ## Progress
 
+- 2026-09-06 12:41 PDT — DONE with the predeclared terminal-failure outcome.
+  The Hückel → 50-cycle damped/0.5-Eh-level-shifted Roothaan stage and its
+  density-seeded 150-cycle unshifted CDIIS finalization both ended with
+  `converged=false`; final orbital-gradient norms were respectively
+  `81.57863386820702` and `4.388151693060163`, and every energy remains
+  diagnostic-only. A cold independent verifier recomputed the terminal,
+  run-status, attempt, driver, legacy-source/settings, geometry, and frequency
+  hashes; confirmed the exact density handoff; reran all nine focused
+  publication-boundary tests; and observed no unit, process, running record,
+  canonical energy, `results.json`, or SQLite store. Terminal receipt SHA-256 is
+  `49d1fd95e82a8a178b3a33c8c946516d3a3655e0a2d108cb3afccf4f3f2bca6d`.
+  A2b remains blocked on terminal reactant SCF failure; no solver, method,
+  geometry, threshold, or cycle-bound expansion is authorized. Final fresh gates
+  are `642 passed`, whole-QM Ruff, changed-file Ruff format, worktree-PYTHONPATH
+  CLI smoke, board/PLAN cross-check, and `git diff --check` green.
+  (hermes-custom-build-001; profile=workstation)
 - 2026-09-06 11:02 PDT — Launched the exact reactant gate as bounded transient unit `task294-a2b1-reactant-scf-recovery.service` (invocation `120d66393dcc47729ea73c9fe17ba079`): driver wall 7,200 s, `RuntimeMaxSec=7,800`, `MemoryMax=48G`, 16 threads, 18 GiB GPU pool, canonical GPU lease acquired by PID 33585, and `ExecStopPost` atomic failure backstop installed. Prelaunch gates: Ruff clean, format clean, full suite 641 passed / 1 skipped, and both independent review rejection classes reproduced then fixed with adversarial tests. Terminal blocker: `/mnt/data/vsletten/dissertation-data/task294-a2b1-wb97mv-reactant-scf-recovery-20260906/terminal-receipt.json`. (hermes-custom-build-001; profile=workstation)
 - 2026-09-06 10:42 PDT — Claimed atomically from `origin/main@dc194e7ae9eecdc0d5c39e904f6f8511e3a82c4a`; independent scientific review approved the predeclared `a2b1-huckel-damped-level-shifted-roothaan-to-cdiis-v1` contract only. Implemented hash/settings/geometry/driver-bound atomic per-attempt receipts, strict cache revalidation, a fail-closed timeout backstop, and adversarial both-fail/tamper/timeout tests. A cold implementation review rejected launch for semantic receipt gaps and pre-start timeout behavior; those findings are fixed and focused verification is 17 passed. (hermes-custom-build-001; profile=workstation)
 
@@ -80,3 +96,20 @@ geometry, density fitting, grids, and convergence acceptance do not change.
   Newton-to-direct-DIIS recovery failed before the first production energy and
   did not separately persist attempt diagnostics. This card owns one bounded,
   materially different reactant-only hypothesis; A2b and A2c remain blocked.
+
+## Result
+
+- `incomplete-computational-failure`, independently verified. Attempt 1
+  exhausted 50 damped/level-shifted Roothaan cycles; attempt 2 exhausted 150
+  fresh unshifted CDIIS cycles from the exact attempt-1 density. Both actual
+  convergence flags are false. Attempt receipt hashes are
+  `c6a980a031020e4c02c638221463260139319e30858cc93015df3ab5306afe7b`
+  and `b0020febb2a653eafd9a27dfe8b046e1386687729e8ff0e69b88d7069c68cf1b`.
+- The exact wB97M-V/def2-TZVPD+SMD(water), charge `-1`, spin `0`, geometry,
+  settings, source, and driver bindings rehash. No running record or process
+  remains, and neither the TASK-290 nor TASK-294 evidence root contains a
+  canonical reactant energy, `results.json`, `store.sqlite`, WAL, or SHM file.
+- This is a finite computational failure, not a mechanism rejection. A2b and
+  A2c remain blocked. The authorized recovery budget is exhausted; no further
+  retry, ad hoc solver, method/geometry change, weakened convergence, or longer
+  cycle bound is authorized by this card. (hermes-custom-build-001; profile=workstation)

@@ -4,9 +4,9 @@
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaign)
-- depends: A2a ✅ (settled production method contract)
+- depends: terminal accepted wB97M-V reactant SCF (unavailable; recovery budget exhausted)
 - claimed-by: hermes-custom-build-001
-- blocked-on: A2b1-wb97mv-reactant-scf-recovery
+- blocked-on: terminal wB97M-V reactant SCF failure; no retry authorized
 
 ## Objective
 
@@ -64,6 +64,16 @@ A2 method identity.
 
 ## Progress
 
+- 2026-09-06 12:41 PDT (hermes-custom-build-001; profile=workstation) — A2b1
+  exhausted its independently reviewed, materially different Hückel → damped
+  level-shifted Roothaan → fresh CDIIS route with both actual convergence flags
+  false. The hash-valid terminal outcome is
+  `incomplete-computational-failure`; exact density provenance and input
+  identity rehash, the unit/process/running record are gone, and no canonical
+  energy/result/store exists. A2b therefore remains terminally BLOCKED rather
+  than becoming ready when A2b1 closes. This is not a mechanism rejection, and
+  no additional solver, method, geometry, threshold, or cycle budget is
+  authorized.
 - 2026-09-06 05:02 PDT (hermes-custom-build-001; profile=workstation) —
   BLOCKED on READY `A2b1-wb97mv-reactant-scf-recovery` after the sole bounded
   Newton-to-direct-DIIS recovery also failed at the first wB97M-V reactant
@@ -146,3 +156,7 @@ A2 method identity.
   evidence and one predeclared reactant-only recovery hypothesis. A2c remains
   blocked. A2b may resume only after A2b1 produces a hash-valid converged
   reactant receipt; another unchanged TASK-290 launch is prohibited.
+- A2b1 has now closed with an independently verified finite failure: its two
+  additional attempt receipts are hash-valid but unconverged, and no canonical
+  production artifact exists. A2b remains blocked on terminal reactant SCF
+  failure; this PR authorizes no further computational retry or A2c transition.
