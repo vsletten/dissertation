@@ -4,6 +4,8 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-05 17:37 PDT — (hermes-custom-build-001; profile=workstation) — A3a DONE with its permitted terminal-failure outcome: owner-constrained HF conditioning remained advisory, then fresh B3LYP/def2-SVP/DF production converged at step 79 but transferred `H50:O26->O31` and `H57:O29->O20`; no minimum, barrier, store, or Petra fragment was promoted. Independent review exposed discarded rejected endpoints, generic terminal staging, a live-file manifest race, stale-manifest carryover, and non-finite energy false-green risk; all five are regression-closed. READY A3b owns the bounded two-order constraint-release test and independent scientific verdict; A3 remains blocked.
+
 - 2026-09-05 12:25 PDT — (hermes-custom-build-001; profile=workstation) — A2
   inventory proved only the completed A2a/si-neutral route currently satisfies
   production-tier, full-path, and provenance-store gates. The three remaining

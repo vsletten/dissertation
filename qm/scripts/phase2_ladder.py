@@ -444,6 +444,11 @@ def _recovery_endpoint_paths(run_dir: Path, attempt: int) -> tuple[Path, Path]:
     return run_dir / f"{stem}.xyz", run_dir / f"{stem}.json"
 
 
+def _recovery_raw_endpoint_paths(run_dir: Path, attempt: int) -> tuple[Path, Path]:
+    stem = f"complex_production_attempt_{attempt}.raw"
+    return run_dir / f"{stem}.xyz", run_dir / f"{stem}.json"
+
+
 def _write_recovery_terminal(
     run_dir: Path,
     *,
@@ -660,11 +665,44 @@ def recover_reactant_minimum(
                 settings,
                 max_steps=REACTANT_PRODUCTION_MAX_STEPS,
             )
-            endpoint, endpoint_gate, raw_drift = _project_frozen_and_gate(
-                result.cluster,
-                complex_guess,
-                stage=f"production attempt {attempt}",
+            raw_path, raw_receipt_path = _recovery_raw_endpoint_paths(run_dir, attempt)
+            write_xyz_atomic(raw_path, result.cluster)
+            raw_receipt: dict[str, object] = {
+                "schema": "phase2-reactant-production-raw-endpoint-v1",
+                "signature": signature,
+                "attempt": attempt,
+                "seed_geometry_hash": geometry_hash(seed.to_xyz()),
+                "endpoint_geometry_hash": geometry_hash(result.cluster.to_xyz()),
+                "converged": result.converged,
+                "max_steps": REACTANT_PRODUCTION_MAX_STEPS,
+                "status": "pending-geometry-gate",
+            }
+            write_json_atomic(raw_receipt_path, raw_receipt)
+            try:
+                endpoint, endpoint_gate, raw_drift = _project_frozen_and_gate(
+                    result.cluster,
+                    complex_guess,
+                    stage=f"production attempt {attempt}",
+                )
+            except Exception as exc:
+                detail = f"{type(exc).__name__}: {exc}"
+                raw_receipt["status"] = "rejected"
+                raw_receipt["detail"] = detail
+                write_json_atomic(raw_receipt_path, raw_receipt)
+                _write_recovery_terminal(
+                    run_dir,
+                    signature=signature,
+                    status="failed",
+                    stage="production-endpoint-geometry-gate",
+                    attempt=attempt,
+                    detail=detail,
+                )
+                raise
+            raw_receipt["status"] = "passed"
+            raw_receipt["projected_endpoint_geometry_hash"] = geometry_hash(
+                endpoint.to_xyz()
             )
+            write_json_atomic(raw_receipt_path, raw_receipt)
             endpoint_path, endpoint_receipt_path = _recovery_endpoint_paths(
                 run_dir, attempt
             )
@@ -733,6 +771,10 @@ def recover_reactant_minimum(
                 "Eh/Bohr)"
             )
         frequency = frequencies(accepted, settings)
+        if not np.isfinite(float(frequency.electronic_hartree)):
+            raise RuntimeError("independent reactant minimum energy is non-finite")
+        if not np.all(np.isfinite(frequency.imaginary_cm)):
+            raise RuntimeError("independent reactant frequencies are non-finite")
         if reason := reactant_minimum_reason(frequency.imaginary_cm):
             raise RuntimeError(reason)
     except Exception as exc:

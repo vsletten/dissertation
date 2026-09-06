@@ -113,3 +113,39 @@ def test_source_evidence_refuses_input_geometry_drift(tmp_path):
             attempts=attempts,
             expected_owner_changes=["H2:O0->O1"],
         )
+
+
+def test_outcome_manifest_excludes_outer_wrapper_files(tmp_path):
+    (tmp_path / "stable.json").write_text("{}")
+    (tmp_path / "launcher.log").write_text("still growing")
+    (tmp_path / "restoration-receipt.txt").write_text("written later")
+
+    records = runner.outcome_artifact_hashes(tmp_path)
+
+    assert [record["path"] for record in records] == ["stable.json"]
+
+
+def test_previous_manifest_and_terminal_are_revoked_together(tmp_path):
+    for name in ("source-evidence-manifest.json", "terminal-receipt.json"):
+        (tmp_path / name).write_text("stale")
+
+    runner.revoke_previous_receipts(tmp_path)
+
+    assert not (tmp_path / "source-evidence-manifest.json").exists()
+    assert not (tmp_path / "terminal-receipt.json").exists()
+
+
+def test_driver_failure_propagates_exact_child_stage(tmp_path):
+    (tmp_path / "production-terminal.json").write_text(
+        json.dumps(
+            {
+                "stage": "production-endpoint-geometry-gate",
+                "detail": "RuntimeError: proton owner changed",
+            }
+        )
+    )
+
+    stage, detail = runner.driver_failure(tmp_path, 1)
+
+    assert stage == "production-endpoint-geometry-gate"
+    assert detail == "driver exited 1: RuntimeError: proton owner changed"

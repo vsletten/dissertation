@@ -746,15 +746,55 @@ def test_reactant_recovery_exhaustion_preserves_both_endpoints(tmp_path, monkeyp
     assert terminal["attempt"] == 2
 
 
+def test_reactant_recovery_preserves_raw_owner_rejection(tmp_path, monkeypatch):
+    guess = Cluster(
+        "two-waters",
+        ["O", "O", "H", "H"],
+        np.array(
+            [[0.0, 0.0, 0.0], [3.0, 0.0, 0.0], [0.96, 0.0, 0.0], [3.96, 0.0, 0.0]]
+        ),
+    )
+    changed = replace(guess, coords=guess.coords.copy())
+    changed.coords[2] = np.array([2.04, 0.0, 0.0])
+    results = iter(
+        [
+            SimpleNamespace(cluster=guess, converged=False),
+            SimpleNamespace(cluster=changed, converged=True),
+        ]
+    )
+    monkeypatch.setattr(
+        phase2, "optimize_bounded", lambda *_args, **_kwargs: next(results)
+    )
+
+    with pytest.raises(RuntimeError, match="H2:O0->O1"):
+        phase2.recover_reactant_minimum(tmp_path, guess, CHEAP)
+
+    raw_path = tmp_path / "complex_production_attempt_1.raw.xyz"
+    raw_receipt = json.loads(
+        (tmp_path / "complex_production_attempt_1.raw.json").read_text()
+    )
+    assert raw_path.exists()
+    assert raw_receipt["status"] == "rejected"
+    assert raw_receipt["endpoint_geometry_hash"] == phase2.geometry_hash(
+        raw_path.read_text()
+    )
+    assert not (tmp_path / "complex_production_attempt_1.xyz").exists()
+    terminal = json.loads((tmp_path / "production-terminal.json").read_text())
+    assert terminal["stage"] == "production-endpoint-geometry-gate"
+    assert terminal["attempt"] == 1
+
+
 @pytest.mark.parametrize(
-    ("gradient_value", "imaginary", "message"),
+    ("gradient_value", "imaginary", "electronic_hartree", "message"),
     [
-        (0.001, np.array([]), "gradient exceeds"),
-        (0.0, np.array([45.0]), "imaginary mode"),
+        (0.001, np.array([]), -10.0, "gradient exceeds"),
+        (0.0, np.array([45.0]), -10.0, "imaginary mode"),
+        (0.0, np.array([]), np.nan, "energy is non-finite"),
+        (0.0, np.array([np.nan]), -10.0, "frequencies are non-finite"),
     ],
 )
 def test_reactant_recovery_never_promotes_failed_minimum(
-    tmp_path, monkeypatch, gradient_value, imaginary, message
+    tmp_path, monkeypatch, gradient_value, imaginary, electronic_hartree, message
 ):
     guess = replace(geometry("guess", 3.2), frozen_indices=[0])
     results = iter(
@@ -773,7 +813,7 @@ def test_reactant_recovery_never_promotes_failed_minimum(
         phase2,
         "frequencies",
         lambda *_args: SimpleNamespace(
-            imaginary_cm=imaginary, electronic_hartree=-10.0
+            imaginary_cm=imaginary, electronic_hartree=electronic_hartree
         ),
     )
 

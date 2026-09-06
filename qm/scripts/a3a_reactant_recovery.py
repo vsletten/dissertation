@@ -93,7 +93,15 @@ def git_head(repo_root: Path) -> str:
 
 
 def outcome_artifact_hashes(output_root: Path) -> list[dict[str, object]]:
-    excluded = {"source-evidence-manifest.json", "terminal-receipt.json"}
+    # These files are written by the outer service wrapper after this process
+    # finalizes the manifest. Hashing them here records a value that is stale by
+    # construction rather than durable evidence.
+    excluded = {
+        "source-evidence-manifest.json",
+        "terminal-receipt.json",
+        "launcher.log",
+        "restoration-receipt.txt",
+    }
     return [
         {
             "path": str(path.relative_to(output_root)),
@@ -105,6 +113,28 @@ def outcome_artifact_hashes(output_root: Path) -> list[dict[str, object]]:
         and path.name not in excluded
         and not path.name.endswith(".tmp")
     ]
+
+
+def revoke_previous_receipts(output_root: Path) -> None:
+    """Remove stale top-level verdicts before validating a new run."""
+    for name in ("source-evidence-manifest.json", "terminal-receipt.json"):
+        (output_root / name).unlink(missing_ok=True)
+
+
+def driver_failure(driver_run_dir: Path, returncode: int) -> tuple[str, str]:
+    """Return the exact child stage/detail when the recovery driver fails."""
+    production_terminal = driver_run_dir / "production-terminal.json"
+    if not production_terminal.is_file():
+        return (
+            "reactant-recovery-driver",
+            f"driver exited {returncode} without production-terminal.json",
+        )
+    payload = json.loads(production_terminal.read_text())
+    child_stage = payload.get("stage")
+    child_detail = payload.get("detail")
+    if not isinstance(child_stage, str) or not isinstance(child_detail, str):
+        raise RuntimeError("production terminal omitted exact stage/detail")
+    return child_stage, f"driver exited {returncode}: {child_detail}"
 
 
 def validate_source_evidence(
@@ -212,7 +242,7 @@ def main() -> int:
     args.output_root.mkdir(parents=True, exist_ok=True)
     manifest_path = args.output_root / "source-evidence-manifest.json"
     terminal_path = args.output_root / "terminal-receipt.json"
-    terminal_path.unlink(missing_ok=True)
+    revoke_previous_receipts(args.output_root)
     driver_run_dir = args.output_root / CELL_RELATIVE
     status = "failed"
     stage = "source-evidence-validation"
@@ -277,13 +307,7 @@ def main() -> int:
         )
         driver_returncode = completed.returncode
         if completed.returncode != 0:
-            production_terminal = driver_run_dir / "production-terminal.json"
-            production_detail = (
-                json.loads(production_terminal.read_text())
-                if production_terminal.exists()
-                else None
-            )
-            detail = f"driver exited {completed.returncode}: {production_detail}"
+            stage, detail = driver_failure(driver_run_dir, completed.returncode)
             raise RuntimeError(detail)
 
         stage = "result-verification"
