@@ -45,12 +45,13 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A1f-acid-neutral-water-attacker-relay](cards/A1f-acid-neutral-water-attacker-relay.md) | A | P1 | workstation | done | exact donor migrated to relay |
 | [A1g-acid-bridge-side-hydronium-neutral-attacker](cards/A1g-acid-bridge-side-hydronium-neutral-attacker.md) | A | P1 | workstation | done | conclusive product-family rejection |
 | [A1i-acid-production-tier-bridge-side-revisit](cards/A1i-acid-production-tier-bridge-side-revisit.md) | A | P1 | workstation | blocked: A2 | A1g ✅, A2 |
-| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | blocked: A3e | A3d ✅; OSS-neutral n=1 owner basin unresolved |
+| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | blocked: A3f | A3e ✅ inconclusive; OSS-neutral n=1 terminal adjudication required |
 | [A3a-reactant-minimum-recovery](cards/A3a-reactant-minimum-recovery.md) | A | P1 | workstation | done | terminal microstate rejection; no minimum promoted |
 | [A3b-osa-neutral-n1-proton-microstate-stability](cards/A3b-osa-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; H52 became third mobile owner |
 | [A3c-osa-neutral-n1-mobile-proton-triad-conditioning](cards/A3c-osa-neutral-n1-mobile-proton-triad-conditioning.md) | A | P1 | workstation | done | verified triad-conditioning failure; owners retained, projected gradients red |
 | [A3d-osa-neutral-n1-triad-failure-adjudication](cards/A3d-osa-neutral-n1-triad-failure-adjudication.md) | A | P1 | workstation | done | verified terminal rejection; A3 returns to remaining campaigns |
-| [A3e-oss-neutral-n1-proton-microstate-stability](cards/A3e-oss-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | ready | one finite owner-constrained → released production basin test |
+| [A3e-oss-neutral-n1-proton-microstate-stability](cards/A3e-oss-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; constrained max-gradient gate red, release not run |
+| [A3f-oss-neutral-n1-terminal-adjudication](cards/A3f-oss-neutral-n1-terminal-adjudication.md) | A | P1 | any | ready | CPU-only terminal disposition; no calculator calls or replay |
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
 | [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: A2b/A2c/A2d | final banked-reaction table, ranking, Petra/CALCULATIONS closeout |
 | [A2a-si-neutral-production-path-rebuild](cards/A2a-si-neutral-production-path-rebuild.md) | A | P1 | workstation | done | exact r2SCAN-3c minima + A2 infrastructure ✅ |
@@ -99,13 +100,14 @@ D2a-astro-rate-reproduction (PR #31 — verdict: GO gas-phase /
 NO-GO surface-LH), A7-kinetics-database (PR #27 — 36 minerals, 74
 mechanisms, validator green). **Blocked closeout branch**:
 `agents/A1b-acid-microsolvation` for A1b-acid-mechanisms.
-A3-barrier-ladder is BLOCKED on READY A3e. Its bounded OSS-neutral n=1 family
-attempt stopped after the converged HF/STO-3G advisory seed changed termination-
-proton owner `H35:O21->O14`; zero cells completed, no B3LYP production optimizer
-ran, and the rejected endpoint was not persisted. A3e owns the only authorized
-next OSS calculation: one finite owner-constrained → released production-PES
-basin test with raw-endpoint persistence and independent verification. No blind
-replay, OSS n=2–4 launch, or surrogate barrier/store/Petra value is authorized.
+A3-barrier-ladder is BLOCKED on READY A3f. A3e's independently verified single
+owner-constrained experiment retained `H35:O21` through constrained B3LYP and
+passed its RMS-gradient, residual, shell, collision, and finite-energy gates, but
+reproducibly missed the fixed maximum projected-gradient gate
+(`4.8363991055655475e-4 > 4.5e-4 Eh/Bohr`). Release was therefore not run and the
+typed terminal outcome is inconclusive. A3f owns one CPU-only terminal evidence
+adjudication; no A3e replay, threshold relaxation, OSS n=2–4 launch, or surrogate
+barrier/store/Petra value is authorized.
 A3d terminally rejected the exact Osa-neutral n=1 proton assignment after A3c's
 three-owner budget retained H50/H52/H57 but failed the independent canonical-
 endpoint projected-gradient stationarity gates despite geomeTRIC convergence.

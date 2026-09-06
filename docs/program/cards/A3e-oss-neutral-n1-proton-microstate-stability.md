@@ -1,11 +1,11 @@
 # A3e-oss-neutral-n1-proton-microstate-stability — test the H35 owner basin
 
-- status: ready
+- status: done
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
 - depends: A3 OSS-neutral n=1 advisory failure recorded and supervisor merged
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## Objective
 
@@ -89,8 +89,13 @@ report only `unverified: candidate outcome`.
 
 ## Progress
 
+- 2026-09-06 09:02 PDT (hermes-custom-build-001; profile=workstation) — DONE with an independently verified `inconclusive terminal failure`. Cold verifier `hermes-task292-cold-verifier` rehashed the complete source/receipt chain and recomputed B3LYP energy plus projected gradients with zero optimizer calls. The constrained production endpoint retained every original proton owner and passed RMS gradient, H35-O21 residual, frozen-shell, finite-energy, and collision gates, but its independently recomputed max projected gradient `4.8363991055655475e-4 Eh/Bohr` reproducibly exceeds the fixed `4.5e-4` gate; release therefore correctly remained unspent and no PHVA or no-basin claim exists. READY A3f owns one CPU-only terminal-path adjudication; A3e may not replay.
+- 2026-09-06 08:10 PDT (hermes-custom-build-001; profile=workstation) — Atomically claimed `agents/A3e-oss-neutral-n1-proton-microstate-stability` from exact `origin/main@d460f1b78defb5477452fff7cbe5ae847dbe462d`. Implemented the single authorized three-stage route: H35-O21-constrained HF/STO-3G conditioning, a fresh constrained B3LYP/def2-SVP/DF optimizer, and a fresh released B3LYP optimizer only after independent projected-gradient/residual/owner/shell/collision gates pass. Every spent stage reserves its one 100-step budget before launch, persists a raw endpoint and pending receipt before structural gates, binds parent/source/settings/code hashes, and emits only an unverified typed candidate. A separate optimizer-free verifier requires a genuinely different identity and recomputes production energy, projected gradients, ownership, residuals, integrity, and accepted-minimum PHVA. Ten focused adversarial tests plus focused Ruff/format and `git diff --check` pass; no calculator call has run yet.
+
 - 2026-09-06 07:06 PDT (hermes-custom-build-001; profile=workstation) — Filed from the fail-closed parent family attempt after two cold read-only reviews agreed that HF-level owner transfer is strong evidence against the builder assignment but insufficient for a production-PES no-basin verdict because the rejected endpoint was not persisted. This card is the only authorized next OSS-neutral n=1 calculation; it spends one materially different finite constrained-to-released production route and forbids all replay and downstream family work.
 
 ## Result
 
-(Pending.)
+- 2026-09-06 09:02 PDT (hermes-custom-build-001; profile=workstation) — **Verified terminal outcome: `inconclusive terminal failure`.** Exact execution source `333917de87c32b6be4ecc886662dd6666947740c`; executor candidate SHA-256 `b9fa9c4b0940b4e5ff7c40b83ffb106e8b3a4f4f2cbac355030c125eda9ab378`; independent terminal SHA-256 `756e1e885150556ac9b2da4a63ab4e4965246cd1072f83b09a9b5ca6629c86ff`; recomputed-evidence SHA-256 `82a5e9d0530568fd5040ffa2ca43fdcd4c6ff799fb94bed110f3faef291316fa`. Durable evidence root: `/mnt/data/vsletten/dissertation-data/a3e-oss-neutral-n1-proton-microstate-stability/`.
+- 2026-09-06 09:02 PDT (hermes-custom-build-001; profile=workstation) — Conditioning and constrained production each spent exactly one 100-step budget with zero retries. The constrained endpoint is owner-retaining at `H35:O21`, residual `4.201582921470326e-6 A`, RMS/max projected gradients `1.0358722090842382e-4/4.8363991055655475e-4 Eh/Bohr`; the fixed maximum-gradient gate is red, so release is `not-run`. No accepted minimum, production no-basin verdict, PHVA, n=2-4 run, saddle, barrier, store, Petra fragment, or CALCULATIONS value was emitted.
+- 2026-09-06 09:02 PDT (hermes-custom-build-001; profile=workstation) — The finite compute unit is terminal, restoration succeeded, the canonical GPU lease is absent, both email pipelines and queue/board timers are active, and API health is HTTP 200 `{"status":"ok"}`. Fresh full fast QA is `626 passed, 4 deselected`; whole-QM Ruff check/format and `git diff --check` passed. This terminal outcome closes A3e without loosening thresholds or replaying a stage; READY `A3f-oss-neutral-n1-terminal-adjudication` owns the exact evidence-only parent disposition.
