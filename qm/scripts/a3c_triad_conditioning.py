@@ -634,6 +634,8 @@ def main() -> int:
             )
         )
         return 0
+    if not args.gpu:
+        parser.error("--gpu is required for non-dry runs")
     terminal = run_experiment(
         args.output_root,
         source,

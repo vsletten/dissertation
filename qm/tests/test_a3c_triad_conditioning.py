@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import json
 import subprocess
+import sys
 import threading
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -446,3 +447,28 @@ def test_no_downstream_scientific_outputs_are_emitted(tmp_path, monkeypatch):
     a3c.run_experiment(tmp_path, source, use_gpu=False, code_revision="1" * 40)
     forbidden = {"results.json", "store.sqlite", "ts.xyz", "barrier.json", "petra.toml"}
     assert not any(path.name in forbidden for path in tmp_path.rglob("*"))
+
+
+def test_production_cli_requires_gpu_for_non_dry_runs(monkeypatch, capsys):
+    monkeypatch.setattr(a3c, "validate_sources", lambda *_args, **_kwargs: _source())
+    monkeypatch.setattr(a3c, "resolve_code_revision", lambda *_args, **_kwargs: "a" * 40)
+    monkeypatch.setattr(
+        a3c, "run_experiment", lambda *_args, **_kwargs: {"spent": True}
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "a3c_triad_conditioning.py",
+            "--a3a-root",
+            "/fixture/a3a",
+            "--a3b-root",
+            "/fixture/a3b",
+            "--output-root",
+            "/fixture/a3c",
+        ],
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        a3c.main()
+    assert excinfo.value.code == 2
+    assert "--gpu is required for non-dry runs" in capsys.readouterr().err
