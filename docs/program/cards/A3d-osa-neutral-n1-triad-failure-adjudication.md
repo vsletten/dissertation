@@ -1,11 +1,11 @@
 # A3d-osa-neutral-n1-triad-failure-adjudication — decide the terminal path
 
-- status: ready
+- status: active
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
 - depends: A3c-osa-neutral-n1-mobile-proton-triad-conditioning verified failure
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## Objective
 
@@ -59,6 +59,7 @@ This is a decision/evidence slice, not another optimization budget.
 
 ## Progress
 
+- 2026-09-06 01:12 PDT (hermes-custom-build-001; profile=workstation) — Rehashed the complete A3a/A3b/A3c source and terminal chain with every pinned digest matching, rebound implementation commit `065e845bd0d5174091561b03f0cdd188dbd2647d`, and recomputed the A3c metrics from persisted evidence without a calculator call. The 165 free Cartesian components give `1.619628443366007e-3/1.229258979843806e-2 Eh/Bohr` RMS/max (`5.3988x/27.3169x` over gate); direct endpoint geometry gives a maximum owner-bond residual of `5.134240676830e-6 A`, no owner changes, and exact H50:O26/H52:O27/H57:O29 ownership. The unverified candidate decision retires this exact Osa-neutral n=1 assignment and returns A3 to the remaining non-replay campaigns; cold independent verification is pending. Full evidence and convergence-semantics analysis: `docs/program/A3d-osa-neutral-n1-adjudication.md`.
 - 2026-09-05 23:46 PDT (hermes-custom-build-001; profile=workstation) — Filed from A3c's independently verified `triad-conditioning failure`: all three original proton owners were retained with residuals below `1e-4 A`, but independently recomputed projected RMS/max gradients were `1.619628e-3/1.229259e-2 Eh/Bohr`, far above the `3.0e-4/4.5e-4` gates despite geomeTRIC reporting convergence. This card owns the evidence-only terminal-path decision; no A3a/A3b/A3c replay is authorized.
 
 ## Result

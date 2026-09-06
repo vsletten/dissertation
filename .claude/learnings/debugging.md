@@ -125,3 +125,16 @@ input/settings/hash provenance, and allow at most one predeclared continuation
 from that endpoint under a fresh optimizer. A finite gradient is an electronic
 qualification only; it neither proves the intended proton microstate nor a
 minimum.
+
+### Constrained geomeTRIC convergence is not an independent stationary gate (2026-09-06)
+A3c's three-owner Osa-neutral n=1 run ended with geomeTRIC 1.1.1 reporting
+`Grad_T=1.122e-5/3.712e-5 Eh/Bohr` and convergence, while a fresh gradient on
+the canonical frozen-shell-projected endpoint gave component-wise free-atom
+RMS/max values of `1.619628e-3/1.229259e-2 Eh/Bohr`. These are different
+contracts: geomeTRIC uses its live constrained-run gradient after
+`InternalCoordinates.calcGradProj` and reduces per-atom vector norms; the
+publication gate independently reevaluates the persisted endpoint, projects
+frozen atoms and active bond normals explicitly, then reduces Cartesian
+components over free atoms. Preserve both receipts, but let the independent
+canonical-endpoint gate decide promotion. Do not infer the calculator-level
+cause of a disagreement without a separately authorized calculation.
