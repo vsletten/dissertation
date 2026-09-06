@@ -15,20 +15,24 @@ from typing import Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from quarry.pipeline import DftSettings, energy  # noqa: E402
-from scripts import a3b_proton_microstate_stability as a3b  # noqa: E402
-from scripts import a3c_triad_conditioning as a3c  # noqa: E402
-
 DEFAULT_VERIFIER_IDENTITY = "hermes-a3c-independent-verifier"
+DEFAULT_OUTPUT_ROOT = Path(
+    "/mnt/data/vsletten/dissertation-data/"
+    "a3c-osa-neutral-n1-mobile-proton-triad-conditioning"
+)
 
 if __name__ == "__main__":
     from quarry.etiquette import bootstrap_cli
 
     bootstrap_cli(
         "a3c_verify",
-        default_run_root=a3c.DEFAULT_OUTPUT_ROOT / "logs",
+        default_run_root=DEFAULT_OUTPUT_ROOT / "logs",
         gpu_owner="a3c_verify",
     )
+
+from quarry.pipeline import DftSettings, energy  # noqa: E402
+from scripts import a3b_proton_microstate_stability as a3b  # noqa: E402
+from scripts import a3c_triad_conditioning as a3c  # noqa: E402
 
 
 def now() -> str:
