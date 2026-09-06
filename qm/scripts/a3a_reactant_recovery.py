@@ -302,8 +302,11 @@ def main() -> int:
             if inherited_pythonpath
             else worktree_pythonpath
         )
+        # argv sequence, shell=False: trusted interpreter plus in-repo
+        # phase2_ladder.py driver and static recovery flags. Not a shell string.
+        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
         completed = subprocess.run(
-            command, cwd=args.worktree, env=child_env, check=False
+            command, cwd=args.worktree, env=child_env, check=False, shell=False
         )
         driver_returncode = completed.returncode
         if completed.returncode != 0:
