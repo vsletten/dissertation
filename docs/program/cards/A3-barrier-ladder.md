@@ -7,16 +7,36 @@
 - depends: A3f-oss-neutral-n1-terminal-adjudication (done; exact OSS-neutral route rejected)
 - claimed-by:
 
+## Constraints
+Ready is **not** authority to continue the OSS-neutral (300s Si–O–Si)
+series. A3f terminally rejected exact `oss-neutral-n1-s2`; OSS-neutral
+n=2–4 has no accepted n=1 baseline and is **prohibited** (no A3e replay,
+threshold relaxation, or surrogate barrier/store/Petra/CALCULATIONS
+output). A3d already closed Osa-neutral n=1–4. A worker claiming this
+parent must pick a **different** independently gated site-family /
+protonation campaign already in this card's objective. HANDOFF §3 next
+remaining family after the closed 400s and 300s neutral series is
+**500s Al–OH–Al**, then attachment/detachment ladders and 100s/200s;
+each still needs its own valid reactant minimum and normal scientific
+gates before any n=2–4 of that family. The retained OSS-neutral n=4
+pilot below is historical/non-actionable.
+
 ## Objective
 Execute qm/HANDOFF.md (Phase 2 edition — the full build plan lives
 there): build the crystallographic cluster builder (terminated,
 peripherally-frozen edge clusters cut from the kaolinite cell in
 petra/examples/kaolinite.toml, per KMC site family and protonation
 state), generalize the Phase-1 driver into a per-ladder-cell campaign
-script, compute the connectivity- and protonation-resolved barriers for
-the five site families, and emit them as petra `by_count`/`when` tables
-with provenance. Closes CALCULATIONS.md rows CALC-002..005 from
-`needed` to `computed`.
+script, and compute connectivity- and protonation-resolved barriers for
+remaining independently gated families. The original five-family list
+is 100s Al, 200s Si, 300s Si–O–Si, 400s Si–O–Al₂, and 500s Al–OH–Al,
+but this card **excludes** OSS-neutral n=1–4 (n=1 rejected; n=2–4
+prohibited) and the closed Osa-neutral series. Claimable next work is
+500s Al–OH–Al under its own reactant-minimum gate, not a prohibited
+OSS n=2–4 route. Emit accepted remaining families as petra
+`by_count`/`when` tables with provenance. Closes CALCULATIONS.md rows
+CALC-002..005 from `needed` to `computed` only for families that
+produce accepted reactant minima — never via OSS n=2–4.
 
 ## Context
 - qm/HANDOFF.md — the complete Phase-2 plan (read first)
@@ -31,18 +51,30 @@ with provenance. Closes CALCULATIONS.md rows CALC-002..005 from
 - Cluster-builder unit gates green (CPU-only): taxonomy match against
   the deck cell, termination/charge bookkeeping, frozen shell
   peripheral, no collisions.
-- Pilot cell (300s Si–O–Si, neutral, reference connectivity) reproduces
-  the si-neutral barrier modulo a logged lattice-resistance shift.
-- Per completed family: gated barriers in runs/ + store, an emitted
-  petra fragment that compiles via petra-cli round-trip, and the
+- Historical OSS-neutral n=4 pilot thermochemistry is
+  historical/non-actionable reconstruction evidence (see Result). It
+  does **not** authorize OSS n=2–4, A3e replay, or treating 300s
+  Si–O–Si neutral as the next claimable family.
+- A worker claiming this ready parent must select a remaining
+  independently gated family — not Osa-neutral n=1–4, not OSS-neutral
+  n=1–4. Permitted next family: 500s Al–OH–Al (HANDOFF §3). That family
+  still requires its own valid reactant minimum and normal scientific
+  gates before any n=2–4 launch.
+- Per completed remaining family: gated barriers in runs/ + store, an
+  emitted petra fragment that compiles via petra-cli round-trip, and the
   CALCULATIONS.md row updated — one PR per family.
 - Full fast test suite + ruff green on every PR.
 
-## Result (pilot cell — family campaigns remain)
+## Result (historical OSS-neutral n=4 pilot — non-actionable)
 
-- 2026-09-06 11:44 PDT (hermes-custom-build-001; profile=workstation) — A3f independently verified terminal rejection of the exact `oss-neutral-n1-s2` route. The owner-retaining constrained B3LYP endpoint passed RMS-gradient/residual/shell/collision/finite-energy gates but failed the immutable maximum projected-gradient gate (`4.836372724428273e-4 > 4.5e-4 Eh/Bohr`, `1.07474949432x`). Release, PHVA, and all downstream output remained absent; one 100-step budget per spent stage and zero retries are proven. This exact route is closed without a global no-basin claim: no A3e replay, threshold relaxation, OSS n=2-4, or surrogate output is authorized. Parent A3 is READY only for a different independently gated site-family/protonation campaign. `docs/program/A3f-oss-neutral-n1-adjudication.md`.
+The OSS-neutral n=4 pilot material in this section is
+**historical/non-actionable**. It is not live campaign authority, does
+not keep the OSS-neutral family incomplete-but-claimable, and does
+**not** permit OSS-neutral n=2–4.
 
-**oss-neutral-n4-s2 @ b3lyp/def2-svp/df, PHVA thermochemistry:**
+- 2026-09-06 11:44 PDT (hermes-custom-build-001; profile=workstation) — A3f independently verified terminal rejection of the exact `oss-neutral-n1-s2` route. The owner-retaining constrained B3LYP endpoint passed RMS-gradient/residual/shell/collision/finite-energy gates but failed the immutable maximum projected-gradient gate (`4.836372724428273e-4 > 4.5e-4 Eh/Bohr`, `1.07474949432x`). Release, PHVA, and all downstream output remained absent; one 100-step budget per spent stage and zero retries are proven. This exact route is closed without a global no-basin claim: no A3e replay, threshold relaxation, OSS n=2-4, or surrogate output is authorized. Parent A3 is READY only for a different independently gated site-family/protonation campaign (permitted next: 500s Al–OH–Al). `docs/program/A3f-oss-neutral-n1-adjudication.md`.
+
+**oss-neutral-n4-s2 @ b3lyp/def2-svp/df, PHVA thermochemistry (historical/non-actionable):**
 ΔG‡(298) = **205.7 kJ/mol** (49.2 kcal/mol), ΔH‡ = 187.0 kJ/mol,
 ΔE_elec = 185.0 (vs complex) / 151.0 (vs fragments) kJ/mol, one
 imaginary mode 128i cm⁻¹, Wigner κ = 1.02. The historical ignored
@@ -78,7 +110,11 @@ restarts), bounded memlock raise (prlimit 16 GiB), cuTENSOR preload —
 all scripted in the run log and learnings. ~10 h GPU per cell realistic
 including one saddle retry.
 
-## Result — OSS-neutral family attempt (incomplete)
+## Result — OSS-neutral family attempt (closed; n=2–4 not actionable)
+
+Historical record of the closed OSS-neutral attempt. Do **not** read
+"incomplete" dated bullets below as permission to finish the series via
+OSS n=2–4. A3f closed the exact n=1 route; n=2–4 remains prohibited.
 
 - 2026-09-06 09:02 PDT (hermes-custom-build-001; profile=workstation) — A3e completed with an independently verified `inconclusive terminal failure`. Its exact owner-constrained B3LYP endpoint retained `H35:O21`, passed RMS gradient/residual/shell/collision/finite-energy gates, but reproducibly failed the fixed maximum projected-gradient gate (`4.8363991055655475e-4 > 4.5e-4 Eh/Bohr`). Release, PHVA, and every downstream family stage correctly remained unspent. A3 stays BLOCKED without a barrier, store, Petra fragment, or CALCULATIONS closeout; READY A3f owns CPU-only terminal adjudication of this exhausted OSS-neutral n=1 route, and no A3e replay or OSS n=2-4 launch is authorized.
 - 2026-09-06 07:06 PDT (hermes-custom-build-001; profile=workstation) — The bounded serial family supervisor worked as designed and stopped after `oss-neutral-n1-s2` failed its first chemistry gate. The exact `ec5bdb059911e32e4b790f849ff97595587c8519` execution completed zero cells: its HF/STO-3G advisory preoptimization converged at step 84, then strict ownership rejected `H35:O21->O14`. This was not a B3LYP production optimization and is not a production no-basin verdict. The rejected advisory endpoint was not persisted; `complex_preopt.xyz`, `complex.xyz`, `results.json`, and `store.sqlite` are absent, and n=2–4 never ran. Terminal receipt/log SHA-256 values are `c392dafe3c60f75687954295ae5b54da4c97a24ae1e54c9ec5b7cb8fdf9d9e53` / `b04a2991be5621925756222ae66bd41490c3152dc1ee442fcdfece590d346173`; shared services were restored and no A3 process or lease remains.
