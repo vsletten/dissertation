@@ -304,7 +304,9 @@ def main() -> int:
         )
         # argv sequence, shell=False: trusted interpreter plus in-repo
         # phase2_ladder.py driver and static recovery flags. Not a shell string.
-        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
+        # Fixed env is a copied process environment with PYTHONPATH prepended;
+        # do not shlex.quote() argv tokens.
+        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit, python.lang.security.audit.dangerous-subprocess-use-tainted-env-args
         completed = subprocess.run(
             command, cwd=args.worktree, env=child_env, check=False, shell=False
         )
