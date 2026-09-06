@@ -469,7 +469,27 @@ def quarantine_terminal_outputs(run_dir: Path) -> Path | None:
     return quarantine
 
 
+def apply_resource_contract(args: argparse.Namespace) -> None:
+    """Bind CLI resource limits to this process before numerical work."""
+    from quarry.etiquette import (
+        _validate_gpu_mem_gb,
+        apply_cupy_memory_limit,
+        enforce,
+    )
+
+    threads = int(args.threads)
+    niceness = int(args.nice)
+    gpu_mem_gb = float(args.gpu_mem_gb)
+    if threads < 1:
+        raise ValueError("threads must be at least 1")
+    _validate_gpu_mem_gb(gpu_mem_gb)
+    enforce(threads=threads, niceness=niceness)
+    if args.gpu:
+        apply_cupy_memory_limit(gpu_mem_gb)
+
+
 def run(args: argparse.Namespace) -> int:
+    apply_resource_contract(args)
     run_dir = args.run_dir.resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
     source_root = args.source_root.resolve()

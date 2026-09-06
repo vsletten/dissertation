@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
+import sys
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -518,3 +521,51 @@ def test_failure_quarantines_stale_outputs_and_publishes_terminal_receipt(
     assert not (run_dir / "store.sqlite").exists()
     quarantined = list((run_dir / "quarantine").glob("*/results.json"))
     assert len(quarantined) == 1
+
+
+def test_run_applies_threads_gpu_mem_and_nice_before_workload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root = tmp_path / "source"
+    fixture_source(source_root)
+    invocation = args(tmp_path / "run", source_root)
+    invocation.threads = 4
+    invocation.gpu = True
+    invocation.gpu_mem_gb = 8.0
+    invocation.nice = 7
+    for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+        monkeypatch.delenv(name, raising=False)
+    nice_calls: list[int] = []
+    monkeypatch.setattr(os, "nice", nice_calls.append)
+    limits: list[int] = []
+    monkeypatch.setitem(
+        sys.modules,
+        "cupy",
+        SimpleNamespace(
+            get_default_memory_pool=lambda: SimpleNamespace(
+                set_limit=lambda *, size: limits.append(size)
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        a2b,
+        "load_source_evidence",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("workload reached")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="workload reached"):
+        a2b.run(invocation)
+
+    assert nice_calls == [7]
+    assert {
+        name: os.environ[name]
+        for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS")
+    } == {
+        "OMP_NUM_THREADS": "4",
+        "MKL_NUM_THREADS": "4",
+        "OPENBLAS_NUM_THREADS": "4",
+    }
+    assert limits == [8 * 1024**3]
