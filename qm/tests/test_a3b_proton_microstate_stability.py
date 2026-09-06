@@ -460,3 +460,52 @@ def test_no_forbidden_scientific_outputs_are_emitted(tmp_path, monkeypatch):
     assert terminal["classification"] == a3b.NO_BASIN_CANDIDATE
     forbidden = {"results.json", "store.sqlite", "ts.xyz", "barrier.json", "petra.toml"}
     assert not any(path.name in forbidden for path in tmp_path.rglob("*"))
+
+
+def test_verifier_rejects_missing_common_receipt(tmp_path, monkeypatch):
+    source = _source()
+    endpoints = _named_endpoints(source.cluster)
+    _patch_calculators(monkeypatch, endpoints)
+    a3b.run_experiment(tmp_path, source, use_gpu=False)
+    (tmp_path / "stages" / a3b.STAGES[0].directory / "receipt.json").unlink()
+
+    result = verifier.verify_experiment(
+        tmp_path,
+        source_override=verifier.StaticSource.from_executor_source(source),
+    )
+    assert result["status"] == "rejected"
+    assert "required" in result["detail"]
+
+
+def test_verifier_rejects_raw_endpoint_tampering(tmp_path, monkeypatch):
+    source = _source()
+    endpoints = _named_endpoints(source.cluster)
+    _patch_calculators(monkeypatch, endpoints)
+    a3b.run_experiment(tmp_path, source, use_gpu=False)
+    raw_path = tmp_path / "stages" / a3b.STAGES[0].directory / "raw-endpoint.xyz"
+    raw_path.write_text(raw_path.read_text().replace("0.01000000", "0.02000000"))
+
+    result = verifier.verify_experiment(
+        tmp_path,
+        source_override=verifier.StaticSource.from_executor_source(source),
+    )
+    assert result["status"] == "rejected"
+    assert "raw endpoint" in result["detail"]
+
+
+def test_resume_corrupt_receipt_does_not_spend_budget(tmp_path, monkeypatch):
+    source = _source()
+    endpoints = _named_endpoints(source.cluster)
+    _patch_calculators(monkeypatch, endpoints)
+    first = a3b.run_experiment(tmp_path, source, use_gpu=False)
+    assert first["classification"] == a3b.RECOVERY_CANDIDATE
+    receipt_path = tmp_path / "stages" / a3b.STAGES[0].directory / "receipt.json"
+    receipt_path.write_text("{")
+    monkeypatch.setattr(
+        a3b,
+        "optimize_bounded",
+        lambda *_args, **_kwargs: pytest.fail("invalid receipt spent a new budget"),
+    )
+    second = a3b.run_experiment(tmp_path, source, use_gpu=False)
+    assert second["classification"] == a3b.INCONCLUSIVE
+    assert second["stages"]["common-dual"] == "receipt-invalid"

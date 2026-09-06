@@ -561,7 +561,17 @@ def _resume_stage(
             {"status": "reservation-identity-mismatch", "stage": spec.stage_id},
             None,
         )
-    receipt = json.loads(receipt_path.read_text())
+    try:
+        receipt = json.loads(receipt_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        return StageOutcome(
+            {
+                "status": "receipt-invalid",
+                "stage": spec.stage_id,
+                "detail": f"{type(exc).__name__}: {exc}",
+            },
+            None,
+        )
     if (
         receipt.get("signature") != signature
         or receipt.get("parent") != parent
@@ -957,9 +967,9 @@ def main() -> int:
     args = parser.parse_args()
     if args.threads > 16:
         parser.error("--threads must be <=16")
-    os.environ.setdefault("OMP_NUM_THREADS", str(args.threads))
-    os.environ.setdefault("MKL_NUM_THREADS", str(args.threads))
-    os.environ.setdefault("OPENBLAS_NUM_THREADS", str(args.threads))
+    os.environ["OMP_NUM_THREADS"] = str(args.threads)
+    os.environ["MKL_NUM_THREADS"] = str(args.threads)
+    os.environ["OPENBLAS_NUM_THREADS"] = str(args.threads)
     if args.gpu:
         preload_cutensor()
     source = validate_source(args.source_root)

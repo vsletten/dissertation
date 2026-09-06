@@ -326,6 +326,8 @@ def _verified_receipt(
     stage_dir = output_root / "stages" / spec.directory
     receipt_path = stage_dir / "receipt.json"
     if not receipt_path.is_file():
+        if spec.parent is None:
+            raise RuntimeError(f"{spec.stage_id} receipt is required")
         return {"status": "not-run", "stage": spec.stage_id}
     receipt = json.loads(receipt_path.read_text())
     if receipt.get("stage") != spec.stage_id:
@@ -409,6 +411,15 @@ def _verified_receipt(
         != hashlib.sha256(seed_cluster.to_xyz().encode()).hexdigest()
     ):
         raise RuntimeError(f"{spec.stage_id} reservation mismatch")
+    raw = receipt.get("raw_endpoint")
+    if receipt.get("status") == "complete" and not isinstance(raw, dict):
+        raise RuntimeError(f"{spec.stage_id} raw endpoint metadata missing")
+    if isinstance(raw, dict):
+        raw_path = stage_dir / "raw-endpoint.xyz"
+        if not raw_path.is_file():
+            raise RuntimeError(f"{spec.stage_id} raw endpoint artifact missing")
+        if raw.get("sha256") != a3b.sha256_path(raw_path):
+            raise RuntimeError(f"{spec.stage_id} raw endpoint byte hash mismatch")
     if receipt.get("status") != "complete":
         return receipt
     endpoint_path = stage_dir / "endpoint.xyz"
