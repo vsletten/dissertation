@@ -140,6 +140,7 @@ def args(run_dir: Path, source_root: Path) -> argparse.Namespace:
         run_dir=run_dir,
         attacker_index=2,
         gpu=False,
+        gpu_mem_gb=18.0,
         minimum_steps=5,
         saddle_steps=5,
         irc_steps=5,

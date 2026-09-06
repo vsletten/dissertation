@@ -27,6 +27,7 @@ if __name__ == "__main__":
             "/mnt/data/vsletten/dissertation-data/"
             "task290-a2b-al-neutral-production-20260906"
         ),
+        gpu_owner="a2b-al-neutral-production",
     )
 
 import numpy as np
@@ -499,6 +500,7 @@ def run(args: argparse.Namespace) -> int:
                 "saddle_steps": args.saddle_steps,
                 "irc_steps": args.irc_steps,
                 "threads": args.threads,
+                "gpu_memory_gb": args.gpu_mem_gb,
             },
         },
     )
@@ -795,6 +797,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--run-dir", type=Path, required=True)
     result.add_argument("--attacker-index", type=int, default=15)
     result.add_argument("--gpu", action="store_true")
+    result.add_argument("--gpu-mem-gb", type=float, default=18.0)
     result.add_argument("--minimum-steps", type=int, default=200)
     result.add_argument("--saddle-steps", type=int, default=400)
     result.add_argument("--irc-steps", type=int, default=400)
@@ -813,6 +816,8 @@ def main() -> int:
         raise ValueError("attacker-index must be nonnegative")
     if args.imaginary_floor <= 0:
         raise ValueError("imaginary-floor must be positive")
+    if args.gpu_mem_gb <= 0:
+        raise ValueError("gpu-mem-gb must be positive")
     return execute_with_status(args)
 
 
