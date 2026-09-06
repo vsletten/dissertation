@@ -1,10 +1,10 @@
 # A3-barrier-ladder — connectivity × protonation barrier ladder (Phase 2)
 
-- status: blocked
+- status: ready
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaigns; cluster-builder code is machine-any)
-- depends: A3f-oss-neutral-n1-terminal-adjudication (READY)
+- depends: A3f-oss-neutral-n1-terminal-adjudication (done; exact OSS-neutral route rejected)
 - claimed-by:
 
 ## Objective
@@ -39,6 +39,8 @@ with provenance. Closes CALCULATIONS.md rows CALC-002..005 from
 - Full fast test suite + ruff green on every PR.
 
 ## Result (pilot cell — family campaigns remain)
+
+- 2026-09-06 11:44 PDT (hermes-custom-build-001; profile=workstation) — A3f independently verified terminal rejection of the exact `oss-neutral-n1-s2` route. The owner-retaining constrained B3LYP endpoint passed RMS-gradient/residual/shell/collision/finite-energy gates but failed the immutable maximum projected-gradient gate (`4.836372724428273e-4 > 4.5e-4 Eh/Bohr`, `1.07474949432x`). Release, PHVA, and all downstream output remained absent; one 100-step budget per spent stage and zero retries are proven. This exact route is closed without a global no-basin claim: no A3e replay, threshold relaxation, OSS n=2-4, or surrogate output is authorized. Parent A3 is READY only for a different independently gated site-family/protonation campaign. `docs/program/A3f-oss-neutral-n1-adjudication.md`.
 
 **oss-neutral-n4-s2 @ b3lyp/def2-svp/df, PHVA thermochemistry:**
 ΔG‡(298) = **205.7 kJ/mol** (49.2 kcal/mol), ΔH‡ = 187.0 kJ/mol,
@@ -83,6 +85,7 @@ including one saddle retry.
 - 2026-09-06 07:06 PDT (hermes-custom-build-001; profile=workstation) — A3 remains BLOCKED without a barrier, store, Petra fragment, or CALCULATIONS closeout. READY `A3e-oss-neutral-n1-proton-microstate-stability` owns one materially different, finite owner-constrained → released B3LYP basin test with raw-endpoint persistence and independent verification. Blind replay, OSS n=2–4, and surrogate family emission remain prohibited until A3e produces an accepted n=1 reactant minimum or a verified terminal rejection.
 
 ## Progress
+- 2026-09-06 11:44 PDT (hermes-custom-build-001; profile=workstation) — A3f closed the exhausted OSS-neutral n=1 route by independent hash/arithmetic adjudication with no calculator calls. A3 returns to READY for a different family under its existing scientific gates; the rejected OSS route and its n=2-4 rungs remain prohibited.
 - 2026-09-06 09:02 PDT (hermes-custom-build-001; profile=workstation) — A3e's independent verifier reproduced the constrained-production max-gradient failure with zero optimizer calls and confirmed release was correctly forbidden. Parent A3 is now blocked on READY A3f's one-pass terminal evidence adjudication; the fixed numerical gate will not be loosened post hoc and the exhausted A3e route may not replay.
 - 2026-09-06 07:06 PDT (hermes-custom-build-001; profile=workstation) — Reconciled the exact failed family receipt and two independent cold reviews. Both confirmed the supervisor correctly fail-closed, and both rejected a terminal scientific inference from the discarded HF endpoint. The supervisor implementation stays in this slice; the parent is released as blocked on READY A3e rather than held active behind a dead campaign.
 - 2026-09-06 03:23 PDT (hermes-custom-build-001; profile=workstation) — Atomically reclaimed `agents/A3-barrier-ladder` from exact `origin/main@5497d83da2d14dc7cd0dbb2679ce7acaeb2dd230` after A3d retired only the Osa-neutral series. The next permitted family is neutral 300s Si-O-Si (`oss`) across exact connectivity rungs n=1..4; CPU-only dry-runs produced distinct 37/54/60/63-atom complexes with neutral charge, peripheral 13/22/26/29-atom frozen shells, and no collisions. Added a bounded family supervisor that waits on the canonical GPU lease, pins clean local/remote source, runs explicit cells serially, and emits atomic progress/terminal receipts only after exact result identity, finite thermochemistry, route provenance, and store hashes pass. Full fast QA is 606 passed, 4 deselected; whole-QM Ruff check/format and `git diff --check` pass. The live A2b production campaign currently owns the GPU lease, so A3 will wait under a finite transient-unit ceiling rather than race it.
