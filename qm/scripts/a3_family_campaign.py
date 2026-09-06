@@ -494,11 +494,17 @@ def validate_result(
             if integrity != "ok":
                 raise RuntimeError(f"store integrity check failed: {integrity}")
             _validate_store_schema(connection)
+            # Identifiers cannot be bound; table names are frozen _STORE_COLUMNS keys.
             counts = {
-                table: int(
-                    connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-                )
-                for table in _STORE_COLUMNS
+                "structures": int(
+                    connection.execute("SELECT count(*) FROM structures").fetchone()[0]
+                ),
+                "jobs": int(
+                    connection.execute("SELECT count(*) FROM jobs").fetchone()[0]
+                ),
+                "results": int(
+                    connection.execute("SELECT count(*) FROM results").fetchone()[0]
+                ),
             }
             if counts != {"structures": 2, "jobs": 2, "results": 2}:
                 raise RuntimeError(f"store row cardinality mismatch: {counts}")
