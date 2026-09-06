@@ -82,6 +82,9 @@ def _read_stage(
         "sha256"
     ) != a3e.sha256_path(raw_path):
         raise RuntimeError(f"{spec.stage_id} raw endpoint missing or hash-mismatched")
+    raw_cluster = a3b.read_cluster(raw_path, source.cluster)
+    if receipt.get("raw_endpoint") != a3e._artifact(raw_cluster, raw_path):
+        raise RuntimeError(f"{spec.stage_id} raw endpoint artifact mismatch")
     if receipt.get("status") != "complete":
         return receipt, None
     endpoint_path = stage_dir / "endpoint.xyz"
@@ -95,6 +98,9 @@ def _read_stage(
     ) != frequency_geometry_fingerprint(endpoint):
         raise RuntimeError(f"{spec.stage_id} endpoint geometry fingerprint mismatch")
     active = a3e.constraints(source, spec)
+    raw_structure = a3b.structural_gate(
+        raw_cluster, source.cluster, active, spec.stage_id
+    )[1]
     structure = a3b.structural_gate(endpoint, source.cluster, active, spec.stage_id)[1]
     owners = a3e._owner_labels(endpoint)
     if receipt.get("observed_owners") != owners:
@@ -107,12 +113,16 @@ def _read_stage(
         "owner_changes"
     ):
         raise RuntimeError(f"{spec.stage_id} owner-change receipt mismatch")
+    if receipt.get("structure", {}).get(
+        "raw_maximum_frozen_coordinate_drift_a"
+    ) != raw_structure.get("raw_maximum_frozen_coordinate_drift_a"):
+        raise RuntimeError(f"{spec.stage_id} raw frozen-shell receipt mismatch")
     verified = dict(receipt)
     verified["structure"] = {
         **structure,
-        "raw_maximum_frozen_coordinate_drift_a": receipt.get("structure", {}).get(
+        "raw_maximum_frozen_coordinate_drift_a": raw_structure[
             "raw_maximum_frozen_coordinate_drift_a"
-        ),
+        ],
     }
     verified["owner_changes"] = structure["owner_changes"]
     verified["owner_retaining"] = structure["owner_changes"] == []

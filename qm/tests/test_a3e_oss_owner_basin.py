@@ -360,6 +360,54 @@ def test_verifier_refuses_executor_identity_and_no_recompute(tmp_path, monkeypat
     assert "calculator recomputation" in refused["detail"]
 
 
+def test_verifier_rejects_coordinated_raw_endpoint_and_receipt_tampering(
+    tmp_path, monkeypatch
+):
+    source = _source()
+    endpoints = _endpoints(source.cluster)
+    energy_values = {endpoint.name: -10.0 for endpoint in endpoints}
+    _patch_calculators(monkeypatch, endpoints, energies=energy_values)
+    a3e.run_experiment(tmp_path, source, code_revision="g" * 40)
+    monkeypatch.setattr(
+        verifier, "energy", lambda cluster, _settings: energy_values[cluster.name]
+    )
+    monkeypatch.setattr(
+        verifier,
+        "frequencies",
+        lambda cluster, settings: SimpleNamespace(
+            imaginary_cm=np.asarray([], dtype=float),
+            electronic_hartree=energy_values[cluster.name],
+            geometry_fingerprint=a3e.frequency_geometry_fingerprint(cluster),
+            settings_fingerprint=a3e.frequency_settings_fingerprint(settings),
+        ),
+    )
+
+    spec = a3e.STAGES[-1]
+    stage_dir = tmp_path / "stages" / spec.directory
+    raw_path = stage_dir / "raw-endpoint.xyz"
+    tampered = a3b.read_cluster(raw_path, source.cluster)
+    coords = tampered.coords.copy()
+    coords[0] = coords[0] + np.array([0.05, 0.0, 0.0])
+    tampered = replace(tampered, coords=coords)
+    a3e.atomic_xyz(raw_path, tampered)
+    receipt_path = stage_dir / "receipt.json"
+    receipt = json.loads(receipt_path.read_text())
+    receipt["raw_endpoint"] = a3e._artifact(tampered, raw_path)
+    a3e.atomic_json(receipt_path, receipt)
+    candidate_path = tmp_path / "candidate-terminal.json"
+    candidate = json.loads(candidate_path.read_text())
+    candidate["stages"][spec.stage_id]["receipt_sha256"] = a3e.sha256_path(receipt_path)
+    a3e.atomic_json(candidate_path, candidate)
+
+    result = verifier.verify_experiment(
+        tmp_path,
+        source_override=source,
+        verifier_identity="cold-worker-2",
+    )
+    assert result["status"] == "rejected"
+    assert "raw" in result["detail"].casefold()
+
+
 def test_no_forbidden_downstream_outputs(tmp_path, monkeypatch):
     source = _source()
     endpoints = _endpoints(source.cluster)
