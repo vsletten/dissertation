@@ -297,29 +297,14 @@ def main() -> int:
             "--log",
             str(log_path),
         ]
-        worktree_pythonpath = str(args.worktree / "qm")
-        inherited_pythonpath = os.environ.get("PYTHONPATH")
-        child_pythonpath = (
-            f"{worktree_pythonpath}{os.pathsep}{inherited_pythonpath}"
-            if inherited_pythonpath
-            else worktree_pythonpath
+        # argv sequence, shell=False: trusted interpreter plus in-repo
+        # phase2_ladder.py driver and static recovery flags. Not a shell string.
+        # Do not pass env= and do not mutate PYTHONPATH (opengrep
+        # tainted-env-args); phase2_ladder.py inserts qm/ via __file__.
+        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit, python.lang.security.audit.dangerous-subprocess-use-tainted-env-args
+        completed = subprocess.run(
+            command, cwd=args.worktree, check=False, shell=False
         )
-        previous_pythonpath = os.environ.get("PYTHONPATH")
-        os.environ["PYTHONPATH"] = child_pythonpath
-        try:
-            # argv sequence, shell=False: trusted interpreter plus in-repo
-            # phase2_ladder.py driver and static recovery flags. Not a shell string.
-            # Child inherits the process environment after PYTHONPATH prepend;
-            # do not pass env= (opengrep tainted-env-args) and do not shlex.quote().
-            # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
-            completed = subprocess.run(
-                command, cwd=args.worktree, check=False, shell=False
-            )
-        finally:
-            if previous_pythonpath is None:
-                os.environ.pop("PYTHONPATH", None)
-            else:
-                os.environ["PYTHONPATH"] = previous_pythonpath
         driver_returncode = completed.returncode
         if completed.returncode != 0:
             stage, detail = driver_failure(driver_run_dir, completed.returncode)
