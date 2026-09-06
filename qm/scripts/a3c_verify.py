@@ -138,6 +138,16 @@ def _verify_receipt(
     return verified
 
 
+COMPLETED_RECEIPT_STATUSES = frozenset(
+    {
+        "complete",
+        "gate-rejected",
+        "optimizer-failed",
+        "stale-evidence-rejected",
+    }
+)
+
+
 def verify_experiment(
     output_root: Path,
     *,
@@ -149,6 +159,35 @@ def verify_experiment(
 ) -> dict[str, Any]:
     """Re-derive A3c from static evidence and independently recompute final gates."""
     output_root = output_root.resolve()
+    with a3c.exclusive_run(output_root):
+        return _verify_experiment_locked(
+            output_root,
+            a3a_root=a3a_root,
+            a3b_root=a3b_root,
+            verifier_identity=verifier_identity,
+            source_override=source_override,
+            recompute_calculators=recompute_calculators,
+        )
+
+
+def _verify_experiment_locked(
+    output_root: Path,
+    *,
+    a3a_root: Path,
+    a3b_root: Path,
+    verifier_identity: str,
+    source_override: a3c.SourceEvidence | None,
+    recompute_calculators: bool | None,
+) -> dict[str, Any]:
+    receipt_path = output_root / "receipt.json"
+    if not receipt_path.is_file():
+        raise RuntimeError("A3c receipt is not completed")
+    try:
+        receipt_status = json.loads(receipt_path.read_text()).get("status")
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("A3c receipt is not completed") from exc
+    if receipt_status not in COMPLETED_RECEIPT_STATUSES:
+        raise RuntimeError("A3c receipt is not completed")
     candidate: dict[str, Any] = {}
     try:
         candidate_path = output_root / "candidate-terminal.json"

@@ -472,3 +472,55 @@ def test_production_cli_requires_gpu_for_non_dry_runs(monkeypatch, capsys):
         a3c.main()
     assert excinfo.value.code == 2
     assert "--gpu is required for non-dry runs" in capsys.readouterr().err
+
+
+def test_verifier_does_not_publish_while_executor_is_running(tmp_path, monkeypatch):
+    source = _source()
+    endpoint = replace(source.a3a.cluster, name="endpoint")
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_optimize(cluster, settings, **kwargs):
+        entered.set()
+        assert release.wait(timeout=5)
+        return SimpleNamespace(cluster=endpoint, converged=True, max_steps=100)
+
+    monkeypatch.setattr(a3c, "optimize_bounded", slow_optimize)
+    monkeypatch.setattr(a3c, "energy", lambda *_args: -4022.0)
+    monkeypatch.setattr(
+        a3b,
+        "gradient",
+        lambda cluster, _settings: np.zeros_like(cluster.coords),
+    )
+    errors = []
+
+    def first_run():
+        try:
+            a3c.run_experiment(
+                tmp_path,
+                source,
+                use_gpu=True,
+                code_revision="v" * 40,
+            )
+        except Exception as exc:  # pragma: no cover - surfaced by assertion below
+            errors.append(exc)
+
+    thread = threading.Thread(target=first_run)
+    thread.start()
+    assert entered.wait(timeout=5)
+    try:
+        with pytest.raises(RuntimeError, match="already active"):
+            verifier.verify_experiment(
+                tmp_path,
+                source_override=source,
+                recompute_calculators=False,
+            )
+        assert not (tmp_path / "verified-terminal.json").exists()
+    finally:
+        release.set()
+        thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert errors == []
+    candidate = json.loads((tmp_path / "candidate-terminal.json").read_text())
+    assert candidate["classification"] == a3c.CANDIDATE_SEED
+    assert not (tmp_path / "verified-terminal.json").exists()
