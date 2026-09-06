@@ -284,6 +284,15 @@ def test_validate_result_rejects_foreign_key_violation(tmp_path):
         campaign.validate_result(result, family="oss", state="neutral", n_intact=2)
 
 
+def test_validate_result_binds_untrusted_index_info_name(tmp_path):
+    result, store = write_valid_result(tmp_path)
+    with sqlite3.connect(store) as connection:
+        connection.execute('CREATE UNIQUE INDEX "odd index" ON structures(name)')
+
+    with pytest.raises(RuntimeError, match="unique-key mismatch"):
+        campaign.validate_result(result, family="oss", state="neutral", n_intact=2)
+
+
 def test_validate_result_rejects_energy_inconsistent_with_summary(tmp_path):
     result, store = write_valid_result(tmp_path)
     with sqlite3.connect(store) as connection:

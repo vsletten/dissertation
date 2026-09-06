@@ -253,7 +253,11 @@ def _validate_store_schema(connection: sqlite3.Connection) -> None:
                 continue
             columns = tuple(
                 str(row["name"])
-                for row in connection.execute(f"PRAGMA index_info({index['name']})")
+                # index name comes from the untrusted store; bind it into pragma_index_info
+                for row in connection.execute(
+                    "SELECT * FROM pragma_index_info(?)",
+                    (index["name"],),
+                )
             )
             unique_keys.add(columns)
         if unique_keys != _STORE_UNIQUE_KEYS[table]:
