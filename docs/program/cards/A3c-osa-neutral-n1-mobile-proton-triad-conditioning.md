@@ -1,11 +1,11 @@
 # A3c-osa-neutral-n1-mobile-proton-triad-conditioning — condition the evidenced mobile triad
 
-- status: ready
+- status: active
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
 - depends: A3b-osa-neutral-n1-proton-microstate-stability verified inconclusive
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## Objective
 
@@ -58,6 +58,7 @@ data in this card.
 
 ## Progress
 
+- 2026-09-05 22:29 PDT (hermes-custom-build-001; profile=workstation) — Implemented the one-stage A3c route: exact hash/semantic binding to A3a's conditioned seed and A3b's independently verified inconclusive evidence, one exclusive 100-step B3LYP/def2-SVP/DF GPU optimizer budget with the H50-O26/H52-O27/H57-O29 owner triad, raw endpoint persistence before gates, code-revision binding, stale-terminal revocation, and a separate optimizer-free verifier. Eleven CPU-only regressions pass, including concurrent-launch exclusion, wrong-method forgery rejection, clean/pushed-code enforcement, stale-success revocation, and exact triad constraints. Production compute remains unstarted pending the full-suite and launch-envelope gates.
 - 2026-09-05 20:47 PDT (hermes-custom-build-001; profile=workstation) — Filed from A3b's independently verified inconclusive endpoint: the dual-owner seed retained H50/H57 but transferred `H52:O27->O32` and remained nonstationary after its sole 100-step budget. This card adds that newly evidenced third constraint and authorizes one bounded conditioning run only.
 
 ## Result
