@@ -263,7 +263,11 @@ def _validate_store_schema(connection: sqlite3.Connection) -> None:
                 str(row["on_update"]),
                 str(row["on_delete"]),
             )
-            for row in connection.execute(f"PRAGMA foreign_key_list({table})")
+            # table is a _STORE_COLUMNS key; bind it into pragma_foreign_key_list
+            for row in connection.execute(
+                "SELECT * FROM pragma_foreign_key_list(?)",
+                (table,),
+            )
         }
         if foreign_keys != _STORE_FOREIGN_KEYS[table]:
             raise RuntimeError(f"store foreign-key schema mismatch for {table}")
