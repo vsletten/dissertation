@@ -1,11 +1,11 @@
 # A3f-oss-neutral-n1-terminal-adjudication — close the exhausted H35 owner route
 
-- status: ready
+- status: done
 - track: A (geochemistry)
 - priority: P1
 - machine: any
 - depends: A3e-oss-neutral-n1-proton-microstate-stability (done)
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## Objective
 
@@ -70,8 +70,12 @@ receipts and original H35-owner complaint. Until that pass agrees, report only
 
 ## Progress
 
+- 2026-09-06 11:46 PDT (hermes-custom-build-001; profile=workstation) — Final isolated CPU-only QA passed with `PYTHONPATH=<worktree>/qm` and `CUDA_VISIBLE_DEVICES=''`: `629 passed, 4 deselected`; whole-QM Ruff check passed, Ruff format reported all 75 files formatted, and `git diff --check` passed. The evidence adjudication itself made zero production electronic-structure, optimizer, gradient, Hessian, or PHVA calls and did not alter the external evidence root.
+
+- 2026-09-06 11:44 PDT (hermes-custom-build-001; profile=workstation) — Independently adjudicated the immutable A3e chain with zero calculator calls. All five contract hashes match; both spent stages used one 100-step budget with zero retries; raw-array arithmetic reproduces owner-conditioning RMS/max `4.853548703717787e-4/2.6190074055318924e-3` and constrained-production `1.0358709556610716e-4/4.836372724428273e-4 Eh/Bohr`. The constrained endpoint passes RMS, H35-O21 residual, owner, shell, collision, and finite-energy gates but fails the fixed max-gradient limit by `1.07474949432x`. Independent worker `a3f-adversarial-verifier` reproduced the hashes, arithmetic, budgets, and downstream absence and returned PASS. Full ledger: `docs/program/A3f-oss-neutral-n1-adjudication.md`.
+
 - 2026-09-06 09:02 PDT (hermes-custom-build-001; profile=workstation) — Created from A3e's independently verified inconclusive outcome to make the parent disposition executable without another compute/retry loop. The terminal default is explicit: failure of any fixed release gate rejects this exhausted campaign route; this card may not create A3g.
 
 ## Result
 
-(Pending.)
+- 2026-09-06 11:44 PDT (hermes-custom-build-001; profile=workstation) — **DONE, independently verified terminal rejection.** The exact `oss-neutral-n1-s2` assignment did not produce an accepted reactant minimum under the finite fixed A3e contract: constrained B3LYP retained `H35:O21` and passed its RMS-gradient (`1.0358709556610716e-4`), residual (`4.201582921470326e-6 A`), shell, collision, and finite-energy gates, but its maximum projected-gradient component `4.836372724428273e-4 Eh/Bohr` exceeded the immutable `4.5e-4` limit. Release/PHVA/downstream artifacts are absent, each spent stage used one 100-step budget, and retries are zero. This is not a global no-basin claim and does not promote the earlier HF owner transfer. A3 returns to ready only for a different independently gated family; A3e replay, threshold relaxation, OSS n=2-4, surrogate barriers/stores/Petra/CALCULATIONS output, and an A3g retry are forbidden. Evidence and the independent PASS are in `docs/program/A3f-oss-neutral-n1-adjudication.md`.
