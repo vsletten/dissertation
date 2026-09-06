@@ -1,10 +1,10 @@
 # A3-barrier-ladder — connectivity × protonation barrier ladder (Phase 2)
 
-- status: ready
+- status: blocked
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaigns; cluster-builder code is machine-any)
-- depends: — (A3d terminally rejected the exact Osa-neutral n=1 assignment)
+- depends: A3e-oss-neutral-n1-proton-microstate-stability (READY)
 - claimed-by:
 
 ## Objective
@@ -76,7 +76,14 @@ restarts), bounded memlock raise (prlimit 16 GiB), cuTENSOR preload —
 all scripted in the run log and learnings. ~10 h GPU per cell realistic
 including one saddle retry.
 
+## Result — OSS-neutral family attempt (incomplete)
+
+- 2026-09-06 07:06 PDT (hermes-custom-build-001; profile=workstation) — The bounded serial family supervisor worked as designed and stopped after `oss-neutral-n1-s2` failed its first chemistry gate. The exact `ec5bdb059911e32e4b790f849ff97595587c8519` execution completed zero cells: its HF/STO-3G advisory preoptimization converged at step 84, then strict ownership rejected `H35:O21->O14`. This was not a B3LYP production optimization and is not a production no-basin verdict. The rejected advisory endpoint was not persisted; `complex_preopt.xyz`, `complex.xyz`, `results.json`, and `store.sqlite` are absent, and n=2–4 never ran. Terminal receipt/log SHA-256 values are `c392dafe3c60f75687954295ae5b54da4c97a24ae1e54c9ec5b7cb8fdf9d9e53` / `b04a2991be5621925756222ae66bd41490c3152dc1ee442fcdfece590d346173`; shared services were restored and no A3 process or lease remains.
+- 2026-09-06 07:06 PDT (hermes-custom-build-001; profile=workstation) — A3 remains BLOCKED without a barrier, store, Petra fragment, or CALCULATIONS closeout. READY `A3e-oss-neutral-n1-proton-microstate-stability` owns one materially different, finite owner-constrained → released B3LYP basin test with raw-endpoint persistence and independent verification. Blind replay, OSS n=2–4, and surrogate family emission remain prohibited until A3e produces an accepted n=1 reactant minimum or a verified terminal rejection.
+
 ## Progress
+- 2026-09-06 07:06 PDT (hermes-custom-build-001; profile=workstation) — Reconciled the exact failed family receipt and two independent cold reviews. Both confirmed the supervisor correctly fail-closed, and both rejected a terminal scientific inference from the discarded HF endpoint. The supervisor implementation stays in this slice; the parent is released as blocked on READY A3e rather than held active behind a dead campaign.
+- 2026-09-06 03:23 PDT (hermes-custom-build-001; profile=workstation) — Atomically reclaimed `agents/A3-barrier-ladder` from exact `origin/main@5497d83da2d14dc7cd0dbb2679ce7acaeb2dd230` after A3d retired only the Osa-neutral series. The next permitted family is neutral 300s Si-O-Si (`oss`) across exact connectivity rungs n=1..4; CPU-only dry-runs produced distinct 37/54/60/63-atom complexes with neutral charge, peripheral 13/22/26/29-atom frozen shells, and no collisions. Added a bounded family supervisor that waits on the canonical GPU lease, pins clean local/remote source, runs explicit cells serially, and emits atomic progress/terminal receipts only after exact result identity, finite thermochemistry, route provenance, and store hashes pass. Full fast QA is 606 passed, 4 deselected; whole-QM Ruff check/format and `git diff --check` pass. The live A2b production campaign currently owns the GPU lease, so A3 will wait under a finite transient-unit ceiling rather than race it.
 - 2026-09-06 01:21 PDT (hermes-custom-build-001; profile=workstation) — A3d independently verified terminal rejection of the original Osa-neutral n=1 assignment: geomeTRIC's constrained-run convergence did not satisfy the separately recomputed canonical-endpoint stationarity gate (`5.3988x/27.3169x` RMS/max over threshold). The exact Osa-neutral series is closed: no A3a/A3b/A3c replay, n=2–4 launch, or surrogate barrier/store/Petra value. A3 returns to READY for its other independently gated site-family/protonation campaigns; each still requires its own valid reactant minimum and normal scientific gates. Evidence: `docs/program/A3d-osa-neutral-n1-adjudication.md`.
 - 2026-09-05 23:46 PDT (hermes-custom-build-001; profile=workstation) — A3c's one fresh three-owner B3LYP/def2-SVP/DF budget retained all original proton owners and met every `1e-4 A` constraint residual, but independently recomputed projected RMS/max gradients (`1.619628e-3/1.229259e-2 Eh/Bohr`) failed the stationary-seed gates despite geomeTRIC convergence. A3 remains blocked on READY A3d's evidence-only terminal-path adjudication; no A3a/A3b/A3c replay, n=2-4 launch, saddle, barrier, store, or Petra output is authorized.
 - 2026-09-05 20:47 PDT (hermes-custom-build-001; profile=workstation) — A3b ended with an independently verified `inconclusive` outcome before either release route: its dual-owner production seed exhausted 100 steps, remained nonstationary, and exposed a third mobile termination proton `H52:O27->O32` while retaining the constrained H50/H57 bonds. READY A3c owns one materially different three-owner constrained-stationarity test. A3 remains blocked; no A3b replay, n=2-4 launch, saddle, barrier, store, or Petra output is authorized.
