@@ -1,11 +1,11 @@
 # A3e-oss-neutral-n1-proton-microstate-stability — test the H35 owner basin
 
-- status: ready
+- status: active
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
 - depends: A3 OSS-neutral n=1 advisory failure recorded and supervisor merged
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## Objective
 
@@ -88,6 +88,8 @@ PHVA gates and confirms the typed terminal outcome. Before that verification lan
 report only `unverified: candidate outcome`.
 
 ## Progress
+
+- 2026-09-06 08:10 PDT (hermes-custom-build-001; profile=workstation) — Atomically claimed `agents/A3e-oss-neutral-n1-proton-microstate-stability` from exact `origin/main@d460f1b78defb5477452fff7cbe5ae847dbe462d`. Implemented the single authorized three-stage route: H35-O21-constrained HF/STO-3G conditioning, a fresh constrained B3LYP/def2-SVP/DF optimizer, and a fresh released B3LYP optimizer only after independent projected-gradient/residual/owner/shell/collision gates pass. Every spent stage reserves its one 100-step budget before launch, persists a raw endpoint and pending receipt before structural gates, binds parent/source/settings/code hashes, and emits only an unverified typed candidate. A separate optimizer-free verifier requires a genuinely different identity and recomputes production energy, projected gradients, ownership, residuals, integrity, and accepted-minimum PHVA. Ten focused adversarial tests plus focused Ruff/format and `git diff --check` pass; no calculator call has run yet.
 
 - 2026-09-06 07:06 PDT (hermes-custom-build-001; profile=workstation) — Filed from the fail-closed parent family attempt after two cold read-only reviews agreed that HF-level owner transfer is strong evidence against the builder assignment but insufficient for a production-PES no-basin verdict because the rejected endpoint was not persisted. This card is the only authorized next OSS-neutral n=1 calculation; it spends one materially different finite constrained-to-released production route and forbids all replay and downstream family work.
 

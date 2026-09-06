@@ -50,7 +50,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A3b-osa-neutral-n1-proton-microstate-stability](cards/A3b-osa-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; H52 became third mobile owner |
 | [A3c-osa-neutral-n1-mobile-proton-triad-conditioning](cards/A3c-osa-neutral-n1-mobile-proton-triad-conditioning.md) | A | P1 | workstation | done | verified triad-conditioning failure; owners retained, projected gradients red |
 | [A3d-osa-neutral-n1-triad-failure-adjudication](cards/A3d-osa-neutral-n1-triad-failure-adjudication.md) | A | P1 | workstation | done | verified terminal rejection; A3 returns to remaining campaigns |
-| [A3e-oss-neutral-n1-proton-microstate-stability](cards/A3e-oss-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | ready | one finite owner-constrained → released production basin test |
+| [A3e-oss-neutral-n1-proton-microstate-stability](cards/A3e-oss-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | active | one finite owner-constrained → released production basin test |
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
 | [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: A2b/A2c/A2d | final banked-reaction table, ranking, Petra/CALCULATIONS closeout |
 | [A2a-si-neutral-production-path-rebuild](cards/A2a-si-neutral-production-path-rebuild.md) | A | P1 | workstation | done | exact r2SCAN-3c minima + A2 infrastructure ✅ |
