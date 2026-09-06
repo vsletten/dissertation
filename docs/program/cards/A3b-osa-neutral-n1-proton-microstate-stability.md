@@ -1,11 +1,11 @@
 # A3b-osa-neutral-n1-proton-microstate-stability — test the requested reactant basin
 
-- status: ready
+- status: active
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
 - depends: A3a-reactant-minimum-recovery terminal failure
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## Objective
 
@@ -72,6 +72,7 @@ Until that edge passes, report only `unverified: recovery candidate` or
 
 ## Progress
 
+- 2026-09-05 19:00 PDT (hermes-custom-build-001; profile=workstation) — Claimed the hash-pinned A3a conditioned geometry and began the bounded five-stage B3LYP/def2-SVP/DF experiment: one dual-owner constrained stationary seed followed by both single-owner release orders, one fresh optimizer/Hessian and one finite budget per boundary. No n=2–4, saddle, barrier, store, or Petra output is authorized.
 - 2026-09-05 17:37 PDT (hermes-custom-build-001; profile=workstation) — Filed from A3a's independently reviewed terminal evidence. The bounded next experiment tests whether the requested termination-proton assignment is a metastable production-level basin; it does not spend another unconstrained convergence continuation.
 
 ## Result
