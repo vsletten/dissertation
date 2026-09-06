@@ -84,6 +84,8 @@ def write_valid_result(tmp_path, **changes):
     payload["cluster"].update(cluster_changes)
     result = tmp_path / "results.json"
     result.write_text(json.dumps(payload))
+    for role, text in xyz.items():
+        (tmp_path / f"{role}.xyz").write_text(text)
     store = tmp_path / "store.sqlite"
     charge = 1 if state == "acid" else 0
     with Store(store) as evidence:
@@ -209,6 +211,36 @@ def test_validate_result_rejects_self_consistent_wrong_identity(tmp_path, change
         campaign.validate_result(result, family="oss", state="neutral", n_intact=2)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("metal_shells", True),
+        ("n_intact_requested", False),
+        ("n_intact", False),
+        ("charge", False),
+        ("charge_offset", False),
+        ("gpu", 1),
+    ],
+)
+def test_validate_result_rejects_cluster_provenance_type_aliases(
+    tmp_path, field, value
+):
+    result, _store = write_valid_result(tmp_path, cluster={field: value})
+
+    with pytest.raises(RuntimeError, match="cluster identity mismatch"):
+        campaign.validate_result(result, family="oss", state="neutral", n_intact=2)
+
+
+def test_validate_result_binds_store_to_durable_geometry_files(tmp_path):
+    result, _store = write_valid_result(tmp_path)
+    (tmp_path / "complex.xyz").write_text(
+        "4\ncomplex\nSi 0.2 0.0 0.0\nO 1.6 0.0 0.0\nH 2.5 0.0 0.0\nH 1.6 0.9 0.0\n"
+    )
+
+    with pytest.raises(RuntimeError, match="durable complex geometry"):
+        campaign.validate_result(result, family="oss", state="neutral", n_intact=2)
+
+
 def test_validate_result_rejects_non_gpu_engine(tmp_path):
     result, store = write_valid_result(tmp_path)
     with sqlite3.connect(store) as connection:
@@ -284,12 +316,30 @@ def test_validate_result_rejects_wrong_oaa_center(tmp_path):
         campaign.validate_result(result, family="oaa", state="neutral", n_intact=4)
 
 
+def test_validate_result_rejects_tiny_forged_oaa_n4_store(tmp_path):
+    result, _store = write_valid_result(
+        tmp_path,
+        family="oaa",
+        state="neutral",
+        n_intact=4,
+        cell="oaa-neutral-n4-s2",
+        cluster={"center_site": 23},
+    )
+
+    with pytest.raises(RuntimeError, match="physical build identity mismatch"):
+        campaign.validate_result(result, family="oaa", state="neutral", n_intact=4)
+
+
 @pytest.mark.parametrize(
-    ("n_intact", "center_site", "n_atoms", "n_frozen"),
-    [(2, 18, 55, 17), (4, 23, 68, 25), (6, 18, 81, 33)],
+    ("n_intact", "center_site", "formula", "n_atoms", "n_frozen"),
+    [
+        (2, 18, "Al4H26O23Si2", 55, 17),
+        (4, 23, "Al5H31O29Si3", 68, 25),
+        (6, 18, "Al6H36O35Si4", 81, 33),
+    ],
 )
 def test_oaa_center_map_builds_every_exact_even_connectivity(
-    n_intact, center_site, n_atoms, n_frozen
+    n_intact, center_site, formula, n_atoms, n_frozen
 ):
     assert campaign.FAMILY_CELL_CENTERS["oaa"][n_intact] == center_site
 
@@ -304,8 +354,17 @@ def test_oaa_center_map_builds_every_exact_even_connectivity(
 
     assert cluster.center_site == center_site
     assert cluster.n_intact == n_intact
+    assert cluster.cluster.formula == formula
     assert len(cluster.cluster.symbols) == n_atoms
     assert len(cluster.cluster.frozen_indices) == n_frozen
+    assert campaign.OAA_EXPECTED_BUILDS[n_intact] == {
+        "center_site": center_site,
+        "site_kind": "Oaa",
+        "formula": formula,
+        "n_atoms": n_atoms,
+        "n_frozen": n_frozen,
+        "attacked_metal": cluster.cluster.symbols[cluster.attacked_index],
+    }
 
 
 def test_oaa_campaign_rejects_unconstructable_odd_connectivity(tmp_path):

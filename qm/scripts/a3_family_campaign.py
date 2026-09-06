@@ -47,6 +47,32 @@ FAMILY_CELL_CENTERS = {
 FAMILY_CONNECTIVITIES = {
     family: tuple(cells) for family, cells in FAMILY_CELL_CENTERS.items()
 }
+OAA_EXPECTED_BUILDS = {
+    2: {
+        "center_site": 18,
+        "site_kind": "Oaa",
+        "formula": "Al4H26O23Si2",
+        "n_atoms": 55,
+        "n_frozen": 17,
+        "attacked_metal": "Al",
+    },
+    4: {
+        "center_site": 23,
+        "site_kind": "Oaa",
+        "formula": "Al5H31O29Si3",
+        "n_atoms": 68,
+        "n_frozen": 25,
+        "attacked_metal": "Al",
+    },
+    6: {
+        "center_site": 18,
+        "site_kind": "Oaa",
+        "formula": "Al6H36O35Si4",
+        "n_atoms": 81,
+        "n_frozen": 33,
+        "attacked_metal": "Al",
+    },
+}
 SCHEMA = "a3-family-campaign-terminal-v1"
 PROGRESS_SCHEMA = "a3-family-campaign-progress-v1"
 TS_GUESS_ROUTES = frozenset({"direct", "proton-neb"})
@@ -300,9 +326,17 @@ def validate_result(
     n_intact: int,
 ) -> dict[str, object]:
     store_path = result_path.with_name("store.sqlite")
-    if not result_path.is_file() or not store_path.is_file():
+    geometry_paths = {
+        role: result_path.with_name(f"{role}.xyz") for role in ("complex", "ts")
+    }
+    if (
+        not result_path.is_file()
+        or not store_path.is_file()
+        or any(not path.is_file() for path in geometry_paths.values())
+    ):
         raise RuntimeError(
-            f"n={n_intact} exited zero without results.json + store.sqlite"
+            f"n={n_intact} exited zero without results.json + store.sqlite + "
+            "complex.xyz + ts.xyz"
         )
     payload = json.loads(result_path.read_text())
     if not isinstance(payload, dict):
@@ -358,6 +392,20 @@ def validate_result(
         for value in geometry_hashes.values()
     ):
         raise RuntimeError(f"n={n_intact} result has invalid geometry hashes")
+    durable_geometries: dict[str, str] = {}
+    for role, path in geometry_paths.items():
+        try:
+            xyz = path.read_text()
+            _xyz_symbols(xyz, label=f"durable {role}")
+        except (OSError, RuntimeError) as exc:
+            raise RuntimeError(
+                f"n={n_intact} durable {role} geometry is invalid: {exc}"
+            ) from exc
+        if geometry_hash(xyz) != geometry_hashes[role]:
+            raise RuntimeError(
+                f"n={n_intact} durable {role} geometry hash mismatches results.json"
+            )
+        durable_geometries[role] = xyz
 
     cluster = payload.get("cluster")
     if not isinstance(cluster, dict):
@@ -374,7 +422,10 @@ def validate_result(
         "gpu": True,
     }
     observed_cluster = {key: cluster.get(key) for key in expected_cluster}
-    if observed_cluster != expected_cluster:
+    if observed_cluster != expected_cluster or any(
+        type(observed_cluster[key]) is not type(expected_value)
+        for key, expected_value in expected_cluster.items()
+    ):
         raise RuntimeError(
             f"n={n_intact} result cluster identity mismatch: "
             f"expected={expected_cluster} observed={observed_cluster}"
@@ -396,10 +447,29 @@ def validate_result(
         )
     expected_metal = "Al" if family == "oaa" else "Si"
     if (
-        payload.get("metal_shells") != 2
+        type(payload.get("metal_shells")) is not int
+        or payload.get("metal_shells") != 2
         or payload.get("attacked_metal") != expected_metal
     ):
         raise RuntimeError(f"n={n_intact} result has wrong attacked-site identity")
+    if family == "oaa":
+        expected_build = OAA_EXPECTED_BUILDS[n_intact]
+        observed_build = {
+            "center_site": center_site,
+            "site_kind": cluster.get("site_kind"),
+            "formula": cluster.get("formula"),
+            "n_atoms": n_atoms,
+            "n_frozen": n_frozen,
+            "attacked_metal": payload.get("attacked_metal"),
+        }
+        if observed_build != expected_build or any(
+            type(observed_build[key]) is not type(expected_value)
+            for key, expected_value in expected_build.items()
+        ):
+            raise RuntimeError(
+                f"n={n_intact} Oaa physical build identity mismatch: "
+                f"expected={expected_build} observed={observed_build}"
+            )
 
     connection: sqlite3.Connection | None = None
     try:
@@ -453,6 +523,7 @@ def validate_result(
     energy_by_name: dict[str, float] = {}
     for row in rows:
         name = str(row["name"])
+        role = name.removeprefix(f"{cell}-")
         symbols = _xyz_symbols(row["xyz"], label=name)
         symbols_by_name[name] = symbols
         structure_time = _parse_store_timestamp(
@@ -476,6 +547,7 @@ def validate_result(
             or row["spin"] != 0
             or row["formula"] != _formula(symbols)
             or len(symbols) != expected_atom_count
+            or row["xyz"] != durable_geometries[role]
             or row["geometry_hash"] != expected_hashes[name]
             or row["geometry_hash"] != geometry_hash(str(row["xyz"]))
             or row["kind"] != "freq"

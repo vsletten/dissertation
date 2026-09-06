@@ -4,7 +4,7 @@ import ctypes
 import json
 import sys
 import sysconfig
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -180,8 +180,14 @@ def test_approach_seed_requires_matching_signature(tmp_path):
     seed = geometry("seed", 1.9)
     template = geometry("template", 3.2)
     signature = phase2.approach_seed_signature(
-        template, m_index=1, br_index=0, ow_index=2, pin_a=1.9
+        template, CHEAP, m_index=1, br_index=0, ow_index=2, pin_a=1.9
     )
+    assert signature[
+        "optimized_reactant_geometry_hash"
+    ] == phase2._stable_geometry_hash(template)
+    assert signature["production_settings"] == asdict(CHEAP)
+    assert signature["driver_git_commit"]
+    assert signature["driver_sha256"] == phase2.sha256_path(Path(phase2.__file__))
     path = tmp_path / "approach_seed.xyz"
     phase2.save_approach_seed(seed, path, signature)
 
@@ -191,6 +197,58 @@ def test_approach_seed_requires_matching_signature(tmp_path):
 
     incompatible = {**signature, "pin_a": 2.0}
     assert phase2.load_compatible_approach_seed(path, template, incompatible) is None
+    assert not path.exists()
+    assert not path.with_suffix(".json").exists()
+
+
+def test_orphaned_approach_and_product_artifacts_are_quarantined(tmp_path):
+    template = geometry("template", 3.2)
+    path = tmp_path / "approach_seed.xyz"
+    for name in ("product.xyz", "product.json"):
+        (tmp_path / name).write_text(name)
+
+    expected = phase2.approach_seed_signature(
+        template, CHEAP, m_index=1, br_index=0, ow_index=2, pin_a=1.9
+    )
+    assert phase2.load_compatible_approach_seed(path, template, expected) is None
+
+    quarantine = next((tmp_path / "quarantine").iterdir())
+    assert {child.name for child in quarantine.iterdir()} == {
+        "product.json",
+        "product.xyz",
+    }
+
+
+def test_product_checkpoint_requires_exact_receipt_and_geometry_hash(tmp_path):
+    reactant = geometry("reactant", 3.0)
+    approach_seed = geometry("approach", 1.9)
+    product = geometry("product", 1.9, m_obr=3.0)
+    path = tmp_path / "product.xyz"
+    signature = phase2.product_signature(
+        approach_seed,
+        reactant,
+        CHEAP,
+        m_index=1,
+        br_index=0,
+        ow_index=2,
+        pin_a=1.9,
+    )
+    phase2.save_product_checkpoint(path, product, signature)
+
+    loaded = phase2.load_compatible_product(path, approach_seed, signature)
+    assert loaded is not None
+    assert loaded.coords == pytest.approx(product.coords)
+
+    tampered = replace(product, coords=product.coords.copy())
+    tampered.coords[1, 1] = 0.1
+    path.write_text(tampered.to_xyz())
+    assert phase2.load_compatible_product(path, approach_seed, signature) is None
+
+    phase2.save_product_checkpoint(path, product, signature)
+    changed = {**signature, "pin_a": 2.0}
+    assert phase2.load_compatible_product(path, approach_seed, changed) is None
+    assert not path.exists()
+    assert not path.with_suffix(".json").exists()
 
 
 def test_reactant_complex_uses_checkpointed_hf_preoptimization(tmp_path, monkeypatch):
@@ -684,6 +742,56 @@ def test_quick_irc_rejects_remote_non_attacker_proton_transfer():
     assert reason is not None and "non-attacker proton" in reason
 
 
+def test_quick_irc_rejects_remote_attacker_owner_on_non_product_endpoint():
+    reference = Cluster(
+        name="remote-owner-reference",
+        symbols=["O", "Si", "O", "O", "H", "H"],
+        coords=np.array(
+            [
+                [1.6, 0.0, 0.0],  # bridge O
+                [0.0, 0.0, 0.0],  # attacked Si
+                [3.0, 4.0, 0.0],  # remote O
+                [3.0, 0.0, 0.0],  # appended attacker O
+                [3.0, 0.9, 0.0],
+                [3.0, -0.9, 0.0],
+            ]
+        ),
+    )
+    wrong_reactant = replace(reference, coords=reference.coords.copy())
+    wrong_reactant.coords[4] = [3.0, 3.1, 0.0]  # attacker H: O3 -> remote O2
+    product = replace(reference, name="product", coords=reference.coords.copy())
+    product.coords[0] = [3.0, 0.0, 0.0]
+    product.coords[3] = [1.9, 0.0, 0.0]
+    product.coords[4] = [3.0, 0.98, 0.0]  # one attacker H protonates bridge O
+    product.coords[5] = [1.9, -0.9, 0.0]
+
+    reason = phase2.quick_irc_acceptance_reason(
+        wrong_reactant,
+        product,
+        reference=reference,
+        frozen_reference=reference,
+        m_index=1,
+        br_index=0,
+        ow_index=3,
+    )
+
+    assert reason is not None and "non-product endpoint moved attacker proton" in reason
+
+    wrong_product = replace(product, coords=product.coords.copy())
+    wrong_product.coords[5] = [3.0, 3.1, 0.0]  # second attacker H -> remote O2
+    reason = phase2.quick_irc_acceptance_reason(
+        reference,
+        wrong_product,
+        reference=reference,
+        frozen_reference=reference,
+        m_index=1,
+        br_index=0,
+        ow_index=3,
+    )
+
+    assert reason is not None and "outside the single required transfer" in reason
+
+
 def test_quick_irc_rejects_frozen_coordinate_drift():
     reference = replace(geometry("intact", 3.0, m_obr=1.6), frozen_indices=[1])
     product = replace(
@@ -790,7 +898,12 @@ def test_resume_persists_proton_route_before_reentering_proton_stage(
         geometry("approach-seed", 1.9),
         run_dir / "approach_seed.xyz",
         phase2.approach_seed_signature(
-            complex_guess, m_index=1, br_index=0, ow_index=2, pin_a=1.9
+            complex_guess,
+            DftSettings(xc="b3lyp", basis="def2-svp", density_fit=True, use_gpu=False),
+            m_index=1,
+            br_index=0,
+            ow_index=2,
+            pin_a=1.9,
         ),
     )
 
