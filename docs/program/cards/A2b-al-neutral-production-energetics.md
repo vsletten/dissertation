@@ -1,11 +1,11 @@
 # A2b-al-neutral-production-energetics — re-tier banked Si–O–Al neutral route
 
-- status: ready
+- status: active
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaign)
 - depends: A2a ✅ (settled production method contract)
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## Objective
 
@@ -62,6 +62,20 @@ A2 method identity.
   durable hashes, and review-ready teardown pass.
 
 ## Progress
+
+- 2026-09-06 04:11 PDT (hermes-custom-build-001; profile=workstation) —
+  Adjudicated the first physical receipt as an honest finite computational
+  failure, not a mechanism rejection: all four r2SCAN-3c minima/saddle index
+  gates and the typed full cleavage IRC passed, but the first production
+  wB97M-V/def2-TZVPD+SMD single point exhausted 100 Newton cycles on the
+  checkpointed reactant. Two cold read-only reviews rejected an identical replay
+  and found that cached single-point receipts did not explicitly require
+  `converged=true`. The shared A2 helper now rejects unproven caches and adds one
+  bounded, receipted direct-DIIS attempt seeded from the failed Newton density;
+  unconverged values remain unpublished. Focused A2/A2a/A2b verification is 29
+  passed with focused Ruff/format and diff checks green. A fresh exact-head
+  supervised resume is next; accepted geometry/frequency/IRC checkpoints are
+  reused rather than recomputed.
 
 - 2026-09-06 02:40 PDT (hermes-custom-build-001; profile=workstation) —
   Launched the physical A2b campaign as bounded user unit

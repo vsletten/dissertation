@@ -453,34 +453,84 @@ def checkpoint_converged_energy(
     """Checkpoint a single-point energy with the settled A2 SCF contract.
 
     The production SMD tiers use bounded Newton-SCF first because direct DIIS
-    exhausted its bound during A2a. Other methods retain direct DIIS with a
-    bounded Newton retry. Only a finite converged value bound to the exact
-    geometry/settings fingerprints is published. This helper is shared by
-    sequential A2 routes so method identity and refusal semantics cannot drift.
+    exhausted its bound during A2a. If Newton itself exhausts its bound, one
+    fresh direct-DIIS solve is seeded from the final Newton density. This is a
+    solver-route change, not a method change; both attempts stay fail-closed.
+    Other methods retain direct DIIS with a bounded Newton retry. Only a finite
+    converged value bound to the exact geometry/settings fingerprints is
+    published. This helper is shared by sequential A2 routes so method identity
+    and refusal semantics cannot drift.
     """
     expected_geometry = frequency_geometry_fingerprint(cluster)
     expected_settings = frequency_settings_fingerprint(settings)
     if path.exists():
+        payload = json.loads(path.read_text())
+        if payload.get("converged") is not True:
+            raise ValueError(f"{path.name}: cached SCF is not explicitly converged")
+        if payload.get("scf_contract") not in {
+            "bounded-direct-diis-or-newton-v1",
+            "bounded-newton-then-direct-diis-v2",
+        }:
+            raise ValueError(f"{path.name}: cached SCF contract is not accepted")
         return checkpoint_energy(path, cluster, settings, method)
 
-    mf = pipeline._make_scf(pipeline.build_mol(cluster, settings), settings)
+    mol = pipeline.build_mol(cluster, settings)
+    mf = pipeline._make_scf(mol, settings)
     convergence_route = "direct-diis"
+    scf_contract = "bounded-direct-diis-or-newton-v1"
+    attempts: list[dict[str, Any]] = []
     if method in {PRODUCTION_METHOD, B3LYP_D4_METHOD}:
         mf = mf.newton()
         mf.max_cycle = 100
         raw_value = mf.kernel()
+        attempts.append(
+            {
+                "solver": "newton",
+                "max_cycle": 100,
+                "converged": bool(mf.converged),
+            }
+        )
         convergence_route = "newton-first"
+        scf_contract = "bounded-newton-then-direct-diis-v2"
+        if not mf.converged:
+            density = mf.make_rdm1()
+            mf = pipeline._make_scf(mol, settings)
+            mf.max_cycle = 150
+            raw_value = mf.kernel(dm0=density)
+            attempts.append(
+                {
+                    "solver": "direct-diis-from-newton-density",
+                    "max_cycle": 150,
+                    "converged": bool(mf.converged),
+                }
+            )
+            convergence_route = "newton-then-direct-diis"
     else:
         raw_value = mf.kernel()
+        attempts.append(
+            {
+                "solver": "direct-diis",
+                "max_cycle": int(mf.max_cycle),
+                "converged": bool(mf.converged),
+            }
+        )
         if not mf.converged:
             density = mf.make_rdm1()
             mf = mf.newton()
             mf.max_cycle = 100
             raw_value = mf.kernel(dm0=density)
+            attempts.append(
+                {
+                    "solver": "newton-from-direct-diis-density",
+                    "max_cycle": 100,
+                    "converged": bool(mf.converged),
+                }
+            )
             convergence_route = "direct-diis-then-newton"
     if not mf.converged:
         raise RuntimeError(
-            f"SCF did not converge for {cluster.name} via {convergence_route}"
+            f"SCF did not converge for {cluster.name} at {method} "
+            f"via {convergence_route}"
         )
     value = float(np.asarray(raw_value).item())
     if not np.isfinite(value):
@@ -492,8 +542,9 @@ def checkpoint_converged_energy(
             "electronic_hartree": value,
             "geometry_fingerprint": expected_geometry,
             "settings_fingerprint": expected_settings,
-            "scf_contract": "bounded-direct-diis-or-newton-v1",
+            "scf_contract": scf_contract,
             "convergence_route": convergence_route,
+            "scf_attempts": attempts,
             "converged": True,
         },
     )

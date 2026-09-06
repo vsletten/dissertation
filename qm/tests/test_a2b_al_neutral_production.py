@@ -401,12 +401,99 @@ def test_converged_energy_uses_bounded_newton_and_reuses_receipt(
     assert fake.kernel_calls == 1
     assert fake.max_cycle == 100
     receipt = json.loads(path.read_text())
+    assert receipt["scf_contract"] == "bounded-newton-then-direct-diis-v2"
     assert receipt["convergence_route"] == "newton-first"
+    assert receipt["scf_attempts"] == [
+        {"solver": "newton", "max_cycle": 100, "converged": True}
+    ]
     assert receipt["converged"] is True
     assert a2.checkpoint_converged_energy(
         path, cluster, settings, a2.PRODUCTION_METHOD
     ) == pytest.approx(-42.5)
     assert fake.kernel_calls == 1
+
+
+def test_converged_energy_falls_back_to_direct_diis_from_newton_density(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cluster = neutral("reactant", state="reactant")
+    settings = DftSettings(
+        xc="wb97m-v",
+        basis="def2-tzvpd",
+        solvent="smd",
+        density_fit=True,
+    )
+    density = object()
+
+    class NewtonScf:
+        converged = False
+        max_cycle = 20
+
+        def kernel(self):
+            return -41.0
+
+        def make_rdm1(self):
+            return density
+
+    class InitialScf:
+        def newton(self):
+            return NewtonScf()
+
+    class DirectScf:
+        converged = False
+        max_cycle = 20
+
+        def kernel(self, *, dm0=None):
+            assert dm0 is density
+            self.converged = True
+            return -42.75
+
+    scfs = iter((InitialScf(), DirectScf()))
+    monkeypatch.setattr(a2.pipeline, "build_mol", lambda *_args: object())
+    monkeypatch.setattr(a2.pipeline, "_make_scf", lambda *_args: next(scfs))
+    path = tmp_path / "energy.json"
+
+    assert a2.checkpoint_converged_energy(
+        path, cluster, settings, a2.PRODUCTION_METHOD
+    ) == pytest.approx(-42.75)
+    receipt = json.loads(path.read_text())
+    assert receipt["convergence_route"] == "newton-then-direct-diis"
+    assert receipt["scf_attempts"] == [
+        {"solver": "newton", "max_cycle": 100, "converged": False},
+        {
+            "solver": "direct-diis-from-newton-density",
+            "max_cycle": 150,
+            "converged": True,
+        },
+    ]
+
+
+def test_converged_energy_rejects_cached_unconverged_receipt(
+    tmp_path: Path,
+) -> None:
+    cluster = neutral("reactant", state="reactant")
+    settings = DftSettings(
+        xc="wb97m-v",
+        basis="def2-tzvpd",
+        solvent="smd",
+        density_fit=True,
+    )
+    path = tmp_path / "energy.json"
+    a2.atomic_json(
+        path,
+        {
+            "method": a2.PRODUCTION_METHOD,
+            "electronic_hartree": -42.0,
+            "geometry_fingerprint": a2.frequency_geometry_fingerprint(cluster),
+            "settings_fingerprint": a2.frequency_settings_fingerprint(settings),
+            "scf_contract": "bounded-newton-then-direct-diis-v2",
+            "converged": False,
+        },
+    )
+
+    with pytest.raises(ValueError, match="not explicitly converged"):
+        a2.checkpoint_converged_energy(path, cluster, settings, a2.PRODUCTION_METHOD)
 
 
 def test_failure_quarantines_stale_outputs_and_publishes_terminal_receipt(
