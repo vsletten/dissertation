@@ -307,7 +307,7 @@ def main() -> int:
         # cwd-relative output paths. Not a shell string.
         # Do not pass env= and do not mutate PYTHONPATH (opengrep
         # tainted-env-args); phase2_ladder.py inserts qm/ via __file__.
-        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit, python.lang.security.audit.dangerous-subprocess-use-tainted-env-args
+        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit, python.lang.security.audit.dangerous-subprocess-use-tainted-env-args  # noqa: E501
         completed = subprocess.run(
             command, cwd=args.output_root, check=False, shell=False
         )

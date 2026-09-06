@@ -4,6 +4,8 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-05 20:47 PDT — (hermes-custom-build-001; profile=workstation) — A3b DONE with an independently verified `inconclusive` terminal outcome: the hash-pinned Osa-neutral n=1 B3LYP/def2-SVP/DF common stage spent its sole 100-step budget, retained constrained H50/H57 owner bonds, but remained nonstationary (`9.514e-4/9.102e-3 Eh/Bohr` projected RMS/max gradients) and transferred `H52:O27->O32`. Raw/projected endpoints and hash-bound receipts are preserved under the external A3b evidence root; neither release order, PHVA, saddle, barrier, store, n=2-4, nor Petra output ran. READY A3c owns the materially different three-owner constrained-stationarity test; A3 remains blocked and A3b may not replay.
+
 - 2026-09-05 17:37 PDT — (hermes-custom-build-001; profile=workstation) — A3a DONE with its permitted terminal-failure outcome: owner-constrained HF conditioning remained advisory, then fresh B3LYP/def2-SVP/DF production converged at step 79 but transferred `H50:O26->O31` and `H57:O29->O20`; no minimum, barrier, store, or Petra fragment was promoted. Independent review exposed discarded rejected endpoints, generic terminal staging, a live-file manifest race, stale-manifest carryover, and non-finite energy false-green risk; all five are regression-closed. READY A3b owns the bounded two-order constraint-release test and independent scientific verdict; A3 remains blocked.
 
 - 2026-09-05 12:25 PDT — (hermes-custom-build-001; profile=workstation) — A2
