@@ -16,6 +16,22 @@ from typing import Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+DEFAULT_SOURCE_ROOT = Path(
+    "/mnt/data/vsletten/dissertation-data/a3a-reactant-minimum-recovery"
+)
+DEFAULT_OUTPUT_ROOT = Path(
+    "/mnt/data/vsletten/dissertation-data/a3b-osa-neutral-n1-proton-microstate-stability"
+)
+
+if __name__ == "__main__":
+    from quarry.etiquette import bootstrap_cli
+
+    bootstrap_cli(
+        "a3b_verify",
+        default_run_root=DEFAULT_OUTPUT_ROOT / "logs",
+        gpu_owner="a3b_verify",
+    )
+
 import numpy as np  # noqa: E402
 
 from quarry.clusters import Cluster  # noqa: E402
@@ -453,7 +469,7 @@ def _verified_receipt(
 def verify_experiment(
     output_root: Path,
     *,
-    source_root: Path = a3b.DEFAULT_SOURCE_ROOT,
+    source_root: Path = DEFAULT_SOURCE_ROOT,
     verifier_identity: str = DEFAULT_VERIFIER_IDENTITY,
     source_override: StaticSource | None = None,
 ) -> dict[str, Any]:
@@ -539,10 +555,18 @@ def verify_experiment(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-root", type=Path, default=a3b.DEFAULT_OUTPUT_ROOT)
-    parser.add_argument("--source-root", type=Path, default=a3b.DEFAULT_SOURCE_ROOT)
+    parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
+    parser.add_argument("--source-root", type=Path, default=DEFAULT_SOURCE_ROOT)
+    parser.add_argument("--gpu", action="store_true")
+    parser.add_argument("--gpu-mem-gb", type=float, default=16.0)
+    parser.add_argument("--threads", type=int, default=16)
+    parser.add_argument("--nice", type=int, default=10)
+    parser.add_argument("--log", type=Path)
     parser.add_argument("--verifier-identity", default=DEFAULT_VERIFIER_IDENTITY)
     args = parser.parse_args()
+    candidate = json.loads((args.output_root / "candidate-terminal.json").read_text())
+    if bool(candidate.get("settings", {}).get("use_gpu")) != args.gpu:
+        parser.error("--gpu must match the candidate's recorded use_gpu setting")
     result = verify_experiment(
         args.output_root,
         source_root=args.source_root,
