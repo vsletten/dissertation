@@ -365,11 +365,12 @@ def test_independent_verifier_accepts_and_detects_tampering(tmp_path, monkeypatc
     source = _source()
     endpoint = replace(source.a3a.cluster, name="endpoint")
     _patch_calculators(monkeypatch, endpoint)
+    monkeypatch.setattr(verifier, "energy", lambda *_args: -4022.0)
     a3c.run_experiment(tmp_path, source, use_gpu=True, code_revision="f" * 40)
     result = verifier.verify_experiment(
         tmp_path,
         source_override=source,
-        recompute_calculators=False,
+        recompute_calculators=True,
     )
     assert result["status"] == "verified"
     assert result["classification"] == a3c.VERIFIED_SEED
@@ -420,11 +421,12 @@ def test_stale_rerun_revokes_prior_verified_terminal(tmp_path, monkeypatch):
     source = _source()
     endpoint = replace(source.a3a.cluster, name="endpoint")
     _patch_calculators(monkeypatch, endpoint)
+    monkeypatch.setattr(verifier, "energy", lambda *_args: -4022.0)
     a3c.run_experiment(tmp_path, source, use_gpu=True, code_revision="9" * 40)
     result = verifier.verify_experiment(
         tmp_path,
         source_override=source,
-        recompute_calculators=False,
+        recompute_calculators=True,
     )
     assert result["status"] == "verified"
     assert (tmp_path / "verified-terminal.json").is_file()
@@ -447,6 +449,26 @@ def test_no_downstream_scientific_outputs_are_emitted(tmp_path, monkeypatch):
     a3c.run_experiment(tmp_path, source, use_gpu=False, code_revision="1" * 40)
     forbidden = {"results.json", "store.sqlite", "ts.xyz", "barrier.json", "petra.toml"}
     assert not any(path.name in forbidden for path in tmp_path.rglob("*"))
+
+
+def test_verifier_refuses_verified_seed_without_calculator_recompute(
+    tmp_path, monkeypatch
+):
+    source = _source()
+    endpoint = replace(source.a3a.cluster, name="endpoint")
+    _patch_calculators(monkeypatch, endpoint)
+    a3c.run_experiment(tmp_path, source, use_gpu=True, code_revision="2" * 40)
+    result = verifier.verify_experiment(
+        tmp_path,
+        source_override=source,
+        recompute_calculators=False,
+    )
+    assert result["status"] == "rejected"
+    assert result["classification"] != a3c.VERIFIED_SEED
+    assert "calculator recomputation" in result["detail"]
+    published = json.loads((tmp_path / "verified-terminal.json").read_text())
+    assert published["status"] == "rejected"
+    assert published["classification"] != a3c.VERIFIED_SEED
 
 
 def test_production_cli_requires_gpu_for_non_dry_runs(monkeypatch, capsys):

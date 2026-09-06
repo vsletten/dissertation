@@ -248,6 +248,8 @@ def _verify_experiment_locked(
                 f"claimed {candidate.get('classification')!r}, "
                 f"derived {classification!r}"
             )
+        if not should_recompute:
+            raise RuntimeError("verified result requires calculator recomputation")
         verified_classification = (
             a3c.VERIFIED_SEED
             if classification == a3c.CANDIDATE_SEED
