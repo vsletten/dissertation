@@ -63,6 +63,19 @@ A2 method identity.
 
 ## Progress
 
+- 2026-09-06 04:13 PDT (hermes-custom-build-001; profile=workstation) —
+  BLOCKED only on the finite recovery receipt. Exact clean/pushed branch
+  `agents/A2b-al-neutral-production-energetics@47d6e2a25697ce8cc3a90249969b7b34ea4c1fec`
+  contains the SCF recovery and cache-refusal tests. Bounded transient unit
+  `a2b-task290-production-recovery.service` invocation
+  `90f3237590404a90aee28785cac91a51` is active/running with PID `3363143`, a
+  36-hour ceiling, 40 GiB RAM + 8 GiB swap, 1600% CPU/nice-10, 16 numerical
+  threads, and the canonical 18-GiB GPU lease. `run_status.json` is `running`,
+  the old failure receipt is quarantined, and the new atomic terminal receipt is
+  absent. On receipt arrival, resume adjudication must verify exact head/hashes,
+  accepted cached stage identities, all converged production receipts, final
+  profile/store/docs/A2c transition, then open the single PR and tear down.
+
 - 2026-09-06 04:11 PDT (hermes-custom-build-001; profile=workstation) —
   Adjudicated the first physical receipt as an honest finite computational
   failure, not a mechanism rejection: all four r2SCAN-3c minima/saddle index
