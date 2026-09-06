@@ -63,6 +63,14 @@ A2 method identity.
 
 ## Progress
 
+- 2026-09-06 02:40 PDT (hermes-custom-build-001; profile=workstation) —
+  Launched the physical A2b campaign as bounded user unit
+  `a2b-task290-production.service` (invocation
+  `b2b0e656685d43ebaf921f551234d213`; runtime 36 h; memory 40 GiB + 8 GiB
+  swap; 16 threads; 18 GiB GPU pool). Read-back proves `active/running`, PID
+  `3152230`, the canonical GPU lease owned by `a2b-al-neutral-production`, and
+  `run_status.json`=`running`; terminal supervision receipt is
+  `/mnt/data/vsletten/dissertation-data/task290-a2b-al-neutral-production-20260906/terminal-receipt.json`.
 - 2026-09-06 02:36 PDT (hermes-custom-build-001; profile=workstation) —
   Implemented and adversarially fixture-tested the route-specific A2b front end
   over the shared resume-safe A2 checkpoints: exact TASK-168 artifact/job/
