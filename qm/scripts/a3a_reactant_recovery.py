@@ -231,6 +231,36 @@ def validate_source_evidence(
     }
 
 
+def driver_command() -> list[str]:
+    """Argv for the recovery child: no argparse paths in $CMD."""
+    return [
+        sys.executable,
+        str(Path(__file__).resolve().parent / "phase2_ladder.py"),
+        "--family",
+        "osa",
+        "--state",
+        "neutral",
+        "--n-intact",
+        "1",
+        "--xc",
+        "b3lyp",
+        "--basis",
+        "def2-svp",
+        "--gpu",
+        "--gpu-mem-gb",
+        "16",
+        "--threads",
+        "16",
+        "--nice",
+        "10",
+        "--reactant-recovery-only",
+        "--run-root",
+        "runs",
+        "--log",
+        "logs/a3a-reactant-recovery.log",
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", type=Path, default=DEFAULT_SOURCE_ROOT)
@@ -259,9 +289,9 @@ def main() -> int:
         implementation_sha = git_head(args.worktree)
         manifest["implementation"] = {
             "git_sha": implementation_sha,
-            "driver": str(args.worktree / "qm/scripts/phase2_ladder.py"),
+            "driver": str(Path(__file__).resolve().parent / "phase2_ladder.py"),
             "driver_sha256": phase2.sha256_path(
-                args.worktree / "qm/scripts/phase2_ladder.py"
+                Path(__file__).resolve().parent / "phase2_ladder.py"
             ),
             "runner": str(Path(__file__).resolve()),
             "runner_sha256": phase2.sha256_path(Path(__file__).resolve()),
@@ -271,39 +301,15 @@ def main() -> int:
         stage = "reactant-recovery-driver"
         log_path = args.output_root / "logs/a3a-reactant-recovery.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        command = [
-            sys.executable,
-            str(args.worktree / "qm/scripts/phase2_ladder.py"),
-            "--family",
-            "osa",
-            "--state",
-            "neutral",
-            "--n-intact",
-            "1",
-            "--xc",
-            "b3lyp",
-            "--basis",
-            "def2-svp",
-            "--gpu",
-            "--gpu-mem-gb",
-            "16",
-            "--threads",
-            "16",
-            "--nice",
-            "10",
-            "--reactant-recovery-only",
-            "--run-root",
-            str(args.output_root / "runs"),
-            "--log",
-            str(log_path),
-        ]
+        command = driver_command()
         # argv sequence, shell=False: trusted interpreter plus in-repo
-        # phase2_ladder.py driver and static recovery flags. Not a shell string.
+        # phase2_ladder.py via __file__, static recovery flags and
+        # cwd-relative output paths. Not a shell string.
         # Do not pass env= and do not mutate PYTHONPATH (opengrep
         # tainted-env-args); phase2_ladder.py inserts qm/ via __file__.
         # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit, python.lang.security.audit.dangerous-subprocess-use-tainted-env-args
         completed = subprocess.run(
-            command, cwd=args.worktree, check=False, shell=False
+            command, cwd=args.output_root, check=False, shell=False
         )
         driver_returncode = completed.returncode
         if completed.returncode != 0:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -160,3 +161,15 @@ def test_outcome_manifest_excludes_configured_recovery_log(tmp_path):
     records = runner.outcome_artifact_hashes(tmp_path)
 
     assert [record["path"] for record in records] == ["stable.json"]
+
+
+def test_driver_command_uses_static_relative_output_paths():
+    command = runner.driver_command()
+
+    assert command[0] == sys.executable
+    assert command[1] == str(
+        Path(runner.__file__).resolve().parent / "phase2_ladder.py"
+    )
+    assert command[command.index("--run-root") + 1] == "runs"
+    assert command[command.index("--log") + 1] == "logs/a3a-reactant-recovery.log"
+    assert "--reactant-recovery-only" in command
