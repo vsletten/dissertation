@@ -138,3 +138,13 @@ frozen atoms and active bond normals explicitly, then reduces Cartesian
 components over free atoms. Preserve both receipts, but let the independent
 canonical-endpoint gate decide promotion. Do not infer the calculator-level
 cause of a disagreement without a separately authorized calculation.
+
+### Failed SCF fallbacks need per-attempt receipts before another campaign (2026-09-06)
+A2b's wB97M-V reactant exhausted both bounded Newton and density-seeded
+direct-DIIS routes, but the helper wrote its detailed `attempts` list only on
+success. The aggregate terminal receipt truthfully named the failed route while
+losing cycle counts, residuals, final-density provenance, and other diagnostics
+needed to justify a materially different recovery. Persist a hash/settings-bound
+atomic receipt for every attempt, including unconverged exits, and prove the
+both-attempts-fail path emits no canonical energy/result/store. Never turn a
+missing diagnostic into permission for an identical expensive replay.

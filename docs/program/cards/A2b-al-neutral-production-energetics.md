@@ -1,11 +1,12 @@
 # A2b-al-neutral-production-energetics — re-tier banked Si–O–Al neutral route
 
-- status: ready
+- status: blocked
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaign)
 - depends: A2a ✅ (settled production method contract)
-- claimed-by:
+- claimed-by: hermes-custom-build-001
+- blocked-on: A2b1-wb97mv-reactant-scf-recovery
 
 ## Objective
 
@@ -63,7 +64,85 @@ A2 method identity.
 
 ## Progress
 
+- 2026-09-06 05:02 PDT (hermes-custom-build-001; profile=workstation) —
+  BLOCKED on READY `A2b1-wb97mv-reactant-scf-recovery` after the sole bounded
+  Newton-to-direct-DIIS recovery also failed at the first wB97M-V reactant
+  single point. Exact terminal receipt SHA-256 is
+  `c4233567cc3a88a23683514531e89af43c1fe6743a020638bc4fb20281d2fecd`;
+  its driver and run-status hashes re-match, the unit is terminal, and no
+  canonical energy, result, barrier, store, or documentation value exists.
+  DEVIATION: cold review found that the aggregate terminal identified the
+  `newton-then-direct-diis` route but did not separately persist per-attempt
+  diagnostics. A2b1 owns that evidence gap plus one materially different,
+  reactant-only SCF hypothesis. Fresh closeout verification is `611 passed`
+  with whole-QM Ruff, Ruff format, CLI smoke, and `git diff --check` green. No
+  identical replay is authorized.
+
+- 2026-09-06 04:13 PDT (hermes-custom-build-001; profile=workstation) —
+  BLOCKED only on the finite recovery receipt. Exact clean/pushed branch
+  `agents/A2b-al-neutral-production-energetics@47d6e2a25697ce8cc3a90249969b7b34ea4c1fec`
+  contains the SCF recovery and cache-refusal tests. Bounded transient unit
+  `a2b-task290-production-recovery.service` invocation
+  `90f3237590404a90aee28785cac91a51` is active/running with PID `3363143`, a
+  36-hour ceiling, 40 GiB RAM + 8 GiB swap, 1600% CPU/nice-10, 16 numerical
+  threads, and the canonical 18-GiB GPU lease. `run_status.json` is `running`,
+  the old failure receipt is quarantined, and the new atomic terminal receipt is
+  absent. On receipt arrival, resume adjudication must verify exact head/hashes,
+  accepted cached stage identities, all converged production receipts, final
+  profile/store/docs/A2c transition, then open the single PR and tear down.
+
+- 2026-09-06 04:11 PDT (hermes-custom-build-001; profile=workstation) —
+  Adjudicated the first physical receipt as an honest finite computational
+  failure, not a mechanism rejection: all four r2SCAN-3c minima/saddle index
+  gates and the typed full cleavage IRC passed, but the first production
+  wB97M-V/def2-TZVPD+SMD single point exhausted 100 Newton cycles on the
+  checkpointed reactant. Two cold read-only reviews rejected an identical replay
+  and found that cached single-point receipts did not explicitly require
+  `converged=true`. The shared A2 helper now rejects unproven caches and adds one
+  bounded direct-DIIS attempt seeded from the failed Newton density; the
+  aggregate terminal identifies that route, but no separate per-attempt receipt
+  exists, and unconverged values remain unpublished. Focused A2/A2a/A2b verification is 29
+  passed with focused Ruff/format and diff checks green. A fresh exact-head
+  supervised resume is next; accepted geometry/frequency/IRC checkpoints are
+  reused rather than recomputed.
+
+- 2026-09-06 02:40 PDT (hermes-custom-build-001; profile=workstation) —
+  Launched the physical A2b campaign as bounded user unit
+  `a2b-task290-production.service` (invocation
+  `b2b0e656685d43ebaf921f551234d213`; runtime 36 h; memory 40 GiB + 8 GiB
+  swap; 16 threads; 18 GiB GPU pool). Read-back proves `active/running`, PID
+  `3152230`, the canonical GPU lease owned by `a2b-al-neutral-production`, and
+  `run_status.json`=`running`; terminal supervision receipt is
+  `/mnt/data/vsletten/dissertation-data/task290-a2b-al-neutral-production-20260906/terminal-receipt.json`.
+- 2026-09-06 02:36 PDT (hermes-custom-build-001; profile=workstation) —
+  Implemented and adversarially fixture-tested the route-specific A2b front end
+  over the shared resume-safe A2 checkpoints: exact TASK-168 artifact/job/
+  mechanism binding, explicit rejected-addition refusal, typed basin + physical-H
+  ownership + heavy-topology gates, four r2SCAN-3c stationary-point/index gates,
+  full cleavage IRC, both production single-point tiers, atomic stale-output
+  quarantine/terminal receipt, and provenance-correct external-store publication.
+  Live source validation passes against the immutable TASK-168 archive; the full
+  QM suite is green (`609 passed`); the executable acquires the canonical QI2
+  GPU lease with an 18 GiB CuPy pool ceiling. Physical campaign launch is next.
 - 2026-09-05 12:25 PDT (hermes-custom-build-001; profile=workstation) — Split
   from A2 after receipt-level inventory proved that only si-neutral currently
   satisfies the production/IRC/store gates. TASK-168 remains a valid banked
   SVP mechanism and immutable source; this card owns its bounded re-tier.
+
+## Result
+
+- The route infrastructure and regression suite are review-ready, but A2b's
+  scientific acceptance is incomplete. Both bounded wB97M-V reactant SCF routes
+  failed before publishing a production energy: the original Newton route and
+  its one direct-DIIS fallback seeded from the failed density. The current
+  terminal receipt is hash-valid, has no running record, and reports
+  `incomplete-computational-failure`; this is not a mechanism rejection.
+- All four r2SCAN-3c stationary-point/index checkpoints and the typed full IRC
+  remain reusable only after exact validator re-execution. They are not a
+  production profile. `results.json`, `store.sqlite`, all production energy
+  receipts, production barriers, thermochemistry, `qm/AL_NEUTRAL_MECHANISM.md`,
+  and `qm/CALCULATIONS.md` updates remain absent.
+- READY card `A2b1-wb97mv-reactant-scf-recovery` owns durable per-attempt failure
+  evidence and one predeclared reactant-only recovery hypothesis. A2c remains
+  blocked. A2b may resume only after A2b1 produces a hash-valid converged
+  reactant receipt; another unchanged TASK-290 launch is prohibited.
