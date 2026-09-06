@@ -149,3 +149,14 @@ def test_driver_failure_propagates_exact_child_stage(tmp_path):
 
     assert stage == "production-endpoint-geometry-gate"
     assert detail == "driver exited 1: RuntimeError: proton owner changed"
+
+
+def test_outcome_manifest_excludes_configured_recovery_log(tmp_path):
+    (tmp_path / "stable.json").write_text("{}")
+    log_path = tmp_path / "logs/a3a-reactant-recovery.log"
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text("still growing")
+
+    records = runner.outcome_artifact_hashes(tmp_path)
+
+    assert [record["path"] for record in records] == ["stable.json"]

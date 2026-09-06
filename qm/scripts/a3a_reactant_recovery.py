@@ -95,12 +95,15 @@ def git_head(repo_root: Path) -> str:
 def outcome_artifact_hashes(output_root: Path) -> list[dict[str, object]]:
     # These files are written by the outer service wrapper after this process
     # finalizes the manifest. Hashing them here records a value that is stale by
-    # construction rather than durable evidence.
+    # construction rather than durable evidence. Match declared live paths, not
+    # just a basename such as launcher.log, so logs/a3a-reactant-recovery.log is
+    # omitted too.
     excluded = {
-        "source-evidence-manifest.json",
-        "terminal-receipt.json",
-        "launcher.log",
-        "restoration-receipt.txt",
+        Path("source-evidence-manifest.json"),
+        Path("terminal-receipt.json"),
+        Path("launcher.log"),
+        Path("restoration-receipt.txt"),
+        Path("logs/a3a-reactant-recovery.log"),
     }
     return [
         {
@@ -110,7 +113,7 @@ def outcome_artifact_hashes(output_root: Path) -> list[dict[str, object]]:
         }
         for path in sorted(output_root.rglob("*"))
         if path.is_file()
-        and path.name not in excluded
+        and path.relative_to(output_root) not in excluded
         and not path.name.endswith(".tmp")
     ]
 
