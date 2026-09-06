@@ -260,7 +260,12 @@ def main(argv: list[str] | None = None) -> int:
                 str(root / "logs" / f"{args.family}-{args.state}-n{n_intact}.log"),
             ]
             cell_started = time.monotonic()
-            result = subprocess.run(command, cwd=args.worktree, check=False)
+            # argv sequence, shell=False: trusted interpreter plus in-repo
+            # phase2_ladder.py driver and static campaign flags. Not a shell string.
+            # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
+            result = subprocess.run(
+                command, cwd=args.worktree, check=False, shell=False
+            )
             if result.returncode != 0:
                 terminal_reason = f"cell-n{n_intact}-failed"
                 exit_code = result.returncode
