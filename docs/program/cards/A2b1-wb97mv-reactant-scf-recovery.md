@@ -1,11 +1,11 @@
 # A2b1-wb97mv-reactant-scf-recovery — bounded reactant SCF adjudication
 
-- status: ready
+- status: active
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaign)
 - depends: A2a-si-neutral-production-path-rebuild
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## Objective
 
@@ -50,6 +50,10 @@ geometry, density fitting, grids, and convergence acceptance do not change.
   accepted unconverged energy, silent geometry change, or external compute spend.
 - The two failed TASK-290 routes are immutable evidence. An identical replay is
   prohibited.
+
+## Progress
+
+- 2026-09-06 10:42 PDT — Claimed atomically from `origin/main@dc194e7ae9eecdc0d5c39e904f6f8511e3a82c4a`; independent scientific review approved the predeclared `a2b1-huckel-damped-level-shifted-roothaan-to-cdiis-v1` contract only. Implemented hash/settings/geometry/driver-bound atomic per-attempt receipts, strict cache revalidation, a fail-closed timeout backstop, and adversarial both-fail/tamper/timeout tests. A cold implementation review rejected launch for semantic receipt gaps and pre-start timeout behavior; those findings are fixed and focused verification is 17 passed. (hermes-custom-build-001; profile=workstation)
 
 ## Acceptance
 

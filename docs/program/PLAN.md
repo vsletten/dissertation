@@ -56,7 +56,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: A2b/A2c/A2d | final banked-reaction table, ranking, Petra/CALCULATIONS closeout |
 | [A2a-si-neutral-production-path-rebuild](cards/A2a-si-neutral-production-path-rebuild.md) | A | P1 | workstation | done | exact r2SCAN-3c minima + A2 infrastructure ✅ |
 | [A2b-al-neutral-production-energetics](cards/A2b-al-neutral-production-energetics.md) | A | P1 | workstation | blocked: A2b1 | A2a ✅; production SCF incomplete after bounded Newton + DIIS |
-| [A2b1-wb97mv-reactant-scf-recovery](cards/A2b1-wb97mv-reactant-scf-recovery.md) | A | P1 | workstation | ready | A2a ✅; reactant-only SCF recovery gate for A2b |
+| [A2b1-wb97mv-reactant-scf-recovery](cards/A2b1-wb97mv-reactant-scf-recovery.md) | A | P1 | workstation | active | A2a ✅; reactant-only SCF recovery gate for A2b |
 | [A2c-al-acid-production-energetics](cards/A2c-al-acid-production-energetics.md) | A | P1 | workstation | blocked: A2b | A1b banked one-water Al-acid route |
 | [A2d-oss-neutral-n4-production-energetics](cards/A2d-oss-neutral-n4-production-energetics.md) | A | P1 | workstation | blocked: A2c | documented embedded pilot; deterministic rebuild |
 | [B3-conformance-decks](cards/B3-conformance-decks.md) | B | P1 | any | done | B2 ✅ |

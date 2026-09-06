@@ -53,6 +53,7 @@ from quarry.ts import (
 R2SCAN3C_METHOD = "r2scan-3c/def2-mtzvpp/d4/gcp"
 PRODUCTION_METHOD = "wb97m-v/def2-tzvpd/smd(water)"
 B3LYP_D4_METHOD = "b3lyp-d4/def2-tzvpd/smd(water)"
+A2B1_RECOVERY_CONTRACT = "a2b1-huckel-damped-level-shifted-roothaan-to-cdiis-v1"
 TEMPERATURE_K = 298.15
 
 
@@ -470,8 +471,168 @@ def checkpoint_converged_energy(
         if payload.get("scf_contract") not in {
             "bounded-direct-diis-or-newton-v1",
             "bounded-newton-then-direct-diis-v2",
+            A2B1_RECOVERY_CONTRACT,
         }:
             raise ValueError(f"{path.name}: cached SCF contract is not accepted")
+        if payload.get("scf_contract") == A2B1_RECOVERY_CONTRACT:
+            references = payload.get("recovery_attempt_receipts")
+            if not isinstance(references, list) or len(references) != 2:
+                raise ValueError(f"{path.name}: recovery attempt receipts are missing")
+            attempts: list[dict[str, Any]] = []
+            for index, reference in enumerate(references, start=1):
+                if not isinstance(reference, dict):
+                    raise ValueError(f"{path.name}: recovery attempt reference drift")
+                attempt_path = Path(str(reference.get("path", "")))
+                if not attempt_path.is_absolute() or not attempt_path.is_file():
+                    raise ValueError(
+                        f"{path.name}: recovery attempt receipt is unavailable"
+                    )
+                if reference.get("sha256") != sha256_path(attempt_path):
+                    raise ValueError(
+                        f"{path.name}: recovery attempt receipt hash drift"
+                    )
+                attempt = json.loads(attempt_path.read_text())
+                if (
+                    attempt.get("recovery_contract") != A2B1_RECOVERY_CONTRACT
+                    or attempt.get("attempt_id") != f"attempt-{index:03d}"
+                    or attempt.get("bindings", {})
+                    .get("reactant_geometry", {})
+                    .get("fingerprint")
+                    != expected_geometry
+                    or attempt.get("bindings", {}).get(
+                        "production_settings_fingerprint"
+                    )
+                    != expected_settings
+                    or attempt.get("bindings", {}).get("production_method") != method
+                    or attempt.get("bindings", {}).get("driver_sha256")
+                    != payload.get("recovery_driver_sha256")
+                    or not attempt.get("cycle_diagnostics")
+                    or not isinstance(attempt.get("final_density"), dict)
+                    or not attempt.get("final_density", {}).get("sha256")
+                    or not 0
+                    < int(attempt.get("cycles_completed", 0))
+                    <= int(attempt.get("solver", {}).get("max_cycle", -1))
+                ):
+                    raise ValueError(f"{path.name}: recovery attempt binding drift")
+                attempts.append(attempt)
+            recovery_driver_path = (
+                Path(__file__).with_name("a2b1_reactant_scf_recovery.py").resolve()
+            )
+            recovery_driver_sha256 = sha256_path(recovery_driver_path)
+            if payload.get("recovery_driver_sha256") != recovery_driver_sha256:
+                raise ValueError(f"{path.name}: recovery driver binding drift")
+            if attempts[0].get("bindings") != attempts[1].get("bindings"):
+                raise ValueError(f"{path.name}: cross-attempt binding drift")
+            bindings = attempts[0]["bindings"]
+            if (
+                bindings.get("recovery_contract") != A2B1_RECOVERY_CONTRACT
+                or bindings.get("driver") != str(recovery_driver_path)
+                or bindings.get("driver_sha256") != recovery_driver_sha256
+                or bindings.get("production_method") != method
+                or bindings.get("production_settings_fingerprint") != expected_settings
+                or bindings.get("reactant_geometry", {}).get("fingerprint")
+                != expected_geometry
+                or bindings.get("reactant_geometry", {}).get("charge") != cluster.charge
+                or bindings.get("reactant_geometry", {}).get("spin") != cluster.spin
+                or bindings.get("reactant_frequency", {}).get("imaginary_count") != 0
+            ):
+                raise ValueError(f"{path.name}: recovery evidence binding drift")
+            for binding_name in (
+                "legacy_terminal",
+                "legacy_source_receipt",
+                "legacy_settings",
+                "reactant_geometry",
+                "reactant_frequency",
+            ):
+                evidence_reference = bindings.get(binding_name)
+                if not isinstance(evidence_reference, dict):
+                    raise ValueError(f"{path.name}: recovery evidence reference drift")
+                evidence_path = Path(str(evidence_reference.get("path", "")))
+                if (
+                    not evidence_path.is_absolute()
+                    or not evidence_path.is_file()
+                    or evidence_reference.get("sha256") != sha256_path(evidence_path)
+                ):
+                    raise ValueError(f"{path.name}: recovery evidence hash drift")
+            for attempt in attempts:
+                diagnostics = attempt["cycle_diagnostics"]
+                cycles_completed = int(attempt["cycles_completed"])
+                if len(diagnostics) > cycles_completed:
+                    raise ValueError(f"{path.name}: recovery cycle diagnostics drift")
+                diagnostic_cycles = [row.get("cycle") for row in diagnostics]
+                if (
+                    any(not isinstance(row, dict) for row in diagnostics)
+                    or any(not isinstance(cycle, int) for cycle in diagnostic_cycles)
+                    or diagnostic_cycles != sorted(set(diagnostic_cycles))
+                    or diagnostic_cycles[-1] >= cycles_completed
+                ):
+                    raise ValueError(f"{path.name}: recovery cycle diagnostics drift")
+                density = attempt["final_density"]
+                if (
+                    not isinstance(density.get("shape"), list)
+                    or not density.get("dtype")
+                    or len(str(density.get("sha256"))) != 64
+                    or attempt.get("status")
+                    != ("converged" if attempt.get("converged") is True else "failed")
+                ):
+                    raise ValueError(f"{path.name}: recovery attempt semantic drift")
+            expected_solvers = [
+                {
+                    "algorithm": "damped-level-shifted-roothaan",
+                    "initial_guess": "huckel",
+                    "max_cycle": 50,
+                    "diis": False,
+                    "diis_start_cycle": 51,
+                    "damp": 0.5,
+                    "level_shift": 0.5,
+                },
+                {
+                    "algorithm": "unshifted-cdiis-finalization",
+                    "initial_guess": "prior-attempt-final-density",
+                    "max_cycle": 150,
+                    "diis": True,
+                    "diis_start_cycle": 1,
+                    "damp": 0.0,
+                    "level_shift": 0.0,
+                },
+            ]
+            if [attempt.get("solver") for attempt in attempts] != expected_solvers:
+                raise ValueError(f"{path.name}: recovery solver contract drift")
+            if (
+                attempts[0].get("recovery_version") != "a2b1-reactant-scf-recovery-v1"
+                or attempts[1].get("recovery_version")
+                != "a2b1-reactant-scf-recovery-v1"
+                or attempts[0].get("initial_density", {}).get("kind") != "huckel"
+                or attempts[1].get("initial_density", {}).get("kind")
+                != "prior-attempt-final-density"
+                or {
+                    key: attempts[1].get("initial_density", {}).get(key)
+                    for key in ("sha256", "shape", "dtype")
+                }
+                != {
+                    key: attempts[0].get("final_density", {}).get(key)
+                    for key in ("sha256", "shape", "dtype")
+                }
+                or attempts[1].get("converged") is not True
+                or attempts[1].get("status") != "converged"
+                or attempts[1].get("electronic_hartree_diagnostic_only")
+                != payload.get("electronic_hartree")
+                or payload.get("convergence_route") != "huckel-roothaan-then-cdiis"
+                or payload.get("scf_attempts")
+                != [
+                    {
+                        "solver": expected_solvers[0]["algorithm"],
+                        "max_cycle": 50,
+                        "converged": bool(attempts[0].get("converged")),
+                    },
+                    {
+                        "solver": expected_solvers[1]["algorithm"],
+                        "max_cycle": 150,
+                        "converged": True,
+                    },
+                ]
+            ):
+                raise ValueError(f"{path.name}: recovery finalization drift")
         return checkpoint_energy(path, cluster, settings, method)
 
     mol = pipeline.build_mol(cluster, settings)
