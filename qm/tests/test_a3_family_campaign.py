@@ -100,3 +100,35 @@ def test_atomic_json_never_emits_nan(tmp_path):
     with pytest.raises(ValueError):
         campaign.atomic_json(path, {"bad": float("nan")})
     assert not path.exists()
+
+
+def test_main_writes_receipt_when_observed_git_sha_lookup_fails(tmp_path):
+    missing = tmp_path / "missing-worktree"
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+
+    exit_code = campaign.main(
+        [
+            "--worktree",
+            str(missing),
+            "--run-root",
+            str(run_root),
+            "--expected-git-sha",
+            "deadbeef",
+            "--family",
+            "oss",
+            "--state",
+            "neutral",
+            "--cells",
+            "1",
+        ]
+    )
+
+    receipt_path = run_root / "terminal-receipt.json"
+    assert receipt_path.is_file()
+    receipt = json.loads(receipt_path.read_text())
+    assert exit_code == 1
+    assert receipt["success"] is False
+    assert receipt["expected_git_sha"] == "deadbeef"
+    assert receipt["error"]
+    assert receipt["observed_git_sha"] is None

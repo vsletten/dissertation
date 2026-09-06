@@ -73,6 +73,13 @@ def git_output(worktree: Path, *args: str) -> str:
     ).stdout.strip()
 
 
+def observed_git_sha(worktree: Path) -> str | None:
+    try:
+        return git_output(worktree, "rev-parse", "HEAD")
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def verify_revision(worktree: Path, expected_sha: str) -> str:
     branch = git_output(worktree, "rev-parse", "--abbrev-ref", "HEAD")
     if branch == "HEAD":
@@ -308,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
             "completed_at": now(),
             "elapsed_seconds": time.monotonic() - started_monotonic,
             "expected_git_sha": args.expected_git_sha,
-            "observed_git_sha": git_output(args.worktree, "rev-parse", "HEAD"),
+            "observed_git_sha": observed_git_sha(args.worktree),
             "family": args.family,
             "state": args.state,
             "requested_n_intact": list(cells),
