@@ -7,65 +7,102 @@ import json
 import signal
 import sqlite3
 import subprocess
+from pathlib import Path
 
 import pytest
 
+from quarry.crystal import from_deck_cell
+from quarry.pipeline import HARTREE_TO_KJ
+from quarry.store import Store, geometry_hash
 from scripts import a3_family_campaign as campaign
+
+REPO = Path(__file__).resolve().parents[2]
+DECK = REPO / "petra" / "examples" / "kaolinite.toml"
 
 
 def write_valid_result(tmp_path, **changes):
-    cell = "oss-neutral-n2-s2"
-    method = "b3lyp/def2-svp/df"
+    complex_energy = -100.0
+    ts_energy = -99.95
     xyz = {
-        "complex": "1\ncomplex\nH 0.0 0.0 0.0\n",
-        "ts": "1\nts\nH 0.1 0.0 0.0\n",
+        "complex": (
+            "4\ncomplex\nSi  0.0 0.0 0.0\nO 1.6 0.0 0.0\n"
+            "H   2.5  0.0 0.0\nH 1.6 0.9 0.0\n"
+        ),
+        "ts": (
+            "4\nts\nSi 0.1  0.0 0.0\nO 1.6 0.0 0.0\nH  2.5 0.0  0.0\nH 1.6 0.9 0.0\n"
+        ),
     }
     payload = {
-        "cell": cell,
+        "cell": "oss-neutral-n2-s2",
         "family": "oss",
         "state": "neutral",
         "n_intact": 2,
-        "method": method,
-        "geometry_hash": {
-            role: hashlib.sha256(text.encode("utf-8")).hexdigest()
-            for role, text in xyz.items()
+        "method": "b3lyp/def2-svp/df",
+        "geometry_hash": {role: geometry_hash(text) for role, text in xyz.items()},
+        "cluster": {
+            "site_kind": "Oss",
+            "center_site": 10,
+            "metal_shells": 2,
+            "n_intact_requested": 2,
+            "n_intact": 2,
+            "n_atoms": 1,
+            "n_frozen": 1,
+            "formula": "Si",
+            "charge": 0,
+            "state": "neutral",
+            "charge_offset": 0,
+            "method": "b3lyp/def2-svp/df",
+            "gpu": True,
         },
+        "dE_elec_vs_complex_kj": (ts_energy - complex_energy) * HARTREE_TO_KJ,
+        "metal_shells": 2,
+        "attacked_metal": "Si",
         "dG_kj": 123.4,
         "dH_kj": 111.0,
         "ts_imaginary_cm": 98.0,
         "route": "proton-neb",
     }
+    cluster_changes = changes.pop("cluster", {})
     payload.update(changes)
+    family = payload["family"]
+    state = payload["state"]
+    n_intact = payload["n_intact"]
+    payload["cluster"].update(
+        {
+            "site_kind": campaign.FAMILY_SITE_KINDS.get(family, "unknown"),
+            "center_site": campaign.FAMILY_CELL_CENTERS.get(family, {}).get(
+                n_intact, 10
+            )
+            or 10,
+            "n_intact": n_intact,
+            "n_intact_requested": n_intact,
+            "state": state,
+            "charge_offset": 1 if state == "acid" else 0,
+        }
+    )
+    payload["attacked_metal"] = "Al" if family == "oaa" else "Si"
+    payload["cluster"].update(cluster_changes)
     result = tmp_path / "results.json"
     result.write_text(json.dumps(payload))
     store = tmp_path / "store.sqlite"
-    with sqlite3.connect(store) as connection:
-        connection.executescript(
-            "CREATE TABLE structures "
-            "(id INTEGER PRIMARY KEY, name TEXT, xyz TEXT, geometry_hash TEXT);"
-            "CREATE TABLE jobs "
-            "(id INTEGER PRIMARY KEY, structure_id INTEGER, kind TEXT, "
-            "method TEXT, engine TEXT, status TEXT);"
-            "CREATE TABLE results (job_id INTEGER, key TEXT, value REAL, units TEXT);"
-        )
-        for index, role in enumerate(("complex", "ts"), start=1):
-            connection.execute(
-                "INSERT INTO structures VALUES (?, ?, ?, ?)",
-                (
-                    index,
-                    f"{payload['cell']}-{role}",
-                    xyz[role],
-                    payload["geometry_hash"][role],
-                ),
+    charge = 1 if state == "acid" else 0
+    with Store(store) as evidence:
+        for role, energy in (("complex", complex_energy), ("ts", ts_energy)):
+            structure_id = evidence.add_structure(
+                f"{payload['cell']}-{role}",
+                "H2OSi",
+                xyz[role],
+                charge=charge,
+                spin=0,
             )
-            connection.execute(
-                "INSERT INTO jobs VALUES (?, ?, 'freq', ?, 'gpu4pyscf', 'done')",
-                (index, index, payload["method"]),
+            job_id = evidence.add_job(
+                structure_id,
+                "freq",
+                payload["method"],
+                "gpu4pyscf",
             )
-            connection.execute(
-                "INSERT INTO results VALUES (?, 'electronic', ?, 'hartree')",
-                (index, -100.0 + index),
-            )
+            evidence.set_job_status(job_id, "done")
+            evidence.add_result(job_id, "electronic", energy, "hartree")
     return result, store
 
 
@@ -118,7 +155,9 @@ def test_validate_result_binds_identity_finite_values_and_hashes(tmp_path):
     [
         ({"n_intact": 3}, "identity mismatch"),
         ({"dG_kj": float("nan")}, "invalid dG_kj"),
-        ({"route": ""}, "no route provenance"),
+        ({"dG_kj": True}, "invalid dG_kj"),
+        ({"route": ""}, "invalid route provenance"),
+        ({"route": "invented-route"}, "invalid route provenance"),
     ],
 )
 def test_validate_result_rejects_false_green_payloads(tmp_path, change, message):
@@ -136,6 +175,23 @@ def test_validate_result_rejects_unrelated_sqlite_store(tmp_path):
         connection.execute("CREATE TABLE unrelated (value TEXT)")
 
     with pytest.raises(RuntimeError, match="store schema is incomplete"):
+        campaign.validate_result(result, family="oss", state="neutral", n_intact=2)
+
+
+def test_validate_result_rejects_reduced_lookalike_store_schema(tmp_path):
+    result, store = write_valid_result(tmp_path)
+    store.unlink()
+    with sqlite3.connect(store) as connection:
+        connection.executescript(
+            "CREATE TABLE structures "
+            "(id INTEGER PRIMARY KEY, name TEXT, xyz TEXT, geometry_hash TEXT);"
+            "CREATE TABLE jobs "
+            "(id INTEGER PRIMARY KEY, structure_id INTEGER, kind TEXT, "
+            "method TEXT, engine TEXT, status TEXT);"
+            "CREATE TABLE results (job_id INTEGER, key TEXT, value REAL, units TEXT);"
+        )
+
+    with pytest.raises(RuntimeError, match="store schema mismatch"):
         campaign.validate_result(result, family="oss", state="neutral", n_intact=2)
 
 
@@ -162,6 +218,58 @@ def test_validate_result_rejects_non_gpu_engine(tmp_path):
         campaign.validate_result(result, family="oss", state="neutral", n_intact=2)
 
 
+@pytest.mark.parametrize(("column", "value"), [("charge", 1), ("spin", 1)])
+def test_validate_result_rejects_wrong_electronic_identity(tmp_path, column, value):
+    result, store = write_valid_result(tmp_path)
+    with sqlite3.connect(store) as connection:
+        connection.execute(f"UPDATE structures SET {column} = ?", (value,))
+
+    with pytest.raises(RuntimeError, match="store provenance mismatch"):
+        campaign.validate_result(result, family="oss", state="neutral", n_intact=2)
+
+
+def test_validate_result_rejects_invalid_provenance_timestamp(tmp_path):
+    result, store = write_valid_result(tmp_path)
+    with sqlite3.connect(store) as connection:
+        connection.execute("UPDATE jobs SET created_at = 'not-an-iso-timestamp'")
+
+    with pytest.raises(RuntimeError, match="timestamp"):
+        campaign.validate_result(result, family="oss", state="neutral", n_intact=2)
+
+
+def test_validate_result_rejects_foreign_key_violation(tmp_path):
+    result, store = write_valid_result(tmp_path)
+    with sqlite3.connect(store) as connection:
+        connection.execute("UPDATE jobs SET structure_id = 999 WHERE id = 1")
+
+    with pytest.raises(RuntimeError, match="foreign-key check failed"):
+        campaign.validate_result(result, family="oss", state="neutral", n_intact=2)
+
+
+def test_validate_result_rejects_energy_inconsistent_with_summary(tmp_path):
+    result, store = write_valid_result(tmp_path)
+    with sqlite3.connect(store) as connection:
+        connection.execute(
+            "UPDATE results SET value = value + 0.01 "
+            "WHERE job_id = (SELECT id FROM jobs WHERE structure_id = 2)"
+        )
+
+    with pytest.raises(RuntimeError, match="electronic barrier does not match"):
+        campaign.validate_result(result, family="oss", state="neutral", n_intact=2)
+
+
+def test_validate_result_uses_store_canonical_geometry_hash(tmp_path):
+    result, store = write_valid_result(tmp_path)
+    with sqlite3.connect(store) as connection:
+        xyz, stored_hash = connection.execute(
+            "SELECT xyz, geometry_hash FROM structures ORDER BY id LIMIT 1"
+        ).fetchone()
+
+    assert stored_hash == geometry_hash(xyz)
+    assert stored_hash != hashlib.sha256(xyz.encode()).hexdigest()
+    campaign.validate_result(result, family="oss", state="neutral", n_intact=2)
+
+
 def test_validate_result_rejects_wrong_oaa_center(tmp_path):
     result, _store = write_valid_result(
         tmp_path,
@@ -174,6 +282,30 @@ def test_validate_result_rejects_wrong_oaa_center(tmp_path):
 
     with pytest.raises(RuntimeError, match="wrong crystallographic center"):
         campaign.validate_result(result, family="oaa", state="neutral", n_intact=4)
+
+
+@pytest.mark.parametrize(
+    ("n_intact", "center_site", "n_atoms", "n_frozen"),
+    [(2, 18, 55, 17), (4, 23, 68, 25), (6, 18, 81, 33)],
+)
+def test_oaa_center_map_builds_every_exact_even_connectivity(
+    n_intact, center_site, n_atoms, n_frozen
+):
+    assert campaign.FAMILY_CELL_CENTERS["oaa"][n_intact] == center_site
+
+    cluster = from_deck_cell(
+        DECK,
+        "Oaa",
+        center_index=center_site,
+        metal_shells=2,
+        n_intact=n_intact,
+        target_charge=0,
+    )
+
+    assert cluster.center_site == center_site
+    assert cluster.n_intact == n_intact
+    assert len(cluster.cluster.symbols) == n_atoms
+    assert len(cluster.cluster.frozen_indices) == n_frozen
 
 
 def test_oaa_campaign_rejects_unconstructable_odd_connectivity(tmp_path):

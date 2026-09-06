@@ -21,7 +21,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 if __name__ == "__main__":
@@ -33,7 +33,10 @@ if __name__ == "__main__":
     )
 
 from quarry import etiquette
+from quarry.pipeline import HARTREE_TO_KJ
+from quarry.store import geometry_hash
 
+FAMILY_SITE_KINDS = {"oss": "Oss", "osa": "Osa", "oaa": "Oaa"}
 FAMILY_CELL_CENTERS = {
     "oss": {1: None, 2: None, 3: None, 4: None},
     "osa": {1: None, 2: None, 3: None, 4: None},
@@ -46,6 +49,48 @@ FAMILY_CONNECTIVITIES = {
 }
 SCHEMA = "a3-family-campaign-terminal-v1"
 PROGRESS_SCHEMA = "a3-family-campaign-progress-v1"
+TS_GUESS_ROUTES = frozenset({"direct", "proton-neb"})
+
+_STORE_COLUMNS = {
+    "structures": (
+        ("id", "INTEGER", False, None, 1),
+        ("name", "TEXT", True, None, 0),
+        ("formula", "TEXT", True, None, 0),
+        ("charge", "INTEGER", True, "0", 0),
+        ("spin", "INTEGER", True, "0", 0),
+        ("xyz", "TEXT", True, None, 0),
+        ("geometry_hash", "TEXT", True, None, 0),
+        ("created_at", "TEXT", True, None, 0),
+    ),
+    "jobs": (
+        ("id", "INTEGER", False, None, 1),
+        ("structure_id", "INTEGER", True, None, 0),
+        ("kind", "TEXT", True, None, 0),
+        ("method", "TEXT", True, None, 0),
+        ("engine", "TEXT", True, None, 0),
+        ("status", "TEXT", True, "'pending'", 0),
+        ("detail", "TEXT", False, None, 0),
+        ("created_at", "TEXT", True, None, 0),
+    ),
+    "results": (
+        ("id", "INTEGER", False, None, 1),
+        ("job_id", "INTEGER", True, None, 0),
+        ("key", "TEXT", True, None, 0),
+        ("value", "REAL", True, None, 0),
+        ("units", "TEXT", True, None, 0),
+        ("created_at", "TEXT", True, None, 0),
+    ),
+}
+_STORE_UNIQUE_KEYS = {
+    "structures": {("geometry_hash",)},
+    "jobs": set(),
+    "results": {("job_id", "key")},
+}
+_STORE_FOREIGN_KEYS = {
+    "structures": set(),
+    "jobs": {("structures", "structure_id", "id", "NO ACTION", "NO ACTION")},
+    "results": {("jobs", "job_id", "id", "NO ACTION", "NO ACTION")},
+}
 
 
 class StopRequested(RuntimeError):
@@ -131,6 +176,122 @@ def wait_for_gpu(
         sleep(min(poll_seconds, remaining))
 
 
+def _finite_scientific_value(value: object) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(float(value))
+    )
+
+
+def _validate_store_schema(connection: sqlite3.Connection) -> None:
+    tables = {
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        )
+    }
+    required_tables = set(_STORE_COLUMNS)
+    if not required_tables <= tables:
+        missing = sorted(required_tables - tables)
+        raise RuntimeError(f"store schema is incomplete: missing {missing}")
+    if tables != required_tables:
+        raise RuntimeError(f"store schema has unexpected tables: {sorted(tables)}")
+
+    for table, expected_columns in _STORE_COLUMNS.items():
+        observed_columns = tuple(
+            (
+                str(row["name"]),
+                str(row["type"]).upper(),
+                bool(row["notnull"]),
+                row["dflt_value"],
+                int(row["pk"]),
+            )
+            for row in connection.execute(f"PRAGMA table_info({table})")
+        )
+        if observed_columns != expected_columns:
+            raise RuntimeError(f"store schema mismatch for {table}")
+
+        unique_keys = set()
+        for index in connection.execute(f"PRAGMA index_list({table})"):
+            if not index["unique"]:
+                continue
+            columns = tuple(
+                str(row["name"])
+                for row in connection.execute(f"PRAGMA index_info({index['name']})")
+            )
+            unique_keys.add(columns)
+        if unique_keys != _STORE_UNIQUE_KEYS[table]:
+            raise RuntimeError(f"store unique-key mismatch for {table}")
+
+        foreign_keys = {
+            (
+                str(row["table"]),
+                str(row["from"]),
+                str(row["to"]),
+                str(row["on_update"]),
+                str(row["on_delete"]),
+            )
+            for row in connection.execute(f"PRAGMA foreign_key_list({table})")
+        }
+        if foreign_keys != _STORE_FOREIGN_KEYS[table]:
+            raise RuntimeError(f"store foreign-key schema mismatch for {table}")
+
+    violations = connection.execute("PRAGMA foreign_key_check").fetchall()
+    if violations:
+        raise RuntimeError(
+            f"store foreign-key check failed: {len(violations)} violation(s)"
+        )
+
+
+def _parse_store_timestamp(value: object, *, label: str) -> datetime:
+    if not isinstance(value, str):
+        raise RuntimeError(f"store {label} timestamp is not text")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise RuntimeError(f"store {label} timestamp is invalid: {value!r}") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0):
+        raise RuntimeError(f"store {label} timestamp is not UTC-aware: {value!r}")
+    return parsed
+
+
+def _xyz_symbols(xyz: object, *, label: str) -> tuple[str, ...]:
+    if not isinstance(xyz, str):
+        raise RuntimeError(f"store {label} XYZ is not text")
+    lines = xyz.strip().splitlines()
+    try:
+        atom_count = int(lines[0])
+    except (IndexError, ValueError) as exc:
+        raise RuntimeError(f"store {label} XYZ atom count is invalid") from exc
+    if atom_count < 1 or len(lines) != atom_count + 2:
+        raise RuntimeError(f"store {label} XYZ line count is invalid")
+    symbols: list[str] = []
+    for line in lines[2:]:
+        fields = line.split()
+        if len(fields) != 4 or not fields[0]:
+            raise RuntimeError(f"store {label} XYZ atom record is invalid")
+        try:
+            coordinates = tuple(float(value) for value in fields[1:])
+        except ValueError as exc:
+            raise RuntimeError(f"store {label} XYZ coordinate is invalid") from exc
+        if not all(math.isfinite(value) for value in coordinates):
+            raise RuntimeError(f"store {label} XYZ coordinate is non-finite")
+        symbols.append(fields[0])
+    return tuple(symbols)
+
+
+def _formula(symbols: tuple[str, ...]) -> str:
+    counts: dict[str, int] = {}
+    for symbol in symbols:
+        counts[symbol] = counts.get(symbol, 0) + 1
+    return "".join(
+        f"{symbol}{count if count > 1 else ''}"
+        for symbol, count in sorted(counts.items())
+    )
+
+
 def validate_result(
     result_path: Path,
     *,
@@ -144,26 +305,36 @@ def validate_result(
             f"n={n_intact} exited zero without results.json + store.sqlite"
         )
     payload = json.loads(result_path.read_text())
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"n={n_intact} result payload is not an object")
     expected = {"family": family, "state": state, "n_intact": n_intact}
     observed = {key: payload.get(key) for key in expected}
-    if observed != expected:
+    if type(payload.get("n_intact")) is not int or observed != expected:
         raise RuntimeError(
             f"n={n_intact} result identity mismatch: "
             f"expected={expected} observed={observed}"
         )
-    required_finite = ("dG_kj", "dH_kj", "ts_imaginary_cm")
+
+    required_finite = (
+        "dE_elec_vs_complex_kj",
+        "dG_kj",
+        "dH_kj",
+        "ts_imaginary_cm",
+    )
     for key in required_finite:
         value = payload.get(key)
-        if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        if not _finite_scientific_value(value):
             raise RuntimeError(f"n={n_intact} result has invalid {key}={value!r}")
     route = payload.get("route")
-    if not isinstance(route, str) or not route:
-        raise RuntimeError(f"n={n_intact} result has no route provenance")
+    if route not in TS_GUESS_ROUTES:
+        raise RuntimeError(
+            f"n={n_intact} result has invalid route provenance {route!r}"
+        )
+
     cell = payload.get("cell")
     method = payload.get("method")
     expected_cell = f"{family}-{state}-n{n_intact}-s2"
     expected_method = "b3lyp/def2-svp/df"
-    geometry_hashes = payload.get("geometry_hash")
     if cell != expected_cell:
         raise RuntimeError(
             f"n={n_intact} result has wrong cell identity (expected {expected_cell})"
@@ -172,22 +343,63 @@ def validate_result(
         raise RuntimeError(
             f"n={n_intact} result has wrong method (expected {expected_method})"
         )
+
+    geometry_hashes = payload.get("geometry_hash")
     if not isinstance(geometry_hashes, dict) or set(geometry_hashes) != {
         "complex",
         "ts",
     }:
         raise RuntimeError(f"n={n_intact} result has invalid geometry provenance")
-    expected_center = FAMILY_CELL_CENTERS.get(family, {}).get(n_intact)
-    if expected_center is not None:
-        cluster = payload.get("cluster")
-        if (
-            not isinstance(cluster, dict)
-            or cluster.get("center_site") != expected_center
-        ):
-            raise RuntimeError(
-                f"n={n_intact} result has wrong crystallographic center "
-                f"(expected {expected_center})"
-            )
+    if any(
+        not isinstance(value, str)
+        or len(value) != 64
+        or value != value.lower()
+        or any(character not in "0123456789abcdef" for character in value)
+        for value in geometry_hashes.values()
+    ):
+        raise RuntimeError(f"n={n_intact} result has invalid geometry hashes")
+
+    cluster = payload.get("cluster")
+    if not isinstance(cluster, dict):
+        raise RuntimeError(f"n={n_intact} result has no cluster provenance")
+    expected_cluster = {
+        "site_kind": FAMILY_SITE_KINDS[family],
+        "metal_shells": 2,
+        "n_intact_requested": n_intact,
+        "n_intact": n_intact,
+        "charge": 0,
+        "state": state,
+        "charge_offset": 1 if state == "acid" else 0,
+        "method": method,
+        "gpu": True,
+    }
+    observed_cluster = {key: cluster.get(key) for key in expected_cluster}
+    if observed_cluster != expected_cluster:
+        raise RuntimeError(
+            f"n={n_intact} result cluster identity mismatch: "
+            f"expected={expected_cluster} observed={observed_cluster}"
+        )
+    center_site = cluster.get("center_site")
+    n_atoms = cluster.get("n_atoms")
+    n_frozen = cluster.get("n_frozen")
+    if type(center_site) is not int or center_site < 0:
+        raise RuntimeError(f"n={n_intact} result has invalid crystallographic center")
+    if type(n_atoms) is not int or n_atoms < 1:
+        raise RuntimeError(f"n={n_intact} result has invalid cluster atom count")
+    if type(n_frozen) is not int or not 0 < n_frozen <= n_atoms:
+        raise RuntimeError(f"n={n_intact} result has invalid frozen atom count")
+    expected_center = FAMILY_CELL_CENTERS[family][n_intact]
+    if expected_center is not None and center_site != expected_center:
+        raise RuntimeError(
+            f"n={n_intact} result has wrong crystallographic center "
+            f"(expected {expected_center})"
+        )
+    expected_metal = "Al" if family == "oaa" else "Si"
+    if (
+        payload.get("metal_shells") != 2
+        or payload.get("attacked_metal") != expected_metal
+    ):
+        raise RuntimeError(f"n={n_intact} result has wrong attacked-site identity")
 
     connection: sqlite3.Connection | None = None
     try:
@@ -199,21 +411,28 @@ def validate_result(
             integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
             if integrity != "ok":
                 raise RuntimeError(f"store integrity check failed: {integrity}")
-            tables = {
-                row[0]
-                for row in connection.execute(
-                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+            _validate_store_schema(connection)
+            counts = {
+                table: int(
+                    connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
                 )
+                for table in _STORE_COLUMNS
             }
-            required_tables = {"structures", "jobs", "results"}
-            if not required_tables <= tables:
-                missing = sorted(required_tables - tables)
-                raise RuntimeError(f"store schema is incomplete: missing {missing}")
+            if counts != {"structures": 2, "jobs": 2, "results": 2}:
+                raise RuntimeError(f"store row cardinality mismatch: {counts}")
             rows = connection.execute(
-                "SELECT s.name, s.xyz, s.geometry_hash, j.kind, j.method, j.engine, "
-                "j.status, r.key, r.value, r.units "
+                "SELECT "
+                "s.id AS structure_id, s.name, s.formula, s.charge, s.spin, "
+                "s.xyz, s.geometry_hash, s.created_at AS structure_created_at, "
+                "typeof(s.charge) AS charge_type, typeof(s.spin) AS spin_type, "
+                "j.id AS job_id, j.structure_id AS job_structure_id, j.kind, "
+                "j.method, j.engine, j.status, j.detail, "
+                "j.created_at AS job_created_at, "
+                "r.id AS result_id, r.job_id AS result_job_id, r.key, r.value, "
+                "r.units, r.created_at AS result_created_at, "
+                "typeof(r.value) AS value_type "
                 "FROM structures s JOIN jobs j ON j.structure_id = s.id "
-                "JOIN results r ON r.job_id = j.id"
+                "JOIN results r ON r.job_id = j.id ORDER BY s.name"
             ).fetchall()
     except (sqlite3.DatabaseError, OSError, RuntimeError) as exc:
         raise RuntimeError(f"n={n_intact} provenance store is invalid: {exc}") from exc
@@ -228,22 +447,75 @@ def validate_result(
         f"{cell}-complex": geometry_hashes["complex"],
         f"{cell}-ts": geometry_hashes["ts"],
     }
+    expected_charge = 1 if state == "acid" else 0
+    expected_atom_count = n_atoms + (4 if state == "acid" else 3)
+    symbols_by_name: dict[str, tuple[str, ...]] = {}
+    energy_by_name: dict[str, float] = {}
     for row in rows:
+        name = str(row["name"])
+        symbols = _xyz_symbols(row["xyz"], label=name)
+        symbols_by_name[name] = symbols
+        structure_time = _parse_store_timestamp(
+            row["structure_created_at"], label=f"{name} structure"
+        )
+        job_time = _parse_store_timestamp(row["job_created_at"], label=f"{name} job")
+        result_time = _parse_store_timestamp(
+            row["result_created_at"], label=f"{name} result"
+        )
+        if not structure_time <= job_time <= result_time:
+            raise RuntimeError(
+                f"n={n_intact} store timestamp order is invalid for {name}"
+            )
         if (
-            row["geometry_hash"] != expected_hashes[row["name"]]
-            or row["geometry_hash"]
-            != hashlib.sha256(row["xyz"].encode("utf-8")).hexdigest()
+            row["job_structure_id"] != row["structure_id"]
+            or row["result_job_id"] != row["job_id"]
+            or row["charge_type"] != "integer"
+            or row["spin_type"] != "integer"
+            or row["value_type"] != "real"
+            or row["charge"] != expected_charge
+            or row["spin"] != 0
+            or row["formula"] != _formula(symbols)
+            or len(symbols) != expected_atom_count
+            or row["geometry_hash"] != expected_hashes[name]
+            or row["geometry_hash"] != geometry_hash(str(row["xyz"]))
             or row["kind"] != "freq"
             or row["method"] != method
             or row["engine"] != "gpu4pyscf"
             or row["status"] != "done"
+            or row["detail"] is not None
             or row["key"] != "electronic"
             or row["units"] != "hartree"
-            or not math.isfinite(float(row["value"]))
+            or not _finite_scientific_value(row["value"])
         ):
-            raise RuntimeError(
-                f"n={n_intact} store provenance mismatch for {row['name']}"
-            )
+            raise RuntimeError(f"n={n_intact} store provenance mismatch for {name}")
+        energy_by_name[name] = float(row["value"])
+
+    if symbols_by_name[f"{cell}-complex"] != symbols_by_name[f"{cell}-ts"]:
+        raise RuntimeError(f"n={n_intact} store complex/TS atom identity mismatch")
+    substrate_counts: dict[str, int] = {}
+    for symbol in symbols_by_name[f"{cell}-complex"]:
+        substrate_counts[symbol] = substrate_counts.get(symbol, 0) + 1
+    substrate_counts["O"] = substrate_counts.get("O", 0) - 1
+    substrate_counts["H"] = substrate_counts.get("H", 0) - (3 if state == "acid" else 2)
+    if any(count < 0 for count in substrate_counts.values()):
+        raise RuntimeError(f"n={n_intact} store is missing the declared attacker atoms")
+    substrate_symbols = tuple(
+        symbol for symbol, count in substrate_counts.items() for _ in range(count)
+    )
+    if cluster.get("formula") != _formula(substrate_symbols):
+        raise RuntimeError(f"n={n_intact} store composition mismatches cluster formula")
+    store_barrier_kj = (
+        energy_by_name[f"{cell}-ts"] - energy_by_name[f"{cell}-complex"]
+    ) * HARTREE_TO_KJ
+    if not math.isclose(
+        store_barrier_kj,
+        float(payload["dE_elec_vs_complex_kj"]),
+        rel_tol=1e-12,
+        abs_tol=1e-8,
+    ):
+        raise RuntimeError(
+            f"n={n_intact} store electronic barrier does not match results.json"
+        )
     return {
         "n_intact": n_intact,
         "result_path": str(result_path),

@@ -571,6 +571,7 @@ def test_quick_irc_must_span_intact_bridge_and_hydrolyzed_product():
             intact,
             product,
             reference=intact,
+            frozen_reference=intact,
             m_index=1,
             br_index=0,
             ow_index=2,
@@ -582,6 +583,7 @@ def test_quick_irc_must_span_intact_bridge_and_hydrolyzed_product():
             intact,
             intact,
             reference=intact,
+            frozen_reference=intact,
             m_index=1,
             br_index=0,
             ow_index=2,
@@ -600,6 +602,7 @@ def test_quick_irc_rejects_metadata_drift():
         intact,
         drifted,
         reference=intact,
+        frozen_reference=intact,
         m_index=1,
         br_index=0,
         ow_index=2,
@@ -633,6 +636,7 @@ def test_quick_irc_rejects_oaa_structural_bridge_proton_transfer():
         reference,
         product,
         reference=reference,
+        frozen_reference=reference,
         m_index=2,
         br_index=0,
         ow_index=3,
@@ -671,12 +675,84 @@ def test_quick_irc_rejects_remote_non_attacker_proton_transfer():
         reference,
         product,
         reference=reference,
+        frozen_reference=reference,
         m_index=2,
         br_index=0,
         ow_index=6,
     )
 
     assert reason is not None and "non-attacker proton" in reason
+
+
+def test_quick_irc_rejects_frozen_coordinate_drift():
+    reference = replace(geometry("intact", 3.0, m_obr=1.6), frozen_indices=[1])
+    product = replace(
+        geometry("product", 1.9, m_obr=3.0),
+        frozen_indices=[1],
+    )
+    product.coords[3] = np.array([3.98, 0.0, 0.0])
+    product.coords[1, 1] = 0.01
+
+    reason = phase2.quick_irc_acceptance_reason(
+        reference,
+        product,
+        reference=reference,
+        frozen_reference=reference,
+        m_index=1,
+        br_index=0,
+        ow_index=2,
+    )
+
+    assert reason is not None and "frozen coordinate" in reason
+
+
+def test_quick_irc_rejects_drifted_saddle_frozen_reference():
+    reference = replace(geometry("intact", 3.0, m_obr=1.6), frozen_indices=[1])
+    product = replace(geometry("product", 1.9, m_obr=3.0), frozen_indices=[1])
+    product.coords[3] = np.array([3.98, 0.0, 0.0])
+    saddle = replace(reference, coords=reference.coords.copy())
+    saddle.coords[1, 1] = 0.01
+    product.coords[1, 1] = 0.01
+    back = replace(reference, coords=reference.coords.copy())
+    back.coords[1, 1] = 0.01
+
+    reason = phase2.quick_irc_acceptance_reason(
+        back,
+        product,
+        reference=reference,
+        frozen_reference=saddle,
+        m_index=1,
+        br_index=0,
+        ow_index=2,
+    )
+
+    assert reason is not None and "frozen reference" in reason
+
+
+@pytest.mark.parametrize(
+    ("defect", "message"),
+    [("nonfinite", "non-finite"), ("collision", "collision")],
+)
+def test_quick_irc_rejects_structurally_invalid_endpoint(defect, message):
+    intact = geometry("intact", 3.0, m_obr=1.6)
+    product = geometry("product", 1.9, m_obr=3.0)
+    product.coords[3] = np.array([3.98, 0.0, 0.0])
+    if defect == "nonfinite":
+        product.coords[4, 2] = np.nan
+    else:
+        product.coords[4] = product.coords[2]
+
+    reason = phase2.quick_irc_acceptance_reason(
+        intact,
+        product,
+        reference=intact,
+        frozen_reference=intact,
+        m_index=1,
+        br_index=0,
+        ow_index=2,
+    )
+
+    assert reason is not None and message in reason
 
 
 def test_new_attempt_quarantines_stale_canonical_outputs(tmp_path):
@@ -744,6 +820,13 @@ def test_resume_persists_proton_route_before_reentering_proton_stage(
         lambda *_args, **_kwargs: SimpleNamespace(imaginary_cm=np.array([])),
     )
     monkeypatch.setattr(phase2, "optimize", lambda cluster, settings: cluster)
+    monkeypatch.setattr(
+        phase2,
+        "scan_to_maximum",
+        lambda *_args, **_kwargs: pytest.fail(
+            "compatible approach-only resume was quarantined"
+        ),
+    )
     monkeypatch.setattr(phase2, "trim_gpu_pool", lambda: None)
 
     def stop_after_route_checkpoint(*args, **kwargs):
@@ -789,7 +872,15 @@ def test_ts_guess_checkpoint_rejects_and_quarantines_signature_drift(tmp_path):
 
     changed = dict(signature)
     changed["m_index"] = 9
-    phase2.save_xyz(geometry("stale-ts", 2.4), tmp_path / "ts.xyz")
+    stale_names = {
+        "approach_seed.xyz",
+        "approach_seed.json",
+        "product.xyz",
+        "product.rejected-rollback.xyz",
+        "ts.xyz",
+    }
+    for name in stale_names:
+        (tmp_path / name).write_text(name)
     assert (
         phase2.load_compatible_ts_guess(path, route_path, complex_opt, changed) is None
     )
@@ -797,6 +888,10 @@ def test_ts_guess_checkpoint_rejects_and_quarantines_signature_drift(tmp_path):
     assert not route_path.exists()
     quarantine = next((tmp_path / "quarantine").iterdir())
     assert {child.name for child in quarantine.iterdir()} == {
+        "approach_seed.json",
+        "approach_seed.xyz",
+        "product.rejected-rollback.xyz",
+        "product.xyz",
         "ts_guess.json",
         "ts_guess.route",
         "ts_guess.xyz",

@@ -82,6 +82,7 @@ MIN_PLAUSIBLE_DE_KJ = 20.0
 SI_NEUTRAL_FREE_DIMER_DG_KJ = 113.05
 APPROACH_SEED_VERSION = 1
 TS_GUESS_VERSION = 1
+TS_GUESS_ROUTES = frozenset({"direct", "proton-neb"})
 ADVISORY_PREOPT_VERSION = 2
 ADVISORY_PREOPT_MAX_STEPS = 100
 ADVISORY_PREOPT_MIN_PAIR_A = 0.60
@@ -302,7 +303,7 @@ def save_ts_guess_checkpoint(
     signature: dict[str, object],
     route: str,
 ) -> None:
-    if route not in {"direct", "proton-neb"}:
+    if route not in TS_GUESS_ROUTES:
         raise ValueError(f"invalid TS-guess route {route!r}")
     route_path.write_text(route)
     write_xyz_atomic(path, cluster)
@@ -331,19 +332,31 @@ def load_compatible_ts_guess(
         "irc_fwd.xyz",
         "results.json",
         "store.sqlite",
+        "store.sqlite-wal",
+        "store.sqlite-shm",
     )
-    artifacts = [
-        candidate
-        for candidate in (
-            path,
-            sidecar,
-            route_path,
-            *(path.parent / name for name in dependent_names),
-        )
-        if candidate.exists()
+    checkpoint_candidates = (
+        path,
+        sidecar,
+        route_path,
+        *(path.parent / name for name in dependent_names),
+    )
+    checkpoint_artifacts = [
+        candidate for candidate in checkpoint_candidates if candidate.exists()
     ]
-    if not artifacts:
+    if not checkpoint_artifacts:
         return None
+    quarantine_candidates = (
+        *checkpoint_artifacts,
+        path.parent / "approach_seed.xyz",
+        path.parent / "approach_seed.json",
+        *sorted(path.parent.glob("product*")),
+    )
+    artifacts = list(
+        dict.fromkeys(
+            candidate for candidate in quarantine_candidates if candidate.exists()
+        )
+    )
     reason: str | None = None
     try:
         if not all(candidate.exists() for candidate in (path, sidecar, route_path)):
@@ -355,7 +368,7 @@ def load_compatible_ts_guess(
             receipt.get("schema") != "phase2-ts-guess-v1"
             or receipt.get("signature") != expected
             or receipt.get("route") != route
-            or route not in {"direct", "proton-neb"}
+            or route not in TS_GUESS_ROUTES
             or receipt.get("geometry_hash") != _stable_geometry_hash(loaded)
         ):
             raise ValueError("checkpoint provenance mismatch")
@@ -640,11 +653,39 @@ def quick_irc_acceptance_reason(
     fwd: Cluster,
     *,
     reference: Cluster,
+    frozen_reference: Cluster,
     m_index: int,
     br_index: int,
     ow_index: int,
 ) -> str | None:
-    """Require the saddle to connect a bonded bridge to hydrolyzed product."""
+    """Require structurally valid endpoints spanning the hydrolysis channel."""
+    if frozen_reference.symbols != reference.symbols:
+        return "quick-IRC frozen reference changed atom identity/order"
+    if (
+        frozen_reference.charge != reference.charge
+        or frozen_reference.spin != reference.spin
+    ):
+        return "quick-IRC frozen reference changed charge or spin"
+    if frozen_reference.frozen_indices != reference.frozen_indices:
+        return "quick-IRC frozen reference changed the frozen shell"
+    if frozen_reference.coords.shape != reference.coords.shape or not np.all(
+        np.isfinite(frozen_reference.coords)
+    ):
+        return "quick-IRC frozen reference has malformed or non-finite coordinates"
+    frozen = sorted(reference.frozen_indices)
+    frozen_reference_drift_a = (
+        float(
+            np.max(np.abs(frozen_reference.coords[frozen] - reference.coords[frozen]))
+        )
+        if frozen
+        else 0.0
+    )
+    if frozen_reference_drift_a > ADVISORY_PREOPT_MAX_PROJECTED_FROZEN_DRIFT_A:
+        return (
+            "quick-IRC frozen reference changed a frozen coordinate "
+            f"({frozen_reference_drift_a:.6f} A)"
+        )
+
     for label, endpoint in (("back", back), ("forward", fwd)):
         if endpoint.symbols != reference.symbols:
             return f"quick-IRC {label} endpoint changed atom identity/order"
@@ -652,16 +693,51 @@ def quick_irc_acceptance_reason(
             return f"quick-IRC {label} endpoint changed charge or spin"
         if endpoint.frozen_indices != reference.frozen_indices:
             return f"quick-IRC {label} endpoint changed the frozen shell"
+        if endpoint.coords.shape != reference.coords.shape:
+            return f"quick-IRC {label} endpoint changed coordinate shape"
+        if not np.all(np.isfinite(endpoint.coords)):
+            return f"quick-IRC {label} endpoint has non-finite coordinates"
+
+        delta = endpoint.coords[:, None, :] - endpoint.coords[None, :, :]
+        distances = np.linalg.norm(delta, axis=2)
+        distances[np.diag_indices_from(distances)] = np.inf
+        minimum_pair_a = float(np.min(distances))
+        if minimum_pair_a <= ADVISORY_PREOPT_MIN_PAIR_A:
+            return (
+                f"quick-IRC {label} endpoint has a collision ({minimum_pair_a:.3f} A)"
+            )
+
+        maximum_frozen_drift_a = (
+            float(
+                np.max(
+                    np.abs(endpoint.coords[frozen] - frozen_reference.coords[frozen])
+                )
+            )
+            if frozen
+            else 0.0
+        )
+        if maximum_frozen_drift_a > ADVISORY_PREOPT_MAX_PROJECTED_FROZEN_DRIFT_A:
+            return (
+                f"quick-IRC {label} endpoint changed a frozen coordinate "
+                f"({maximum_frozen_drift_a:.6f} A)"
+            )
+
     # All physical protons must remain unambiguously owned at both minima.
-    reference_owners = oxygen_proton_owners(reference)
-    attacker_h = set(_attacker_h_indices(reference, ow_index))
+    try:
+        reference_owners = oxygen_proton_owners(reference)
+        attacker_h = set(_attacker_h_indices(reference, ow_index))
+    except (RuntimeError, ValueError) as exc:
+        return f"quick-IRC reference has invalid proton ownership ({exc})"
     structural_bridge_h = {
         hydrogen
         for hydrogen, oxygen in reference_owners.items()
         if oxygen == br_index and hydrogen not in attacker_h
     }
     for label, endpoint in (("back", back), ("forward", fwd)):
-        owners = oxygen_proton_owners(endpoint)
+        try:
+            owners = oxygen_proton_owners(endpoint)
+        except RuntimeError as exc:
+            return f"quick-IRC {label} endpoint has invalid proton ownership ({exc})"
         moved_structural = sorted(
             hydrogen
             for hydrogen in structural_bridge_h
@@ -1762,6 +1838,7 @@ def main() -> int:
         back,
         fwd,
         reference=complex_opt,
+        frozen_reference=ts,
         m_index=m_index,
         br_index=br_index,
         ow_index=ow_index,
