@@ -473,7 +473,9 @@ def test_verifier_refuses_verified_seed_without_calculator_recompute(
 
 def test_production_cli_requires_gpu_for_non_dry_runs(monkeypatch, capsys):
     monkeypatch.setattr(a3c, "validate_sources", lambda *_args, **_kwargs: _source())
-    monkeypatch.setattr(a3c, "resolve_code_revision", lambda *_args, **_kwargs: "a" * 40)
+    monkeypatch.setattr(
+        a3c, "resolve_code_revision", lambda *_args, **_kwargs: "a" * 40
+    )
     monkeypatch.setattr(
         a3c, "run_experiment", lambda *_args, **_kwargs: {"spent": True}
     )

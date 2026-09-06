@@ -45,11 +45,11 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A1f-acid-neutral-water-attacker-relay](cards/A1f-acid-neutral-water-attacker-relay.md) | A | P1 | workstation | done | exact donor migrated to relay |
 | [A1g-acid-bridge-side-hydronium-neutral-attacker](cards/A1g-acid-bridge-side-hydronium-neutral-attacker.md) | A | P1 | workstation | done | conclusive product-family rejection |
 | [A1i-acid-production-tier-bridge-side-revisit](cards/A1i-acid-production-tier-bridge-side-revisit.md) | A | P1 | workstation | blocked: A2 | A1g ✅, A2 |
-| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | blocked: A3d | Osa-neutral n=1 terminal-path adjudication |
+| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | ready | A3d ✅; exact Osa-neutral series retired, remaining campaigns only |
 | [A3a-reactant-minimum-recovery](cards/A3a-reactant-minimum-recovery.md) | A | P1 | workstation | done | terminal microstate rejection; no minimum promoted |
 | [A3b-osa-neutral-n1-proton-microstate-stability](cards/A3b-osa-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; H52 became third mobile owner |
 | [A3c-osa-neutral-n1-mobile-proton-triad-conditioning](cards/A3c-osa-neutral-n1-mobile-proton-triad-conditioning.md) | A | P1 | workstation | done | verified triad-conditioning failure; owners retained, projected gradients red |
-| [A3d-osa-neutral-n1-triad-failure-adjudication](cards/A3d-osa-neutral-n1-triad-failure-adjudication.md) | A | P1 | workstation | ready | A3c verified failure ✅; evidence-only terminal decision |
+| [A3d-osa-neutral-n1-triad-failure-adjudication](cards/A3d-osa-neutral-n1-triad-failure-adjudication.md) | A | P1 | workstation | done | verified terminal rejection; A3 returns to remaining campaigns |
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
 | [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: A2b/A2c/A2d | final banked-reaction table, ranking, Petra/CALCULATIONS closeout |
 | [A2a-si-neutral-production-path-rebuild](cards/A2a-si-neutral-production-path-rebuild.md) | A | P1 | workstation | done | exact r2SCAN-3c minima + A2 infrastructure ✅ |
@@ -73,7 +73,8 @@ on main). Priority P0 > P1 > P2 within READY.
 | [E3b-periodic-dft-spot-checks](cards/E3b-periodic-dft-spot-checks.md) | E | P2 | workstation | blocked: E3a | E3a |
 | [E4-1998-comparison](cards/E4-1998-comparison.md) | E | P1 | any | blocked: E3a, E2b, A8 | E3a, E2b, A8 |
 
-**Done** (acceptance verified on main): A3c-osa-neutral-n1-mobile-proton-triad-conditioning,
+**Done** (acceptance verified on main): A3d-osa-neutral-n1-triad-failure-adjudication,
+A3c-osa-neutral-n1-mobile-proton-triad-conditioning,
 A3b-osa-neutral-n1-proton-microstate-stability,
 A2a-si-neutral-production-path-rebuild,
 C3-pit-statistics, E2b-grain-size-sweep,
@@ -96,11 +97,13 @@ D2a-astro-rate-reproduction (PR #31 — verdict: GO gas-phase /
 NO-GO surface-LH), A7-kinetics-database (PR #27 — 36 minerals, 74
 mechanisms, validator green). **Blocked closeout branch**:
 `agents/A1b-acid-microsolvation` for A1b-acid-mechanisms.
-A3-barrier-ladder is blocked on READY A3d's evidence-only terminal-path
-adjudication. A3c's one three-owner budget retained H50/H52/H57 at their original
-owners but failed the independent projected-gradient stationarity gates despite
-geomeTRIC convergence. No minimum was promoted and no A3a/A3b/A3c replay is
-authorized. The pilot result remains merged in PR #67.
+A3-barrier-ladder is READY for its remaining independently gated campaigns.
+A3d terminally rejected the exact Osa-neutral n=1 proton assignment after A3c's
+three-owner budget retained H50/H52/H57 but failed the independent canonical-
+endpoint projected-gradient stationarity gates despite geomeTRIC convergence.
+No A3a/A3b/A3c replay or Osa-neutral n=2–4 launch is authorized, and no surrogate
+barrier/store/Petra value may represent that series. The pilot result remains
+merged in PR #67.
 
 **Tracked elsewhere**: TASK-164 (scan-smoothness repair + al-neutral
 barrier) predates this board and lives in the mission-control queue —
