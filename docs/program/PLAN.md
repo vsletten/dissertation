@@ -45,13 +45,14 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A1f-acid-neutral-water-attacker-relay](cards/A1f-acid-neutral-water-attacker-relay.md) | A | P1 | workstation | done | exact donor migrated to relay |
 | [A1g-acid-bridge-side-hydronium-neutral-attacker](cards/A1g-acid-bridge-side-hydronium-neutral-attacker.md) | A | P1 | workstation | done | conclusive product-family rejection |
 | [A1i-acid-production-tier-bridge-side-revisit](cards/A1i-acid-production-tier-bridge-side-revisit.md) | A | P1 | workstation | blocked: A2 | A1g ✅, A2 |
-| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | ready | A3f ✅; exact OSS-neutral route rejected, choose a different gated family |
+| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | blocked: A3g | Oaa n=2 advisory failure; one owner-basin test required |
 | [A3a-reactant-minimum-recovery](cards/A3a-reactant-minimum-recovery.md) | A | P1 | workstation | done | terminal microstate rejection; no minimum promoted |
 | [A3b-osa-neutral-n1-proton-microstate-stability](cards/A3b-osa-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; H52 became third mobile owner |
 | [A3c-osa-neutral-n1-mobile-proton-triad-conditioning](cards/A3c-osa-neutral-n1-mobile-proton-triad-conditioning.md) | A | P1 | workstation | done | verified triad-conditioning failure; owners retained, projected gradients red |
 | [A3d-osa-neutral-n1-triad-failure-adjudication](cards/A3d-osa-neutral-n1-triad-failure-adjudication.md) | A | P1 | workstation | done | verified terminal rejection; A3 returns to remaining campaigns |
 | [A3e-oss-neutral-n1-proton-microstate-stability](cards/A3e-oss-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; constrained max-gradient gate red, release not run |
 | [A3f-oss-neutral-n1-terminal-adjudication](cards/A3f-oss-neutral-n1-terminal-adjudication.md) | A | P1 | any | done | verified terminal rejection; no global no-basin claim |
+| [A3g-oaa-neutral-n2-proton-microstate-stability](cards/A3g-oaa-neutral-n2-proton-microstate-stability.md) | A | P1 | workstation | ready | one H52-O15-constrained → released B3LYP test; zero retries |
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
 | [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: A2b/A2c/A2d | final banked-reaction table, ranking, Petra/CALCULATIONS closeout |
 | [A2a-si-neutral-production-path-rebuild](cards/A2a-si-neutral-production-path-rebuild.md) | A | P1 | workstation | done | exact r2SCAN-3c minima + A2 infrastructure ✅ |
@@ -101,8 +102,13 @@ D2a-astro-rate-reproduction (PR #31 — verdict: GO gas-phase /
 NO-GO surface-LH), A7-kinetics-database (PR #27 — 36 minerals, 74
 mechanisms, validator green). **Blocked closeout branch**:
 `agents/A1b-acid-microsolvation` for A1b-acid-mechanisms.
-A3-barrier-ladder is READY only for a different independently gated family. A3f
-independently terminally rejected the exact `oss-neutral-n1-s2` route because the
+A3-barrier-ladder is BLOCKED on READY A3g. Its first neutral 500s Al-OH-Al n=2
+attempt exhausted the 100-step HF/STO-3G advisory preoptimization and ended with
+ambiguous H52 ownership between O15/O9 (`1.134/1.195 A`); the raw endpoint was not
+persisted, and no B3LYP production or downstream stage ran. A3g owns one finite,
+zero-retry H52-O15-constrained → released B3LYP test with durable raw endpoints and
+independent verification. No identical replay or Oaa n=4/6 launch is authorized.
+A3f independently terminally rejected the exact `oss-neutral-n1-s2` route because the
 owner-retaining constrained B3LYP endpoint's maximum projected gradient
 `4.836372724428273e-4 Eh/Bohr` exceeded the fixed `4.5e-4` gate. The narrower
 RMS/residual/owner/shell/collision/finite-energy gates passed; release and all

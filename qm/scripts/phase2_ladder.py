@@ -26,6 +26,7 @@ import argparse
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
 from dataclasses import asdict, replace
@@ -79,7 +80,10 @@ HYDROLYSIS_OH_MAX_A = 1.25
 MIN_PLAUSIBLE_DE_KJ = 20.0
 # The Phase-1 free-dimer anchor for the lattice-resistance comparison.
 SI_NEUTRAL_FREE_DIMER_DG_KJ = 113.05
-APPROACH_SEED_VERSION = 1
+APPROACH_SEED_VERSION = 2
+PRODUCT_CHECKPOINT_VERSION = 1
+TS_GUESS_VERSION = 1
+TS_GUESS_ROUTES = frozenset({"direct", "proton-neb"})
 ADVISORY_PREOPT_VERSION = 2
 ADVISORY_PREOPT_MAX_STEPS = 100
 ADVISORY_PREOPT_MIN_PAIR_A = 0.60
@@ -207,8 +211,45 @@ def write_xyz_atomic(path: Path, cluster: Cluster) -> None:
     temporary.replace(path)
 
 
+def _driver_provenance() -> dict[str, str]:
+    return {
+        "driver_git_commit": subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).parent,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip(),
+        "driver_sha256": sha256_path(Path(__file__)),
+    }
+
+
+def _stable_geometry_hash(cluster: Cluster) -> str:
+    """Geometry identity independent of the in-memory checkpoint name."""
+    return geometry_hash(cluster.to_xyz(comment="geometry"))
+
+
+def _quarantine_artifacts(
+    run_dir: Path, *, label: str, artifacts: list[Path], reason: str
+) -> Path | None:
+    existing = list(dict.fromkeys(path for path in artifacts if path.exists()))
+    if not existing:
+        return None
+    quarantine = (
+        run_dir
+        / "quarantine"
+        / f"{label}-{time.strftime('%Y%m%dT%H%M%S')}-{time.time_ns()}"
+    )
+    quarantine.mkdir(parents=True)
+    for artifact in existing:
+        artifact.replace(quarantine / artifact.name)
+    log(f"  quarantined incompatible {label} ({reason}) at {quarantine}")
+    return quarantine
+
+
 def approach_seed_signature(
-    complex_guess: Cluster,
+    optimized_reactant: Cluster,
+    settings: DftSettings,
     *,
     m_index: int,
     br_index: int,
@@ -218,7 +259,13 @@ def approach_seed_signature(
     """Parameters that make an approach checkpoint safe to resume."""
     return {
         "version": APPROACH_SEED_VERSION,
-        "complex_guess_geometry_hash": geometry_hash(complex_guess.to_xyz()),
+        **_driver_provenance(),
+        "optimized_reactant_geometry_hash": _stable_geometry_hash(optimized_reactant),
+        "symbols": optimized_reactant.symbols,
+        "charge": optimized_reactant.charge,
+        "spin": optimized_reactant.spin,
+        "frozen_indices": sorted(optimized_reactant.frozen_indices),
+        "production_settings": asdict(settings),
         "m_index": m_index,
         "br_index": br_index,
         "ow_index": ow_index,
@@ -228,8 +275,15 @@ def approach_seed_signature(
 
 def save_approach_seed(seed: Cluster, path: Path, signature: dict[str, object]) -> None:
     """Write an approach checkpoint and its compatibility data."""
-    save_xyz(seed, path)
-    path.with_suffix(".json").write_text(json.dumps(signature, indent=2))
+    write_xyz_atomic(path, seed)
+    write_json_atomic(
+        path.with_suffix(".json"),
+        {
+            "schema": "phase2-approach-seed-v2",
+            "signature": signature,
+            "geometry_hash": _stable_geometry_hash(seed),
+        },
+    )
 
 
 def load_compatible_approach_seed(
@@ -237,24 +291,228 @@ def load_compatible_approach_seed(
 ) -> Cluster | None:
     """Load a seed only when its recorded inputs match this run exactly."""
     signature_path = path.with_suffix(".json")
-    if not path.exists():
+    product_artifacts = sorted(path.parent.glob("product*"))
+    if not path.exists() and not signature_path.exists():
+        _quarantine_artifacts(
+            path.parent,
+            label="orphaned-approach-product",
+            artifacts=product_artifacts,
+            reason="product artifacts exist without an approach seed",
+        )
         return None
-    if not signature_path.exists():
-        log("  ignoring approach_seed.xyz: compatibility metadata is missing")
+    artifacts = [path, signature_path, *product_artifacts]
+    try:
+        if not path.exists() or not signature_path.exists():
+            raise ValueError("checkpoint files are incomplete")
+        receipt = json.loads(signature_path.read_text())
+        loaded = load_xyz(path, template)
+        if (
+            receipt.get("schema") != "phase2-approach-seed-v2"
+            or receipt.get("signature") != expected
+            or receipt.get("geometry_hash") != _stable_geometry_hash(loaded)
+        ):
+            raise ValueError("checkpoint provenance mismatch")
+        return loaded
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        _quarantine_artifacts(
+            path.parent,
+            label="approach-seed",
+            artifacts=artifacts,
+            reason=str(exc),
+        )
+        return None
+
+
+def product_signature(
+    approach_seed: Cluster,
+    optimized_reactant: Cluster,
+    settings: DftSettings,
+    *,
+    m_index: int,
+    br_index: int,
+    ow_index: int,
+    pin_a: float,
+) -> dict[str, object]:
+    return {
+        "version": PRODUCT_CHECKPOINT_VERSION,
+        **_driver_provenance(),
+        "approach_seed_geometry_hash": _stable_geometry_hash(approach_seed),
+        "optimized_reactant_geometry_hash": _stable_geometry_hash(optimized_reactant),
+        "symbols": optimized_reactant.symbols,
+        "charge": optimized_reactant.charge,
+        "spin": optimized_reactant.spin,
+        "frozen_indices": sorted(optimized_reactant.frozen_indices),
+        "production_settings": asdict(settings),
+        "m_index": m_index,
+        "br_index": br_index,
+        "ow_index": ow_index,
+        "pin_a": pin_a,
+    }
+
+
+def save_product_checkpoint(
+    path: Path, product: Cluster, signature: dict[str, object]
+) -> None:
+    write_xyz_atomic(path, product)
+    write_json_atomic(
+        path.with_suffix(".json"),
+        {
+            "schema": "phase2-product-v1",
+            "signature": signature,
+            "geometry_hash": _stable_geometry_hash(product),
+        },
+    )
+
+
+def load_compatible_product(
+    path: Path, template: Cluster, expected: dict[str, object]
+) -> Cluster | None:
+    receipt_path = path.with_suffix(".json")
+    artifacts = sorted(path.parent.glob("product*"))
+    if not path.exists() and not receipt_path.exists():
+        _quarantine_artifacts(
+            path.parent,
+            label="orphaned-product",
+            artifacts=artifacts,
+            reason="noncanonical product artifacts have no reusable checkpoint",
+        )
         return None
     try:
-        actual = json.loads(signature_path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        log(f"  ignoring approach_seed.xyz: invalid compatibility metadata ({exc})")
+        if not path.exists() or not receipt_path.exists():
+            raise ValueError("checkpoint files are incomplete")
+        receipt = json.loads(receipt_path.read_text())
+        loaded = load_xyz(path, template)
+        if (
+            receipt.get("schema") != "phase2-product-v1"
+            or receipt.get("signature") != expected
+            or receipt.get("geometry_hash") != _stable_geometry_hash(loaded)
+        ):
+            raise ValueError("checkpoint provenance mismatch")
+        return loaded
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        _quarantine_artifacts(
+            path.parent,
+            label="product",
+            artifacts=artifacts,
+            reason=str(exc),
+        )
         return None
-    if actual != expected:
-        log("  ignoring approach_seed.xyz: parameters or input geometry changed")
+
+
+def ts_guess_signature(
+    complex_opt: Cluster,
+    settings: DftSettings,
+    *,
+    m_index: int,
+    br_index: int,
+    ow_index: int,
+) -> dict[str, object]:
+    return {
+        "version": TS_GUESS_VERSION,
+        **_driver_provenance(),
+        "complex_geometry_hash": _stable_geometry_hash(complex_opt),
+        "symbols": complex_opt.symbols,
+        "charge": complex_opt.charge,
+        "spin": complex_opt.spin,
+        "frozen_indices": sorted(complex_opt.frozen_indices),
+        "settings": asdict(settings),
+        "m_index": m_index,
+        "br_index": br_index,
+        "ow_index": ow_index,
+        "approach": APPROACH[complex_opt.symbols[m_index]],
+    }
+
+
+def save_ts_guess_checkpoint(
+    path: Path,
+    route_path: Path,
+    cluster: Cluster,
+    signature: dict[str, object],
+    route: str,
+) -> None:
+    if route not in TS_GUESS_ROUTES:
+        raise ValueError(f"invalid TS-guess route {route!r}")
+    route_path.write_text(route)
+    write_xyz_atomic(path, cluster)
+    write_json_atomic(
+        path.with_suffix(".json"),
+        {
+            "schema": "phase2-ts-guess-v1",
+            "signature": signature,
+            "route": route,
+            "geometry_hash": _stable_geometry_hash(cluster),
+        },
+    )
+
+
+def load_compatible_ts_guess(
+    path: Path,
+    route_path: Path,
+    template: Cluster,
+    expected: dict[str, object],
+) -> tuple[Cluster, str] | None:
+    sidecar = path.with_suffix(".json")
+    dependent_names = (
+        "ts.xyz",
+        "sella.traj",
+        "irc_back.xyz",
+        "irc_fwd.xyz",
+        "results.json",
+        "store.sqlite",
+        "store.sqlite-wal",
+        "store.sqlite-shm",
+    )
+    checkpoint_candidates = (
+        path,
+        sidecar,
+        route_path,
+        *(path.parent / name for name in dependent_names),
+    )
+    checkpoint_artifacts = [
+        candidate for candidate in checkpoint_candidates if candidate.exists()
+    ]
+    if not checkpoint_artifacts:
         return None
+    quarantine_candidates = (
+        *checkpoint_artifacts,
+        path.parent / "approach_seed.xyz",
+        path.parent / "approach_seed.json",
+        *sorted(path.parent.glob("product*")),
+    )
+    artifacts = list(
+        dict.fromkeys(
+            candidate for candidate in quarantine_candidates if candidate.exists()
+        )
+    )
+    reason: str | None = None
     try:
-        return load_xyz(path, template)
-    except (OSError, ValueError) as exc:
-        log(f"  ignoring approach_seed.xyz: checkpoint is unreadable ({exc})")
-        return None
+        if not all(candidate.exists() for candidate in (path, sidecar, route_path)):
+            raise ValueError("checkpoint files are incomplete")
+        receipt = json.loads(sidecar.read_text())
+        route = route_path.read_text().strip()
+        loaded = load_xyz(path, template)
+        if (
+            receipt.get("schema") != "phase2-ts-guess-v1"
+            or receipt.get("signature") != expected
+            or receipt.get("route") != route
+            or route not in TS_GUESS_ROUTES
+            or receipt.get("geometry_hash") != _stable_geometry_hash(loaded)
+        ):
+            raise ValueError("checkpoint provenance mismatch")
+        return loaded, route
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        reason = str(exc)
+
+    quarantine = (
+        path.parent
+        / "quarantine"
+        / (f"ts-guess-{time.strftime('%Y%m%dT%H%M%S')}-{time.time_ns()}")
+    )
+    quarantine.mkdir(parents=True)
+    for artifact in artifacts:
+        artifact.replace(quarantine / artifact.name)
+    log(f"  quarantined incompatible TS guess ({reason}) at {quarantine}")
+    return None
 
 
 def checkpointed(path: Path, template: Cluster, compute) -> Cluster:
@@ -521,26 +779,163 @@ def quick_irc_acceptance_reason(
     back: Cluster,
     fwd: Cluster,
     *,
+    reference: Cluster,
+    frozen_reference: Cluster,
     m_index: int,
     br_index: int,
     ow_index: int,
 ) -> str | None:
-    """Require the saddle to connect a bonded bridge to hydrolyzed product."""
+    """Require structurally valid endpoints spanning the hydrolysis channel."""
+    if frozen_reference.symbols != reference.symbols:
+        return "quick-IRC frozen reference changed atom identity/order"
+    if (
+        frozen_reference.charge != reference.charge
+        or frozen_reference.spin != reference.spin
+    ):
+        return "quick-IRC frozen reference changed charge or spin"
+    if frozen_reference.frozen_indices != reference.frozen_indices:
+        return "quick-IRC frozen reference changed the frozen shell"
+    if frozen_reference.coords.shape != reference.coords.shape or not np.all(
+        np.isfinite(frozen_reference.coords)
+    ):
+        return "quick-IRC frozen reference has malformed or non-finite coordinates"
+    frozen = sorted(reference.frozen_indices)
+    frozen_reference_drift_a = (
+        float(
+            np.max(np.abs(frozen_reference.coords[frozen] - reference.coords[frozen]))
+        )
+        if frozen
+        else 0.0
+    )
+    if frozen_reference_drift_a > ADVISORY_PREOPT_MAX_PROJECTED_FROZEN_DRIFT_A:
+        return (
+            "quick-IRC frozen reference changed a frozen coordinate "
+            f"({frozen_reference_drift_a:.6f} A)"
+        )
+
+    for label, endpoint in (("back", back), ("forward", fwd)):
+        if endpoint.symbols != reference.symbols:
+            return f"quick-IRC {label} endpoint changed atom identity/order"
+        if endpoint.charge != reference.charge or endpoint.spin != reference.spin:
+            return f"quick-IRC {label} endpoint changed charge or spin"
+        if endpoint.frozen_indices != reference.frozen_indices:
+            return f"quick-IRC {label} endpoint changed the frozen shell"
+        if endpoint.coords.shape != reference.coords.shape:
+            return f"quick-IRC {label} endpoint changed coordinate shape"
+        if not np.all(np.isfinite(endpoint.coords)):
+            return f"quick-IRC {label} endpoint has non-finite coordinates"
+
+        delta = endpoint.coords[:, None, :] - endpoint.coords[None, :, :]
+        distances = np.linalg.norm(delta, axis=2)
+        distances[np.diag_indices_from(distances)] = np.inf
+        minimum_pair_a = float(np.min(distances))
+        if minimum_pair_a <= ADVISORY_PREOPT_MIN_PAIR_A:
+            return (
+                f"quick-IRC {label} endpoint has a collision ({minimum_pair_a:.3f} A)"
+            )
+
+        maximum_frozen_drift_a = (
+            float(
+                np.max(
+                    np.abs(endpoint.coords[frozen] - frozen_reference.coords[frozen])
+                )
+            )
+            if frozen
+            else 0.0
+        )
+        if maximum_frozen_drift_a > ADVISORY_PREOPT_MAX_PROJECTED_FROZEN_DRIFT_A:
+            return (
+                f"quick-IRC {label} endpoint changed a frozen coordinate "
+                f"({maximum_frozen_drift_a:.6f} A)"
+            )
+
     # All physical protons must remain unambiguously owned at both minima.
-    oxygen_proton_owners(back)
-    oxygen_proton_owners(fwd)
-    signatures = {
-        hydrolysis_basin_signature(
+    try:
+        reference_owners = oxygen_proton_owners(reference)
+        attacker_h = set(_attacker_h_indices(reference, ow_index))
+    except (RuntimeError, ValueError) as exc:
+        return f"quick-IRC reference has invalid proton ownership ({exc})"
+    structural_bridge_h = {
+        hydrogen
+        for hydrogen, oxygen in reference_owners.items()
+        if oxygen == br_index and hydrogen not in attacker_h
+    }
+    endpoint_owners: dict[str, dict[int, int]] = {}
+    for label, endpoint in (("back", back), ("forward", fwd)):
+        try:
+            owners = oxygen_proton_owners(endpoint)
+        except RuntimeError as exc:
+            return f"quick-IRC {label} endpoint has invalid proton ownership ({exc})"
+        moved_structural = sorted(
+            hydrogen
+            for hydrogen in structural_bridge_h
+            if owners.get(hydrogen) != br_index
+        )
+        if moved_structural:
+            return (
+                f"quick-IRC {label} endpoint moved structural bridge proton(s) "
+                f"{moved_structural}"
+            )
+        moved_non_attacker = sorted(
+            hydrogen
+            for hydrogen, owner in reference_owners.items()
+            if hydrogen not in attacker_h and owners.get(hydrogen) != owner
+        )
+        if moved_non_attacker:
+            return (
+                f"quick-IRC {label} endpoint moved non-attacker proton(s) "
+                f"{moved_non_attacker}"
+            )
+        endpoint_owners[label] = owners
+    endpoint_signatures = {
+        label: hydrolysis_basin_signature(
             endpoint, m_index=m_index, br_index=br_index, ow_index=ow_index
         )
-        for endpoint in (back, fwd)
+        for label, endpoint in (("back", back), ("forward", fwd))
     }
+    signatures = set(endpoint_signatures.values())
     product = (True, False, True)
     if len(signatures) != 2 or product not in signatures:
         return f"quick-IRC endpoints do not span the hydrolysis channel: {signatures}"
     other = next(signature for signature in signatures if signature != product)
     if not other[1]:
         return f"quick-IRC non-product endpoint has no intact M-Obr bond: {other}"
+    product_label = next(
+        label
+        for label, signature in endpoint_signatures.items()
+        if signature == product
+    )
+    non_product_label = next(
+        label
+        for label, signature in endpoint_signatures.items()
+        if signature != product
+    )
+    moved_reactant_attacker = sorted(
+        hydrogen
+        for hydrogen in attacker_h
+        if endpoint_owners[non_product_label].get(hydrogen)
+        != reference_owners.get(hydrogen)
+    )
+    if moved_reactant_attacker:
+        return (
+            f"quick-IRC {non_product_label} non-product endpoint moved attacker "
+            f"proton(s) {moved_reactant_attacker}"
+        )
+    moved_product_attacker = sorted(
+        hydrogen
+        for hydrogen in attacker_h
+        if endpoint_owners[product_label].get(hydrogen)
+        != reference_owners.get(hydrogen)
+    )
+    if (
+        len(moved_product_attacker) != 1
+        or endpoint_owners[product_label].get(moved_product_attacker[0]) != br_index
+    ):
+        return (
+            f"quick-IRC {product_label} product endpoint changed attacker proton(s) "
+            f"outside the single required transfer to O{br_index}: "
+            f"{moved_product_attacker}"
+        )
     return None
 
 
@@ -1067,9 +1462,20 @@ def proton_neb_guess(
     product_path = run_dir / "product.xyz"
     product_seed: Cluster | None = None
     h_candidates = _attacker_h_indices(approach_seed, ow_index)
+    expected_product_signature = product_signature(
+        approach_seed,
+        complex_opt,
+        settings,
+        m_index=m_index,
+        br_index=br_index,
+        ow_index=ow_index,
+        pin_a=pin_a,
+    )
 
-    if product_path.exists():
-        product = load_xyz(product_path, approach_seed)
+    product = load_compatible_product(
+        product_path, approach_seed, expected_product_signature
+    )
+    if product is not None:
         r_prod_ow = float(
             np.linalg.norm(product.coords[m_index] - product.coords[ow_index])
         )
@@ -1090,7 +1496,12 @@ def proton_neb_guess(
                 pin_a=pin_a,
             )
         log("  saved product is not hydrolyzed; extending M-Obr cleavage")
-        product_path.replace(run_dir / "product.rejected-rollback.xyz")
+        _quarantine_artifacts(
+            run_dir,
+            label="product-rollback",
+            artifacts=[product_path, product_path.with_suffix(".json")],
+            reason="verified product checkpoint is not hydrolyzed",
+        )
         product_seed = product
 
     if product_seed is None:
@@ -1188,7 +1599,7 @@ def proton_neb_guess(
     for r, e, _ in broken:
         log(f"  r(M-Obr)={r:.2f} A  E={e:.6f} Ha")
     product = optimize(broken[-1][2], settings)
-    save_xyz(product, product_path)
+    save_product_checkpoint(product_path, product, expected_product_signature)
 
     r_prod_ow = float(
         np.linalg.norm(product.coords[m_index] - product.coords[ow_index])
@@ -1365,6 +1776,11 @@ def main() -> int:
         n_intact=args.n_intact,
         target_charge=0,
     )
+    if args.n_intact is not None and cc.n_intact != args.n_intact:
+        raise RuntimeError(
+            "requested connectivity cannot be constructed exactly: "
+            f"requested n={args.n_intact}, resolved n={cc.n_intact}"
+        )
     attacker = attacker_factory()
     complex_guess, ow_index = attack_complex(cc, attacker)
     m_index, br_index = cc.attacked_index, cc.bridge_index
@@ -1399,8 +1815,6 @@ def main() -> int:
     metadata["temperature_k"] = args.temperature
     metadata["written_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     try:
-        import subprocess
-
         metadata["driver_git_commit"] = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             cwd=Path(__file__).parent,
@@ -1470,23 +1884,48 @@ def main() -> int:
     route_path = run_dir / "ts_guess.route"
     approach_seed_path = run_dir / "approach_seed.xyz"
     seed_signature = approach_seed_signature(
-        complex_guess,
+        complex_opt,
+        settings,
         m_index=m_index,
         br_index=br_index,
         ow_index=ow_index,
         pin_a=approach["pin"],
     )
-    route = route_path.read_text().strip() if route_path.exists() else "direct"
-    if ts_guess_path.exists():
-        ts_guess = load_xyz(ts_guess_path, complex_opt)
+    ts_signature = ts_guess_signature(
+        complex_opt,
+        settings,
+        m_index=m_index,
+        br_index=br_index,
+        ow_index=ow_index,
+    )
+    ts_guess: Cluster
+    route: str
+    base = load_compatible_approach_seed(
+        approach_seed_path, complex_opt, seed_signature
+    )
+    if base is not None and any(run_dir.glob("product*")):
+        load_compatible_product(
+            run_dir / "product.xyz",
+            base,
+            product_signature(
+                base,
+                complex_opt,
+                settings,
+                m_index=m_index,
+                br_index=br_index,
+                ow_index=ow_index,
+                pin_a=approach["pin"],
+            ),
+        )
+    loaded_ts_guess = load_compatible_ts_guess(
+        ts_guess_path, route_path, complex_opt, ts_signature
+    )
+    if loaded_ts_guess is not None:
+        ts_guess, route = loaded_ts_guess
         log(f"  resume: ts_guess.xyz exists ({route} route)")
     else:
         route = "direct"
         route_path.unlink(missing_ok=True)
-        base: Cluster | None = None
-        base = load_compatible_approach_seed(
-            approach_seed_path, complex_opt, seed_signature
-        )
         if base is not None:
             # A crashed proton-route attempt already proved the direct
             # route dead — skip the approach scan entirely.
@@ -1523,9 +1962,9 @@ def main() -> int:
                 ow_index=ow_index,
                 pin_a=approach["pin"],
             )
-        save_xyz(ts_guess, ts_guess_path)
-        if route == "proton-neb":
-            route_path.write_text(route)
+        save_ts_guess_checkpoint(
+            ts_guess_path, route_path, ts_guess, ts_signature, route
+        )
 
     # Stage 3 — Sella saddle search with the escaped-channel gates.
     trim_gpu_pool()
@@ -1555,9 +1994,10 @@ def main() -> int:
         if trajectory_path.exists():
             trajectory_path.replace(run_dir / "sella.rejected-direct.traj")
         ts_guess = neb_guess
-        save_xyz(ts_guess, ts_guess_path)
         route = "proton-neb"
-        route_path.write_text(route)
+        save_ts_guess_checkpoint(
+            ts_guess_path, route_path, ts_guess, ts_signature, route
+        )
         log("stage 3b: Sella saddle search from CI-NEB guess")
         ts = checkpointed(
             ts_path,
@@ -1593,6 +2033,8 @@ def main() -> int:
     if reason := quick_irc_acceptance_reason(
         back,
         fwd,
+        reference=complex_opt,
+        frozen_reference=ts,
         m_index=m_index,
         br_index=br_index,
         ow_index=ow_index,
