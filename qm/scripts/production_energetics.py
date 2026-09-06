@@ -29,6 +29,7 @@ if __name__ == "__main__":
 
 import numpy as np
 
+from quarry import pipeline
 from quarry.clusters import Cluster
 from quarry.pipeline import (
     HARTREE_TO_KJ,
@@ -438,6 +439,62 @@ def checkpoint_energy(
             "electronic_hartree": value,
             "geometry_fingerprint": expected_geometry,
             "settings_fingerprint": expected_settings,
+        },
+    )
+    return value
+
+
+def checkpoint_converged_energy(
+    path: Path,
+    cluster: Cluster,
+    settings: DftSettings,
+    method: str,
+) -> float:
+    """Checkpoint a single-point energy with the settled A2 SCF contract.
+
+    The production SMD tiers use bounded Newton-SCF first because direct DIIS
+    exhausted its bound during A2a. Other methods retain direct DIIS with a
+    bounded Newton retry. Only a finite converged value bound to the exact
+    geometry/settings fingerprints is published. This helper is shared by
+    sequential A2 routes so method identity and refusal semantics cannot drift.
+    """
+    expected_geometry = frequency_geometry_fingerprint(cluster)
+    expected_settings = frequency_settings_fingerprint(settings)
+    if path.exists():
+        return checkpoint_energy(path, cluster, settings, method)
+
+    mf = pipeline._make_scf(pipeline.build_mol(cluster, settings), settings)
+    convergence_route = "direct-diis"
+    if method in {PRODUCTION_METHOD, B3LYP_D4_METHOD}:
+        mf = mf.newton()
+        mf.max_cycle = 100
+        raw_value = mf.kernel()
+        convergence_route = "newton-first"
+    else:
+        raw_value = mf.kernel()
+        if not mf.converged:
+            density = mf.make_rdm1()
+            mf = mf.newton()
+            mf.max_cycle = 100
+            raw_value = mf.kernel(dm0=density)
+            convergence_route = "direct-diis-then-newton"
+    if not mf.converged:
+        raise RuntimeError(
+            f"SCF did not converge for {cluster.name} via {convergence_route}"
+        )
+    value = float(np.asarray(raw_value).item())
+    if not np.isfinite(value):
+        raise RuntimeError(f"{path.name}: computed electronic energy is non-finite")
+    atomic_json(
+        path,
+        {
+            "method": method,
+            "electronic_hartree": value,
+            "geometry_fingerprint": expected_geometry,
+            "settings_fingerprint": expected_settings,
+            "scf_contract": "bounded-direct-diis-or-newton-v1",
+            "convergence_route": convergence_route,
+            "converged": True,
         },
     )
     return value

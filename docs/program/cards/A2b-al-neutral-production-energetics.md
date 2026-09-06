@@ -63,6 +63,15 @@ A2 method identity.
 
 ## Progress
 
+- 2026-09-06 02:36 PDT (hermes-custom-build-001; profile=workstation) —
+  Implemented and adversarially fixture-tested the route-specific A2b front end
+  over the shared resume-safe A2 checkpoints: exact TASK-168 artifact/job/
+  mechanism binding, explicit rejected-addition refusal, typed basin + physical-H
+  ownership + heavy-topology gates, four r2SCAN-3c stationary-point/index gates,
+  full cleavage IRC, both production single-point tiers, atomic stale-output
+  quarantine/terminal receipt, and provenance-correct external-store publication.
+  Live source validation passes against the immutable TASK-168 archive; the full
+  QM suite is green (`609 passed`). Physical campaign launch is next.
 - 2026-09-05 12:25 PDT (hermes-custom-build-001; profile=workstation) — Split
   from A2 after receipt-level inventory proved that only si-neutral currently
   satisfies the production/IRC/store gates. TASK-168 remains a valid banked
