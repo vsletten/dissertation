@@ -197,6 +197,12 @@ def test_validate_result_rejects_reduced_lookalike_store_schema(tmp_path):
         campaign.validate_result(result, family="oss", state="neutral", n_intact=2)
 
 
+def test_store_schema_index_list_uses_bound_pragma_function():
+    source = Path(campaign.__file__).read_text()
+    assert 'f"PRAGMA index_list({table})"' not in source
+    assert "SELECT * FROM pragma_index_list(?)" in source
+
+
 @pytest.mark.parametrize(
     "change",
     [

@@ -244,7 +244,11 @@ def _validate_store_schema(connection: sqlite3.Connection) -> None:
             raise RuntimeError(f"store schema mismatch for {table}")
 
         unique_keys = set()
-        for index in connection.execute(f"PRAGMA index_list({table})"):
+        # table is a _STORE_COLUMNS key; bind it into pragma_index_list
+        for index in connection.execute(
+            "SELECT * FROM pragma_index_list(?)",
+            (table,),
+        ):
             if not index["unique"]:
                 continue
             columns = tuple(
