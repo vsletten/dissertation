@@ -16,6 +16,7 @@ import json
 import math
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
@@ -33,7 +34,16 @@ if __name__ == "__main__":
 
 from quarry import etiquette
 
-FAMILY_MAX_CONNECTIVITY = {"oss": 4, "osa": 4, "oaa": 6}
+FAMILY_CELL_CENTERS = {
+    "oss": {1: None, 2: None, 3: None, 4: None},
+    "osa": {1: None, 2: None, 3: None, 4: None},
+    # The first Oaa center realizes exact n=2/6, while center 23 is the first
+    # crystallographic center that realizes n=4 without silently aliasing n=2.
+    "oaa": {2: 18, 4: 23, 6: 18},
+}
+FAMILY_CONNECTIVITIES = {
+    family: tuple(cells) for family, cells in FAMILY_CELL_CENTERS.items()
+}
 SCHEMA = "a3-family-campaign-terminal-v1"
 PROGRESS_SCHEMA = "a3-family-campaign-progress-v1"
 
@@ -149,6 +159,91 @@ def validate_result(
     route = payload.get("route")
     if not isinstance(route, str) or not route:
         raise RuntimeError(f"n={n_intact} result has no route provenance")
+    cell = payload.get("cell")
+    method = payload.get("method")
+    expected_cell = f"{family}-{state}-n{n_intact}-s2"
+    expected_method = "b3lyp/def2-svp/df"
+    geometry_hashes = payload.get("geometry_hash")
+    if cell != expected_cell:
+        raise RuntimeError(
+            f"n={n_intact} result has wrong cell identity (expected {expected_cell})"
+        )
+    if method != expected_method:
+        raise RuntimeError(
+            f"n={n_intact} result has wrong method (expected {expected_method})"
+        )
+    if not isinstance(geometry_hashes, dict) or set(geometry_hashes) != {
+        "complex",
+        "ts",
+    }:
+        raise RuntimeError(f"n={n_intact} result has invalid geometry provenance")
+    expected_center = FAMILY_CELL_CENTERS.get(family, {}).get(n_intact)
+    if expected_center is not None:
+        cluster = payload.get("cluster")
+        if (
+            not isinstance(cluster, dict)
+            or cluster.get("center_site") != expected_center
+        ):
+            raise RuntimeError(
+                f"n={n_intact} result has wrong crystallographic center "
+                f"(expected {expected_center})"
+            )
+
+    connection: sqlite3.Connection | None = None
+    try:
+        connection = sqlite3.connect(
+            f"{store_path.resolve().as_uri()}?mode=ro", uri=True
+        )
+        connection.row_factory = sqlite3.Row
+        with connection:
+            integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
+            if integrity != "ok":
+                raise RuntimeError(f"store integrity check failed: {integrity}")
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            required_tables = {"structures", "jobs", "results"}
+            if not required_tables <= tables:
+                missing = sorted(required_tables - tables)
+                raise RuntimeError(f"store schema is incomplete: missing {missing}")
+            rows = connection.execute(
+                "SELECT s.name, s.xyz, s.geometry_hash, j.kind, j.method, j.engine, "
+                "j.status, r.key, r.value, r.units "
+                "FROM structures s JOIN jobs j ON j.structure_id = s.id "
+                "JOIN results r ON r.job_id = j.id"
+            ).fetchall()
+    except (sqlite3.DatabaseError, OSError, RuntimeError) as exc:
+        raise RuntimeError(f"n={n_intact} provenance store is invalid: {exc}") from exc
+    finally:
+        if connection is not None:
+            connection.close()
+
+    expected_names = {f"{cell}-complex", f"{cell}-ts"}
+    if len(rows) != 2 or {row["name"] for row in rows} != expected_names:
+        raise RuntimeError(f"n={n_intact} store lacks exact complex/TS provenance rows")
+    expected_hashes = {
+        f"{cell}-complex": geometry_hashes["complex"],
+        f"{cell}-ts": geometry_hashes["ts"],
+    }
+    for row in rows:
+        if (
+            row["geometry_hash"] != expected_hashes[row["name"]]
+            or row["geometry_hash"]
+            != hashlib.sha256(row["xyz"].encode("utf-8")).hexdigest()
+            or row["kind"] != "freq"
+            or row["method"] != method
+            or row["engine"] != "gpu4pyscf"
+            or row["status"] != "done"
+            or row["key"] != "electronic"
+            or row["units"] != "hartree"
+            or not math.isfinite(float(row["value"]))
+        ):
+            raise RuntimeError(
+                f"n={n_intact} store provenance mismatch for {row['name']}"
+            )
     return {
         "n_intact": n_intact,
         "result_path": str(result_path),
@@ -167,7 +262,7 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--worktree", type=Path, required=True)
     ap.add_argument("--run-root", type=Path, required=True)
     ap.add_argument("--expected-git-sha", required=True)
-    ap.add_argument("--family", choices=sorted(FAMILY_MAX_CONNECTIVITY), required=True)
+    ap.add_argument("--family", choices=sorted(FAMILY_CONNECTIVITIES), required=True)
     ap.add_argument("--state", choices=("acid", "neutral"), required=True)
     ap.add_argument("--cells", type=int, nargs="+", required=True)
     ap.add_argument("--wait-for-gpu-seconds", type=float, default=36 * 3600)
@@ -184,9 +279,10 @@ def main(argv: list[str] | None = None) -> int:
     cells = tuple(args.cells)
     if tuple(sorted(set(cells))) != cells:
         raise SystemExit("--cells must be unique and strictly increasing")
-    maximum = FAMILY_MAX_CONNECTIVITY[args.family]
-    if not cells or cells[0] < 1 or cells[-1] > maximum:
-        raise SystemExit(f"--cells must be within 1..{maximum} for {args.family}")
+    allowed = FAMILY_CONNECTIVITIES[args.family]
+    if not cells or any(cell not in allowed for cell in cells):
+        allowed_text = ",".join(str(cell) for cell in allowed)
+        raise SystemExit(f"--cells must be drawn from {allowed_text} for {args.family}")
     if args.threads < 1 or args.threads > 16:
         raise SystemExit("--threads must be within 1..16")
     if args.wait_for_gpu_seconds < 0 or args.gpu_poll_seconds <= 0:
@@ -266,6 +362,9 @@ def main(argv: list[str] | None = None) -> int:
                 "--log",
                 str(root / "logs" / f"{args.family}-{args.state}-n{n_intact}.log"),
             ]
+            center_index = FAMILY_CELL_CENTERS.get(args.family, {}).get(n_intact)
+            if center_index is not None:
+                command.extend(["--center-index", str(center_index)])
             cell_started = time.monotonic()
             # argv sequence, shell=False: trusted interpreter plus in-repo
             # phase2_ladder.py driver and static campaign flags. Not a shell string.
@@ -307,8 +406,15 @@ def main(argv: list[str] | None = None) -> int:
         elif terminal_reason == "runner-error":
             exit_code = 1
     finally:
-        for sig, previous in previous_handlers.items():
-            signal.signal(sig, previous)
+        deferred_signals: list[int] = []
+
+        def defer_stop(signum: int, _frame: object) -> None:
+            # The work is already terminal. Do not permit a signal to split
+            # final progress from the receipt commit point.
+            deferred_signals.append(signum)
+
+        for sig in previous_handlers:
+            signal.signal(sig, defer_stop)
         receipt: dict[str, object] = {
             "schema": SCHEMA,
             "started_at": started,
@@ -328,8 +434,25 @@ def main(argv: list[str] | None = None) -> int:
             "worktree": str(args.worktree),
             "branch": locals().get("branch"),
         }
-        atomic_json(terminal_path, receipt)
-        heartbeat("complete" if receipt["success"] else "failed")
+        try:
+            heartbeat("complete" if receipt["success"] else "failed")
+        except Exception as exc:
+            progress_error = f"{type(exc).__name__}: {exc}"
+            receipt["success"] = False
+            receipt["terminal_reason"] = "progress-finalization-failed"
+            receipt["exit_code"] = exit_code = exit_code if exit_code != 0 else 1
+            receipt["error"] = (
+                f"{error}; final progress write failed: {progress_error}"
+                if error
+                else f"final progress write failed: {progress_error}"
+            )
+        try:
+            # This is the terminal commit point: after it exists, progress is
+            # already final or the receipt itself records why that failed.
+            atomic_json(terminal_path, receipt)
+        finally:
+            for sig, previous in previous_handlers.items():
+                signal.signal(sig, previous)
     return exit_code
 
 

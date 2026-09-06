@@ -1,11 +1,11 @@
 # A3-barrier-ladder — connectivity × protonation barrier ladder (Phase 2)
 
-- status: ready
+- status: active
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaigns; cluster-builder code is machine-any)
 - depends: A3f-oss-neutral-n1-terminal-adjudication (done; exact OSS-neutral route rejected)
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## Constraints
 Ready is **not** authority to continue the OSS-neutral (300s Si–O–Si)
@@ -16,10 +16,13 @@ output). A3d already closed Osa-neutral n=1–4. A worker claiming this
 parent must pick a **different** independently gated site-family /
 protonation campaign already in this card's objective. HANDOFF §3 next
 remaining family after the closed 400s and 300s neutral series is
-**500s Al–OH–Al**, then attachment/detachment ladders and 100s/200s;
-each still needs its own valid reactant minimum and normal scientific
-gates before any n=2–4 of that family. The retained OSS-neutral n=4
-pilot below is historical/non-actionable.
+**500s Al–OH–Al**, then attachment/detachment ladders and 100s/200s.
+The crystallographic Oaa builder can realize only exact even coordination
+rungs: n=2 at center 18, n=4 at center 23, and n=6 at center 18. Odd
+requests alias lower even structures and are prohibited. The serial family
+campaign starts at exact n=2 and must pass its reactant-minimum and normal
+scientific gates before n=4, then n=6. The retained OSS-neutral n=4 pilot
+below is historical/non-actionable.
 
 ## Objective
 Execute qm/HANDOFF.md (Phase 2 edition — the full build plan lives
@@ -58,8 +61,9 @@ produce accepted reactant minima — never via OSS n=2–4.
 - A worker claiming this ready parent must select a remaining
   independently gated family — not Osa-neutral n=1–4, not OSS-neutral
   n=1–4. Permitted next family: 500s Al–OH–Al (HANDOFF §3). That family
-  still requires its own valid reactant minimum and normal scientific
-  gates before any n=2–4 launch.
+  uses only its exact crystallographic n=2/4/6 rungs (centers 18/23/18),
+  rejects odd aliased requests, and requires its n=2 reactant minimum plus
+  normal scientific gates before the serial campaign may advance.
 - Per completed remaining family: gated barriers in runs/ + store, an
   emitted petra fragment that compiles via petra-cli round-trip, and the
   CALCULATIONS.md row updated — one PR per family.
@@ -121,6 +125,7 @@ OSS n=2–4. A3f closed the exact n=1 route; n=2–4 remains prohibited.
 - 2026-09-06 07:06 PDT (hermes-custom-build-001; profile=workstation) — A3 remains BLOCKED without a barrier, store, Petra fragment, or CALCULATIONS closeout. READY `A3e-oss-neutral-n1-proton-microstate-stability` owns one materially different, finite owner-constrained → released B3LYP basin test with raw-endpoint persistence and independent verification. Blind replay, OSS n=2–4, and surrogate family emission remain prohibited until A3e produces an accepted n=1 reactant minimum or a verified terminal rejection.
 
 ## Progress
+- 2026-09-06 14:02 PDT (hermes-custom-build-001; profile=workstation) — Claimed A3 for the independently gated neutral 500s Al-OH-Al family. A cold pre-launch audit blocked DFT after proving that requested Oaa n=1/3/5 silently alias even structures, default-center n=4 aliases n=2, terminal receipt ordering could contradict live progress, a junk SQLite file could pass as provenance, TS guesses were not bound to the optimized reactant/settings, and quick-IRC did not preserve charge/spin/frozen-shell or the structural bridge proton. The implementation now defines the exact Oaa domain and centers as n=2/4/6 at 18/23/18, fails closed on every alias, commits terminal receipts last, validates the read-only SQLite evidence graph, binds/quarantines TS-guess checkpoints, and gates endpoint identity plus structural bridge-H ownership. Physical dry-runs produce exact neutral 55/68/81-atom cells with 17/25/33 frozen atoms; odd n=1 rejects. A second cold review found and closed four residual blockers (transitive stale-saddle reuse, self-consistent wrong-tier stores, remote substrate-proton transfer, and signal interruption at terminal commit). Full CPU-only QA is 656 passed plus whole-QM Ruff/format/diff gates. No DFT has run yet.
 - 2026-09-06 11:44 PDT (hermes-custom-build-001; profile=workstation) — A3f closed the exhausted OSS-neutral n=1 route by independent hash/arithmetic adjudication with no calculator calls. A3 returns to READY for a different family under its existing scientific gates; the rejected OSS route and its n=2-4 rungs remain prohibited.
 - 2026-09-06 09:02 PDT (hermes-custom-build-001; profile=workstation) — A3e's independent verifier reproduced the constrained-production max-gradient failure with zero optimizer calls and confirmed release was correctly forbidden. Parent A3 is now blocked on READY A3f's one-pass terminal evidence adjudication; the fixed numerical gate will not be loosened post hoc and the exhausted A3e route may not replay.
 - 2026-09-06 07:06 PDT (hermes-custom-build-001; profile=workstation) — Reconciled the exact failed family receipt and two independent cold reviews. Both confirmed the supervisor correctly fail-closed, and both rejected a terminal scientific inference from the discarded HF endpoint. The supervisor implementation stays in this slice; the parent is released as blocked on READY A3e rather than held active behind a dead campaign.

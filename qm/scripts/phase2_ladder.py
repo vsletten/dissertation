@@ -26,6 +26,7 @@ import argparse
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
 from dataclasses import asdict, replace
@@ -80,6 +81,7 @@ MIN_PLAUSIBLE_DE_KJ = 20.0
 # The Phase-1 free-dimer anchor for the lattice-resistance comparison.
 SI_NEUTRAL_FREE_DIMER_DG_KJ = 113.05
 APPROACH_SEED_VERSION = 1
+TS_GUESS_VERSION = 1
 ADVISORY_PREOPT_VERSION = 2
 ADVISORY_PREOPT_MAX_STEPS = 100
 ADVISORY_PREOPT_MIN_PAIR_A = 0.60
@@ -255,6 +257,122 @@ def load_compatible_approach_seed(
     except (OSError, ValueError) as exc:
         log(f"  ignoring approach_seed.xyz: checkpoint is unreadable ({exc})")
         return None
+
+
+def _stable_geometry_hash(cluster: Cluster) -> str:
+    """Geometry identity independent of the in-memory checkpoint name."""
+    return geometry_hash(cluster.to_xyz(comment="geometry"))
+
+
+def ts_guess_signature(
+    complex_opt: Cluster,
+    settings: DftSettings,
+    *,
+    m_index: int,
+    br_index: int,
+    ow_index: int,
+) -> dict[str, object]:
+    return {
+        "version": TS_GUESS_VERSION,
+        "driver_git_commit": subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).parent,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip(),
+        "driver_sha256": sha256_path(Path(__file__)),
+        "complex_geometry_hash": _stable_geometry_hash(complex_opt),
+        "symbols": complex_opt.symbols,
+        "charge": complex_opt.charge,
+        "spin": complex_opt.spin,
+        "frozen_indices": sorted(complex_opt.frozen_indices),
+        "settings": asdict(settings),
+        "m_index": m_index,
+        "br_index": br_index,
+        "ow_index": ow_index,
+        "approach": APPROACH[complex_opt.symbols[m_index]],
+    }
+
+
+def save_ts_guess_checkpoint(
+    path: Path,
+    route_path: Path,
+    cluster: Cluster,
+    signature: dict[str, object],
+    route: str,
+) -> None:
+    if route not in {"direct", "proton-neb"}:
+        raise ValueError(f"invalid TS-guess route {route!r}")
+    route_path.write_text(route)
+    write_xyz_atomic(path, cluster)
+    write_json_atomic(
+        path.with_suffix(".json"),
+        {
+            "schema": "phase2-ts-guess-v1",
+            "signature": signature,
+            "route": route,
+            "geometry_hash": _stable_geometry_hash(cluster),
+        },
+    )
+
+
+def load_compatible_ts_guess(
+    path: Path,
+    route_path: Path,
+    template: Cluster,
+    expected: dict[str, object],
+) -> tuple[Cluster, str] | None:
+    sidecar = path.with_suffix(".json")
+    dependent_names = (
+        "ts.xyz",
+        "sella.traj",
+        "irc_back.xyz",
+        "irc_fwd.xyz",
+        "results.json",
+        "store.sqlite",
+    )
+    artifacts = [
+        candidate
+        for candidate in (
+            path,
+            sidecar,
+            route_path,
+            *(path.parent / name for name in dependent_names),
+        )
+        if candidate.exists()
+    ]
+    if not artifacts:
+        return None
+    reason: str | None = None
+    try:
+        if not all(candidate.exists() for candidate in (path, sidecar, route_path)):
+            raise ValueError("checkpoint files are incomplete")
+        receipt = json.loads(sidecar.read_text())
+        route = route_path.read_text().strip()
+        loaded = load_xyz(path, template)
+        if (
+            receipt.get("schema") != "phase2-ts-guess-v1"
+            or receipt.get("signature") != expected
+            or receipt.get("route") != route
+            or route not in {"direct", "proton-neb"}
+            or receipt.get("geometry_hash") != _stable_geometry_hash(loaded)
+        ):
+            raise ValueError("checkpoint provenance mismatch")
+        return loaded, route
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        reason = str(exc)
+
+    quarantine = (
+        path.parent
+        / "quarantine"
+        / (f"ts-guess-{time.strftime('%Y%m%dT%H%M%S')}-{time.time_ns()}")
+    )
+    quarantine.mkdir(parents=True)
+    for artifact in artifacts:
+        artifact.replace(quarantine / artifact.name)
+    log(f"  quarantined incompatible TS guess ({reason}) at {quarantine}")
+    return None
 
 
 def checkpointed(path: Path, template: Cluster, compute) -> Cluster:
@@ -521,14 +639,49 @@ def quick_irc_acceptance_reason(
     back: Cluster,
     fwd: Cluster,
     *,
+    reference: Cluster,
     m_index: int,
     br_index: int,
     ow_index: int,
 ) -> str | None:
     """Require the saddle to connect a bonded bridge to hydrolyzed product."""
+    for label, endpoint in (("back", back), ("forward", fwd)):
+        if endpoint.symbols != reference.symbols:
+            return f"quick-IRC {label} endpoint changed atom identity/order"
+        if endpoint.charge != reference.charge or endpoint.spin != reference.spin:
+            return f"quick-IRC {label} endpoint changed charge or spin"
+        if endpoint.frozen_indices != reference.frozen_indices:
+            return f"quick-IRC {label} endpoint changed the frozen shell"
     # All physical protons must remain unambiguously owned at both minima.
-    oxygen_proton_owners(back)
-    oxygen_proton_owners(fwd)
+    reference_owners = oxygen_proton_owners(reference)
+    attacker_h = set(_attacker_h_indices(reference, ow_index))
+    structural_bridge_h = {
+        hydrogen
+        for hydrogen, oxygen in reference_owners.items()
+        if oxygen == br_index and hydrogen not in attacker_h
+    }
+    for label, endpoint in (("back", back), ("forward", fwd)):
+        owners = oxygen_proton_owners(endpoint)
+        moved_structural = sorted(
+            hydrogen
+            for hydrogen in structural_bridge_h
+            if owners.get(hydrogen) != br_index
+        )
+        if moved_structural:
+            return (
+                f"quick-IRC {label} endpoint moved structural bridge proton(s) "
+                f"{moved_structural}"
+            )
+        moved_non_attacker = sorted(
+            hydrogen
+            for hydrogen, owner in reference_owners.items()
+            if hydrogen not in attacker_h and owners.get(hydrogen) != owner
+        )
+        if moved_non_attacker:
+            return (
+                f"quick-IRC {label} endpoint moved non-attacker proton(s) "
+                f"{moved_non_attacker}"
+            )
     signatures = {
         hydrolysis_basin_signature(
             endpoint, m_index=m_index, br_index=br_index, ow_index=ow_index
@@ -1365,6 +1518,11 @@ def main() -> int:
         n_intact=args.n_intact,
         target_charge=0,
     )
+    if args.n_intact is not None and cc.n_intact != args.n_intact:
+        raise RuntimeError(
+            "requested connectivity cannot be constructed exactly: "
+            f"requested n={args.n_intact}, resolved n={cc.n_intact}"
+        )
     attacker = attacker_factory()
     complex_guess, ow_index = attack_complex(cc, attacker)
     m_index, br_index = cc.attacked_index, cc.bridge_index
@@ -1399,8 +1557,6 @@ def main() -> int:
     metadata["temperature_k"] = args.temperature
     metadata["written_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     try:
-        import subprocess
-
         metadata["driver_git_commit"] = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             cwd=Path(__file__).parent,
@@ -1476,9 +1632,20 @@ def main() -> int:
         ow_index=ow_index,
         pin_a=approach["pin"],
     )
-    route = route_path.read_text().strip() if route_path.exists() else "direct"
-    if ts_guess_path.exists():
-        ts_guess = load_xyz(ts_guess_path, complex_opt)
+    ts_signature = ts_guess_signature(
+        complex_opt,
+        settings,
+        m_index=m_index,
+        br_index=br_index,
+        ow_index=ow_index,
+    )
+    ts_guess: Cluster
+    route: str
+    loaded_ts_guess = load_compatible_ts_guess(
+        ts_guess_path, route_path, complex_opt, ts_signature
+    )
+    if loaded_ts_guess is not None:
+        ts_guess, route = loaded_ts_guess
         log(f"  resume: ts_guess.xyz exists ({route} route)")
     else:
         route = "direct"
@@ -1523,9 +1690,9 @@ def main() -> int:
                 ow_index=ow_index,
                 pin_a=approach["pin"],
             )
-        save_xyz(ts_guess, ts_guess_path)
-        if route == "proton-neb":
-            route_path.write_text(route)
+        save_ts_guess_checkpoint(
+            ts_guess_path, route_path, ts_guess, ts_signature, route
+        )
 
     # Stage 3 — Sella saddle search with the escaped-channel gates.
     trim_gpu_pool()
@@ -1555,9 +1722,10 @@ def main() -> int:
         if trajectory_path.exists():
             trajectory_path.replace(run_dir / "sella.rejected-direct.traj")
         ts_guess = neb_guess
-        save_xyz(ts_guess, ts_guess_path)
         route = "proton-neb"
-        route_path.write_text(route)
+        save_ts_guess_checkpoint(
+            ts_guess_path, route_path, ts_guess, ts_signature, route
+        )
         log("stage 3b: Sella saddle search from CI-NEB guess")
         ts = checkpointed(
             ts_path,
@@ -1593,6 +1761,7 @@ def main() -> int:
     if reason := quick_irc_acceptance_reason(
         back,
         fwd,
+        reference=complex_opt,
         m_index=m_index,
         br_index=br_index,
         ow_index=ow_index,

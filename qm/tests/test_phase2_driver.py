@@ -121,6 +121,28 @@ def test_dry_run_writes_geometry_and_metadata(family, tmp_path, monkeypatch):
     assert (run_dir / "complex_guess.xyz").exists()
 
 
+def test_oaa_dry_run_rejects_unconstructable_odd_connectivity(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "phase2_ladder.py",
+            "--family",
+            "oaa",
+            "--state",
+            "neutral",
+            "--n-intact",
+            "1",
+            "--dry-run",
+            "--run-root",
+            str(tmp_path),
+        ],
+    )
+
+    with pytest.raises(RuntimeError, match="requested n=1, resolved n=2"):
+        phase2.main()
+
+
 def test_approach_parameters_cover_both_metals():
     assert phase2.APPROACH["Si"]["pin"] == pytest.approx(1.90)
     assert phase2.APPROACH["Al"]["pin"] == pytest.approx(2.00)
@@ -546,16 +568,115 @@ def test_quick_irc_must_span_intact_bridge_and_hydrolyzed_product():
     product.coords[3] = np.array([3.98, 0.0, 0.0])
     assert (
         phase2.quick_irc_acceptance_reason(
-            intact, product, m_index=1, br_index=0, ow_index=2
+            intact,
+            product,
+            reference=intact,
+            m_index=1,
+            br_index=0,
+            ow_index=2,
         )
         is None
     )
     assert (
         phase2.quick_irc_acceptance_reason(
-            intact, intact, m_index=1, br_index=0, ow_index=2
+            intact,
+            intact,
+            reference=intact,
+            m_index=1,
+            br_index=0,
+            ow_index=2,
         )
         is not None
     )
+
+
+def test_quick_irc_rejects_metadata_drift():
+    intact = geometry("intact", 3.0, m_obr=1.6)
+    product = geometry("product", 1.9, m_obr=3.0)
+    product.coords[3] = np.array([3.98, 0.0, 0.0])
+    drifted = replace(product, charge=1)
+
+    reason = phase2.quick_irc_acceptance_reason(
+        intact,
+        drifted,
+        reference=intact,
+        m_index=1,
+        br_index=0,
+        ow_index=2,
+    )
+
+    assert reason is not None and "charge or spin" in reason
+
+
+def test_quick_irc_rejects_oaa_structural_bridge_proton_transfer():
+    reference = Cluster(
+        name="oaa-reference",
+        symbols=["O", "H", "Al", "O", "H", "H"],
+        coords=np.array(
+            [
+                [1.6, 0.0, 0.0],
+                [1.6, 0.9, 0.0],  # structural Al-OH-Al proton
+                [0.0, 0.0, 0.0],
+                [3.0, 0.0, 0.0],
+                [3.0, 0.9, 0.0],
+                [3.0, -0.9, 0.0],
+            ]
+        ),
+    )
+    product = replace(reference, name="product", coords=reference.coords.copy())
+    product.coords[0] = [3.0, 0.0, 0.0]
+    product.coords[1] = [1.9, 0.9, 0.0]  # structural H escaped to attacker O
+    product.coords[3] = [1.9, 0.0, 0.0]
+    product.coords[4] = [3.0, 0.9, 0.0]  # attacker H protonates bridge O
+
+    reason = phase2.quick_irc_acceptance_reason(
+        reference,
+        product,
+        reference=reference,
+        m_index=2,
+        br_index=0,
+        ow_index=3,
+    )
+
+    assert reason is not None and "structural bridge proton" in reason
+
+
+def test_quick_irc_rejects_remote_non_attacker_proton_transfer():
+    reference = Cluster(
+        name="oaa-reference",
+        symbols=["O", "H", "Al", "O", "H", "O", "O", "H", "H"],
+        coords=np.array(
+            [
+                [1.6, 0.0, 0.0],  # bridge O
+                [1.6, 0.9, 0.0],  # structural bridge H
+                [0.0, 0.0, 0.0],  # attacked Al
+                [0.0, 5.0, 0.0],  # remote donor O
+                [0.0, 5.9, 0.0],  # remote substrate H
+                [3.0, 5.0, 0.0],  # remote acceptor O
+                [3.0, 0.0, 0.0],  # appended attacker O
+                [3.0, 0.9, 0.0],
+                [3.0, -0.9, 0.0],
+            ]
+        ),
+    )
+    product = replace(reference, name="product", coords=reference.coords.copy())
+    product.coords[0] = [3.0, 0.0, 0.0]
+    product.coords[1] = [3.0, 0.9, 0.0]
+    product.coords[4] = [3.0, 5.9, 0.0]  # remote H: O3 -> O5
+    product.coords[6] = [1.9, 0.0, 0.0]
+    product.coords[7] = [3.0, -0.9, 0.0]  # attacker H protonates bridge O
+    product.coords[8] = [1.9, 0.9, 0.0]
+
+    reason = phase2.quick_irc_acceptance_reason(
+        reference,
+        product,
+        reference=reference,
+        m_index=2,
+        br_index=0,
+        ow_index=6,
+    )
+
+    assert reason is not None and "non-attacker proton" in reason
 
 
 def test_new_attempt_quarantines_stale_canonical_outputs(tmp_path):
@@ -644,6 +765,43 @@ def test_load_xyz_rejects_extra_atom_fields(tmp_path):
 
     with pytest.raises(ValueError, match="atom records are malformed"):
         phase2.load_xyz(path, template)
+
+
+def test_ts_guess_checkpoint_rejects_and_quarantines_signature_drift(tmp_path):
+    complex_opt = geometry("complex", 3.0)
+    ts_guess = geometry("guess", 2.0)
+    path = tmp_path / "ts_guess.xyz"
+    route_path = tmp_path / "ts_guess.route"
+    signature = phase2.ts_guess_signature(
+        complex_opt,
+        CHEAP,
+        m_index=1,
+        br_index=0,
+        ow_index=2,
+    )
+    assert signature["driver_git_commit"]
+    assert signature["driver_sha256"] == phase2.sha256_path(Path(phase2.__file__))
+    assert signature["approach"] == phase2.APPROACH["Si"]
+    phase2.save_ts_guess_checkpoint(path, route_path, ts_guess, signature, "direct")
+    loaded = phase2.load_compatible_ts_guess(path, route_path, complex_opt, signature)
+    assert loaded is not None
+    assert loaded[1] == "direct"
+
+    changed = dict(signature)
+    changed["m_index"] = 9
+    phase2.save_xyz(geometry("stale-ts", 2.4), tmp_path / "ts.xyz")
+    assert (
+        phase2.load_compatible_ts_guess(path, route_path, complex_opt, changed) is None
+    )
+    assert not path.exists()
+    assert not route_path.exists()
+    quarantine = next((tmp_path / "quarantine").iterdir())
+    assert {child.name for child in quarantine.iterdir()} == {
+        "ts_guess.json",
+        "ts_guess.route",
+        "ts_guess.xyz",
+        "ts.xyz",
+    }
 
 
 def test_load_xyz_rejects_trailing_atom_records(tmp_path):
