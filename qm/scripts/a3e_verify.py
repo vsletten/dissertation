@@ -71,6 +71,13 @@ def _read_stage(
         and receipt.get("optimizer", {}).get("geometric_default_fresh_hessian") is True
     ):
         raise RuntimeError(f"{spec.stage_id} optimizer freshness evidence mismatch")
+    optimizer = receipt.get("optimizer") or {}
+    if not (
+        optimizer.get("observed_calls") == 1
+        and optimizer.get("observed_retries") == 0
+        and optimizer.get("observed_max_steps") == a3e.MAX_STEPS
+    ):
+        raise RuntimeError(f"{spec.stage_id} observed optimizer budget mismatch")
     raw_path = stage_dir / "raw-endpoint.xyz"
     if receipt.get("status") == "optimizer-failed":
         if raw_path.exists() or receipt.get("raw_endpoint") is not None:
@@ -261,6 +268,8 @@ def verify_experiment(
             conditioning = receipts[a3e.STAGES[0].stage_id]
             constrained = receipts[a3e.STAGES[1].stage_id]
             released = receipts[a3e.STAGES[2].stage_id]
+            if candidate.get("experiment_budget") != a3e._experiment_budget(receipts):
+                raise RuntimeError("candidate experiment_budget mismatch")
             if constrained.get("status") != "not-run" and not (
                 conditioning.get("status") == "complete"
                 and conditioning.get("owner_retaining") is True

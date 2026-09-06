@@ -415,3 +415,70 @@ def test_no_forbidden_downstream_outputs(tmp_path, monkeypatch):
     a3e.run_experiment(tmp_path, source, code_revision="2" * 40)
     forbidden = {"results.json", "store.sqlite", "ts.xyz", "barrier.json", "petra.toml"}
     assert not any(path.name in forbidden for path in tmp_path.rglob("*"))
+
+
+def test_spent_stage_receipts_persist_one_call_zero_retry_100_step_budget(
+    tmp_path, monkeypatch
+):
+    source = _source()
+    endpoints = _endpoints(source.cluster)
+    _patch_calculators(monkeypatch, endpoints)
+    terminal = a3e.run_experiment(tmp_path, source, code_revision="3" * 40)
+    assert terminal["experiment_budget"] == {
+        "owner_conditioning": 1,
+        "constrained_production": 1,
+        "released_production": 1,
+        "retries": 0,
+    }
+    for spec in a3e.STAGES:
+        receipt = json.loads(
+            (tmp_path / "stages" / spec.directory / "receipt.json").read_text()
+        )
+        assert receipt["optimizer"]["observed_calls"] == 1
+        assert receipt["optimizer"]["observed_retries"] == 0
+        assert receipt["optimizer"]["observed_max_steps"] == 100
+
+
+def test_verifier_rejects_spent_stage_budget_that_is_not_one_call_zero_retry_100_steps(
+    tmp_path, monkeypatch
+):
+    source = _source()
+    endpoints = _endpoints(source.cluster)
+    energy_values = {endpoint.name: -10.0 for endpoint in endpoints}
+    _patch_calculators(monkeypatch, endpoints, energies=energy_values)
+    a3e.run_experiment(tmp_path, source, code_revision="4" * 40)
+    monkeypatch.setattr(
+        verifier, "energy", lambda cluster, _settings: energy_values[cluster.name]
+    )
+    monkeypatch.setattr(
+        verifier,
+        "frequencies",
+        lambda cluster, settings: SimpleNamespace(
+            imaginary_cm=np.asarray([], dtype=float),
+            electronic_hartree=energy_values[cluster.name],
+            geometry_fingerprint=a3e.frequency_geometry_fingerprint(cluster),
+            settings_fingerprint=a3e.frequency_settings_fingerprint(settings),
+        ),
+    )
+
+    spec = a3e.STAGES[2]
+    receipt_path = tmp_path / "stages" / spec.directory / "receipt.json"
+    receipt = json.loads(receipt_path.read_text())
+    receipt["optimizer"]["observed_calls"] = 2
+    receipt["optimizer"]["observed_retries"] = 1
+    receipt["optimizer"]["observed_max_steps"] = 200
+    a3e.atomic_json(receipt_path, receipt)
+    candidate_path = tmp_path / "candidate-terminal.json"
+    candidate = json.loads(candidate_path.read_text())
+    candidate["stages"][spec.stage_id]["receipt_sha256"] = a3e.sha256_path(receipt_path)
+    candidate["experiment_budget"]["released_production"] = 2
+    candidate["experiment_budget"]["retries"] = 1
+    a3e.atomic_json(candidate_path, candidate)
+
+    result = verifier.verify_experiment(
+        tmp_path,
+        source_override=source,
+        verifier_identity="cold-worker-2",
+    )
+    assert result["status"] == "rejected"
+    assert "budget" in result["detail"].casefold()

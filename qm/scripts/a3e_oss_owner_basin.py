@@ -380,6 +380,42 @@ def _artifact(cluster: Cluster, path: Path) -> dict[str, Any]:
     }
 
 
+def _optimizer_record(
+    *,
+    converged: bool,
+    observed_calls: int,
+    observed_retries: int,
+    observed_max_steps: int,
+) -> dict[str, Any]:
+    return {
+        "converged": converged,
+        "fresh_instance": True,
+        "geometric_default_fresh_hessian": True,
+        "observed_calls": observed_calls,
+        "observed_retries": observed_retries,
+        "observed_max_steps": observed_max_steps,
+    }
+
+
+def _experiment_budget(receipts: dict[str, dict[str, Any]]) -> dict[str, int]:
+    mapping = {
+        "owner-conditioning": "owner_conditioning",
+        "constrained-production": "constrained_production",
+        "released-production": "released_production",
+    }
+    budget = {key: 0 for key in mapping.values()}
+    budget["retries"] = 0
+    for stage_id, key in mapping.items():
+        optimizer = (receipts.get(stage_id) or {}).get("optimizer") or {}
+        calls = optimizer.get("observed_calls")
+        retries = optimizer.get("observed_retries")
+        if isinstance(calls, int):
+            budget[key] = calls
+        if isinstance(retries, int):
+            budget["retries"] += retries
+    return budget
+
+
 def _resume_stage(
     stage_dir: Path,
     expected_signature: dict[str, Any],
@@ -460,12 +496,17 @@ def run_stage(
     }
     atomic_json(stage_dir / "reservation.json", reservation)
     active = constraints(source, spec)
+    kwargs: dict[str, Any] = {"max_steps": MAX_STEPS}
+    if active:
+        kwargs["fixed_distances"] = active
+    observed_calls = 0
+    observed_retries = 0
+    observed_max_steps = int(kwargs["max_steps"])
     try:
-        kwargs: dict[str, Any] = {"max_steps": MAX_STEPS}
-        if active:
-            kwargs["fixed_distances"] = active
         optimized = optimize_bounded(seed, spec.settings, **kwargs)
+        observed_calls = 1
     except Exception as exc:
+        observed_calls = 1
         receipt = {
             "schema": "a3e-stage-receipt-v1",
             "status": "optimizer-failed",
@@ -475,11 +516,12 @@ def run_stage(
             "signature": signature,
             "parent": parent,
             "seed": reservation["seed"],
-            "optimizer": {
-                "converged": False,
-                "fresh_instance": True,
-                "geometric_default_fresh_hessian": True,
-            },
+            "optimizer": _optimizer_record(
+                converged=False,
+                observed_calls=observed_calls,
+                observed_retries=observed_retries,
+                observed_max_steps=observed_max_steps,
+            ),
             "detail": f"{type(exc).__name__}: {exc}",
         }
         atomic_json(stage_dir / "receipt.json", receipt)
@@ -495,11 +537,12 @@ def run_stage(
         "signature": signature,
         "parent": parent,
         "seed": reservation["seed"],
-        "optimizer": {
-            "converged": bool(optimized.converged),
-            "fresh_instance": True,
-            "geometric_default_fresh_hessian": True,
-        },
+        "optimizer": _optimizer_record(
+            converged=bool(optimized.converged),
+            observed_calls=observed_calls,
+            observed_retries=observed_retries,
+            observed_max_steps=observed_max_steps,
+        ),
         "raw_endpoint": _artifact(optimized.cluster, raw_path),
     }
     atomic_json(stage_dir / "receipt.json", receipt)
@@ -732,12 +775,7 @@ def _run_locked(
         },
         "independent_verification_required": True,
         "forbidden_outputs_emitted": False,
-        "experiment_budget": {
-            "owner_conditioning": 1,
-            "constrained_production": 1,
-            "released_production": 1,
-            "retries": 0,
-        },
+        "experiment_budget": _experiment_budget(receipts),
     }
     if classification == INCONCLUSIVE_CANDIDATE:
         terminal["detail"] = (
