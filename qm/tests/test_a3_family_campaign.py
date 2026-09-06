@@ -522,6 +522,12 @@ def test_main_terminal_receipt_records_final_progress_failure(tmp_path, monkeypa
     assert "simulated final progress failure" in receipt["error"]
 
 
+def test_store_schema_table_info_uses_bound_pragma_function():
+    source = Path(campaign.__file__).read_text()
+    assert 'f"PRAGMA table_info({table})"' not in source
+    assert "SELECT * FROM pragma_table_info(?)" in source
+
+
 def test_main_defers_signal_during_terminal_receipt_commit(tmp_path, monkeypatch):
     worktree = tmp_path / "worktree"
     worktree.mkdir()

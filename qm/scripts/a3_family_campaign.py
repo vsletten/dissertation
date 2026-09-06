@@ -234,7 +234,11 @@ def _validate_store_schema(connection: sqlite3.Connection) -> None:
                 row["dflt_value"],
                 int(row["pk"]),
             )
-            for row in connection.execute(f"PRAGMA table_info({table})")
+            # table is a _STORE_COLUMNS key; bind it into pragma_table_info
+            for row in connection.execute(
+                "SELECT * FROM pragma_table_info(?)",
+                (table,),
+            )
         )
         if observed_columns != expected_columns:
             raise RuntimeError(f"store schema mismatch for {table}")
