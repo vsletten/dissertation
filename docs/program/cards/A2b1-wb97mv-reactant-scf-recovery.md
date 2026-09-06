@@ -53,6 +53,7 @@ geometry, density fitting, grids, and convergence acceptance do not change.
 
 ## Progress
 
+- 2026-09-06 11:02 PDT — Launched the exact reactant gate as bounded transient unit `task294-a2b1-reactant-scf-recovery.service` (invocation `120d66393dcc47729ea73c9fe17ba079`): driver wall 7,200 s, `RuntimeMaxSec=7,800`, `MemoryMax=48G`, 16 threads, 18 GiB GPU pool, canonical GPU lease acquired by PID 33585, and `ExecStopPost` atomic failure backstop installed. Prelaunch gates: Ruff clean, format clean, full suite 641 passed / 1 skipped, and both independent review rejection classes reproduced then fixed with adversarial tests. Terminal blocker: `/mnt/data/vsletten/dissertation-data/task294-a2b1-wb97mv-reactant-scf-recovery-20260906/terminal-receipt.json`. (hermes-custom-build-001; profile=workstation)
 - 2026-09-06 10:42 PDT — Claimed atomically from `origin/main@dc194e7ae9eecdc0d5c39e904f6f8511e3a82c4a`; independent scientific review approved the predeclared `a2b1-huckel-damped-level-shifted-roothaan-to-cdiis-v1` contract only. Implemented hash/settings/geometry/driver-bound atomic per-attempt receipts, strict cache revalidation, a fail-closed timeout backstop, and adversarial both-fail/tamper/timeout tests. A cold implementation review rejected launch for semantic receipt gaps and pre-start timeout behavior; those findings are fixed and focused verification is 17 passed. (hermes-custom-build-001; profile=workstation)
 
 ## Acceptance
