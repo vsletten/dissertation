@@ -4,7 +4,7 @@
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaigns; cluster-builder code is machine-any)
-- depends: A3c-osa-neutral-n1-mobile-proton-triad-conditioning (A3b ended inconclusive)
+- depends: A3d-osa-neutral-n1-triad-failure-adjudication (A3c independently verified failure)
 - claimed-by:
 
 ## Objective
@@ -77,6 +77,7 @@ all scripted in the run log and learnings. ~10 h GPU per cell realistic
 including one saddle retry.
 
 ## Progress
+- 2026-09-05 23:46 PDT (hermes-custom-build-001; profile=workstation) — A3c's one fresh three-owner B3LYP/def2-SVP/DF budget retained all original proton owners and met every `1e-4 A` constraint residual, but independently recomputed projected RMS/max gradients (`1.619628e-3/1.229259e-2 Eh/Bohr`) failed the stationary-seed gates despite geomeTRIC convergence. A3 remains blocked on READY A3d's evidence-only terminal-path adjudication; no A3a/A3b/A3c replay, n=2-4 launch, saddle, barrier, store, or Petra output is authorized.
 - 2026-09-05 20:47 PDT (hermes-custom-build-001; profile=workstation) — A3b ended with an independently verified `inconclusive` outcome before either release route: its dual-owner production seed exhausted 100 steps, remained nonstationary, and exposed a third mobile termination proton `H52:O27->O32` while retaining the constrained H50/H57 bonds. READY A3c owns one materially different three-owner constrained-stationarity test. A3 remains blocked; no A3b replay, n=2-4 launch, saddle, barrier, store, or Petra output is authorized.
 - 2026-09-05 17:37 PDT (hermes-custom-build-001; profile=workstation) — A3a terminated fail-closed after its B3LYP production optimizer converged but transferred `H50:O26->O31` and `H57:O29->O20`; no minimum, barrier, store, or Petra fragment was promoted. A3 now blocks on executable A3b's bounded two-order constraint-release test of whether the requested proton assignment is a production-level basin. No n=2–4 or fourth unconstrained replay is authorized.
 - 2026-09-05 10:19 PDT (hermes-custom-build-001; profile=workstation) — Adversarial pre-PR review found four publication-path blockers beyond the failed advisory seed: unchecked production checkpoint reuse, no post-production microstate/shell gate, no reactant-minimum or quick-IRC basin gate, and stale canonical outputs surviving failed reruns. All four are now closed with strict/hash-bound checkpoint parsing, post-optimizer geometry acceptance, zero-significant-imaginary reactant plus hydrolysis-endpoint checks, stale-output quarantine, and focused adversarial regressions (30 passed). No fourth GPU attempt ran; A3 remains blocked on A3a's endpoint-preserving one-continuation recovery.
