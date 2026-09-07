@@ -1,10 +1,10 @@
 # A3-barrier-ladder — connectivity × protonation barrier ladder (Phase 2)
 
-- status: blocked
+- status: ready
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaigns; cluster-builder code is machine-any)
-- depends: A3g-oaa-neutral-n2-proton-microstate-stability (READY)
+- depends: —
 - claimed-by:
 
 ## Constraints
@@ -12,19 +12,14 @@ Ready is **not** authority to continue the OSS-neutral (300s Si–O–Si)
 series. A3f terminally rejected exact `oss-neutral-n1-s2`; OSS-neutral
 n=2–4 has no accepted n=1 baseline and is **prohibited** (no A3e replay,
 threshold relaxation, or surrogate barrier/store/Petra/CALCULATIONS
-output). A3d already closed Osa-neutral n=1–4. A worker claiming this
-parent must pick a **different** independently gated site-family /
-protonation campaign already in this card's objective. HANDOFF §3 next
-remaining family after the closed 400s and 300s neutral series is
-**500s Al–OH–Al**, then attachment/detachment ladders and 100s/200s.
-The crystallographic Oaa builder can realize only exact even coordination
-rungs: n=2 at center 18, n=4 at center 23, and n=6 at center 18. Odd
-requests alias lower even structures and are prohibited. The serial family
-campaign starts at exact n=2 and must pass its reactant-minimum and normal
-scientific gates before n=4, then n=6. The first n=2 attempt exhausted its
-100-step HF/STO-3G advisory preoptimization and ended with ambiguous H52
-ownership; no production optimization ran. Parent A3 is blocked on A3g's one
-finite H52-O15 owner-constrained → released B3LYP test. The retained OSS-neutral
+output). A3d already closed Osa-neutral n=1–4, and A3g now closes Oaa-neutral n=2/4/6
+after its one authorized n=2 owner-basin test failed independently verified
+conditioning gates before production. A worker claiming this parent must pick a
+**different** independently gated site-family / protonation campaign already in
+this card's objective. The remaining space is attachment/detachment ladders and
+100s/200s; neutral Osa, OSS, and Oaa routes are prohibited. The crystallographic
+Oaa builder's exact even-rung mapping (n=2/4/6 at centers 18/23/18) remains a
+tested implementation contract, not campaign authority. The retained OSS-neutral
 n=4 pilot below is historical/non-actionable.
 
 ## Objective
@@ -37,12 +32,12 @@ script, and compute connectivity- and protonation-resolved barriers for
 remaining independently gated families. The original five-family list
 is 100s Al, 200s Si, 300s Si–O–Si, 400s Si–O–Al₂, and 500s Al–OH–Al,
 but this card **excludes** OSS-neutral n=1–4 (n=1 rejected; n=2–4
-prohibited) and the closed Osa-neutral series. Claimable next work is
-500s Al–OH–Al under its own reactant-minimum gate, not a prohibited
-OSS n=2–4 route. Emit accepted remaining families as petra
+prohibited), the closed Osa-neutral series, and Oaa-neutral n=2/4/6
+(closed by A3g). Claimable next work is a different independently gated
+remaining family, not a prohibited neutral route. Emit accepted families as petra
 `by_count`/`when` tables with provenance. Closes CALCULATIONS.md rows
 CALC-002..005 from `needed` to `computed` only for families that
-produce accepted reactant minima — never via OSS n=2–4.
+produce accepted reactant minima — never via closed OSS or Oaa neutral rungs.
 
 ## Context
 - qm/HANDOFF.md — the complete Phase-2 plan (read first)
@@ -61,12 +56,11 @@ produce accepted reactant minima — never via OSS n=2–4.
   historical/non-actionable reconstruction evidence (see Result). It
   does **not** authorize OSS n=2–4, A3e replay, or treating 300s
   Si–O–Si neutral as the next claimable family.
-- A worker claiming this ready parent must select a remaining
-  independently gated family — not Osa-neutral n=1–4, not OSS-neutral
-  n=1–4. Permitted next family: 500s Al–OH–Al (HANDOFF §3). That family
-  uses only its exact crystallographic n=2/4/6 rungs (centers 18/23/18),
-  rejects odd aliased requests, and requires its n=2 reactant minimum plus
-  normal scientific gates before the serial campaign may advance.
+- A worker claiming this ready parent must select a remaining independently
+  gated family — not Osa-neutral n=1–4, OSS-neutral n=1–4, or Oaa-neutral
+  n=2/4/6. The Oaa builder's exact even-rung contract remains valid but its
+  neutral serial family is terminally closed by A3g. Continue only with another
+  family already in the Objective, under a fresh reactant-minimum gate.
 - Per completed remaining family: gated barriers in runs/ + store, an
   emitted petra fragment that compiles via petra-cli round-trip, and the
   CALCULATIONS.md row updated — one PR per family.
@@ -127,14 +121,16 @@ OSS n=2–4. A3f closed the exact n=1 route; n=2–4 remains prohibited.
 - 2026-09-06 07:06 PDT (hermes-custom-build-001; profile=workstation) — The bounded serial family supervisor worked as designed and stopped after `oss-neutral-n1-s2` failed its first chemistry gate. The exact `ec5bdb059911e32e4b790f849ff97595587c8519` execution completed zero cells: its HF/STO-3G advisory preoptimization converged at step 84, then strict ownership rejected `H35:O21->O14`. This was not a B3LYP production optimization and is not a production no-basin verdict. The rejected advisory endpoint was not persisted; `complex_preopt.xyz`, `complex.xyz`, `results.json`, and `store.sqlite` are absent, and n=2–4 never ran. Terminal receipt/log SHA-256 values are `c392dafe3c60f75687954295ae5b54da4c97a24ae1e54c9ec5b7cb8fdf9d9e53` / `b04a2991be5621925756222ae66bd41490c3152dc1ee442fcdfece590d346173`; shared services were restored and no A3 process or lease remains.
 - 2026-09-06 07:06 PDT (hermes-custom-build-001; profile=workstation) — A3 remains BLOCKED without a barrier, store, Petra fragment, or CALCULATIONS closeout. READY `A3e-oss-neutral-n1-proton-microstate-stability` owns one materially different, finite owner-constrained → released B3LYP basin test with raw-endpoint persistence and independent verification. Blind replay, OSS n=2–4, and surrogate family emission remain prohibited until A3e produces an accepted n=1 reactant minimum or a verified terminal rejection.
 
-## Result — Oaa-neutral family attempt (blocked on A3g)
+## Result — Oaa-neutral family attempt (closed by A3g)
 
 - 2026-09-06 15:28 PDT (hermes-custom-build-001; profile=workstation) — **Independently verified computational failure at `oaa-neutral-n2-s2`, before production science.** The bounded family receipt completed with exit 1 after 2,153.50 seconds and zero completed cells. HF/STO-3G advisory preoptimization spent all 100 steps; the final logged RMS/max projected gradients were `8.942e-3/4.151e-2 Eh/Bohr`, and strict ownership rejected H52 as ambiguous between O15/O9 at `1.134/1.195 A` (margin `0.061 A`, below the fixed `0.15 A` gate). Because the raw endpoint was not persisted, this proves neither a completed H52 transfer nor a production-PES no-basin result. B3LYP production, PHVA, n=4/6, saddle, barrier, store, Petra fragment, and CALCULATIONS closeout did not run.
 - 2026-09-06 15:28 PDT (hermes-custom-build-001; profile=workstation) — Receipt/progress/log/source/seed/metadata/launch/restoration hashes re-match the A3g evidence contract; exact source is `97cea5b585c95f18e499f53317ca8864a4c542d2`. The terminal and restoration units are inactive, the GPU lease is released, both email pipelines and both watchdog/deploy timers are active, and Honcho health passed. Independent evidence review found no inconsistency; a separate cold scientific review selected READY `A3g-oaa-neutral-n2-proton-microstate-stability` for one materially different, zero-retry H52-O15 owner-constrained → released B3LYP basin test with durable raw endpoints. Parent A3 remains BLOCKED; no identical replay or n=4/6 launch is authorized.
 - 2026-09-06 16:19 PDT (hermes-custom-build-001; profile=workstation) — A final context-cold pass reproduced four deeper false-greens and the branch regression-closed each one: orphaned approach/product artifacts now require exact optimized-reactant/settings/code-bound receipts; quick-IRC's non-product endpoint must retain every attacker-proton owner and its product may perform exactly one required transfer; Oaa completion is pinned to exact n=2/4/6 build metadata plus byte-identical durable complex/TS Store rows; and cluster provenance rejects bool/int aliases by exact type. Fresh final CPU-only verification passed `683` tests with no cache; whole-QM Ruff check passed, Ruff format reported all 77 files formatted, and `git diff --check` passed. No scientific calculator call was made during closeout.
+- 2026-09-06 19:45 PDT (hermes-custom-build-001; profile=workstation) — A3g independently verified `inconclusive terminal failure` for exact `oaa-neutral-n2-s2`. The one 100-step HF/STO-3G owner-conditioning call remained nonstationary, changed H41/H48/H54 owners, and failed projected RMS/max gradient gates (`1.399492e-3/4.996644e-3 Eh/Bohr`); H52-O15 residual, finite energy, frozen shell, and collision checks passed. Constrained B3LYP, release, PHVA, and downstream outputs did not run. The zero-retry contract closes Oaa-neutral n=2/4/6; A3 is READY only for a different independently gated family.
 - 2026-09-06 16:00 PDT (hermes-custom-build-001; profile=workstation) — An adversarial review round regression-closed stale approach/product reuse after TS incompatibility, quick-IRC frozen-coordinate drift, reduced lookalike Store schemas and inconsistent electronic barriers, bool/arbitrary-route acceptance, and missing physical all-rung Oaa builder coverage. Its 672-test count was superseded by the newer 16:19 closure. The failed first `uv run pytest` attempt used an uninstalled fresh worktree environment and collected 31 import errors; the required main-venv invocation then passed the complete suite.
 
 ## Progress
+- 2026-09-06 19:45 PDT (hermes-custom-build-001; profile=workstation) — A3g closed Oaa-neutral n=2/4/6 with an independently verified terminal failure and no production/downstream output. Parent A3 returns to READY for a different family already in the Objective; Osa-, OSS-, and Oaa-neutral replays/rungs remain prohibited.
 - 2026-09-06 15:28 PDT (hermes-custom-build-001; profile=workstation) — Reconciled the finite Oaa-neutral terminal receipt and two independent cold reviews. The supervisor correctly fail-closed at n=2 after advisory optimizer exhaustion plus ambiguous H52 ownership; no production or family output was emitted. READY A3g owns the only authorized Oaa continuation, with fixed gates and a terminal no-A3h default.
 - 2026-09-06 16:19 PDT (hermes-custom-build-001; profile=workstation) — Closed the final cold-review reproductions with provenance-bound approach/product receipts, declared-reactant attacker ownership at quick-IRC return, exact Oaa physical-build plus durable-geometry Store validation, and exact typed cluster metadata. Fresh full CPU-only QA is 683 passed plus whole-QM Ruff/format/diff gates. No production calculator call was made in closeout.
 - 2026-09-06 16:00 PDT (hermes-custom-build-001; profile=workstation) — Hardening closed incompatible TS transitive reuse, coordinate-level frozen-shell drift, real Store schema/electronic-barrier consistency, bool/route false-greens, and all-rung Oaa builder coverage. Its 672-test count was superseded by the newer 16:19 closure.

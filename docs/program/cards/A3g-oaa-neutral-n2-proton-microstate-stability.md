@@ -1,11 +1,11 @@
 # A3g-oaa-neutral-n2-proton-microstate-stability — test the H52 owner basin
 
-- status: ready
+- status: done
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
 - depends: A3 Oaa-neutral n=2 advisory failure recorded and supervisor merged
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## Objective
 
@@ -142,9 +142,27 @@ the observed inventory. The verifier inventories before recomputation and again
 before publication and requires the candidate's explicit empty inventory. A missing first-stage attempt cannot become a verified
 experiment; verified optimizer failure explicitly reports zero recomputed items.
 
-This repair ran only mocked CPU tests. The scientific experiment and its result
-remain pending; no real calculator or downstream scientific output was produced.
+At this implementation checkpoint, the repair had run only mocked CPU tests; no
+real calculator or downstream scientific output had yet been produced.
+
+- 2026-09-06 19:45 PDT (hermes-custom-build-001; profile=workstation) — The bounded experiment and a distinct delegated verifier process completed. The sole owner-conditioning optimizer spent its one 100-step HF/STO-3G budget without convergence, changed three original proton owners (`H41:O11->O15`, `H48:O26->O28`, `H54:O28->O11`), and failed independently recomputed projected-gradient gates (`1.3994921840965815e-3/4.996643654196831e-3 Eh/Bohr` RMS/max versus `3.0e-4/4.5e-4`). `H52` itself remained unambiguously owned by `O15` (0.960017 A; 0.686038 A margin) and the constraint residual, finite-energy, frozen-shell, and collision gates passed, but those narrower passes cannot authorize production. Constrained B3LYP, release, and PHVA therefore did not run. The independent verifier rehashed source and receipts, recomputed four calculator quantities, found no forbidden artifacts, and published verified terminal SHA-256 `6786d6796a4b233f6a73b1272cf6804783b8f6cb3634b4ec6cfe9bd96c57171c`.
 
 ## Result
 
-Pending.
+**Independently verified outcome: inconclusive terminal failure.** The exact
+`oaa-neutral-n2-s2` H52-O15-constrained route is exhausted with one
+owner-conditioning call and zero retries. Its endpoint was persisted with finite
+energy (`-3316.690344523382 Eh`) and passed the H52 residual, frozen-shell, and
+collision gates, but the optimizer did not converge, three other proton owners
+changed, and independently recomputed projected gradients were above both fixed
+thresholds. No constrained-production or released-production optimizer, PHVA,
+barrier, store, Petra fragment, family publication, or CALCULATIONS value ran or
+was emitted.
+
+The verified terminal receipt is
+`/mnt/data/vsletten/dissertation-data/a3g-oaa-neutral-n2-proton-microstate-stability/verified-terminal.json`
+(SHA-256 `6786d6796a4b233f6a73b1272cf6804783b8f6cb3634b4ec6cfe9bd96c57171c`);
+the hash-bound stage receipt is `7ff5632ef99476284a8c1254a74a8a11b7f0144c36053aca7faa7639bb50866f`.
+Per this card's zero-retry terminal contract, Oaa-neutral n=2/4/6 is closed and
+parent A3 returns only to a different independently gated family. No A3h retry
+card is authorized or filed.
