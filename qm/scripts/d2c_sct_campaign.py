@@ -633,6 +633,8 @@ def orient_sella_trace(
     _route_identity_cluster(route, qualified_transition_state, label="qualified TS")
     if not isinstance(trace, SellaIrcTrace):
         raise TypeError("trace must be a SellaIrcTrace")
+    if len(trace.directions) != 2:
+        raise ValueError("Sella trace must contain exactly two directions")
     expected_shape = np.asarray(qualified_transition_state.coords).shape
     for direction_index, direction in enumerate(trace.directions):
         expected_direction, expected_sign = (
@@ -701,13 +703,14 @@ def orient_sella_trace(
             name=f"{route}-{direction.sella_direction}-terminal",
         )
         classified.append((direction, classify_endpoint_basin(route, terminal)))
-    by_basin = {
-        classification.basin: direction for direction, classification in classified
-    }
-    if len(by_basin) != 2 or set(by_basin) != {"reactant", "product"}:
+    basins = [classification.basin for _, classification in classified]
+    if sorted(basins) != ["product", "reactant"]:
         raise ValueError(
             "Sella terminals must classify as exactly one reactant and one product"
         )
+    by_basin = {
+        classification.basin: direction for direction, classification in classified
+    }
 
     reactant_direction = by_basin["reactant"]
     product_direction = by_basin["product"]

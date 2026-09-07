@@ -603,6 +603,29 @@ def test_typed_trace_rejects_same_basin_unknown_terminal_and_ts_disagreement():
     with pytest.raises(ValueError, match="TS copies"):
         campaign.orient_sella_trace(route, transition_state, disagreeing)
 
+    transition_state, extra_direction = _trace(route, "irc_back.xyz", "irc_fwd.xyz")
+    poisoned_third = replace(
+        extra_direction.directions[1],
+        points=(
+            replace(
+                extra_direction.directions[1].points[0],
+                electronic_energy_ev=(
+                    extra_direction.directions[1].points[0].electronic_energy_ev + 7.0
+                ),
+            ),
+            *extra_direction.directions[1].points[1:],
+        ),
+    )
+    poisoned_trace = object.__new__(SellaIrcTrace)
+    object.__setattr__(poisoned_trace, "masses_amu", extra_direction.masses_amu)
+    object.__setattr__(
+        poisoned_trace,
+        "directions",
+        (*extra_direction.directions, poisoned_third),
+    )
+    with pytest.raises(ValueError, match="exactly two directions"):
+        campaign.orient_sella_trace(route, transition_state, poisoned_trace)
+
 
 def test_atomic_path_publication_resume_and_tamper_fail_closed(tmp_path: Path):
     route = "h-co-1w-cside"
