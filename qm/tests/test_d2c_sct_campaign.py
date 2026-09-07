@@ -349,6 +349,7 @@ def _validate_strict_gate(fixture):
         native,
         expected_settings_fingerprint="settings",
         reaction_vector_mass_scaled=reaction_vector,
+        reaction_vector_source="route-fixture:mapped-reactant-product-displacement",
     )
 
 
@@ -359,6 +360,8 @@ def test_strict_transition_state_gate_accepts_one_deep_imaginary_mode():
     assert receipt["imaginary_mode_count"] == 1
     assert receipt["imaginary_wavenumber_cm"] >= 200.0
     assert receipt["mapped_reaction_vector_overlap"] == pytest.approx(1.0)
+    assert receipt["reaction_vector_source"].startswith("route-fixture:")
+    assert len(receipt["reaction_vector_sha256"]) == 64
     assert len(receipt["gradient_sha256"]) == 64
     assert len(receipt["canonical_hessian_sha256"]) == 64
 
@@ -398,6 +401,7 @@ def test_strict_transition_state_gate_rejects_stale_geometry_settings_and_masses
             replace(native, geometry_fingerprint="wrong"),
             expected_settings_fingerprint="settings",
             reaction_vector_mass_scaled=reaction_vector,
+            reaction_vector_source="route-fixture:mapped-reactant-product-displacement",
         )
     with pytest.raises(ValueError, match="settings fingerprint"):
         campaign.validate_transition_state_gate(
@@ -406,6 +410,7 @@ def test_strict_transition_state_gate_rejects_stale_geometry_settings_and_masses
             native,
             expected_settings_fingerprint="different",
             reaction_vector_mass_scaled=reaction_vector,
+            reaction_vector_source="route-fixture:mapped-reactant-product-displacement",
         )
     with pytest.raises(ValueError, match="isotopic standard"):
         campaign.validate_transition_state_gate(
@@ -414,6 +419,7 @@ def test_strict_transition_state_gate_rejects_stale_geometry_settings_and_masses
             native,
             expected_settings_fingerprint="settings",
             reaction_vector_mass_scaled=reaction_vector,
+            reaction_vector_source="route-fixture:mapped-reactant-product-displacement",
         )
 
 
@@ -430,4 +436,35 @@ def test_strict_transition_state_gate_rejects_orthogonal_deep_spectator_mode():
             native,
             expected_settings_fingerprint="settings",
             reaction_vector_mass_scaled=vibrational[:, 1],
+            reaction_vector_source="route-fixture:mapped-reactant-product-displacement",
+        )
+
+
+def test_strict_transition_state_gate_rejects_stale_fmax_and_unbound_vector():
+    cluster, masses, native, reaction_vector = _strict_gate_fixture(
+        np.array([-0.02, 0.01, 0.03])
+    )
+    native.gradient_hartree_per_bohr.setflags(write=True)
+    native.gradient_hartree_per_bohr[0, 0] = 1.0
+    with pytest.raises(ValueError, match="physical fmax is stale"):
+        campaign.validate_transition_state_gate(
+            cluster,
+            masses,
+            native,
+            expected_settings_fingerprint="settings",
+            reaction_vector_mass_scaled=reaction_vector,
+            reaction_vector_source="route-fixture:mapped-reactant-product-displacement",
+        )
+
+    cluster, masses, native, reaction_vector = _strict_gate_fixture(
+        np.array([-0.02, 0.01, 0.03])
+    )
+    with pytest.raises(ValueError, match="reaction vector source"):
+        campaign.validate_transition_state_gate(
+            cluster,
+            masses,
+            native,
+            expected_settings_fingerprint="settings",
+            reaction_vector_mass_scaled=reaction_vector,
+            reaction_vector_source="",
         )

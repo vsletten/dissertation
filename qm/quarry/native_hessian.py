@@ -87,18 +87,28 @@ class NativeHessianResult:
             or self.actual_backend not in allowed_backends
         ):
             raise ValueError("native Hessian backend identity is invalid")
-        expected_fallback = (
-            self.requested_backend == "gpu4pyscf" and self.actual_backend == "pyscf"
-        )
-        if self.gpu_fallback_used is not expected_fallback:
+        valid_provenance = {
+            ("pyscf", "pyscf", False),
+            ("gpu4pyscf", "gpu4pyscf", False),
+            ("gpu4pyscf", "pyscf", True),
+        }
+        if (
+            self.requested_backend,
+            self.actual_backend,
+            self.gpu_fallback_used,
+        ) not in valid_provenance:
             raise ValueError("native Hessian fallback provenance is inconsistent")
         if not self.geometry_fingerprint or not self.settings_fingerprint:
             raise ValueError("native Hessian fingerprints must be non-empty")
-        object.__setattr__(self, "gradient_hartree_per_bohr", gradient.copy())
+        gradient = gradient.copy()
+        gradient.setflags(write=False)
+        canonical_hessian = (0.5 * (hessian + hessian.T)).copy()
+        canonical_hessian.setflags(write=False)
+        object.__setattr__(self, "gradient_hartree_per_bohr", gradient)
         object.__setattr__(
             self,
             "cartesian_hessian_hartree_per_bohr2",
-            (0.5 * (hessian + hessian.T)).copy(),
+            canonical_hessian,
         )
 
 

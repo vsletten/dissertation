@@ -45,8 +45,11 @@ if __name__ == "__main__":
 import numpy as np  # noqa: E402
 
 from quarry.clusters import Cluster  # noqa: E402
-from quarry.native_hessian import NativeHessianResult  # noqa: E402
-from quarry.pipeline import frequency_geometry_fingerprint  # noqa: E402
+from quarry.native_hessian import HARTREE_TO_EV, NativeHessianResult  # noqa: E402
+from quarry.pipeline import (  # noqa: E402
+    BOHR_TO_ANGSTROM,
+    frequency_geometry_fingerprint,
+)
 from quarry.reaction_path import (  # noqa: E402
     hessian_eigenvalues_to_wavenumbers_cm,
     project_vibrational_hessian,
@@ -239,6 +242,7 @@ def validate_transition_state_gate(
     *,
     expected_settings_fingerprint: str,
     reaction_vector_mass_scaled: Any,
+    reaction_vector_source: str,
 ) -> dict[str, Any]:
     """Apply the strict fresh first-order-saddle gate before any IRC call."""
 
@@ -262,12 +266,25 @@ def validate_transition_state_gate(
         raise ValueError(
             "mass vector does not match the receipt-bound isotopic standard"
         )
+    gradient_fmax = float(
+        np.max(np.linalg.norm(native_hessian.gradient_hartree_per_bohr, axis=1))
+    )
+    gradient_fmax *= HARTREE_TO_EV / BOHR_TO_ANGSTROM
+    if not math.isclose(
+        gradient_fmax,
+        native_hessian.physical_fmax_ev_per_angstrom,
+        rel_tol=1.0e-12,
+        abs_tol=1.0e-12,
+    ):
+        raise ValueError(
+            "native Hessian physical fmax is stale relative to its gradient"
+        )
     bounds = BOUNDS["transition_state_qualification"]
     fmax_limit = bounds["physical_fmax_ev_per_angstrom_exclusive_maximum"]
-    if native_hessian.physical_fmax_ev_per_angstrom >= fmax_limit:
+    if gradient_fmax >= fmax_limit:
         raise ValueError(
             "transition state is not stationary: physical fmax "
-            f"{native_hessian.physical_fmax_ev_per_angstrom:.12g} >= "
+            f"{gradient_fmax:.12g} >= "
             f"{fmax_limit:.12g} eV/A"
         )
     modes = project_vibrational_hessian(
@@ -311,6 +328,13 @@ def validate_transition_state_gate(
     if reaction_norm <= 1.0e-12:
         raise ValueError("reaction vector has no non-rigid vibrational component")
     reaction_vector /= reaction_norm
+    if (
+        not isinstance(reaction_vector_source, str)
+        or not reaction_vector_source.strip()
+    ):
+        raise ValueError(
+            "reaction vector source must identify its mapped route construction"
+        )
     unstable_mode = modes.mass_weighted_eigenvectors[
         np.flatnonzero(negative)[0]
     ].reshape(-1)
@@ -327,9 +351,10 @@ def validate_transition_state_gate(
     hessian_bytes = np.ascontiguousarray(
         native_hessian.cartesian_hessian_hartree_per_bohr2, dtype="<f8"
     ).tobytes()
+    reaction_vector_bytes = np.ascontiguousarray(reaction_vector, dtype="<f8").tobytes()
     return {
         "accepted": True,
-        "physical_fmax_ev_per_angstrom": (native_hessian.physical_fmax_ev_per_angstrom),
+        "physical_fmax_ev_per_angstrom": gradient_fmax,
         "physical_fmax_exclusive_limit_ev_per_angstrom": fmax_limit,
         "vibrational_mode_count": int(modes.eigenvalues.size),
         "imaginary_mode_count": 1,
@@ -337,6 +362,8 @@ def validate_transition_state_gate(
         "minimum_imaginary_wavenumber_cm": minimum_imaginary,
         "mapped_reaction_vector_overlap": reaction_overlap,
         "minimum_mapped_reaction_vector_overlap": minimum_overlap,
+        "reaction_vector_source": reaction_vector_source,
+        "reaction_vector_sha256": hashlib.sha256(reaction_vector_bytes).hexdigest(),
         "eigenvalues_hartree_per_bohr2_amu": modes.eigenvalues.tolist(),
         "masses_amu": masses.tolist(),
         "gradient_sha256": hashlib.sha256(gradient_bytes).hexdigest(),

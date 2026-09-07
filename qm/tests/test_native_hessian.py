@@ -76,6 +76,67 @@ def test_native_cartesian_hessian_records_gradient_fmax_and_backend(monkeypatch)
     assert result.requested_backend == "gpu4pyscf"
     assert result.actual_backend == "pyscf"
     assert result.gpu_fallback_used is True
+    assert result.gradient_hartree_per_bohr.flags.writeable is False
+    assert result.cartesian_hessian_hartree_per_bohr2.flags.writeable is False
+
+
+def test_execute_native_hessian_retries_only_known_gpu_assertion(monkeypatch):
+    calls = []
+
+    class FakeScf:
+        converged = True
+
+        def __init__(self, gpu):
+            self.gpu = gpu
+
+        def kernel(self):
+            calls.append(self.gpu)
+            return -75.0
+
+    class FakeHessian:
+        def __init__(self, gpu):
+            self.gpu = gpu
+
+        def kernel(self):
+            if self.gpu:
+                raise AssertionError("gpu4pyscf non-contiguous UKS Hessian")
+            return np.zeros((3, 3, 3, 3))
+
+    monkeypatch.setattr(native_hessian, "build_mol", lambda cluster, settings: object())
+    monkeypatch.setattr(
+        native_hessian,
+        "_make_scf",
+        lambda mol, settings: FakeScf(settings.use_gpu),
+    )
+    monkeypatch.setattr(
+        native_hessian,
+        "_hessian_method",
+        lambda mf, settings: FakeHessian(settings.use_gpu),
+    )
+
+    with pytest.warns(RuntimeWarning, match="retrying this Hessian on CPU"):
+        _, _, _, actual, fallback = native_hessian._execute_native_hessian(
+            water(), DftSettings(xc="b3lyp", basis="sto-3g", use_gpu=True)
+        )
+
+    assert calls == [True, False]
+    assert actual.use_gpu is False
+    assert fallback is True
+
+
+def test_native_hessian_result_rejects_impossible_backend_provenance():
+    with pytest.raises(ValueError, match="fallback provenance"):
+        native_hessian.NativeHessianResult(
+            electronic_hartree=-1.0,
+            gradient_hartree_per_bohr=np.zeros((1, 3)),
+            physical_fmax_ev_per_angstrom=0.0,
+            cartesian_hessian_hartree_per_bohr2=np.eye(3),
+            requested_backend="pyscf",
+            actual_backend="gpu4pyscf",
+            gpu_fallback_used=False,
+            geometry_fingerprint="geometry",
+            settings_fingerprint="settings",
+        )
 
 
 @pytest.mark.parametrize("reported", [float("nan"), float("inf"), -1.0, 0.0])
