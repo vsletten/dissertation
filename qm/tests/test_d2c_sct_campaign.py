@@ -13,7 +13,15 @@ from scripts import d2c_sct_campaign as campaign
 FIXED_GIT_SHA = "a" * 40
 FIXED_DEPENDENCIES = {
     "ase": "3.29.0",
+    "cuda_device_count": "1",
+    "cuda_driver": "13000",
+    "cuda_runtime": "12090",
+    "cupy": "14.1.1",
+    "cupy_distribution": "cupy-cuda12x",
     "geometric": "1.1",
+    "gpu4pyscf": "1.8.1",
+    "gpu4pyscf_distribution": "gpu4pyscf-cuda12x",
+    "gpu_backend": "gpu4pyscf",
     "numpy": "2.3.2",
     "pyscf": "2.10.0",
     "sella": "2.5.1",
@@ -34,21 +42,63 @@ def _preflight(run_root: Path, bundle_root: Path = BUNDLE_ROOT) -> dict:
 def test_dry_run_identity_and_exact_four_route_inventory(tmp_path: Path):
     first = _preflight(tmp_path / "first")
     second = _preflight(tmp_path / "second")
+    changed_gpu = dict(FIXED_DEPENDENCIES)
+    changed_gpu["gpu4pyscf"] = "1.8.2"
+    third = campaign.create_preflight_receipt(
+        BUNDLE_ROOT,
+        tmp_path / "third",
+        git_sha=FIXED_GIT_SHA,
+        dependency_versions=changed_gpu,
+        created_utc="2026-09-07T12:00:00Z",
+    )
 
     assert first["state"] == "pending"
     assert first["identity"] == second["identity"]
+    assert first["identity"] != third["identity"]
     assert first["campaign"]["git_sha"] == FIXED_GIT_SHA
     assert first["campaign"]["bundle_manifest_sha256"] == bundle.sha256_path(
         BUNDLE_ROOT / "manifest.json"
     )
     assert list(first["routes"]) == list(bundle.ROUTES)
     assert len(first["routes"]) == 4
-    for route_receipt in first["routes"].values():
+    assert first["campaign"]["dependencies"] == FIXED_DEPENDENCIES
+    assert first["campaign"]["bounds"]["sct"][
+        "straightness_tolerance_per_angstrom"
+    ] == pytest.approx(1.0e-12)
+    assert first["campaign"]["bounds"]["hessian"] == {
+        "cartesian_hessian_units": "hartree / bohr^2",
+        "coverage": "every retained IRC point including TS and endpoints",
+        "maximum_retained_points_per_direction": 201,
+        "required_transverse_mode_count": "3N-7",
+        "transverse_eigenvalue_units": "hartree / bohr^2 / amu",
+        "transverse_negative_eigenvalue_tolerance": 1.0e-8,
+        "transverse_negative_eigenvalue_tolerance_units": ("hartree / bohr^2 / amu"),
+    }
+    for route, route_receipt in first["routes"].items():
         assert route_receipt["symbols"]
+        assert len(route_receipt["atom_identity_labels"]) == len(
+            route_receipt["symbols"]
+        )
+        assert len(set(route_receipt["atom_identity_labels"])) == len(
+            route_receipt["symbols"]
+        )
+        assert len(route_receipt["atom_mapping_sha256"]) == 64
+        assert (
+            route_receipt["canonical_transition_state_geometry_sha256"]
+            == (campaign.TRUSTED_CANONICAL_TS_GEOMETRY_SHA256[route])
+        )
         assert len(route_receipt["masses_amu"]) == len(route_receipt["symbols"])
         assert all(
             stage["state"] == "pending" for stage in route_receipt["stages"].values()
         )
+    assert first["routes"]["h-co-1w-oside"]["atom_identity_labels"][:3] == [
+        "carbon_monoxide_carbon",
+        "carbon_monoxide_oxygen",
+        "incoming_hydrogen",
+    ]
+    abstraction_labels = first["routes"]["h-h2co-h2-hco-1w"]["atom_identity_labels"]
+    assert abstraction_labels[2] == "abstracted_formaldehyde_hydrogen"
+    assert abstraction_labels[4] == "incoming_hydrogen"
     assert first["campaign_stages"]["branching_common_reference_gate"]["required"]
     assert first["campaign_stages"]["final_freeze"]["required"]
     assert first["accepted_result"] is None
@@ -67,6 +117,35 @@ def test_dry_run_refuses_bundle_drift_without_writing_receipt(tmp_path: Path):
     assert not (run_root / campaign.PREFLIGHT_RECEIPT).exists()
 
 
+def test_preflight_rejects_same_element_permutation_despite_rehashed_manifest(
+    tmp_path: Path,
+):
+    copied = tmp_path / "bundle"
+    shutil.copytree(BUNDLE_ROOT, copied)
+    route = "h-h2co-ch3o-1w"
+    target = copied / route / "ts.xyz"
+    lines = target.read_text().splitlines()
+    assert lines[4].split()[0] == lines[5].split()[0] == "H"
+    lines[4], lines[5] = lines[5], lines[4]
+    target.write_text("\n".join(lines) + "\n")
+
+    manifest_path = copied / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    file_receipt = manifest["routes"][route]["files"]["ts.xyz"]
+    file_receipt["bytes"] = target.stat().st_size
+    file_receipt["sha256"] = bundle.sha256_path(target)
+    manifest["routes"][route]["canonical_checkpoint_geometry_sha256"]["ts.xyz"] = (
+        bundle.geometry_hash_xyz(target)
+    )
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    bundle.verify_bundle(copied)
+
+    run_root = tmp_path / "run"
+    with pytest.raises(ValueError, match="canonical transition-state geometry"):
+        _preflight(run_root, copied)
+    assert not (run_root / campaign.PREFLIGHT_RECEIPT).exists()
+
+
 def test_preflight_receipt_is_non_overwriting(tmp_path: Path):
     run_root = tmp_path / "run"
     first = _preflight(run_root)
@@ -78,6 +157,17 @@ def test_preflight_receipt_is_non_overwriting(tmp_path: Path):
 
     assert receipt_path.read_bytes() == original_bytes
     assert json.loads(original_bytes)["identity"] == first["identity"]
+
+
+def test_preflight_refuses_active_run_claim_then_recovers(tmp_path: Path):
+    run_root = tmp_path / "run"
+    with campaign._exclusive_run_claim(run_root):
+        with pytest.raises(RuntimeError, match="already claimed"):
+            _preflight(run_root)
+        assert not (run_root / campaign.PREFLIGHT_RECEIPT).exists()
+
+    receipt = _preflight(run_root)
+    assert receipt["state"] == "pending"
 
 
 def test_preflight_refuses_and_preserves_stale_accepted_result(tmp_path: Path):
@@ -92,6 +182,10 @@ def test_preflight_refuses_and_preserves_stale_accepted_result(tmp_path: Path):
 
     assert stale.read_bytes() == original_bytes
     assert not (run_root / campaign.PREFLIGHT_RECEIPT).exists()
+
+    stale.unlink()
+    recovered = _preflight(run_root)
+    assert recovered["state"] == "pending"
 
 
 def test_preflight_refuses_and_preserves_final_freeze_receipt(tmp_path: Path):
@@ -181,3 +275,29 @@ def test_git_identity_refuses_dirty_worktree(monkeypatch, tmp_path: Path):
         campaign._git_sha(tmp_path)
 
     assert calls == [["git", "status", "--porcelain", "--untracked-files=all"]]
+
+
+def test_dependency_inventory_fails_closed_without_gpu_backend(monkeypatch):
+    available = {name: "1.0" for name in campaign.DEPENDENCY_DISTRIBUTIONS}
+
+    def fake_version(distribution: str) -> str:
+        if distribution in available:
+            return available[distribution]
+        raise campaign.importlib.metadata.PackageNotFoundError(distribution)
+
+    monkeypatch.setattr(campaign.importlib.metadata, "version", fake_version)
+    with pytest.raises(RuntimeError, match="GPU4PySCF distribution"):
+        campaign._dependency_versions()
+
+
+def test_injected_dependency_inventory_must_include_exact_gpu_identity(tmp_path: Path):
+    incomplete = dict(FIXED_DEPENDENCIES)
+    incomplete.pop("cuda_runtime")
+
+    with pytest.raises(ValueError, match="exact and complete"):
+        campaign.create_preflight_receipt(
+            BUNDLE_ROOT,
+            tmp_path / "run",
+            git_sha=FIXED_GIT_SHA,
+            dependency_versions=incomplete,
+        )

@@ -34,7 +34,13 @@ _DUPLICATE_TOLERANCE_ANGSTROM = 1.0e-12
 
 @dataclass(frozen=True)
 class MassScaledPath:
-    """A rigid-motion-free path in one transition-state-centred frame."""
+    """A discrete rigid-horizontal path in one transition-state-centred frame.
+
+    ``input_to_aligned_rotations[p]`` is the proper row-vector rotation ``R``
+    such that the mass-centred input geometry at point ``p`` satisfies
+    ``x_aligned = x_centred @ R``.  Apply the same rotation to Cartesian
+    Hessians associated with unaligned input geometries.
+    """
 
     coordinate_angstrom: np.ndarray
     aligned_coordinates_angstrom: np.ndarray
@@ -42,16 +48,24 @@ class MassScaledPath:
     masses_amu: np.ndarray
     transition_state_index: int
     reference_mass_amu: float
+    input_to_aligned_rotations: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
 class PathDifferentialGeometry:
-    """Unit tangents and curvature ``d tangent / ds`` on a nonuniform path."""
+    """Unit tangents and curvature ``d tangent / ds`` on a nonuniform path.
+
+    Molecular differentiation reports the magnitudes of rigid components removed
+    before tangent normalization and final curvature projection.  They remain
+    ``None`` for generic curves without a molecular rigid-motion convention.
+    """
 
     coordinate_angstrom: np.ndarray
     unit_tangents: np.ndarray
     curvature_vectors_per_angstrom: np.ndarray
     curvature_magnitudes_per_angstrom: np.ndarray
+    tangent_rigid_residual_magnitudes: np.ndarray | None = None
+    curvature_rigid_residual_magnitudes_per_angstrom: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +81,7 @@ class TransverseHessianModes:
     mass_weighted_eigenvectors: np.ndarray
     transverse_basis: np.ndarray
     negative_eigenvalue_tolerance: float
+    negative_eigenvalue_tolerance_units: str = "same as cartesian_hessian / amu"
 
 
 @dataclass(frozen=True)
@@ -91,6 +106,7 @@ class CurvatureMassProfile:
     turning_length_derivative: np.ndarray
     effective_mass_amu: np.ndarray
     reference_mass_amu: float
+    straightness_tolerance_per_angstrom: float = 1.0e-12
 
 
 def _positive_masses(
@@ -106,8 +122,8 @@ def _positive_masses(
 
 def _mass_weighted_kabsch(
     moving: np.ndarray, reference: np.ndarray, masses_amu: np.ndarray
-) -> np.ndarray:
-    """Centre and optimally rotate ``moving`` onto centred ``reference``."""
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return centred/aligned rows and their input-to-aligned proper rotation."""
 
     centre = np.average(moving, axis=0, weights=masses_amu)
     centred = moving - centre
@@ -115,7 +131,8 @@ def _mass_weighted_kabsch(
     left, _, right_transpose = np.linalg.svd(covariance)
     if np.linalg.det(left @ right_transpose) < 0.0:
         left[:, -1] *= -1.0
-    return centred @ (left @ right_transpose)
+    rotation = left @ right_transpose
+    return centred @ rotation, rotation
 
 
 def build_mass_scaled_path(
@@ -127,12 +144,14 @@ def build_mass_scaled_path(
 ) -> MassScaledPath:
     """Align an ordered molecular path and construct signed mass-scaled ``s``.
 
-    Every geometry is mass-centred and fitted by a proper mass-weighted Kabsch
-    rotation to the explicit transition-state geometry.  This removes arbitrary
-    per-point translations and rotations without changing atom order.  ``s`` is
-    strictly increasing in input order and exactly zero at ``transition_state_index``.
-    Rigidly equivalent duplicate points, including non-adjacent duplicates, are
-    rejected because their tangent and Hessian association would be ambiguous.
+    The transition state anchors the centred frame.  Kabsch alignment is propagated
+    outwards independently in both directions: every other geometry is fitted to its
+    already-aligned adjacent predecessor toward the transition state.  Each segment
+    is therefore the minimum mass-weighted displacement in molecular quotient space,
+    without imposing a direct-to-TS gauge at distant points.  ``s`` is strictly
+    increasing in input order and exactly zero at ``transition_state_index``.  Rigidly
+    equivalent duplicate points, including non-adjacent duplicates, are rejected
+    because their tangent and Hessian association would be ambiguous.
     """
 
     coordinates = np.asarray(coordinates_angstrom, dtype=float)
@@ -155,26 +174,35 @@ def build_mass_scaled_path(
     transition_state = transition_state - np.average(
         transition_state, axis=0, weights=masses
     )
-    aligned = np.asarray(
-        [
-            _mass_weighted_kabsch(point, transition_state, masses)
-            for point in coordinates
-        ]
-    )
+    aligned = np.empty_like(coordinates)
+    rotations = np.empty((point_count, 3, 3), dtype=float)
+    aligned[transition_state_index] = transition_state
+    rotations[transition_state_index] = np.eye(3)
+    for point_index in range(transition_state_index - 1, -1, -1):
+        aligned[point_index], rotations[point_index] = _mass_weighted_kabsch(
+            coordinates[point_index], aligned[point_index + 1], masses
+        )
+    for point_index in range(transition_state_index + 1, point_count):
+        aligned[point_index], rotations[point_index] = _mass_weighted_kabsch(
+            coordinates[point_index], aligned[point_index - 1], masses
+        )
     mass_scale = np.sqrt(masses / reference_mass_amu)[None, :, None]
     mass_scaled = (aligned * mass_scale).reshape(point_count, -1)
 
-    pair_differences = mass_scaled[:, None, :] - mass_scaled[None, :, :]
-    pair_distances = np.linalg.norm(pair_differences, axis=2)
-    duplicate_pairs = np.argwhere(
-        np.triu(pair_distances <= _DUPLICATE_TOLERANCE_ANGSTROM, k=1)
-    )
-    if duplicate_pairs.size:
-        first, second = duplicate_pairs[0]
-        raise ValueError(
-            "path contains rigidly equivalent duplicate points "
-            f"at indices {first} and {second}"
-        )
+    atom_mass_scale = mass_scale[0]
+    for first in range(point_count - 1):
+        for second in range(first + 1, point_count):
+            first_in_second_frame, _ = _mass_weighted_kabsch(
+                coordinates[first], aligned[second], masses
+            )
+            quotient_distance = np.linalg.norm(
+                (first_in_second_frame - aligned[second]) * atom_mass_scale
+            )
+            if quotient_distance <= _DUPLICATE_TOLERANCE_ANGSTROM:
+                raise ValueError(
+                    "path contains rigidly equivalent duplicate points "
+                    f"at indices {first} and {second}"
+                )
 
     segment_lengths = np.linalg.norm(np.diff(mass_scaled, axis=0), axis=1)
     cumulative = np.concatenate(([0.0], np.cumsum(segment_lengths)))
@@ -186,7 +214,65 @@ def build_mass_scaled_path(
         masses_amu=masses.copy(),
         transition_state_index=transition_state_index,
         reference_mass_amu=float(reference_mass_amu),
+        input_to_aligned_rotations=rotations,
     )
+
+
+def rotate_cartesian_hessian(
+    cartesian_hessian: Sequence[Sequence[float]] | np.ndarray,
+    input_to_output_rotation: Sequence[Sequence[float]] | np.ndarray,
+) -> np.ndarray:
+    """Rotate a Cartesian Hessian consistently with row-vector coordinates.
+
+    For coordinates transformed as ``x_output = x_input @ R``, flattened column
+    displacements transform by ``Q = I_N kron R.T`` and the Hessian becomes
+    ``H_output = Q H_input Q.T``.  Both ``(3N, 3N)`` and ``(N, 3, N, 3)``
+    Hessian shapes are accepted and the input shape is preserved.  ``R`` must be
+    a finite proper orthogonal rotation; reflections are rejected.
+    """
+
+    rotation = np.asarray(input_to_output_rotation, dtype=float)
+    proper_orthogonal = (
+        rotation.shape == (3, 3)
+        and np.all(np.isfinite(rotation))
+        and np.allclose(rotation.T @ rotation, np.eye(3), rtol=1.0e-10, atol=1.0e-12)
+        and math.isclose(
+            float(np.linalg.det(rotation)),
+            1.0,
+            rel_tol=1.0e-10,
+            abs_tol=1.0e-12,
+        )
+    )
+    if not proper_orthogonal:
+        raise ValueError(
+            "input_to_output_rotation must be a proper orthogonal 3x3 matrix"
+        )
+
+    hessian = np.asarray(cartesian_hessian, dtype=float)
+    original_shape = hessian.shape
+    if hessian.ndim == 2 and hessian.shape[0] == hessian.shape[1]:
+        if hessian.shape[0] == 0 or hessian.shape[0] % 3:
+            raise ValueError(
+                "cartesian_hessian must have shape (3N, 3N) or (N, 3, N, 3)"
+            )
+        atom_count = hessian.shape[0] // 3
+    elif (
+        hessian.ndim == 4
+        and hessian.shape[1] == 3
+        and hessian.shape[3] == 3
+        and hessian.shape[0] == hessian.shape[2]
+        and hessian.shape[0] > 0
+    ):
+        atom_count = hessian.shape[0]
+        hessian = hessian.reshape(3 * atom_count, 3 * atom_count)
+    else:
+        raise ValueError("cartesian_hessian must have shape (3N, 3N) or (N, 3, N, 3)")
+    if not np.all(np.isfinite(hessian)):
+        raise ValueError("cartesian_hessian must be finite")
+
+    block_rotation = np.kron(np.eye(atom_count), rotation.T)
+    rotated = block_rotation @ hessian @ block_rotation.T
+    return rotated.reshape(original_shape)
 
 
 def _strict_coordinate(
@@ -267,6 +353,87 @@ def _rigid_motion_basis(
             "coordinates must describe a nonlinear molecule with six rigid modes"
         )
     return left[:, :6]
+
+
+def molecular_path_tangents_and_curvature(
+    path: MassScaledPath,
+) -> PathDifferentialGeometry:
+    """Differentiate a molecular path in the local rigid-horizontal subspace.
+
+    The path must come from :func:`build_mass_scaled_path` (or satisfy the same
+    validated conventions).  At every point, the raw coordinate derivative is
+    projected off the local three translations and three rotations before tangent
+    normalization.  The tangent derivative is then projected off both those local
+    rigid modes and the unit reaction tangent.  Reported residual magnitudes expose
+    exactly how much finite-difference rigid contamination was discarded.
+    """
+
+    if not isinstance(path, MassScaledPath):
+        raise TypeError("path must be a MassScaledPath")
+    coordinate = _strict_coordinate(path.coordinate_angstrom)
+    aligned = np.asarray(path.aligned_coordinates_angstrom, dtype=float)
+    if (
+        aligned.ndim != 3
+        or aligned.shape[0] != coordinate.size
+        or aligned.shape[1] < 3
+        or aligned.shape[2] != 3
+        or not np.all(np.isfinite(aligned))
+    ):
+        raise ValueError(
+            "aligned_coordinates_angstrom must have shape "
+            "(n_points, n_atoms, 3), n_atoms >= 3, and be finite"
+        )
+    masses = _positive_masses(path.masses_amu, aligned.shape[1])
+    if not math.isfinite(path.reference_mass_amu) or path.reference_mass_amu <= 0.0:
+        raise ValueError("reference_mass_amu must be finite and positive")
+    points = np.asarray(path.mass_scaled_coordinates, dtype=float)
+    expected_shape = (coordinate.size, 3 * aligned.shape[1])
+    if points.shape != expected_shape or not np.all(np.isfinite(points)):
+        raise ValueError(
+            f"mass_scaled_coordinates must have shape {expected_shape} and be finite"
+        )
+    mass_scale = np.sqrt(masses / path.reference_mass_amu)[None, :, None]
+    expected_points = (aligned * mass_scale).reshape(expected_shape)
+    if not np.allclose(points, expected_points, rtol=1.0e-12, atol=1.0e-12):
+        raise ValueError(
+            "mass_scaled_coordinates are inconsistent with aligned coordinates, "
+            "masses, and reference mass"
+        )
+    if np.any(np.linalg.norm(np.diff(points, axis=0), axis=1) <= 1.0e-14):
+        raise ValueError("mass_scaled_coordinates contains adjacent duplicate points")
+
+    rigid_bases = np.asarray([_rigid_motion_basis(point, masses) for point in aligned])
+    derivatives = np.gradient(points, coordinate, axis=0, edge_order=2)
+    tangent_rigid = np.einsum(
+        "pij,pj->pi",
+        rigid_bases,
+        np.einsum("pji,pj->pi", rigid_bases, derivatives),
+    )
+    horizontal_derivatives = derivatives - tangent_rigid
+    derivative_norms = np.linalg.norm(horizontal_derivatives, axis=1)
+    if np.any(~np.isfinite(derivative_norms)) or np.any(derivative_norms <= 1.0e-14):
+        raise ValueError("path has an undefined local non-rigid tangent")
+    tangents = horizontal_derivatives / derivative_norms[:, None]
+
+    tangent_derivatives = np.gradient(tangents, coordinate, axis=0, edge_order=2)
+    curvature_rigid = np.einsum(
+        "pij,pj->pi",
+        rigid_bases,
+        np.einsum("pji,pj->pi", rigid_bases, tangent_derivatives),
+    )
+    curvature = tangent_derivatives - curvature_rigid
+    curvature -= np.einsum("ij,ij->i", curvature, tangents)[:, None] * tangents
+    magnitudes = np.linalg.norm(curvature, axis=1)
+    return PathDifferentialGeometry(
+        coordinate_angstrom=coordinate.copy(),
+        unit_tangents=tangents,
+        curvature_vectors_per_angstrom=curvature,
+        curvature_magnitudes_per_angstrom=magnitudes,
+        tangent_rigid_residual_magnitudes=np.linalg.norm(tangent_rigid, axis=1),
+        curvature_rigid_residual_magnitudes_per_angstrom=np.linalg.norm(
+            curvature_rigid, axis=1
+        ),
+    )
 
 
 def project_transverse_hessian(
@@ -415,24 +582,30 @@ def curvature_effective_mass_profile(
     transverse_frequencies_cm: Sequence[Sequence[float]] | np.ndarray,
     *,
     reference_mass_amu: float = 1.0,
+    straightness_tolerance_per_angstrom: float = 1.0e-12,
 ) -> CurvatureMassProfile:
     """Derive the mode-resolved Liu/Pilgrim SCT mass profile.
 
-    At each point, the curvature vector is resolved into the complete orthonormal
-    transverse normal-mode basis.  With ``B_k = e_k . curvature``,
-    ``kappa = sqrt(sum_k B_k**2)``, and mode turning amplitudes
-    ``t_k = sqrt(hbar/(mu*omega_k))``, the Pilgrim/Liu turning length is
-    ``tbar = sqrt(kappa) * sum_k((B_k/t_k**2)**2)**(-1/4)``.  This expression is
-    invariant to normal-mode signs and permutations, and to rotations within an
-    exactly degenerate mode subspace.  The nonuniform derivative ``dtbar/ds`` and
-    curvature are then passed unchanged to
-    :func:`small_curvature_effective_mass`.
+    At each point, the curvature vector is projected into the complete orthonormal
+    transverse normal-mode basis.  This is the physically relevant curvature for
+    SCT: reaction-tangent and rigid translation/rotation components are discarded.
+    With ``B_k = e_k . curvature``, ``kappa = sqrt(sum_k B_k**2)``, and mode
+    turning amplitudes ``t_k = sqrt(hbar/(mu*omega_k))``, the directional
+    Pilgrim/Liu turning length for positive curvature is
+    ``t_raw = sum_k(((B_k/kappa)/t_k**2)**2)**(-1/4)``.  This is algebraically
+    equivalent to ``sqrt(kappa) * sum_k((B_k/t_k**2)**2)**(-1/4)`` but remains
+    numerically defined for every positive ``kappa``.  It is invariant to normal-mode
+    signs and permutations, and to rotations within an exactly degenerate mode
+    subspace.
 
-    At an exactly straight point (``kappa == 0``) the formula's directional limit
-    is undefined.  Isolated straight points therefore receive a coordinate-linear
-    interpolation of neighboring bent-point values.  A wholly straight path uses
-    one constant positive diagnostic amplitude, so ``dtbar/ds`` is exactly zero and
-    cannot manufacture an effective-mass correction.
+    The exact-zero directional ambiguity is resolved continuously with the local,
+    direction-neutral RMS mode amplitude ``t_base``.  The returned turning length is
+    ``(1-w)*t_base + w*t_raw``, where
+    ``w = kappa**2 / (kappa**2 + straightness_tolerance**2)``.  The actual projected
+    ``kappa`` is retained and passed to :func:`small_curvature_effective_mass`; no
+    positive curvature is thresholded to zero.  Setting the tolerance to zero cleanly
+    recovers the raw directional formula at every positive-curvature point while exact
+    zero still uses the finite baseline.
     """
 
     coordinate = _strict_coordinate(coordinate_angstrom)
@@ -443,6 +616,13 @@ def curvature_effective_mass_profile(
         raise ValueError("curvature vectors must be finite")
     if not math.isfinite(reference_mass_amu) or reference_mass_amu <= 0.0:
         raise ValueError("reference_mass_amu must be finite and positive")
+    if (
+        not math.isfinite(straightness_tolerance_per_angstrom)
+        or straightness_tolerance_per_angstrom < 0.0
+    ):
+        raise ValueError(
+            "straightness_tolerance_per_angstrom must be finite and non-negative"
+        )
 
     modes = np.asarray(transverse_eigenvectors, dtype=float)
     if modes.ndim < 3 or modes.shape[0] != coordinate.size:
@@ -450,6 +630,12 @@ def curvature_effective_mass_profile(
     modes = modes.reshape(modes.shape[0], modes.shape[1], -1)
     if modes.shape[2] != curvature.shape[1] or modes.shape[1] == 0:
         raise ValueError("transverse eigenvectors and curvature dimensions differ")
+    if modes.shape[2] >= 9 and modes.shape[2] % 3 == 0:
+        expected_modes = modes.shape[2] - 7
+        if modes.shape[1] != expected_modes:
+            raise ValueError(
+                "transverse eigenvectors must provide the complete 3N-7 molecular basis"
+            )
     if not np.all(np.isfinite(modes)):
         raise ValueError("transverse eigenvectors must be finite")
     gram = np.einsum("pmi,pni->pmn", modes, modes)
@@ -463,34 +649,34 @@ def curvature_effective_mass_profile(
     if not np.all(np.isfinite(frequencies)) or np.any(frequencies <= 0.0):
         raise ValueError("transverse frequencies must be finite and positive")
 
-    vector_magnitudes = np.linalg.norm(curvature, axis=1)
     components = np.einsum("pmi,pi->pm", modes, curvature)
     kappa = np.linalg.norm(components, axis=1)
-    bent = vector_magnitudes > 0.0
-    projected_curvature = np.einsum("pm,pmi->pi", components, modes)
-    projection_residuals = np.linalg.norm(curvature - projected_curvature, axis=1)
-    if np.any(projection_residuals[bent] > 1.0e-7 * vector_magnitudes[bent]):
-        raise ValueError(
-            "curvature vector is not contained in the transverse mode space"
-        )
 
     omega = 2.0 * math.pi * _C_CM_S * frequencies
     amplitudes = (
         np.sqrt(_HBAR_J_S / (reference_mass_amu * _AMU_KG * omega)) / _ANGSTROM_M
     )
-    turning = np.empty(coordinate.size, dtype=float)
-    if np.any(bent):
+    baseline = np.sqrt(np.mean(amplitudes**2, axis=1))
+    turning = baseline.copy()
+    curved = kappa > 0.0
+    if np.any(curved):
+        directions = components[curved] / kappa[curved, None]
         inverse_quartic_sum = np.sum(
-            (components[bent] / amplitudes[bent] ** 2) ** 2, axis=1
+            (directions / amplitudes[curved] ** 2) ** 2, axis=1
         )
         if np.any(~np.isfinite(inverse_quartic_sum)) or np.any(
             inverse_quartic_sum <= 0.0
         ):
-            raise ValueError("bent-point turning-length denominator must be positive")
-        turning[bent] = np.sqrt(kappa[bent]) * inverse_quartic_sum ** (-0.25)
-        turning[~bent] = np.interp(coordinate[~bent], coordinate[bent], turning[bent])
-    else:
-        turning.fill(float(np.sqrt(np.mean(amplitudes**2))))
+            raise ValueError("turning-length directional denominator must be positive")
+        raw_turning = inverse_quartic_sum ** (-0.25)
+        if straightness_tolerance_per_angstrom == 0.0:
+            weight = np.ones_like(raw_turning)
+        else:
+            weight = (
+                kappa[curved]
+                / np.hypot(kappa[curved], straightness_tolerance_per_angstrom)
+            ) ** 2
+        turning[curved] += weight * (raw_turning - baseline[curved])
     derivative = np.gradient(turning, coordinate, edge_order=2)
     effective_mass = small_curvature_effective_mass(
         reference_mass_amu,
@@ -506,4 +692,5 @@ def curvature_effective_mass_profile(
         turning_length_derivative=derivative,
         effective_mass_amu=effective_mass,
         reference_mass_amu=float(reference_mass_amu),
+        straightness_tolerance_per_angstrom=float(straightness_tolerance_per_angstrom),
     )

@@ -49,6 +49,22 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   transverse frequencies/eigenvectors at path points, a vibrationally adiabatic
   potential, matched-site branching, and immutable tracked provenance. No D3b
   rate table has been emitted.
+- 2026-09-07 03:48 PDT (hermes-custom-build-001; profile=workstation) —
+  NUMERICAL FOUNDATION REVIEWED: added a fail-closed, dry-run-only D2c campaign
+  preflight plus reusable molecular reaction-path primitives. The path now uses
+  TS-anchored outward mass-weighted Kabsch transport, exposes exact frame rotations,
+  projects molecular tangents/curvature in the local rigid-horizontal space, rotates
+  Cartesian Hessians coherently, extracts exactly 3N-7 positive transverse modes,
+  builds the vibrationally adiabatic potential, and applies continuously regularized
+  mode-resolved Liu/Pilgrim effective mass. Preflight hash-binds all four atom mappings,
+  frozen geometries, GPU4PySCF/CuPy/CUDA identity, exact atomic-unit Hessian convention,
+  campaign bounds, and stage receipts under a crash-recoverable exclusive run-root
+  claim. Two independent correction rounds closed all critical/important scientific
+  review findings; final review approved with one non-blocking native PySCF Hessian-layout
+  note for the production driver. Whole-QM verification is 865 passed, 1 skipped plus
+  whole-tree Ruff/format; no IRC/Hessian production compute or D3b table ran. Acceptance
+  remains red until the resumable production stages execute and matched-site 12-20 K
+  literature/branching gates pass.
 - 2026-09-06 23:33 PDT (hermes-custom-build-001; profile=workstation) —
   INPUT GATE CLOSED: froze the four predeclared direct-CC one-water D2b routes
   (both H+CO orientations plus both H2CO channels) into a tracked 29-file,

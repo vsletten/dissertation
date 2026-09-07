@@ -10,6 +10,7 @@ no IRC, Hessian, high-level, VAG, or tunnelling calculation.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import importlib.metadata
 import json
@@ -19,6 +20,8 @@ import platform
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +65,38 @@ DFT_SETTINGS: dict[str, Any] = {
     "use_gpu": True,
 }
 DEPENDENCY_DISTRIBUTIONS = ("numpy", "pyscf", "geometric", "sella", "ase")
+GPU4PYSCF_DISTRIBUTIONS = (
+    "gpu4pyscf-cuda12x",
+    "gpu4pyscf-cuda11x",
+    "gpu4pyscf",
+)
+CUPY_DISTRIBUTIONS = ("cupy-cuda13x", "cupy-cuda12x", "cupy-cuda11x", "cupy")
+DEPENDENCY_VERSION_KEYS = frozenset(
+    (
+        *DEPENDENCY_DISTRIBUTIONS,
+        "gpu_backend",
+        "gpu4pyscf_distribution",
+        "gpu4pyscf",
+        "cupy_distribution",
+        "cupy",
+        "cuda_runtime",
+        "cuda_driver",
+        "cuda_device_count",
+    )
+)
+# These geometry hashes are trusted source constants, deliberately independent of
+# the mutable manifest being verified.  They bind atom row identity even if a copied
+# bundle and all of its ordinary byte receipts are coherently rewritten.
+TRUSTED_CANONICAL_TS_GEOMETRY_SHA256 = {
+    "h-co-1w-oside": "7c121ddaddfb47932b95301593524498fdb7ed98faaf741ee383e04c49880106",
+    "h-co-1w-cside": "4265cd1ee5dfcc082027bafa8322587aa505f200589adcaf9cbb97e5b7eb7f2b",
+    "h-h2co-ch3o-1w": (
+        "c5602e65b972f2703d467781cca1c8e1299eb06d68d13fd3889cbf75c294d6bf"
+    ),
+    "h-h2co-h2-hco-1w": (
+        "a1b804833d74cd77b7382cd516b84af7981fd37f18417ae7a858a7898a8225bf"
+    ),
+}
 # Ground-state isotopic masses.  Carbon-12 is exact by definition; the others are
 # the neutral-atom masses used by this bounded H/C/O campaign.
 ISOTOPIC_MASSES_AMU = {
@@ -82,7 +117,10 @@ BOUNDS: dict[str, Any] = {
     "hessian": {
         "coverage": "every retained IRC point including TS and endpoints",
         "maximum_retained_points_per_direction": 201,
+        "cartesian_hessian_units": "hartree / bohr^2",
         "transverse_negative_eigenvalue_tolerance": 1.0e-8,
+        "transverse_negative_eigenvalue_tolerance_units": "hartree / bohr^2 / amu",
+        "transverse_eigenvalue_units": "hartree / bohr^2 / amu",
         "required_transverse_mode_count": "3N-7",
     },
     "sct": {
@@ -106,6 +144,7 @@ BOUNDS: dict[str, Any] = {
         "quadrature_order": 96,
         "path_grid_size": 4097,
         "reference_mass_amu": REFERENCE_MASS_AMU,
+        "straightness_tolerance_per_angstrom": 1.0e-12,
     },
 }
 ROUTE_STAGE_CONTRACT: dict[str, dict[str, Any]] = {
@@ -190,7 +229,29 @@ def _git_sha(repository_root: Path) -> str:
     return _require_sha(completed.stdout.strip(), length=40, label="Git SHA")
 
 
+def _installed_distribution(label: str, candidates: tuple[str, ...]) -> tuple[str, str]:
+    installed: list[tuple[str, str]] = []
+    for distribution in candidates:
+        try:
+            installed.append((distribution, importlib.metadata.version(distribution)))
+        except importlib.metadata.PackageNotFoundError:
+            continue
+    if not installed:
+        raise RuntimeError(
+            f"required D2c {label} distribution is not installed; expected one of "
+            + ", ".join(candidates)
+        )
+    if len(installed) != 1:
+        names = ", ".join(distribution for distribution, _ in installed)
+        raise RuntimeError(
+            f"ambiguous D2c {label} distributions are installed: {names}"
+        )
+    return installed[0]
+
+
 def _dependency_versions() -> dict[str, str]:
+    """Inventory the exact CPU packages, GPU backend, and live CUDA runtime."""
+
     versions: dict[str, str] = {}
     for distribution in DEPENDENCY_DISTRIBUTIONS:
         try:
@@ -199,6 +260,39 @@ def _dependency_versions() -> dict[str, str]:
             raise RuntimeError(
                 f"required D2c dependency is not installed: {distribution}"
             ) from exc
+
+    gpu_distribution, gpu_version = _installed_distribution(
+        "GPU4PySCF", GPU4PYSCF_DISTRIBUTIONS
+    )
+    cupy_distribution, cupy_version = _installed_distribution(
+        "CuPy", CUPY_DISTRIBUTIONS
+    )
+    try:
+        __import__("gpu4pyscf")
+        cupy = __import__("cupy")
+        runtime = cupy.cuda.runtime
+        runtime_version = runtime.runtimeGetVersion()
+        driver_version = runtime.driverGetVersion()
+        device_count = runtime.getDeviceCount()
+    except Exception as exc:
+        raise RuntimeError(
+            "required D2c GPU backend or CUDA runtime is unavailable"
+        ) from exc
+    if not isinstance(device_count, int) or device_count < 1:
+        raise RuntimeError("required D2c CUDA runtime exposes no GPU devices")
+
+    versions.update(
+        {
+            "gpu_backend": "gpu4pyscf",
+            "gpu4pyscf_distribution": gpu_distribution,
+            "gpu4pyscf": gpu_version,
+            "cupy_distribution": cupy_distribution,
+            "cupy": cupy_version,
+            "cuda_runtime": str(runtime_version),
+            "cuda_driver": str(driver_version),
+            "cuda_device_count": str(device_count),
+        }
+    )
     return versions
 
 
@@ -236,6 +330,58 @@ def _declared_stage_receipt_paths(run_root: Path) -> tuple[Path, ...]:
     return (*route_receipts, *campaign_receipts)
 
 
+def _semantic_atom_identity_labels(route: str, template: Any) -> tuple[str, ...]:
+    """Bind the index semantics defined by the D2b reaction-template builders."""
+
+    if template.n_water != 1:
+        raise ValueError(f"D2c route must use exactly one template water: {route}")
+    if template.family == "h-co":
+        labels = (
+            "carbon_monoxide_carbon",
+            "carbon_monoxide_oxygen",
+            "incoming_hydrogen",
+            "water_1_oxygen",
+            "water_1_hydrogen_a",
+            "water_1_hydrogen_b",
+        )
+        expected_symbols = ("C", "O", "H", "O", "H", "H")
+        expected_scan_pair = (0, 2)
+    elif template.family == "h-h2co-ch3o":
+        labels = (
+            "formaldehyde_carbon",
+            "formaldehyde_oxygen",
+            "formaldehyde_hydrogen_a",
+            "formaldehyde_hydrogen_b",
+            "incoming_hydrogen",
+            "water_1_oxygen",
+            "water_1_hydrogen_a",
+            "water_1_hydrogen_b",
+        )
+        expected_symbols = ("C", "O", "H", "H", "H", "O", "H", "H")
+        expected_scan_pair = (0, 4)
+    elif template.family == "h-h2co-h2-hco":
+        labels = (
+            "formaldehyde_carbon",
+            "formaldehyde_oxygen",
+            "abstracted_formaldehyde_hydrogen",
+            "retained_formaldehyde_hydrogen",
+            "incoming_hydrogen",
+            "water_1_oxygen",
+            "water_1_hydrogen_a",
+            "water_1_hydrogen_b",
+        )
+        expected_symbols = ("C", "O", "H", "H", "H", "O", "H", "H")
+        expected_scan_pair = (2, 4)
+    else:
+        raise ValueError(f"unsupported D2c reaction-template family: {route}")
+    if (
+        tuple(template.cluster.symbols) != expected_symbols
+        or (template.scan_i, template.scan_j) != expected_scan_pair
+    ):
+        raise ValueError(f"semantic atom template order drifted: {route}")
+    return labels
+
+
 def _route_inventory(bundle_root: Path, manifest: dict[str, Any]) -> dict[str, Any]:
     templates = reactions(gpu=True, basis="def2-svp")
     inventory: dict[str, Any] = {}
@@ -246,6 +392,21 @@ def _route_inventory(bundle_root: Path, manifest: dict[str, Any]) -> dict[str, A
         manifest_route = manifest["routes"][route]
         if manifest_route.get("method") != DFT_SETTINGS:
             raise ValueError(f"frozen DFT settings drifted: {route}")
+        expected_geometry_hash = TRUSTED_CANONICAL_TS_GEOMETRY_SHA256[route]
+        declared_canonical_hashes = manifest_route.get(
+            "canonical_checkpoint_geometry_sha256"
+        )
+        observed_geometry_hash = d2c_input_bundle.geometry_hash_xyz(
+            bundle_root / route / "ts.xyz"
+        )
+        if (
+            not isinstance(declared_canonical_hashes, dict)
+            or declared_canonical_hashes.get("ts.xyz") != expected_geometry_hash
+            or observed_geometry_hash != expected_geometry_hash
+        ):
+            raise ValueError(
+                f"canonical transition-state geometry/mapping identity drifted: {route}"
+            )
         transition_state = load_xyz_like(
             bundle_root / route / "ts.xyz",
             template.cluster,
@@ -261,8 +422,30 @@ def _route_inventory(bundle_root: Path, manifest: dict[str, Any]) -> dict[str, A
             ) from exc
         if not all(math.isfinite(mass) and mass > 0.0 for mass in masses):
             raise RuntimeError("internal isotopic mass table is invalid")
+        atom_identity_labels = _semantic_atom_identity_labels(route, template)
+        if tuple(transition_state.symbols) != tuple(template.cluster.symbols):
+            raise ValueError(f"transition-state atom symbols drifted: {route}")
+        atom_mapping_sha256 = _canonical_hash(
+            {
+                "route": route,
+                "canonical_transition_state_geometry_sha256": expected_geometry_hash,
+                "atoms": [
+                    {"index": index, "symbol": symbol, "semantic_identity": label}
+                    for index, (symbol, label) in enumerate(
+                        zip(
+                            transition_state.symbols,
+                            atom_identity_labels,
+                            strict=True,
+                        )
+                    )
+                ],
+            }
+        )
         inventory[route] = {
             "symbols": list(transition_state.symbols),
+            "atom_identity_labels": list(atom_identity_labels),
+            "atom_mapping_sha256": atom_mapping_sha256,
+            "canonical_transition_state_geometry_sha256": expected_geometry_hash,
             "masses_amu": masses,
             "transition_state_sha256": d2c_input_bundle.sha256_path(
                 bundle_root / route / "ts.xyz"
@@ -274,6 +457,37 @@ def _route_inventory(bundle_root: Path, manifest: dict[str, Any]) -> dict[str, A
             "D2c preflight must enumerate exactly the four frozen routes"
         )
     return inventory
+
+
+@contextmanager
+def _exclusive_run_claim(run_root: Path) -> Iterator[None]:
+    """Hold a crash-recoverable exclusive claim on one campaign run root."""
+
+    run_root.mkdir(parents=True, exist_ok=True)
+    claim_path = run_root / ".preflight.lock"
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(claim_path, flags, 0o600)
+    locked = False
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError(
+                f"D2c run root is already claimed by another preflight: {run_root}"
+            ) from exc
+        locked = True
+        claim = json.dumps(
+            {"pid": os.getpid(), "claimed_unix_ns": time.time_ns()},
+            sort_keys=True,
+        ).encode()
+        os.ftruncate(descriptor, 0)
+        os.write(descriptor, claim + b"\n")
+        os.fsync(descriptor)
+        yield
+    finally:
+        if locked:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
 
 
 def _atomic_non_overwriting_json(path: Path, payload: dict[str, Any]) -> None:
@@ -335,10 +549,24 @@ def create_preflight_receipt(
     dependencies = dict(
         _dependency_versions() if dependency_versions is None else dependency_versions
     )
-    if set(dependencies) != set(DEPENDENCY_DISTRIBUTIONS):
+    if set(dependencies) != DEPENDENCY_VERSION_KEYS:
         raise ValueError("dependency version inventory must be exact and complete")
     if any(not isinstance(value, str) or not value for value in dependencies.values()):
         raise ValueError("dependency versions must be non-empty strings")
+    if (
+        dependencies["gpu_backend"] != "gpu4pyscf"
+        or dependencies["gpu4pyscf_distribution"] not in GPU4PYSCF_DISTRIBUTIONS
+        or dependencies["cupy_distribution"] not in CUPY_DISTRIBUTIONS
+        or not dependencies["cuda_runtime"].isdigit()
+        or not dependencies["cuda_driver"].isdigit()
+    ):
+        raise ValueError("dependency inventory has an invalid GPU backend identity")
+    try:
+        cuda_device_count = int(dependencies["cuda_device_count"])
+    except ValueError as exc:
+        raise ValueError("CUDA device count must be a positive integer") from exc
+    if cuda_device_count < 1:
+        raise ValueError("CUDA device count must be a positive integer")
     routes = _route_inventory(bundle_root, manifest)
 
     identity_payload = {
@@ -353,6 +581,11 @@ def create_preflight_receipt(
         "routes": {
             route: {
                 "symbols": record["symbols"],
+                "atom_identity_labels": record["atom_identity_labels"],
+                "atom_mapping_sha256": record["atom_mapping_sha256"],
+                "canonical_transition_state_geometry_sha256": record[
+                    "canonical_transition_state_geometry_sha256"
+                ],
                 "masses_amu": record["masses_amu"],
                 "transition_state_sha256": record["transition_state_sha256"],
             }
@@ -382,19 +615,19 @@ def create_preflight_receipt(
         },
     }
 
-    run_root.mkdir(parents=True, exist_ok=True)
-    for name in _FORBIDDEN_ACCEPTED_RESULTS:
-        existing = run_root / name
-        if existing.exists() or existing.is_symlink():
-            raise FileExistsError(
-                f"refusing stale accepted/final result in run root: {existing}"
-            )
-    for existing in _declared_stage_receipt_paths(run_root):
-        if existing.exists() or existing.is_symlink():
-            raise FileExistsError(
-                f"refusing stale stage receipt in run root: {existing}"
-            )
-    _atomic_non_overwriting_json(run_root / PREFLIGHT_RECEIPT, receipt)
+    with _exclusive_run_claim(run_root):
+        for name in _FORBIDDEN_ACCEPTED_RESULTS:
+            existing = run_root / name
+            if existing.exists() or existing.is_symlink():
+                raise FileExistsError(
+                    f"refusing stale accepted/final result in run root: {existing}"
+                )
+        for existing in _declared_stage_receipt_paths(run_root):
+            if existing.exists() or existing.is_symlink():
+                raise FileExistsError(
+                    f"refusing stale stage receipt in run root: {existing}"
+                )
+        _atomic_non_overwriting_json(run_root / PREFLIGHT_RECEIPT, receipt)
     return receipt
 
 

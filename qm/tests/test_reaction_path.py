@@ -8,8 +8,10 @@ import pytest
 from quarry.reaction_path import (
     build_mass_scaled_path,
     curvature_effective_mass_profile,
+    molecular_path_tangents_and_curvature,
     path_tangents_and_curvature,
     project_transverse_hessian,
+    rotate_cartesian_hessian,
     vibrationally_adiabatic_potential,
 )
 
@@ -21,6 +23,23 @@ def _rotation_z(angle: float) -> np.ndarray:
             [math.sin(angle), math.cos(angle), 0.0],
             [0.0, 0.0, 1.0],
         ]
+    )
+
+
+def _axis_angle_rotation(axis: np.ndarray | list[float], angle: float) -> np.ndarray:
+    axis = np.asarray(axis, dtype=float)
+    axis /= np.linalg.norm(axis)
+    cross_matrix = np.array(
+        [
+            [0.0, -axis[2], axis[1]],
+            [axis[2], 0.0, -axis[0]],
+            [-axis[1], axis[0], 0.0],
+        ]
+    )
+    return (
+        math.cos(angle) * np.eye(3)
+        + (1.0 - math.cos(angle)) * np.outer(axis, axis)
+        + math.sin(angle) * cross_matrix
     )
 
 
@@ -88,6 +107,53 @@ def test_nonuniform_circle_recovers_curvature():
     assert np.einsum(
         "ij,ij->i", result.unit_tangents, result.curvature_vectors_per_angstrom
     ) == pytest.approx(np.zeros(len(theta)), abs=1.0e-12)
+    assert result.tangent_rigid_residual_magnitudes is None
+    assert result.curvature_rigid_residual_magnitudes_per_angstrom is None
+
+
+def test_propagated_alignment_makes_every_outward_segment_rigid_horizontal():
+    parameter = np.linspace(-1.0, 1.0, 9)
+    base = np.array(
+        [[0.0, 0.0, 0.0], [1.2, 0.1, 0.0], [0.1, 0.9, 0.4], [0.3, -0.4, 0.8]]
+    )
+    coordinates = np.asarray(
+        [
+            base
+            + np.array(
+                [
+                    [0.15 * value**2, 0.08 * value**3, -0.04 * value],
+                    [0.12 * value, 0.18 * value**2, 0.07 * value**3],
+                    [-0.09 * value, 0.05 * value**3, -0.12 * value**2],
+                    [0.04 * value**2, -0.11 * value, 0.09 * value],
+                ]
+            )
+            for value in parameter
+        ]
+    )
+    masses = np.array([12.0, 16.0, 1.0, 14.0])
+    transition_state_index = 4
+    path = build_mass_scaled_path(
+        coordinates, masses, transition_state_index=transition_state_index
+    )
+
+    outward_indices = [*range(transition_state_index - 1, -1, -1), *range(5, 9)]
+    for point_index in outward_indices:
+        predecessor_index = (
+            point_index + 1 if point_index < transition_state_index else point_index - 1
+        )
+        displacement = (
+            np.sqrt(masses)[:, None]
+            * (
+                path.aligned_coordinates_angstrom[point_index]
+                - path.aligned_coordinates_angstrom[predecessor_index]
+            )
+        ).reshape(-1)
+        local_rotations = _mass_weighted_rigid_motions(
+            path.aligned_coordinates_angstrom[point_index], masses
+        )[:, 3:]
+        assert local_rotations.T @ displacement == pytest.approx(
+            np.zeros(3), abs=2.0e-11
+        )
 
 
 def test_path_is_invariant_to_rigid_motion_and_reversal():
@@ -102,11 +168,26 @@ def test_path_is_invariant_to_rigid_motion_and_reversal():
         coordinates, masses, transition_state_index=2, reference_mass_amu=2.0
     )
 
+    imposed_rotations = [
+        _axis_angle_rotation(axis, angle)
+        for axis, angle in zip(
+            (
+                [1.0, 2.0, 3.0],
+                [-2.0, 1.0, 0.5],
+                [0.3, -1.0, 2.0],
+                [1.5, 0.2, -0.7],
+                [-0.4, 2.0, 1.0],
+            ),
+            (0.31, -0.73, 1.11, -0.47, 0.88),
+            strict=True,
+        )
+    ]
     moved = np.asarray(
         [
-            point @ _rotation_z(0.31 * (index + 1)).T
-            + np.array([2.0 * index, -index, 0.4 * index])
-            for index, point in enumerate(coordinates)
+            point @ rotation.T + np.array([2.0 * index, -index, 0.4 * index])
+            for index, (point, rotation) in enumerate(
+                zip(coordinates, imposed_rotations, strict=True)
+            )
         ]
     )
     transformed = build_mass_scaled_path(
@@ -116,12 +197,130 @@ def test_path_is_invariant_to_rigid_motion_and_reversal():
         coordinates[::-1], masses, transition_state_index=2, reference_mass_amu=2.0
     )
 
+    reference_geometry = molecular_path_tangents_and_curvature(reference)
+    transformed_geometry = molecular_path_tangents_and_curvature(transformed)
+    reversed_geometry = molecular_path_tangents_and_curvature(reversed_path)
+    transition_state_rotation = imposed_rotations[2]
+    transformed_tangents_in_reference_frame = (
+        transformed_geometry.unit_tangents.reshape(-1, 3, 3) @ transition_state_rotation
+    ).reshape(len(parameter), -1)
+    transformed_curvature_in_reference_frame = (
+        transformed_geometry.curvature_vectors_per_angstrom.reshape(-1, 3, 3)
+        @ transition_state_rotation
+    ).reshape(len(parameter), -1)
+
     assert transformed.coordinate_angstrom == pytest.approx(
         reference.coordinate_angstrom, abs=2.0e-12
     )
     assert reversed_path.coordinate_angstrom == pytest.approx(
         -reference.coordinate_angstrom[::-1], abs=2.0e-12
     )
+    assert transformed_tangents_in_reference_frame == pytest.approx(
+        reference_geometry.unit_tangents, abs=2.0e-10
+    )
+    assert transformed_curvature_in_reference_frame == pytest.approx(
+        reference_geometry.curvature_vectors_per_angstrom, abs=2.0e-8
+    )
+    assert reversed_path.aligned_coordinates_angstrom == pytest.approx(
+        reference.aligned_coordinates_angstrom[::-1], abs=2.0e-12
+    )
+    assert reversed_geometry.unit_tangents == pytest.approx(
+        -reference_geometry.unit_tangents[::-1], abs=2.0e-10
+    )
+    assert reversed_geometry.curvature_vectors_per_angstrom == pytest.approx(
+        reference_geometry.curvature_vectors_per_angstrom[::-1], abs=2.0e-8
+    )
+
+    assert reference_geometry.tangent_rigid_residual_magnitudes is not None
+    assert (
+        reference_geometry.curvature_rigid_residual_magnitudes_per_angstrom is not None
+    )
+    assert np.all(reference_geometry.tangent_rigid_residual_magnitudes >= 0.0)
+    assert np.all(
+        reference_geometry.curvature_rigid_residual_magnitudes_per_angstrom >= 0.0
+    )
+    for point, tangent, curvature in zip(
+        reference.aligned_coordinates_angstrom,
+        reference_geometry.unit_tangents,
+        reference_geometry.curvature_vectors_per_angstrom,
+        strict=True,
+    ):
+        rigid = _mass_weighted_rigid_motions(point, masses)
+        assert rigid.T @ tangent == pytest.approx(np.zeros(6), abs=2.0e-12)
+        assert rigid.T @ curvature == pytest.approx(np.zeros(6), abs=2.0e-11)
+        assert tangent @ curvature == pytest.approx(0.0, abs=2.0e-12)
+
+
+def test_alignment_rotations_map_input_rows_and_coherently_rotate_hessians():
+    base = np.array([[0.0, 0.0, 0.0], [1.2, 0.1, 0.0], [0.1, 0.9, 0.4]])
+    displacement = np.array(
+        [[0.03, -0.02, 0.01], [-0.04, 0.05, 0.02], [0.01, -0.03, 0.04]]
+    )
+    internal = np.asarray([base + value * displacement for value in (-0.4, 0.0, 0.5)])
+    imposed_rotations = [_rotation_z(angle) for angle in (0.8, -0.35, 0.45)]
+    coordinates = np.asarray(
+        [
+            point @ rotation.T + np.array([3.0 * index, -2.0, 0.7])
+            for index, (point, rotation) in enumerate(
+                zip(internal, imposed_rotations, strict=True)
+            )
+        ]
+    )
+    masses = np.array([12.0, 16.0, 1.0])
+    path = build_mass_scaled_path(coordinates, masses, transition_state_index=1)
+
+    for point, aligned, rotation in zip(
+        coordinates,
+        path.aligned_coordinates_angstrom,
+        path.input_to_aligned_rotations,
+        strict=True,
+    ):
+        centred = point - np.average(point, axis=0, weights=masses)
+        assert centred @ rotation == pytest.approx(aligned, abs=2.0e-12)
+        assert rotation.T @ rotation == pytest.approx(np.eye(3), abs=2.0e-12)
+        assert np.linalg.det(rotation) == pytest.approx(1.0, abs=2.0e-12)
+
+    point_index = 0
+    rotation = path.input_to_aligned_rotations[point_index]
+    aligned_tangent = (
+        molecular_path_tangents_and_curvature(path)
+        .unit_tangents[point_index]
+        .reshape(3, 3)
+    )
+    input_tangent = aligned_tangent @ rotation.T
+    rng = np.random.default_rng(20260907)
+    raw = rng.normal(size=(9, 9))
+    mass_weighted_hessian = raw.T @ raw + np.diag(np.arange(1.0, 10.0))
+    factors = np.repeat(np.sqrt(masses), 3)
+    input_hessian = factors[:, None] * mass_weighted_hessian * factors[None, :]
+
+    input_modes = project_transverse_hessian(
+        coordinates[point_index], masses, input_hessian, input_tangent
+    )
+    aligned_modes = project_transverse_hessian(
+        path.aligned_coordinates_angstrom[point_index],
+        masses,
+        rotate_cartesian_hessian(input_hessian, rotation),
+        aligned_tangent,
+    )
+    wrong_frame_modes = project_transverse_hessian(
+        path.aligned_coordinates_angstrom[point_index],
+        masses,
+        input_hessian,
+        aligned_tangent,
+    )
+
+    assert aligned_modes.eigenvalues == pytest.approx(
+        input_modes.eigenvalues, rel=2.0e-12
+    )
+    assert not np.allclose(wrong_frame_modes.eigenvalues, input_modes.eigenvalues)
+
+    tensor_hessian = input_hessian.reshape(3, 3, 3, 3)
+    assert rotate_cartesian_hessian(tensor_hessian, rotation).reshape(
+        9, 9
+    ) == pytest.approx(rotate_cartesian_hessian(input_hessian, rotation), abs=2.0e-12)
+    with pytest.raises(ValueError, match="proper orthogonal"):
+        rotate_cartesian_hessian(input_hessian, np.diag([-1.0, 1.0, 1.0]))
 
 
 def test_nonlinear_transverse_projection_recovers_distinct_modes_and_constraints():
@@ -143,6 +342,9 @@ def test_nonlinear_transverse_projection_recovers_distinct_modes_and_constraints
     assert result.eigenvalues.shape == (2,)
     assert result.mass_weighted_eigenvectors.shape == (2, 3, 3)
     assert result.eigenvalues == pytest.approx([2.0, 5.0], abs=2.0e-12)
+    assert (
+        result.negative_eigenvalue_tolerance_units == "same as cartesian_hessian / amu"
+    )
 
     eigenvectors = result.mass_weighted_eigenvectors.reshape(2, -1)
     rigid = _mass_weighted_rigid_motions(coordinates, masses)
@@ -309,7 +511,7 @@ def test_pilgrim_liu_two_mode_turning_length_golden_equation():
     )
 
 
-def test_exact_straight_point_uses_continuous_neighboring_turning_length():
+def test_exact_straight_point_uses_finite_direction_neutral_baseline():
     coordinate = np.array([-1.0, 0.0, 1.0])
     curvature_vectors = np.array([[0.3, 0.4, 0.0], [0.0, 0.0, 0.0], [0.3, 0.4, 0.0]])
     modes = np.broadcast_to(np.eye(3)[:2], (3, 2, 3)).copy()
@@ -318,22 +520,195 @@ def test_exact_straight_point_uses_continuous_neighboring_turning_length():
     result = curvature_effective_mass_profile(
         coordinate, curvature_vectors, modes, frequencies
     )
+    unregularized = curvature_effective_mass_profile(
+        coordinate,
+        curvature_vectors,
+        modes,
+        frequencies,
+        straightness_tolerance_per_angstrom=0.0,
+    )
 
     assert result.turning_length_angstrom[1] == pytest.approx(
-        0.5 * (result.turning_length_angstrom[0] + result.turning_length_angstrom[2])
+        np.sqrt(np.mean(result.mode_turning_amplitudes_angstrom[1] ** 2)),
+        rel=2.0e-15,
     )
     assert result.turning_length_derivative[1] == pytest.approx(0.0, abs=1.0e-14)
     assert result.mode_curvature_components_per_angstrom[1] == pytest.approx([0.0, 0.0])
     assert result.effective_mass_amu[1] == pytest.approx(1.0)
     assert np.all(np.isfinite(result.turning_length_angstrom))
+    assert np.all(np.isfinite(unregularized.turning_length_angstrom))
+    assert unregularized.turning_length_angstrom[1] == pytest.approx(
+        result.turning_length_angstrom[1], rel=2.0e-15
+    )
+
+
+def test_near_zero_curvature_uses_same_straight_limit_as_exact_zero():
+    coordinate = np.array([-1.0, 0.0, 1.0])
+    exact = np.array([[0.3, 0.4, 0.0], [0.0, 0.0, 0.0], [0.3, 0.4, 0.0]])
+    near = exact.copy()
+    near[1, 0] = 1.0e-15
+    modes = np.broadcast_to(np.eye(3)[:2], (3, 2, 3)).copy()
+    frequencies = np.tile([400.0, 100.0], (3, 1))
+
+    exact_result = curvature_effective_mass_profile(
+        coordinate, exact, modes, frequencies
+    )
+    near_result = curvature_effective_mass_profile(coordinate, near, modes, frequencies)
+
+    assert near_result.straightness_tolerance_per_angstrom == pytest.approx(1.0e-12)
+    assert near_result.curvature_magnitudes_per_angstrom[1] == pytest.approx(1.0e-15)
+    assert near_result.turning_length_angstrom == pytest.approx(
+        exact_result.turning_length_angstrom, rel=2.0e-6
+    )
+    assert near_result.effective_mass_amu == pytest.approx(
+        exact_result.effective_mass_amu, rel=2.0e-6
+    )
+    with pytest.raises(ValueError, match="straightness_tolerance"):
+        curvature_effective_mass_profile(
+            coordinate,
+            exact,
+            modes,
+            frequencies,
+            straightness_tolerance_per_angstrom=-1.0,
+        )
+
+
+def test_turning_length_and_mass_are_continuous_across_regularization_scale():
+    coordinate = np.array([-1.0, -0.5, 0.0, 0.5, 1.0])
+    tolerance = 0.2
+    modes = np.broadcast_to(np.eye(3)[:2], (len(coordinate), 2, 3)).copy()
+    frequencies = np.tile([400.0, 100.0], (len(coordinate), 1))
+
+    def profile(centre_scale: float):
+        scales = np.array([0.4, 0.8, centre_scale, 1.4, 2.0])
+        curvature = np.column_stack(
+            [scales * tolerance, np.zeros((len(coordinate), 2))]
+        )
+        return curvature_effective_mass_profile(
+            coordinate,
+            curvature,
+            modes,
+            frequencies,
+            straightness_tolerance_per_angstrom=tolerance,
+        )
+
+    below = profile(0.999)
+    above = profile(1.001)
+
+    assert below.curvature_magnitudes_per_angstrom[2] == pytest.approx(
+        0.999 * tolerance, rel=2.0e-15
+    )
+    assert above.curvature_magnitudes_per_angstrom[2] == pytest.approx(
+        1.001 * tolerance, rel=2.0e-15
+    )
+    assert above.turning_length_angstrom == pytest.approx(
+        below.turning_length_angstrom, rel=5.0e-4
+    )
+    assert above.effective_mass_amu == pytest.approx(
+        below.effective_mass_amu, rel=3.0e-4
+    )
+
+
+def test_wholly_straight_profile_has_reference_mass_even_with_varying_modes():
+    coordinate = np.array([-1.0, -0.3, 0.0, 0.4, 1.0])
+    curvature = np.zeros((len(coordinate), 3))
+    modes = np.broadcast_to(np.eye(3)[:2], (len(coordinate), 2, 3)).copy()
+    frequencies = np.column_stack(
+        [
+            np.linspace(300.0, 700.0, len(coordinate)),
+            np.linspace(900.0, 500.0, len(coordinate)),
+        ]
+    )
+
+    result = curvature_effective_mass_profile(
+        coordinate,
+        curvature,
+        modes,
+        frequencies,
+        reference_mass_amu=2.5,
+    )
+
+    assert np.all(np.isfinite(result.turning_length_angstrom))
+    assert result.effective_mass_amu == pytest.approx(np.full(len(coordinate), 2.5))
+
+
+def test_curved_molecular_path_composes_through_transverse_curvature_mass():
+    parameter = np.linspace(-0.6, 0.6, 7)
+    base = np.array([[0.0, 0.0, 0.0], [1.2, 0.1, 0.0], [0.1, 0.9, 0.4]])
+    coordinates = np.asarray(
+        [
+            base
+            + np.array(
+                [
+                    [0.03 * value**2, 0.0, 0.0],
+                    [0.08 * value, 0.04 * value**2, 0.02 * value],
+                    [-0.05 * value, 0.06 * value, -0.04 * value**2],
+                ]
+            )
+            for value in parameter
+        ]
+    )
+    masses = np.array([12.0, 16.0, 1.0])
+    path = build_mass_scaled_path(coordinates, masses, transition_state_index=3)
+    geometry = molecular_path_tangents_and_curvature(path)
+    cartesian_hessian = np.diag(np.repeat(masses, 3))
+    mode_results = [
+        project_transverse_hessian(point, masses, cartesian_hessian, tangent)
+        for point, tangent in zip(
+            path.aligned_coordinates_angstrom,
+            geometry.unit_tangents,
+            strict=True,
+        )
+    ]
+    eigenvectors = np.asarray(
+        [result.mass_weighted_eigenvectors for result in mode_results]
+    )
+    flattened_modes = eigenvectors.reshape(len(parameter), 2, -1)
+    projected = np.einsum(
+        "pm,pmi->pi",
+        np.einsum(
+            "pmi,pi->pm", flattened_modes, geometry.curvature_vectors_per_angstrom
+        ),
+        flattened_modes,
+    )
+    residual = np.linalg.norm(
+        geometry.curvature_vectors_per_angstrom - projected, axis=1
+    )
+    assert residual == pytest.approx(np.zeros(len(parameter)), abs=2.0e-11)
+
+    profile = curvature_effective_mass_profile(
+        path.coordinate_angstrom,
+        geometry.curvature_vectors_per_angstrom,
+        eigenvectors,
+        np.full((len(parameter), 2), 500.0),
+    )
+
+    assert profile.curvature_magnitudes_per_angstrom == pytest.approx(
+        geometry.curvature_magnitudes_per_angstrom, rel=2.0e-12, abs=2.0e-12
+    )
+    assert np.all(np.isfinite(profile.turning_length_angstrom))
+    assert np.all(np.isfinite(profile.effective_mass_amu))
+    assert np.all(
+        (profile.effective_mass_amu > 0.0) & (profile.effective_mass_amu <= 1.0)
+    )
+
+
+def test_curvature_mass_rejects_incomplete_molecular_transverse_basis():
+    coordinate = np.array([-1.0, 0.0, 1.0])
+    curvature = np.zeros((3, 9))
+    modes = np.broadcast_to(np.eye(9)[:1], (3, 1, 9)).copy()
+    frequencies = np.full((3, 1), 500.0)
+
+    with pytest.raises(ValueError, match="complete 3N-7"):
+        curvature_effective_mass_profile(coordinate, curvature, modes, frequencies)
 
 
 def test_duplicate_nonfinite_and_nonpositive_inputs_are_rejected():
     coordinates = np.array(
         [
             [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
-            [[1.0, 2.0, 3.0], [2.0, 2.0, 3.0]],
-            [[0.0, 0.0, 0.0], [1.4, 0.0, 0.0]],
+            [[1.0, 2.0, 3.0], [2.2, 2.0, 3.0]],
+            [[4.0, -1.0, 2.0], [5.0, -1.0, 2.0]],
         ]
     )
     with pytest.raises(ValueError, match="duplicate"):
