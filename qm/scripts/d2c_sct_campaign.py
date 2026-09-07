@@ -1143,6 +1143,31 @@ def _exclusive_route_claim(route_root: Path) -> Iterator[None]:
         os.close(descriptor)
 
 
+_PATH_ANCESTOR_RECEIPT_KEYS = frozenset(
+    {
+        "preflight",
+        "transition_state_qualification",
+        "irc_execution",
+        "irc_forward",
+        "irc_reverse",
+    }
+)
+
+
+def _validated_path_ancestor_hashes(ancestors: Any) -> dict[str, str]:
+    if type(ancestors) is not dict or set(ancestors) != _PATH_ANCESTOR_RECEIPT_KEYS:
+        raise ValueError("typed path canonical ancestor receipts are incomplete")
+    validated: dict[str, str] = {}
+    for label in sorted(_PATH_ANCESTOR_RECEIPT_KEYS):
+        value = _require_json_string(
+            ancestors[label], label=f"typed path {label} receipt SHA-256"
+        )
+        validated[label] = _require_sha(
+            value, length=64, label=f"typed path {label} receipt SHA-256"
+        )
+    return validated
+
+
 def _path_receipt_payload(
     campaign_identity: str,
     route: str,
@@ -1151,6 +1176,8 @@ def _path_receipt_payload(
     oriented: OrientedIrcPath,
     ancestor_receipts: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], bytes]:
+    if ancestor_receipts is not None:
+        ancestor_receipts = _validated_path_ancestor_hashes(ancestor_receipts)
     coordinates_bytes = oriented.coordinates_angstrom.tobytes()
     points = []
     for index, provenance in enumerate(oriented.point_provenance):
@@ -1168,7 +1195,7 @@ def _path_receipt_payload(
         )
     receipt = {
         "schema": (
-            "d2c-typed-irc-path-v2"
+            "d2c-typed-irc-path-v3"
             if ancestor_receipts is not None
             else "d2c-typed-irc-path-v1"
         ),
@@ -2274,38 +2301,32 @@ def _direction_from_irc_receipt(
 def _validate_canonical_irc_receipts(
     ancestry: _CanonicalQualificationAncestry,
 ) -> tuple[SellaIrcTrace, dict[str, str], str]:
-    hashes: dict[str, str] = {}
-    directions: list[IrcDirectionPath] = []
-    contracts: list[IrcExecutionContract] = []
-    run_identities: list[str] = []
+    execution_receipt, execution_raw, trace, run_identity = _load_irc_execution_receipt(
+        ancestry
+    )
+    hashes = {
+        "execution": hashlib.sha256(execution_raw).hexdigest(),
+    }
+    direction_receipts = execution_receipt["direction_receipts"]
     for name in ("forward", "reverse"):
         receipt_path = ancestry.root / ancestry.route / f"irc-{name}" / "receipt.json"
         receipt, raw = _read_json_object(receipt_path, label=f"IRC {name} receipt")
-        direction, contract, run_identity = _direction_from_irc_receipt(
+        _strict_json_equal(
+            receipt,
+            direction_receipts[name],
+            label=f"IRC {name} standalone/shared execution receipt",
+        )
+        _, contract, direction_run_identity = _direction_from_irc_receipt(
             receipt,
             name=name,
             ancestry=ancestry,
         )
-        directions.append(direction)
-        contracts.append(contract)
-        run_identities.append(run_identity)
+        if contract != trace.execution_contract:
+            raise ValueError("canonical IRC directions have mixed execution contracts")
+        if direction_run_identity != run_identity:
+            raise ValueError("canonical IRC directions have mixed run identities")
         hashes[name] = hashlib.sha256(raw).hexdigest()
-    if contracts[0] != contracts[1]:
-        raise ValueError("canonical IRC directions have mixed execution contracts")
-    if run_identities[0] != run_identities[1]:
-        raise ValueError("canonical IRC directions have mixed run identities")
-    masses = np.asarray(
-        [
-            ISOTOPIC_MASSES_AMU[symbol]
-            for symbol in ancestry.qualified_transition_state.symbols
-        ]
-    )
-    trace = SellaIrcTrace(
-        masses_amu=masses,
-        directions=(directions[0], directions[1]),
-        execution_contract=contracts[0],
-    )
-    return trace, hashes, run_identities[0]
+    return trace, hashes, run_identity
 
 
 def _irc_execution_receipt_payload(
@@ -2559,6 +2580,7 @@ def run_and_publish_irc(
                 _load_irc_execution_receipt(ancestry)
             )
 
+        execution_sha256 = hashlib.sha256(execution_raw).hexdigest()
         direction_records = execution_receipt["direction_receipts"]
         for name in ("forward", "reverse"):
             direction_root = route_root / f"irc-{name}"
@@ -2603,26 +2625,39 @@ def run_and_publish_irc(
                 _failure_injector(f"after_irc_direction_commit:{name}")
 
         current = _load_canonical_qualification(ancestry.root, route)
+        if (
+            current.preflight_receipt_sha256 != ancestry.preflight_receipt_sha256
+            or current.ts_qualification_receipt_sha256
+            != ancestry.ts_qualification_receipt_sha256
+        ):
+            raise ValueError("IRC canonical parent receipts changed after publication")
+        _, current_execution_raw, _, current_execution_run_identity = (
+            _load_irc_execution_receipt(current)
+        )
+        current_execution_sha256 = hashlib.sha256(current_execution_raw).hexdigest()
+        if (
+            current_execution_raw != execution_raw
+            or current_execution_sha256 != execution_sha256
+            or current_execution_run_identity != run_identity
+        ):
+            raise ValueError(
+                "IRC execution receipt changed after direction publication"
+            )
         current_trace, hashes, current_run_identity = _validate_canonical_irc_receipts(
             current
         )
-        if current_run_identity != run_identity:
-            raise ValueError("canonical IRC direction run identity changed")
-        for name in ("forward", "reverse"):
-            observed, _ = _read_json_object(
-                route_root / f"irc-{name}" / "receipt.json",
-                label=f"IRC {name} receipt",
-            )
-            _strict_json_equal(
-                observed,
-                direction_records[name],
-                label=f"IRC {name} shared execution receipt",
-            )
+        if (
+            hashes["execution"] != execution_sha256
+            or current_run_identity != run_identity
+        ):
+            raise ValueError("canonical IRC execution receipt changed")
         return PublishedIrcRun(
             run_identity=run_identity,
             execution_receipt_path=execution_root / "receipt.json",
-            execution_receipt_sha256=hashlib.sha256(execution_raw).hexdigest(),
-            direction_receipt_sha256=hashes,
+            execution_receipt_sha256=hashes["execution"],
+            direction_receipt_sha256={
+                name: hashes[name] for name in ("forward", "reverse")
+            },
             trace=current_trace,
         )
 
@@ -2675,9 +2710,21 @@ def _validate_published_path(
         expected_receipt_keys.add("ancestor_receipts")
     if set(receipt) != expected_receipt_keys:
         raise ValueError("typed path receipt fields are unexpected or incomplete")
+    if ancestor_receipts is not None:
+        if receipt.get("schema") == "d2c-typed-irc-path-v2":
+            raise ValueError(
+                "legacy d2c-typed-irc-path-v2 lacks shared IRC execution ancestry; "
+                "use a fresh run root"
+            )
+        ancestor_receipts = _validated_path_ancestor_hashes(ancestor_receipts)
+        _strict_json_equal(
+            _validated_path_ancestor_hashes(receipt.get("ancestor_receipts")),
+            ancestor_receipts,
+            label="typed path receipt ancestor_receipts",
+        )
     expected_identity = {
         "schema": (
-            "d2c-typed-irc-path-v2"
+            "d2c-typed-irc-path-v3"
             if ancestor_receipts is not None
             else "d2c-typed-irc-path-v1"
         ),
@@ -2993,24 +3040,12 @@ def _publish_typed_irc_path(
 
 
 def _validated_path_ancestor_receipts(receipt: dict[str, Any]) -> dict[str, str]:
-    ancestors = receipt.get("ancestor_receipts")
-    expected_keys = {
-        "preflight",
-        "transition_state_qualification",
-        "irc_forward",
-        "irc_reverse",
-    }
-    if type(ancestors) is not dict or set(ancestors) != expected_keys:
-        raise ValueError("typed path canonical ancestor receipts are incomplete")
-    validated: dict[str, str] = {}
-    for label in sorted(expected_keys):
-        value = _require_json_string(
-            ancestors[label], label=f"typed path {label} receipt SHA-256"
+    if receipt.get("schema") == "d2c-typed-irc-path-v2":
+        raise ValueError(
+            "legacy d2c-typed-irc-path-v2 lacks shared IRC execution ancestry; "
+            "use a fresh run root"
         )
-        validated[label] = _require_sha(
-            value, length=64, label=f"typed path {label} receipt SHA-256"
-        )
-    return validated
+    return _validated_path_ancestor_hashes(receipt.get("ancestor_receipts"))
 
 
 def _directions_from_published_path(
@@ -3062,13 +3097,14 @@ def publish_typed_irc_path(
     route: str,
     _failure_injector: Callable[[str], None] | None = None,
 ) -> PublishedTypedIrcPath:
-    """Publish or resume solely from the two canonical IRC direction receipts."""
+    """Publish or resume solely from canonical shared and direction IRC receipts."""
 
     ancestry = _load_canonical_qualification(run_root, route)
     trace, irc_hashes, run_identity = _validate_canonical_irc_receipts(ancestry)
     ancestor_receipts = {
         "preflight": ancestry.preflight_receipt_sha256,
         "transition_state_qualification": ancestry.ts_qualification_receipt_sha256,
+        "irc_execution": irc_hashes["execution"],
         "irc_forward": irc_hashes["forward"],
         "irc_reverse": irc_hashes["reverse"],
     }
@@ -3081,6 +3117,7 @@ def publish_typed_irc_path(
         current_ancestors = {
             "preflight": current.preflight_receipt_sha256,
             "transition_state_qualification": (current.ts_qualification_receipt_sha256),
+            "irc_execution": current_hashes["execution"],
             "irc_forward": current_hashes["forward"],
             "irc_reverse": current_hashes["reverse"],
         }
@@ -3113,6 +3150,7 @@ def publish_typed_irc_path(
         "transition_state_qualification": (
             current_ancestry.ts_qualification_receipt_sha256
         ),
+        "irc_execution": current_ancestors["irc_execution"],
         "irc_forward": current_ancestors["irc_forward"],
         "irc_reverse": current_ancestors["irc_reverse"],
     }
@@ -3145,6 +3183,7 @@ def _validate_authoritative_published_path(
     expected = {
         "preflight": ancestry.preflight_receipt_sha256,
         "transition_state_qualification": ancestry.ts_qualification_receipt_sha256,
+        "irc_execution": irc_hashes["execution"],
         "irc_forward": irc_hashes["forward"],
         "irc_reverse": irc_hashes["reverse"],
     }

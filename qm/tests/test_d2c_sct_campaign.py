@@ -674,6 +674,30 @@ def test_atomic_path_publication_resume_and_tamper_fail_closed(tmp_path: Path):
     assert coordinates_path.read_bytes() == tampered_bytes
 
 
+def test_v3_typed_path_requires_exact_five_ancestor_hashes(tmp_path: Path):
+    route = "h-co-1w-cside"
+    transition_state, trace = _trace(route, "irc_back.xyz", "irc_fwd.xyz")
+    run_root = tmp_path / "run"
+
+    with pytest.raises(ValueError, match="ancestor receipts are incomplete"):
+        campaign._publish_typed_irc_path(
+            run_root,
+            campaign_identity="c" * 64,
+            route=route,
+            atom_mapping_sha256="d" * 64,
+            qualified_transition_state=transition_state,
+            trace=trace,
+            ancestor_receipts={
+                "preflight": "a" * 64,
+                "transition_state_qualification": "b" * 64,
+                "irc_forward": "c" * 64,
+                "irc_reverse": "d" * 64,
+            },
+        )
+
+    assert not (run_root / route / "path").exists()
+
+
 def test_atomic_path_failure_injection_leaves_no_canonical_partial(tmp_path: Path):
     route = "h-co-1w-oside"
     transition_state, trace = _trace(route, "irc_fwd.xyz", "irc_back.xyz")
@@ -1547,6 +1571,10 @@ def _rewrite_direction_receipt(
         irc_run_identity=run_identity,
     )
     receipt_path.write_bytes(campaign._json_bytes(receipt))
+    execution_path = run_root / route / "irc-execution" / "receipt.json"
+    execution = json.loads(execution_path.read_text())
+    execution["direction_receipts"][direction.sella_direction] = receipt
+    execution_path.write_bytes(campaign._json_bytes(execution))
 
 
 def test_bound_irc_runner_receives_every_exact_campaign_argument(tmp_path: Path):
@@ -1581,7 +1609,21 @@ def test_bound_irc_runner_receives_every_exact_campaign_argument(tmp_path: Path)
     assert observed["fmax_ev_a"] == 0.05
     assert observed["fmax_inner_ev_a"] == 0.01
     assert len(published.run_identity) == 64
+    assert (
+        published.execution_receipt_sha256
+        == hashlib.sha256(published.execution_receipt_path.read_bytes()).hexdigest()
+    )
     assert set(published.direction_receipt_sha256) == {"forward", "reverse"}
+    ancestry = campaign._load_canonical_qualification(run_root, "h-co-1w-cside")
+    _, canonical_hashes, canonical_run_identity = (
+        campaign._validate_canonical_irc_receipts(ancestry)
+    )
+    assert canonical_hashes == {
+        "execution": published.execution_receipt_sha256,
+        "forward": published.direction_receipt_sha256["forward"],
+        "reverse": published.direction_receipt_sha256["reverse"],
+    }
+    assert canonical_run_identity == published.run_identity
     resumed = campaign.run_and_publish_irc(
         run_root,
         route="h-co-1w-cside",
@@ -1654,7 +1696,45 @@ def test_irc_direction_crash_resumes_without_runner_or_overwrite(tmp_path: Path)
     assert resumed.trace.execution_contract == trace.execution_contract
 
 
-def test_public_path_rejects_mixed_irc_run_identities(tmp_path: Path):
+@pytest.mark.parametrize("race", ["delete", "replace"])
+def test_irc_final_validation_rejects_shared_execution_race(tmp_path: Path, race: str):
+    route = "h-co-1w-cside"
+    run_root = tmp_path / race
+    _, _, trace = _qualified_ancestry(run_root, route=route)
+    execution_path = run_root / route / "irc-execution" / "receipt.json"
+    replacement_raw = None
+
+    def race_after_reverse(stage: str) -> None:
+        nonlocal replacement_raw
+        if stage != "after_irc_direction_commit:reverse":
+            return
+        if race == "delete":
+            shutil.rmtree(execution_path.parent)
+            return
+        replacement = json.loads(execution_path.read_text())
+        replacement["irc_run_identity"] = "f" * 64
+        for direction in replacement["direction_receipts"].values():
+            direction["irc_run_identity"] = "f" * 64
+        replacement_raw = campaign._json_bytes(replacement)
+        execution_path.write_bytes(replacement_raw)
+
+    with pytest.raises(ValueError, match="IRC execution receipt"):
+        campaign.run_and_publish_irc(
+            run_root,
+            route=route,
+            _runner=lambda *_args, **_kwargs: trace,
+            _failure_injector=race_after_reverse,
+        )
+
+    if race == "delete":
+        assert not execution_path.exists()
+    else:
+        assert execution_path.read_bytes() == replacement_raw
+    assert (run_root / route / "irc-forward" / "receipt.json").is_file()
+    assert (run_root / route / "irc-reverse" / "receipt.json").is_file()
+
+
+def test_public_path_rejects_standalone_irc_run_identity_divergence(tmp_path: Path):
     run_root = tmp_path / "run"
     _authoritative_ancestry(run_root)
     reverse_receipt = run_root / "h-co-1w-cside" / "irc-reverse" / "receipt.json"
@@ -1663,7 +1743,7 @@ def test_public_path_rejects_mixed_irc_run_identities(tmp_path: Path):
         lambda receipt: receipt.__setitem__("irc_run_identity", "f" * 64),
     )
 
-    with pytest.raises(ValueError, match="mixed run identities"):
+    with pytest.raises(ValueError, match="standalone/shared execution receipt"):
         campaign.publish_typed_irc_path(run_root, route="h-co-1w-cside")
     assert not (run_root / "h-co-1w-cside" / "path").exists()
 
@@ -1808,13 +1888,21 @@ def test_authoritative_path_direct_and_resume_revalidate_canonical_ancestry(
     preflight, _, _ = _authoritative_ancestry(run_root)
 
     published = campaign.publish_typed_irc_path(run_root, route="h-co-1w-cside")
-    assert published.receipt["schema"] == "d2c-typed-irc-path-v2"
+    assert published.receipt["schema"] == "d2c-typed-irc-path-v3"
     assert set(published.receipt["ancestor_receipts"]) == {
         "preflight",
         "transition_state_qualification",
+        "irc_execution",
         "irc_forward",
         "irc_reverse",
     }
+    execution_raw = (
+        run_root / "h-co-1w-cside" / "irc-execution" / "receipt.json"
+    ).read_bytes()
+    assert (
+        published.receipt["ancestor_receipts"]["irc_execution"]
+        == hashlib.sha256(execution_raw).hexdigest()
+    )
     resumed = campaign.publish_typed_irc_path(run_root, route="h-co-1w-cside")
     assert resumed.receipt_sha256 == published.receipt_sha256
 
@@ -1823,6 +1911,65 @@ def test_authoritative_path_direct_and_resume_revalidate_canonical_ancestry(
     preflight_path.write_bytes(campaign._json_bytes(preflight))
     with pytest.raises(ValueError, match="preflight receipt SHA-256"):
         campaign.publish_typed_irc_path(run_root, route="h-co-1w-cside")
+
+
+def test_authoritative_path_rejects_legacy_v2_with_fresh_root_guidance(
+    tmp_path: Path,
+):
+    route = "h-co-1w-cside"
+    run_root = tmp_path / "run"
+    _authoritative_ancestry(run_root, route=route)
+    campaign.publish_typed_irc_path(run_root, route=route)
+    path_receipt = run_root / route / "path" / "receipt.json"
+    _rewrite_canonical_json(
+        path_receipt,
+        lambda receipt: receipt.__setitem__("schema", "d2c-typed-irc-path-v2"),
+    )
+
+    with pytest.raises(ValueError, match="legacy.*fresh run root"):
+        campaign.publish_typed_irc_path(run_root, route=route)
+
+
+@pytest.mark.parametrize("resume", [False, True])
+def test_authoritative_path_rejects_deleted_shared_execution_receipt(
+    tmp_path: Path, resume: bool
+):
+    route = "h-co-1w-cside"
+    run_root = tmp_path / "run"
+    _authoritative_ancestry(run_root, route=route)
+    published = (
+        campaign.publish_typed_irc_path(run_root, route=route) if resume else None
+    )
+    shutil.rmtree(run_root / route / "irc-execution")
+
+    with pytest.raises(ValueError, match="IRC execution receipt"):
+        campaign.publish_typed_irc_path(run_root, route=route)
+    if published is None:
+        assert not (run_root / route / "path").exists()
+    else:
+        assert (run_root / route / "path" / "receipt.json").read_bytes() == (
+            campaign._json_bytes(published.receipt)
+        )
+
+
+def test_authoritative_path_rejects_shared_nested_direction_divergence(
+    tmp_path: Path,
+):
+    route = "h-co-1w-cside"
+    run_root = tmp_path / "run"
+    _authoritative_ancestry(run_root, route=route)
+    execution_path = run_root / route / "irc-execution" / "receipt.json"
+
+    def mutate_nested_direction(receipt):
+        receipt["direction_receipts"]["forward"]["points"][-1][
+            "electronic_energy_ev"
+        ] -= 0.25
+
+    _rewrite_canonical_json(execution_path, mutate_nested_direction)
+
+    with pytest.raises(ValueError, match="standalone/shared execution receipt"):
+        campaign.publish_typed_irc_path(run_root, route=route)
+    assert not (run_root / route / "path").exists()
 
 
 def test_authoritative_path_api_does_not_accept_caller_identity_ts_or_trace(
@@ -2134,12 +2281,43 @@ def test_authoritative_hessian_resume_rejects_irc_ancestry_tamper_before_compute
         lambda receipt: receipt.__setitem__("algorithm", "tampered"),
     )
 
-    with pytest.raises(ValueError, match="IRC reverse receipt"):
+    with pytest.raises(ValueError, match="standalone/shared execution receipt"):
         campaign.publish_path_hessians(
             run_root,
             evaluator=lambda _cluster: pytest.fail("tamper reached evaluator"),
             **kwargs,
         )
+
+
+def test_hessian_precommit_revalidation_rejects_shared_execution_mutation(
+    tmp_path: Path,
+):
+    route = "h-co-1w-cside"
+    run_root = tmp_path / "run"
+    _, path = _authoritative_path(run_root)
+    execution_path = run_root / route / "irc-execution" / "receipt.json"
+    evaluation_calls = []
+
+    def mutate_during_evaluation(cluster):
+        evaluation_calls.append(int(cluster.name.rsplit("-", 1)[-1]))
+
+        def mutate_nested_direction(receipt):
+            receipt["direction_receipts"]["reverse"]["points"][-1][
+                "electronic_energy_ev"
+            ] -= 0.25
+
+        _rewrite_canonical_json(execution_path, mutate_nested_direction)
+        return _energy_reproducing_result(cluster, path)
+
+    with pytest.raises(ValueError, match="standalone/shared execution receipt"):
+        campaign.publish_path_hessians(
+            run_root,
+            route=route,
+            evaluator=mutate_during_evaluation,
+        )
+
+    assert evaluation_calls == [0]
+    assert not (run_root / route / "hessians" / "points" / "000000").exists()
 
 
 def test_authoritative_hessian_rejects_low_level_unreproduced_checkpoint(
@@ -2269,7 +2447,7 @@ def test_authoritative_hessian_post_commit_ancestry_mutation_fails_closed(
                 lambda receipt: receipt.__setitem__("algorithm", "raced"),
             )
 
-    with pytest.raises(ValueError, match="IRC forward receipt"):
+    with pytest.raises(ValueError, match="standalone/shared execution receipt"):
         campaign.publish_path_hessians(
             run_root,
             route="h-co-1w-cside",
