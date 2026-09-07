@@ -14,10 +14,10 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from types import MethodType
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -37,6 +37,89 @@ from quarry.pipeline import (
 
 HARTREE_TO_EV = 27.211386245988
 BOHR_TO_ANGSTROM = 0.529177210903
+
+
+def _immutable_float_array(values: np.ndarray) -> np.ndarray:
+    """Copy numerical record data into a read-only float array."""
+
+    array = np.asarray(values, dtype=float).copy()
+    array.setflags(write=False)
+    return array
+
+
+@dataclass(frozen=True)
+class IrcPoint:
+    """One Sella outer IRC point in ASE's native energy/length units."""
+
+    outer_step: int
+    coordinates_angstrom: np.ndarray
+    electronic_energy_ev: float
+    projected_fmax_ev_per_angstrom: float
+
+    def __post_init__(self) -> None:
+        coordinates = _immutable_float_array(self.coordinates_angstrom)
+        if coordinates.ndim != 2 or coordinates.shape[1] != 3:
+            raise ValueError("IRC point coordinates must have shape (N, 3)")
+        if not np.all(np.isfinite(coordinates)):
+            raise ValueError("IRC point coordinates must be finite")
+        if self.outer_step < 0:
+            raise ValueError("IRC outer_step must be non-negative")
+        if not np.isfinite(self.electronic_energy_ev):
+            raise ValueError("IRC electronic energy must be finite")
+        if (
+            not np.isfinite(self.projected_fmax_ev_per_angstrom)
+            or self.projected_fmax_ev_per_angstrom < 0.0
+        ):
+            raise ValueError("IRC projected fmax must be finite and non-negative")
+        object.__setattr__(self, "coordinates_angstrom", coordinates)
+
+
+@dataclass(frozen=True)
+class IrcDirectionPath:
+    """Outer points for one algebraic Sella direction.
+
+    ``sella_direction`` and ``algebraic_direction`` describe Sella's normalized
+    Hessian eigenvector convention only. They are deliberately not chemistry
+    labels such as reactant/product or backward/forward.
+    """
+
+    sella_direction: Literal["forward", "reverse"]
+    algebraic_direction: Literal[-1, 1]
+    points: tuple[IrcPoint, ...]
+
+    def __post_init__(self) -> None:
+        expected_sign = {"forward": 1, "reverse": -1}.get(self.sella_direction)
+        if expected_sign is None or self.algebraic_direction != expected_sign:
+            raise ValueError("Sella direction and algebraic direction disagree")
+        points = tuple(self.points)
+        if not points:
+            raise ValueError("an IRC direction path must contain its start point")
+        if [point.outer_step for point in points] != list(range(len(points))):
+            raise ValueError("IRC outer steps must be consecutive from zero")
+        object.__setattr__(self, "points", points)
+
+
+@dataclass(frozen=True)
+class SellaIrcTrace:
+    """Both paths generated from one shared-Hessian Sella IRC object."""
+
+    masses_amu: np.ndarray
+    directions: tuple[IrcDirectionPath, IrcDirectionPath]
+
+    def __post_init__(self) -> None:
+        masses = _immutable_float_array(self.masses_amu)
+        if masses.ndim != 1 or not np.all(np.isfinite(masses)) or np.any(masses <= 0.0):
+            raise ValueError(
+                "IRC masses must be a finite positive one-dimensional array"
+            )
+        directions = tuple(self.directions)
+        if len(directions) != 2 or [path.sella_direction for path in directions] != [
+            "forward",
+            "reverse",
+        ]:
+            raise ValueError("an IRC trace requires Sella forward then reverse paths")
+        object.__setattr__(self, "masses_amu", masses)
+        object.__setattr__(self, "directions", directions)
 
 
 def make_ase_calculator(settings: DftSettings, charge: int, spin: int):
@@ -775,25 +858,72 @@ def quick_irc(
     return ends[0], ends[1]
 
 
-def full_irc(
+def _capture_irc_point(
+    irc: Any,
+    atoms: Any,
+    *,
+    direction: str,
+    outer_step: int,
+) -> IrcPoint:
+    """Read one already-evaluated outer point from Sella's projected PES."""
+
+    coordinates = np.asarray(atoms.positions, dtype=float).copy()
+    if coordinates.ndim != 2 or coordinates.shape[1] != 3:
+        raise RuntimeError(f"full IRC {direction} produced invalid coordinate shape")
+    if not np.all(np.isfinite(coordinates)):
+        raise RuntimeError(
+            f"full IRC {direction} point {outer_step} has non-finite coordinates"
+        )
+    energy_ev = float(irc.pes.get_f())
+    if not np.isfinite(energy_ev):
+        raise RuntimeError(
+            f"full IRC {direction} point {outer_step} has non-finite energy"
+        )
+    projected_forces = np.asarray(irc.pes.get_projected_forces(), dtype=float)
+    if projected_forces.shape != coordinates.shape:
+        raise RuntimeError(
+            f"full IRC {direction} point {outer_step} has invalid projected-force shape"
+        )
+    if not np.all(np.isfinite(projected_forces)):
+        raise RuntimeError(
+            f"full IRC {direction} point {outer_step} has non-finite forces"
+        )
+    projected_fmax = float(np.linalg.norm(projected_forces, axis=1).max())
+    return IrcPoint(
+        outer_step=outer_step,
+        coordinates_angstrom=coordinates,
+        electronic_energy_ev=energy_ev,
+        projected_fmax_ev_per_angstrom=projected_fmax,
+    )
+
+
+def trace_sella_irc(
     ts: Cluster,
     settings: DftSettings,
     *,
+    masses_amu: np.ndarray | list[float] | tuple[float, ...] | None = None,
     fmax_ev_a: float = 0.05,
     fmax_inner_ev_a: float = 0.01,
     max_steps: int = 400,
     step_size_a: float = 0.10,
     trajectory: str | Path | None = None,
     logfile: str | Path | None = None,
-) -> tuple[Cluster, Cluster]:
-    """Trace both Gonzalez--Schlegel IRC directions to true minima.
+) -> SellaIrcTrace:
+    """Capture both bounded Gonzalez--Schlegel paths from one Sella object.
 
     One :class:`sella.IRC` instance is deliberately reused for ``forward`` and
     ``reverse``. Sella caches the transition-state Hessian and restores it when
     the second direction starts; constructing two unrelated optimizers would
-    lose that shared path identity. Both directions are bounded and must report
-    convergence. The returned clusters preserve the input atom order,
-    electronic state, and frozen-atom contract.
+    lose that shared path identity. Atomic masses are explicitly stored on
+    ``Atoms`` before Sella construction; production callers should pass their
+    receipt-bound isotopic masses, while legacy callers retain ASE's most-common
+    isotope convention. Each direction includes its exact TS
+    start and every completed outer IRC step. Energy is electronic energy in eV;
+    projected fmax is the maximum per-atom projected-force norm in eV/Angstrom.
+
+    Both directions must take at least one step, remain inside the point bound,
+    finish with both the ASE iterator and ``irc.converged()`` reporting success,
+    and independently pass the outer projected-force threshold.
     """
 
     from ase import Atoms
@@ -802,12 +932,37 @@ def full_irc(
 
     if max_steps <= 0:
         raise ValueError("full IRC max_steps must be positive")
-    if fmax_ev_a <= 0.0 or fmax_inner_ev_a <= 0.0:
-        raise ValueError("full IRC force tolerances must be positive")
-    if step_size_a <= 0.0:
-        raise ValueError("full IRC step size must be positive")
+    if (
+        not np.isfinite(fmax_ev_a)
+        or not np.isfinite(fmax_inner_ev_a)
+        or fmax_ev_a <= 0.0
+        or fmax_inner_ev_a <= 0.0
+    ):
+        raise ValueError("full IRC force tolerances must be finite and positive")
+    if not np.isfinite(step_size_a) or step_size_a <= 0.0:
+        raise ValueError("full IRC step size must be finite and positive")
+    coordinates = np.asarray(ts.coords, dtype=float)
+    if coordinates.ndim != 2 or coordinates.shape[1] != 3:
+        raise ValueError("full IRC TS coordinates must have shape (N, 3)")
+    if not np.all(np.isfinite(coordinates)):
+        raise ValueError("full IRC TS coordinates must be finite")
 
-    atoms = Atoms(symbols=ts.symbols, positions=ts.coords)
+    atoms = Atoms(symbols=ts.symbols, positions=coordinates)
+    # Never let IRC.__init__ choose masses implicitly. D2c supplies its frozen
+    # neutral-isotope table; existing full_irc callers preserve the historical
+    # ASE most-common convention through the explicit fallback.
+    if masses_amu is None:
+        atoms.set_masses("most_common")
+    else:
+        supplied_masses = np.asarray(masses_amu, dtype=float)
+        if supplied_masses.shape != (len(ts.symbols),):
+            raise ValueError("full IRC masses must contain exactly one value per atom")
+        atoms.set_masses(supplied_masses)
+    recorded_masses_amu = atoms.get_masses().copy()
+    if not np.all(np.isfinite(recorded_masses_amu)) or np.any(
+        recorded_masses_amu <= 0.0
+    ):
+        raise ValueError("full IRC atomic masses must be finite and positive")
     atoms.calc = make_ase_calculator(settings, ts.charge, ts.spin)
     if ts.frozen_indices:
         atoms.set_constraint(FixAtoms(indices=ts.frozen_indices))
@@ -828,21 +983,116 @@ def full_irc(
             return bool(method.converged())
 
         irc.gradient_converged = MethodType(gradient_converged, irc)
-    endpoints: list[Cluster] = []
-    for direction, suffix in (("forward", "irc-forward"), ("reverse", "irc-reverse")):
-        converged = irc.run(
-            fmax=fmax_ev_a,
-            fmax_inner=fmax_inner_ev_a,
-            steps=max_steps,
-            direction=direction,
+    direction_paths: list[IrcDirectionPath] = []
+    direction_specs: tuple[
+        tuple[Literal["forward", "reverse"], Literal[-1, 1]], ...
+    ] = (("forward", 1), ("reverse", -1))
+    for direction, algebraic_direction in direction_specs:
+        nsteps_before = int(irc.nsteps)
+        states = iter(
+            irc.irun(
+                fmax=fmax_ev_a,
+                fmax_inner=fmax_inner_ev_a,
+                steps=max_steps,
+                direction=direction,
+            )
         )
-        if not converged:
+        points: list[IrcPoint] = []
+        reported_convergence = False
+        for outer_step, converged in enumerate(states):
+            if outer_step > max_steps:
+                raise RuntimeError(
+                    f"full IRC {direction} exceeded its point bound of {max_steps + 1}"
+                )
+            points.append(
+                _capture_irc_point(
+                    irc,
+                    atoms,
+                    direction=direction,
+                    outer_step=outer_step,
+                )
+            )
+            reported_convergence = bool(converged)
+        if not points:
+            raise RuntimeError(f"full IRC {direction} produced no path points")
+        if not np.array_equal(points[0].coordinates_angstrom, coordinates):
+            raise RuntimeError(
+                f"full IRC {direction} did not start at the exact transition state"
+            )
+        steps_taken = int(irc.nsteps) - nsteps_before
+        if steps_taken > max_steps or len(points) > max_steps + 1:
+            raise RuntimeError(
+                f"full IRC {direction} exceeded its point bound of {max_steps + 1}"
+            )
+        if steps_taken != len(points) - 1:
+            raise RuntimeError(
+                f"full IRC {direction} outer-step accounting is inconsistent"
+            )
+        if steps_taken == 0:
+            raise RuntimeError(f"full IRC {direction} produced zero outer IRC steps")
+        terminal_convergence = bool(irc.converged())
+        if not reported_convergence or not terminal_convergence:
             raise RuntimeError(
                 f"full IRC {direction} direction did not converge within "
                 f"{max_steps} steps"
             )
+        endpoint_fmax = points[-1].projected_fmax_ev_per_angstrom
+        if endpoint_fmax >= fmax_ev_a:
+            raise RuntimeError(
+                f"full IRC {direction} endpoint projected fmax "
+                f"{endpoint_fmax:.6f} eV/A is not below {fmax_ev_a:.6f} eV/A"
+            )
+        direction_paths.append(
+            IrcDirectionPath(
+                sella_direction=direction,
+                algebraic_direction=algebraic_direction,
+                points=tuple(points),
+            )
+        )
+    return SellaIrcTrace(
+        masses_amu=recorded_masses_amu,
+        directions=(direction_paths[0], direction_paths[1]),
+    )
+
+
+def full_irc(
+    ts: Cluster,
+    settings: DftSettings,
+    *,
+    masses_amu: np.ndarray | list[float] | tuple[float, ...] | None = None,
+    fmax_ev_a: float = 0.05,
+    fmax_inner_ev_a: float = 0.01,
+    max_steps: int = 400,
+    step_size_a: float = 0.10,
+    trajectory: str | Path | None = None,
+    logfile: str | Path | None = None,
+) -> tuple[Cluster, Cluster]:
+    """Return legacy endpoint clusters for Sella forward then reverse paths.
+
+    The tuple ordering and endpoint names retain the historical API. Sella's
+    algebraic direction names do not assign reactant/product chemistry labels.
+    Use :func:`trace_sella_irc` when every outer path point is required.
+    """
+
+    trace = trace_sella_irc(
+        ts,
+        settings,
+        masses_amu=masses_amu,
+        fmax_ev_a=fmax_ev_a,
+        fmax_inner_ev_a=fmax_inner_ev_a,
+        max_steps=max_steps,
+        step_size_a=step_size_a,
+        trajectory=trajectory,
+        logfile=logfile,
+    )
+    endpoints = []
+    for path in trace.directions:
         endpoints.append(
-            replace(ts, coords=atoms.positions.copy(), name=f"{ts.name}-{suffix}")
+            replace(
+                ts,
+                coords=path.points[-1].coordinates_angstrom.copy(),
+                name=f"{ts.name}-irc-{path.sella_direction}",
+            )
         )
     return endpoints[0], endpoints[1]
 

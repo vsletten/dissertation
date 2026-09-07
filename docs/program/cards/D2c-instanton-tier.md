@@ -65,6 +65,18 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   whole-tree Ruff/format; no IRC/Hessian production compute or D3b table ran. Acceptance
   remains red until the resumable production stages execute and matched-site 12-20 K
   literature/branching gates pass.
+- 2026-09-07 05:02 PDT (hermes-custom-build-001; profile=workstation) —
+  PRODUCTION IRC ADAPTER CHECKPOINT: added a path-preserving Sella 2.5 IRC adapter
+  that records the exact TS and every outer point for both algebraic directions from
+  one shared-Hessian optimizer, accepts receipt-bound isotopic masses before optimizer
+  construction, preserves the legacy endpoint API, and fails closed on zero-step,
+  exhaustion, non-finite, accounting, point-bound, terminal-convergence, and endpoint-
+  force violations. Deterministic fake-optimizer coverage plus the whole QM suite are
+  green (`879 passed, 1 skipped`; Ruff/format/diff clean). Independent scientific review
+  found the frozen D2b H+CO inputs retain 13.5-52.8i cm^-1 spectator modes, so production
+  launch remains prohibited until the driver performs a fresh first-order-saddle/index,
+  reaction-mode/tangent, and typed endpoint-basin gate (or refines the saddles under a
+  new identity). No production calculator call, IRC receipt, Hessian, or D3b table ran.
 - 2026-09-06 23:33 PDT (hermes-custom-build-001; profile=workstation) —
   INPUT GATE CLOSED: froze the four predeclared direct-CC one-water D2b routes
   (both H+CO orientations plus both H2CO channels) into a tracked 29-file,

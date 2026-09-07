@@ -209,13 +209,37 @@ def test_full_irc_reuses_one_optimizer_for_both_directions(monkeypatch, tmp_path
         def __init__(self, atoms, **kwargs):
             self.atoms = atoms
             self.kwargs = kwargs
+            self.nsteps = 0
+            self.first = True
+            self.pes = self
             instances.append(self)
 
-        def run(self, **kwargs):
+        def get_f(self):
+            return -1.0
+
+        def get_projected_forces(self):
+            return np.zeros_like(self.atoms.positions)
+
+        def gradient_converged(self, gradient):
+            return self.converged()
+
+        def converged(self):
+            return not self.first
+
+        def irun(self, **kwargs):
             calls.append(kwargs)
-            sign = 1.0 if kwargs["direction"] == "forward" else -1.0
-            self.atoms.positions[:] = water().coords + sign * 0.05
-            return True
+            self.atoms.positions[:] = water().coords
+            self.first = True
+
+            def states():
+                yield self.gradient_converged(np.zeros(9))
+                sign = 1.0 if kwargs["direction"] == "forward" else -1.0
+                self.atoms.positions[:] = water().coords + sign * 0.05
+                self.first = False
+                self.nsteps += 1
+                yield self.gradient_converged(np.zeros(9))
+
+            return states()
 
     monkeypatch.setattr(sella, "IRC", FakeIRC)
     monkeypatch.setattr(relay, "full_irc", relay.full_irc)
@@ -246,7 +270,15 @@ def test_full_irc_bridges_ase_329_gradient_convergence_api(monkeypatch):
     class FakeIRC:
         def __init__(self, atoms, **kwargs):
             self.atoms = atoms
+            self.nsteps = 0
             self.first = True
+            self.pes = self
+
+        def get_f(self):
+            return -1.0
+
+        def get_projected_forces(self):
+            return np.zeros_like(self.atoms.positions)
 
         def gradient_converged(self, gradient):
             return True  # ASE 3.29's ordinary force-only decision at the TS.
@@ -254,13 +286,21 @@ def test_full_irc_bridges_ase_329_gradient_convergence_api(monkeypatch):
         def converged(self):
             return not self.first
 
-        def run(self, **kwargs):
+        def irun(self, **kwargs):
+            self.atoms.positions[:] = water().coords
             self.first = True  # Sella resets this for each direction.
-            initial_decisions.append(self.gradient_converged(np.zeros(9)))
-            self.first = False
-            sign = 1.0 if kwargs["direction"] == "forward" else -1.0
-            self.atoms.positions[:] = water().coords + sign * 0.05
-            return True
+
+            def states():
+                decision = self.gradient_converged(np.zeros(9))
+                initial_decisions.append(decision)
+                yield decision
+                self.first = False
+                sign = 1.0 if kwargs["direction"] == "forward" else -1.0
+                self.atoms.positions[:] = water().coords + sign * 0.05
+                self.nsteps += 1
+                yield self.gradient_converged(np.zeros(9))
+
+            return states()
 
     monkeypatch.setattr(sella, "IRC", FakeIRC)
     monkeypatch.setattr(ts_module, "make_ase_calculator", lambda *args: object())
@@ -277,9 +317,36 @@ def test_full_irc_fails_closed_when_either_direction_exhausts(monkeypatch):
     class FakeIRC:
         def __init__(self, atoms, **kwargs):
             self.atoms = atoms
+            self.nsteps = 0
+            self.first = True
+            self.direction = "forward"
+            self.pes = self
 
-        def run(self, **kwargs):
-            return kwargs["direction"] == "forward"
+        def get_f(self):
+            return -1.0
+
+        def get_projected_forces(self):
+            return np.zeros_like(self.atoms.positions)
+
+        def gradient_converged(self, gradient):
+            return self.converged()
+
+        def converged(self):
+            return not self.first and self.direction == "forward"
+
+        def irun(self, **kwargs):
+            self.direction = kwargs["direction"]
+            self.atoms.positions[:] = water().coords
+            self.first = True
+
+            def states():
+                yield self.gradient_converged(np.zeros(9))
+                self.first = False
+                self.atoms.positions[:] = water().coords + 0.05
+                self.nsteps += 1
+                yield self.gradient_converged(np.zeros(9))
+
+            return states()
 
     monkeypatch.setattr(sella, "IRC", FakeIRC)
     monkeypatch.setattr(ts_module, "make_ase_calculator", lambda *args: object())
