@@ -77,6 +77,22 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   launch remains prohibited until the driver performs a fresh first-order-saddle/index,
   reaction-mode/tangent, and typed endpoint-basin gate (or refines the saddles under a
   new identity). No production calculator call, IRC receipt, Hessian, or D3b table ran.
+- 2026-09-07 07:54 PDT (hermes-custom-build-001; profile=workstation) —
+  TRANSITION-STATE HESSIAN GATE CHECKPOINT: added a fresh native PySCF Hessian
+  evaluator with explicit `(atom_i, atom_j, xyz_i, xyz_j)` canonicalization, immutable
+  gradient/Hessian payloads, exact GPU-to-CPU fallback provenance, and geometry/settings
+  fingerprints. The campaign now applies a full nonlinear `3N-6` index gate before IRC:
+  physical `fmax < 0.02 eV/A`, exactly one mode below `-1e-8 Eh/Bohr^2/amu`, no
+  zero/noise-floor or additional negative modes, reaction frequency at least `200 cm^-1`,
+  and an unstable-mode vector derived from and hash-bound to mapped reactant/product
+  basin geometries. Four adversarial review rounds closed Hessian-layout, mutable-payload,
+  self-attested-vector, backend-provenance, and non-finite-overflow false greens; final
+  review passed. Exact pushed head is `c5ae2b990fd23323d970f15cac07278ee01c68df`;
+  whole-QM verification is `900 passed, 1 skipped` with Ruff/format/diff clean and the
+  historical hash-pinned `quarry/pipeline.py` unchanged. No production calculation,
+  endpoint-basin classification, per-path Hessian receipt, or D3b table ran. The next
+  continuation must implement typed endpoint classification plus atomic resumable route
+  and per-point Hessian publishing before any bounded production launch.
 - 2026-09-06 23:33 PDT (hermes-custom-build-001; profile=workstation) —
   INPUT GATE CLOSED: froze the four predeclared direct-CC one-water D2b routes
   (both H+CO orientations plus both H2CO channels) into a tracked 29-file,
