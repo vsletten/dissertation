@@ -45,7 +45,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A1f-acid-neutral-water-attacker-relay](cards/A1f-acid-neutral-water-attacker-relay.md) | A | P1 | workstation | done | exact donor migrated to relay |
 | [A1g-acid-bridge-side-hydronium-neutral-attacker](cards/A1g-acid-bridge-side-hydronium-neutral-attacker.md) | A | P1 | workstation | done | conclusive product-family rejection |
 | [A1i-acid-production-tier-bridge-side-revisit](cards/A1i-acid-production-tier-bridge-side-revisit.md) | A | P1 | workstation | blocked: A2 | A1g ✅, A2 |
-| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | ready | Osa/OSS/Oaa neutral families closed; choose a different independently gated family |
+| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | blocked: A3h | CALC-005 Si lane selected; physical/kinetic protocol required before compute |
 | [A3a-reactant-minimum-recovery](cards/A3a-reactant-minimum-recovery.md) | A | P1 | workstation | done | terminal microstate rejection; no minimum promoted |
 | [A3b-osa-neutral-n1-proton-microstate-stability](cards/A3b-osa-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; H52 became third mobile owner |
 | [A3c-osa-neutral-n1-mobile-proton-triad-conditioning](cards/A3c-osa-neutral-n1-mobile-proton-triad-conditioning.md) | A | P1 | workstation | done | verified triad-conditioning failure; owners retained, projected gradients red |
@@ -53,6 +53,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A3e-oss-neutral-n1-proton-microstate-stability](cards/A3e-oss-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; constrained max-gradient gate red, release not run |
 | [A3f-oss-neutral-n1-terminal-adjudication](cards/A3f-oss-neutral-n1-terminal-adjudication.md) | A | P1 | any | done | verified terminal rejection; no global no-basin claim |
 | [A3g-oaa-neutral-n2-proton-microstate-stability](cards/A3g-oaa-neutral-n2-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; conditioning nonstationary/owner-changing, production not run |
+| [A3h-calc005-si-attachment-protocol](cards/A3h-calc005-si-attachment-protocol.md) | A | P1 | any | ready | define balanced Si cycle, detailed-balance mapping, and one-rung pilot gate |
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
 | [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: A2b/A2c/A2d | final banked-reaction table, ranking, Petra/CALCULATIONS closeout |
 | [A2a-si-neutral-production-path-rebuild](cards/A2a-si-neutral-production-path-rebuild.md) | A | P1 | workstation | done | exact r2SCAN-3c minima + A2 infrastructure ✅ |
@@ -103,7 +104,10 @@ D2a-astro-rate-reproduction (PR #31 — verdict: GO gas-phase /
 NO-GO surface-LH), A7-kinetics-database (PR #27 — 36 minerals, 74
 mechanisms, validator green). **Blocked closeout branch**:
 `agents/A1b-acid-microsolvation` for A1b-acid-mechanisms.
-A3-barrier-ladder is READY only for a different independently gated family. A3g
+A3-barrier-ladder is BLOCKED on READY A3h before any fourth-family calculator
+launch. A3h owns the balanced 200s Si CALC-005 thermodynamic cycle, exact
+connectivity-to-Petra mapping, numerical/evidence contract, and independently
+reviewed one-rung pilot plan. A3g
 independently verified `inconclusive terminal failure` for exact Oaa-neutral n=2:
 the one owner-conditioning call remained nonstationary, changed three other proton
 owners, and failed both projected-gradient gates. Constrained B3LYP, release, PHVA,
