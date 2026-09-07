@@ -495,3 +495,23 @@ def test_strict_transition_state_gate_rejects_vector_not_derived_from_mapped_bas
             mapped_reactant_coordinates_angstrom=reactant,
             mapped_product_coordinates_angstrom=product,
         )
+
+
+def test_strict_transition_state_gate_rejects_projection_overflow():
+    cluster, masses, native, _, reactant, product = _strict_gate_fixture(
+        np.array([-0.02, 0.01, 0.03])
+    )
+    overflowing = np.array(
+        [-1e308, -1e308, -1e308, 1e308, -1e308, -1e308, -1e308, 1e308, 1e308]
+    )
+    with pytest.raises(ValueError, match="projection must be finite"):
+        campaign.validate_transition_state_gate(
+            cluster,
+            masses,
+            native,
+            expected_settings_fingerprint="settings",
+            reaction_vector_mass_scaled=overflowing,
+            reaction_vector_source="route-fixture:overflow",
+            mapped_reactant_coordinates_angstrom=reactant,
+            mapped_product_coordinates_angstrom=product,
+        )

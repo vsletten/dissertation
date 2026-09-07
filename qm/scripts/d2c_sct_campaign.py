@@ -333,9 +333,14 @@ def validate_transition_state_gate(
     route_vector = (
         mapped_path.mass_scaled_coordinates[2] - mapped_path.mass_scaled_coordinates[0]
     )
-    route_vector = modes.vibrational_basis @ (modes.vibrational_basis.T @ route_vector)
+    with np.errstate(over="ignore", invalid="ignore"):
+        route_vector = modes.vibrational_basis @ (
+            modes.vibrational_basis.T @ route_vector
+        )
+    if not np.all(np.isfinite(route_vector)):
+        raise ValueError("mapped route vector projection must be finite")
     route_norm = float(np.linalg.norm(route_vector))
-    if route_norm <= 1.0e-12:
+    if not math.isfinite(route_norm) or route_norm <= 1.0e-12:
         raise ValueError(
             "mapped route has no non-rigid reactant-to-product displacement"
         )
@@ -350,11 +355,14 @@ def validate_transition_state_gate(
         raise ValueError(
             "reaction vector must be a finite mass-scaled (N,3) or (3N,) vector"
         )
-    reaction_vector = modes.vibrational_basis @ (
-        modes.vibrational_basis.T @ reaction_vector
-    )
+    with np.errstate(over="ignore", invalid="ignore"):
+        reaction_vector = modes.vibrational_basis @ (
+            modes.vibrational_basis.T @ reaction_vector
+        )
+    if not np.all(np.isfinite(reaction_vector)):
+        raise ValueError("reaction vector projection must be finite")
     reaction_norm = float(np.linalg.norm(reaction_vector))
-    if reaction_norm <= 1.0e-12:
+    if not math.isfinite(reaction_norm) or reaction_norm <= 1.0e-12:
         raise ValueError("reaction vector has no non-rigid vibrational component")
     reaction_vector /= reaction_norm
     if (
@@ -365,7 +373,10 @@ def validate_transition_state_gate(
             "reaction vector source must identify its mapped route construction"
         )
     route_binding_overlap = float(abs(np.dot(reaction_vector, route_vector)))
-    if route_binding_overlap < 1.0 - 1.0e-10:
+    if (
+        not math.isfinite(route_binding_overlap)
+        or route_binding_overlap < 1.0 - 1.0e-10
+    ):
         raise ValueError(
             "reaction vector does not match the receipt-bound mapped route geometries"
         )
@@ -374,7 +385,7 @@ def validate_transition_state_gate(
     ].reshape(-1)
     reaction_overlap = float(abs(np.dot(unstable_mode, reaction_vector)))
     minimum_overlap = bounds["minimum_mapped_reaction_vector_overlap"]
-    if reaction_overlap < minimum_overlap:
+    if not math.isfinite(reaction_overlap) or reaction_overlap < minimum_overlap:
         raise ValueError(
             f"imaginary mode overlap {reaction_overlap:.12g} is below mapped-reaction "
             f"minimum {minimum_overlap:.12g}"
