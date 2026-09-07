@@ -57,6 +57,15 @@ Node = tuple[int, tuple[int, int, int]]
 
 
 @dataclass(frozen=True)
+class AtomOrigin:
+    """Graph identity retained alongside one constructed cluster atom."""
+
+    kind: str
+    node: Node
+    ordinal: int | None = None
+
+
+@dataclass(frozen=True)
 class CellSite:
     kind: str
     frac: tuple[float, float, float]
@@ -165,6 +174,9 @@ class CrystalCluster:
     n_intact: int
     # Per-atom metal-shell provenance (H atoms inherit their oxygen's shell).
     atom_shell: list[int]
+    atom_origins: list[AtomOrigin]
+    center_bridges: list[Node]
+    kept_center_bridges: list[Node]
     termination_log: list[str] = field(default_factory=list)
 
     def metadata(self) -> dict:
@@ -372,6 +384,7 @@ def from_deck_cell(
     symbols: list[str] = []
     coords: list[np.ndarray] = []
     shells: list[int] = []
+    origins: list[AtomOrigin] = []
     atom_of: dict[Node, int] = {}
 
     def add(node: Node, shell: int) -> int:
@@ -379,6 +392,7 @@ def from_deck_cell(
         symbols.append(KIND_ELEMENT[cell.kind(node)])
         coords.append(cell.cart(node))
         shells.append(shell)
+        origins.append(AtomOrigin(kind="deck", node=node))
         return atom_of[node]
 
     bridge_index: int | None = None
@@ -459,10 +473,11 @@ def from_deck_cell(
             away = np.cross(metal_dirs[0], [1.0, 0.0, 0.0])
             if float(np.linalg.norm(away)) < 1e-3:
                 away = np.cross(metal_dirs[0], [0.0, 1.0, 0.0])
-        for d in _h_directions(away, n_h):
+        for ordinal, d in enumerate(_h_directions(away, n_h)):
             symbols.append("H")
             coords.append(o_pos + R_O_H * d)
             shells.append(shells[o_idx])
+            origins.append(AtomOrigin(kind="termination", node=b, ordinal=ordinal))
 
     # --- frozen shell -----------------------------------------------------
     # Heavy atoms of the outermost metal shell freeze at crystallographic
@@ -519,6 +534,9 @@ def from_deck_cell(
         n_intact_requested=n_intact,
         n_intact=resolved_n_intact,
         atom_shell=shells,
+        atom_origins=origins,
+        center_bridges=sorted(attacked_bridges),
+        kept_center_bridges=sorted(kept),
         termination_log=log,
     )
 

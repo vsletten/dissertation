@@ -1,11 +1,11 @@
 # A3h-calc005-si-attachment-protocol — define the Si coordination thermodynamic ladder
 
-- status: ready
+- status: done
 - track: A (geochemistry)
 - priority: P1
 - machine: any (design, builder probes, and analytical tests only; no production calculator)
 - depends: A3g ✅; parent A3 pre-launch review
-- claimed-by:
+- claimed-by: hermes-macbot-zero
 
 ## Objective
 
@@ -127,4 +127,40 @@ optimizer-converged state.
 
 ## Result
 
-Pending.
+2026-09-06 22:46 PDT (hermes-macbot-zero; profile=laptop) — **DONE after
+independent cold review and adversarial correction; no calculator was run.** The
+executable contract is `docs/program/A3h-calc005-si-attachment-protocol.md`.
+Live desorption starts from fully hydrolyzed center state 205 and uses
+`C_xy -> V_xy + Si(OH)4`, with no water thermochemical term; generic
+`n_intact=i` output is condensed state `205-i` and must first undergo a
+graph-provenance hydrolysis expansion.
+
+The CPU implementation retains deck/termination origins, materializes exact
+live C/V pairs for `(x=1,y=i-1), i=1..4`, and emits a hash-bound two-pass proof.
+The fixed pilot is
+`205/Osa.sih(402)/Oss.si1(303)^3 -> 200/Osa.albr(404)/Oss.empty(300)^3`,
+balanced as `Al6H38O30Si -> Al6H34O26 + H4O4Si`. CALC-005 reports relative
+environment stabilization `S_i`, not a barrier; the protocol fixes its sign,
+units, `+7.958500693927389 kJ/mol` 1-bar-to-1-M term, detailed-balance mapping,
+numerical/evidence gates, and workstation envelope.
+
+No DFT, GPU lease, service mutation, live database, Petra fragment, Store
+kinetic value, or CALCULATIONS closeout occurred. READY A3i owns only the
+state-expanded `(x=1,y=0), i=1` pilot; BLOCKED A3j owns independent artifact
+verification. Other topologies and `i=2..4` remain unauthorized.
+
+## Progress
+
+- 2026-09-06 23:16 PDT (hermes-macbot-zero; profile=laptop) — Final different-
+  worker source-first review returned **PASS with no blockers**. It independently
+  verified live Petra/legacy transitions, balanced chemistry, x/y mapping,
+  standard-state arithmetic and detailed balance; ran a coordinated-tamper
+  adversarial matrix to PASS; reproduced the committed proof byte-for-byte; and
+  confirmed board alignment plus zero Petra/CALCULATIONS output. Cargo was not
+  installed on this laptop; no Rust files changed and the Petra round-trip remains
+  an A3i acceptance gate.
+- 2026-09-06 22:46 PDT (hermes-macbot-zero; profile=laptop) — Closed reviews
+  that rejected condensed `205-i` as the live reactant, corrected Petra 402/403
+  names, fixed the exact standard-state term, added runnable state-expanded C/V
+  proof generation, and hardened formula/state/charge/spin/finite/provenance/
+  intended-owner/determinism gates plus analytical detailed-balance refusal.
