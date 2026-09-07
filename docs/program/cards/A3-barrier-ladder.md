@@ -4,7 +4,7 @@
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaigns; cluster-builder code is machine-any)
-- depends: A3h-calc005-si-attachment-protocol
+- depends: A3i-calc005-si-n1-pilot; A3j-calc005-si-n1-verification
 - claimed-by: hermes-custom-build-001
 
 ## Constraints
@@ -68,6 +68,14 @@ produce accepted reactant minima — never via closed OSS or Oaa neutral rungs.
 
 ## Result — CALC-005 pre-launch design gate
 
+- 2026-09-06 22:46 PDT (hermes-macbot-zero; profile=laptop) — A3h is DONE after
+  context-cold scientific/KMC review corrected the candidate cycle to the live
+  fully hydrolyzed state-205 exchange `C_xy -> V_xy + Si(OH)4`, separated the
+  KMC `i=x+y` environment index from generic `n_intact`, and produced a
+  deterministic state-expanded C/V proof for i=1..4. Parent A3 remains BLOCKED:
+  READY A3i owns only the `(x=1,y=0), i=1`, `Osa.sih -> Osa.albr` pilot and
+  BLOCKED A3j owns independent artifact verification. No other topology, i=2..4,
+  Al, kinetic value, Petra output, or CALCULATIONS closeout is authorized.
 - 2026-09-06 20:39 PDT (hermes-custom-build-001; profile=workstation) —
   **BLOCKED on READY A3h; no fourth family launched.** Two independent
   context-cold reviews selected the 200s Si attachment/detachment lane as the

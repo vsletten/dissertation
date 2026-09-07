@@ -266,6 +266,25 @@ class TestBuilder:
         assert cc.atom_shell[cc.attacked_index] == 0
         assert c.charge == 0
 
+    def test_atom_origins_preserve_deck_and_termination_identity(self):
+        cc = from_deck_cell(
+            DECK,
+            "Si",
+            center_index=4,
+            metal_shells=2,
+            n_intact=1,
+        )
+        assert len(cc.atom_origins) == len(cc.cluster.symbols)
+        assert cc.atom_origins[cc.attacked_index].kind == "deck"
+        assert cc.atom_origins[cc.attacked_index].node == (4, (0, 0, 0))
+        assert all(
+            origin.kind == "termination"
+            for symbol, origin in zip(cc.cluster.symbols, cc.atom_origins, strict=True)
+            if symbol == "H"
+        )
+        assert len(cc.center_bridges) == 4
+        assert len(cc.kept_center_bridges) == 1
+
 
 class TestAttackComplex:
     def test_water_attack_on_oss(self):
