@@ -4,17 +4,22 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import fcntl
 import hashlib
 import json
 import math
 import os
-import shutil
+import re
+import socket
+import subprocess
 import sys
 import time
+import uuid
 from contextlib import contextmanager
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
+from types import CodeType
 from typing import Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -36,6 +41,7 @@ import numpy as np  # noqa: E402
 from quarry.clusters import Cluster, water  # noqa: E402
 from quarry.crystal import attack_complex, from_deck_cell  # noqa: E402
 from quarry.pipeline import (  # noqa: E402
+    DftSettings,
     energy,
     frequencies,
     frequency_geometry_fingerprint,
@@ -45,6 +51,143 @@ from quarry.pipeline import (  # noqa: E402
 from quarry.store import geometry_hash  # noqa: E402
 from scripts import a3g_oaa_owner_basin as a3g  # noqa: E402
 from scripts.phase2_ladder import preload_cutensor  # noqa: E402
+
+AUDITED_EXECUTOR_SOURCES = {
+    "qm/scripts/a3g_oaa_owner_basin.py": (
+        "ab594073b47caa5b35985b7899b9a8541260d73241222b00b817daa5e3919261"
+    ),
+    "qm/quarry/pipeline.py": (
+        "6d92a01e1d275c2f97926731cc61e295eba360ce2e8850ac48a0a2e0ded6297f"
+    ),
+}
+
+# Independently maintained card contract; never read executor runtime constants.
+DEFAULT_SOURCE_ROOT = Path(
+    "/mnt/data/vsletten/dissertation-data/task274-a3-oaa-neutral-family-20260906"
+)
+DEFAULT_OUTPUT_ROOT = Path(
+    "/mnt/data/vsletten/dissertation-data/a3g-oaa-neutral-n2-proton-microstate-stability"
+)
+SOURCE_CELL = Path("runs/phase2/oaa-neutral-n2-s2-b3lyp-def2-svp")
+SOURCE_PATHS = {
+    "family_receipt": Path("terminal-receipt.json"),
+    "family_progress": Path("family-progress.json"),
+    "child_log": Path("logs/oaa-neutral-n2.log"),
+    "seed": SOURCE_CELL / "complex_guess.xyz",
+    "metadata": SOURCE_CELL / "metadata.json",
+    "launch": Path("launch-receipt.txt"),
+    "restoration": Path("restoration-receipt.txt"),
+}
+EXPECTED_SOURCE_SHA256 = {
+    "family_receipt": (
+        "e6cfb7063d1dc6bdfe9ce88324183f54838560aa379673a3c1ca2ce20fb531e6"
+    ),
+    "family_progress": (
+        "2d75c859be5fe2496432537bfb7e9892b5ccf228377c762caad98d050457a92b"
+    ),
+    "child_log": "ff607898882e7f16c1fd6d52f1283c01646ab32e9dccda603bc80ef54af746a2",
+    "seed": "bcf597e78dede88afe0f2b7af360c71ebb90b1fbacbb476eeb02ba6365dfbedd",
+    "metadata": "6fdd24d73fb1d2cd5dd6145345562c5803abcf13e7286d57ae5bf6865a2a6190",
+    "launch": "48bb6e018372caf56828d37aeb18915b2a579a58eafd62a6e75bb2bd6d5821a2",
+    "restoration": "ad5a78f88fc84be7ba794b274af431d35b1d97da8cab855fccc054d9755d9646",
+}
+EXPECTED_EXECUTION_SOURCE = "97cea5b585c95f18e499f53317ca8864a4c542d2"
+EXPECTED_BRANCH = "agents/A3g-oaa-neutral-n2-proton-microstate-stability"
+H52 = 52
+O15 = 15
+O9 = 9
+MAX_STEPS = 100
+DOWNHILL_MIN_HARTREE = 1.0e-6
+EXECUTOR_IDENTITY = "hermes-custom-build-001"
+ACCEPTED_CANDIDATE = "unverified: accepted reactant minimum"
+ALTERNATIVE_CANDIDATE = "unverified: lower-energy alternative microstate candidate"
+INCONCLUSIVE_CANDIDATE = "unverified: inconclusive terminal failure"
+VERIFIED_ACCEPTED = "accepted reactant minimum"
+VERIFIED_ALTERNATIVE = "verified lower-energy alternative microstate"
+VERIFIED_INCONCLUSIVE = "inconclusive terminal failure"
+
+
+NOISE_FLOOR_CM = 30.0
+ENERGY_REPRO_TOL = 1e-7
+GRADIENT_REPRO_TOL = 1e-7
+
+
+@dataclass(frozen=True)
+class StageSpec:
+    stage_id: str
+    directory: str
+    method: str
+    settings: DftSettings
+    parent: str | None
+    constrain_h52: bool
+    require_production_release_gate: bool
+    fully_released: bool
+
+
+STAGES = (
+    StageSpec(
+        "owner-conditioning",
+        "01-owner-conditioning",
+        "hf/sto-3g",
+        DftSettings(xc="hf", basis="sto-3g", use_gpu=False),
+        None,
+        True,
+        False,
+        False,
+    ),
+    StageSpec(
+        "constrained-production",
+        "02-constrained-production",
+        "b3lyp/def2-svp/df",
+        DftSettings(xc="b3lyp", basis="def2-svp", density_fit=True, use_gpu=True),
+        "owner-conditioning",
+        True,
+        True,
+        False,
+    ),
+    StageSpec(
+        "released-production",
+        "03-released-production",
+        "b3lyp/def2-svp/df",
+        DftSettings(xc="b3lyp", basis="def2-svp", density_fit=True, use_gpu=True),
+        "constrained-production",
+        False,
+        False,
+        True,
+    ),
+)
+STAGE_BY_ID = {stage.stage_id: stage for stage in STAGES}
+
+
+from quarry.durable_receipts import durable_mkdir, durable_replace  # noqa: E402
+
+# Card-scoped downstream artifacts, including family publication and store sidecars.
+FORBIDDEN_ARTIFACT_NAMES = frozenset(
+    {
+        "results.json",
+        "store.sqlite",
+        "store.sqlite-wal",
+        "store.sqlite-shm",
+        "store.sqlite-journal",
+        "store.task168.tmp.sqlite",
+        "store.sequential.tmp.sqlite",
+        "ts.xyz",
+        "barrier.json",
+        "petra.toml",
+        "family-progress.json",
+        "terminal-receipt.json",
+        "terminal.json",
+    }
+)
+
+
+def forbidden_inventory(output_root: Path) -> list[str]:
+    # No subtree exemptions: evidence/attempt directories cannot hide publication.
+    return sorted(
+        str(path.relative_to(output_root))
+        for path in output_root.rglob("*")
+        if path.name in FORBIDDEN_ARTIFACT_NAMES
+    )
 
 
 def now() -> str:
@@ -60,12 +203,14 @@ def sha256_path(path: Path) -> str:
 
 
 def atomic_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    durable_mkdir(path.parent)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     temporary.write_text(
         json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
     )
-    temporary.replace(path)
+    with temporary.open("rb") as stream:
+        os.fsync(stream.fileno())
+    durable_replace(temporary, path)
 
 
 def canonical_template(repo_root: Path) -> Cluster:
@@ -89,18 +234,18 @@ def validate_source(
 ) -> a3g.SourceEvidence:
     """Rehash and semantically bind every artifact in the A3g evidence contract."""
     source_root = source_root.resolve()
-    expected = expected_hashes or a3g.EXPECTED_SOURCE_SHA256
-    if set(expected) != set(a3g.SOURCE_PATHS):
+    expected = expected_hashes or EXPECTED_SOURCE_SHA256
+    if set(expected) != set(SOURCE_PATHS):
         raise RuntimeError("source expected-hash set is incomplete")
     observed = {
         name: sha256_path(source_root / relative)
-        for name, relative in a3g.SOURCE_PATHS.items()
+        for name, relative in SOURCE_PATHS.items()
     }
     for name, digest in expected.items():
         if observed[name] != digest:
             raise RuntimeError(f"source {name} SHA-256 mismatch: {observed[name]}")
 
-    family = json.loads((source_root / a3g.SOURCE_PATHS["family_receipt"]).read_text())
+    family = json.loads((source_root / SOURCE_PATHS["family_receipt"]).read_text())
     if (
         family.get("schema") != "a3-family-campaign-terminal-v1"
         or family.get("success") is not False
@@ -108,12 +253,12 @@ def validate_source(
         or family.get("state") != "neutral"
         or family.get("current_n_intact") != 2
         or family.get("completed") != []
-        or family.get("expected_git_sha") != a3g.EXPECTED_EXECUTION_SOURCE
-        or family.get("observed_git_sha") != a3g.EXPECTED_EXECUTION_SOURCE
+        or family.get("expected_git_sha") != EXPECTED_EXECUTION_SOURCE
+        or family.get("observed_git_sha") != EXPECTED_EXECUTION_SOURCE
     ):
         raise RuntimeError("family terminal identity/outcome/source mismatch")
 
-    metadata = json.loads((source_root / a3g.SOURCE_PATHS["metadata"]).read_text())
+    metadata = json.loads((source_root / SOURCE_PATHS["metadata"]).read_text())
     if (
         metadata.get("site_kind") != "Oaa"
         or metadata.get("state") != "neutral"
@@ -122,13 +267,13 @@ def validate_source(
         or metadata.get("metal_shells") != 2
         or metadata.get("charge") != 0
         or metadata.get("method") != "b3lyp/def2-svp/df"
-        or metadata.get("driver_git_commit") != a3g.EXPECTED_EXECUTION_SOURCE
+        or metadata.get("driver_git_commit") != EXPECTED_EXECUTION_SOURCE
     ):
         raise RuntimeError("source metadata identity/settings mismatch")
 
     root = (repo_root or Path(__file__).resolve().parents[2]).resolve()
     template = canonical_template(root)
-    seed = read_cluster(source_root / a3g.SOURCE_PATHS["seed"], template)
+    seed = read_cluster(source_root / SOURCE_PATHS["seed"], template)
     if (
         seed.symbols != template.symbols
         or seed.charge != template.charge
@@ -138,8 +283,8 @@ def validate_source(
     ):
         raise RuntimeError("source seed identity/order/state/frozen-shell mismatch")
     owners = oxygen_proton_owners(seed)
-    if owners.get(a3g.H52) != a3g.O15:
-        raise RuntimeError(f"source seed H52 owner is O{owners.get(a3g.H52)}, not O15")
+    if owners.get(H52) != O15:
+        raise RuntimeError(f"source seed H52 owner is O{owners.get(H52)}, not O15")
     if metadata.get("n_atoms") + 3 != len(seed.symbols):
         raise RuntimeError("metadata cell atom count does not bind attacked complex")
     return a3g.SourceEvidence(seed, source_root, observed, metadata)
@@ -149,8 +294,8 @@ def source_map(source: a3g.SourceEvidence) -> dict[str, Any]:
     return {
         "root": str(source.source_root),
         "hashes": dict(sorted(source.hashes.items())),
-        "execution_source": a3g.EXPECTED_EXECUTION_SOURCE,
-        "branch": a3g.EXPECTED_BRANCH,
+        "execution_source": EXPECTED_EXECUTION_SOURCE,
+        "branch": EXPECTED_BRANCH,
         "seed_geometry_hash": geometry_hash(source.cluster.to_xyz()),
         "seed_geometry_fingerprint": frequency_geometry_fingerprint(source.cluster),
         "symbols": list(source.cluster.symbols),
@@ -164,7 +309,7 @@ def source_map(source: a3g.SourceEvidence) -> dict[str, Any]:
 @contextmanager
 def exclusive_run(output_root: Path):
     lock_path = output_root / "run.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    durable_mkdir(lock_path.parent)
     with lock_path.open("a+") as lock:
         try:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -176,23 +321,9 @@ def exclusive_run(output_root: Path):
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
-def revoke_terminals(output_root: Path) -> None:
-    paths = [
-        output_root / name
-        for name in ("candidate-terminal.json", "verified-terminal.json")
-        if (output_root / name).exists()
-    ]
-    if not paths:
-        return
-    revoked = output_root / "revoked" / f"{time.time_ns()}-{os.getpid()}"
-    revoked.mkdir(parents=True, exist_ok=False)
-    for path in paths:
-        shutil.move(path, revoked / path.name)
-
-
 def stage_signature(
     source: a3g.SourceEvidence,
-    spec: a3g.StageSpec,
+    spec: StageSpec,
     code_revision: str,
 ) -> dict[str, Any]:
     active = constraints(source, spec)
@@ -203,10 +334,10 @@ def stage_signature(
         "settings": asdict(spec.settings),
         "source": source_map(source),
         "constraints": [list(item) for item in active],
-        "budget": {"max_steps": a3g.MAX_STEPS, "retry_allowed": False},
+        "budget": {"max_steps": MAX_STEPS, "retry_allowed": False},
         "parent": spec.parent,
-        "fresh_optimizer": True,
-        "geometric_default_fresh_hessian": True,
+        "fresh_optimizer_requested": True,
+        "default_hessian_requested": True,
         "fully_released": spec.fully_released,
         "code_revision": code_revision,
     }
@@ -294,7 +425,7 @@ def _owner_labels(cluster: Cluster) -> list[str]:
     return [f"H{h}:O{o}" for h, o in oxygen_proton_owners(cluster).items()]
 
 
-def constraints(source: a3g.SourceEvidence, spec: a3g.StageSpec) -> list:
+def constraints(source: a3g.SourceEvidence, spec: StageSpec) -> list:
     if spec.fully_released:
         return []
     return [
@@ -411,9 +542,11 @@ def independent_metrics(cluster: Cluster, raw: Any, active: list) -> dict:
     }
 
 
-def reproduce(cluster: Cluster, settings: Any, saved: dict) -> dict:
+def reproduce(cluster: Cluster, settings: Any, saved: dict, observations: list) -> dict:
     value = float(energy(cluster, settings))
+    observations.append("energy")
     full = np.asarray(gradient(cluster, settings), dtype=float)
+    observations.append("gradient")
     prior = np.asarray(saved.get("gradient_hartree_per_bohr"), dtype=float)
     if (
         not math.isfinite(value)
@@ -423,8 +556,8 @@ def reproduce(cluster: Cluster, settings: Any, saved: dict) -> dict:
         or not np.isfinite(prior).all()
         or not isinstance(saved.get("energy_hartree"), (int, float))
         or not math.isfinite(saved["energy_hartree"])
-        or abs(value - saved["energy_hartree"]) > a3g.ENERGY_REPRO_TOL
-        or not np.allclose(full, prior, atol=a3g.GRADIENT_REPRO_TOL, rtol=0)
+        or abs(value - saved["energy_hartree"]) > ENERGY_REPRO_TOL
+        or not np.allclose(full, prior, atol=GRADIENT_REPRO_TOL, rtol=0)
         or saved.get("settings") != asdict(settings)
         or saved.get("geometry_fingerprint") != frequency_geometry_fingerprint(cluster)
     ):
@@ -434,25 +567,24 @@ def reproduce(cluster: Cluster, settings: Any, saved: dict) -> dict:
     return {"energy_hartree": value, "gradient_hartree_per_bohr": full.tolist()}
 
 
-def phva(cluster: Cluster, settings: Any, value: float) -> dict:
+def phva(cluster: Cluster, settings: Any, value: float, observations: list) -> dict:
     result = frequencies(cluster, settings)
+    observations.append("phva")
     imaginary = [float(v) for v in result.imaginary_cm]
     if (
         not math.isfinite(float(result.electronic_hartree))
         or not all(math.isfinite(v) and v >= 0 for v in imaginary)
-        or abs(float(result.electronic_hartree) - value) > a3g.ENERGY_REPRO_TOL
+        or abs(float(result.electronic_hartree) - value) > ENERGY_REPRO_TOL
         or result.geometry_fingerprint != frequency_geometry_fingerprint(cluster)
         or result.settings_fingerprint != frequency_settings_fingerprint(settings)
     ):
         raise RuntimeError("PHVA evidence mismatch")
     return {
-        "status": "passed"
-        if max(imaginary, default=0) <= a3g.NOISE_FLOOR_CM
-        else "failed",
+        "status": "passed" if max(imaginary, default=0) <= NOISE_FLOOR_CM else "failed",
         "imaginary_cm": imaginary,
         "electronic_hartree": float(result.electronic_hartree),
-        "fresh_hessian": True,
-        "noise_floor_cm": a3g.NOISE_FLOOR_CM,
+        "fresh_hessian_requested": True,
+        "noise_floor_cm": NOISE_FLOOR_CM,
         "geometry_fingerprint": frequency_geometry_fingerprint(cluster),
         "settings_fingerprint": frequency_settings_fingerprint(settings),
     }
@@ -465,7 +597,7 @@ def _read_stage(
     code_revision,
     parent,
     *,
-    recompute_calculators,
+    process,
     expected_seed,
 ):
     stage_dir = output_root / "stages" / spec.directory
@@ -492,18 +624,24 @@ def _read_stage(
     ):
         raise RuntimeError("stage input seed/parent mismatch")
     optimizer = receipt.get("optimizer", {})
+    observation = json.loads((stage_dir / "optimizer-observation.json").read_text())
     if (
-        optimizer.get("fresh_instance") is not True
-        or optimizer.get("geometric_default_fresh_hessian") is not True
+        optimizer.get("fresh_optimizer_requested") is not True
+        or optimizer.get("default_hessian_requested") is not True
         or optimizer.get("observed_calls") != 1
         or optimizer.get("observed_retries") != 0
-        or optimizer.get("observed_max_steps") != 100
+        or optimizer.get("requested_max_steps") != 100
+        or optimizer.get("runtime_observation") != observation
+        or observation.get("calls") != 1
+        or observation.get("kernel_calls") not in (0, 1)
+        or observation.get("pid") != process.get("pid")
+        or observation.get("hostname") != process.get("hostname")
     ):
-        raise RuntimeError("optimizer budget/freshness mismatch")
+        raise RuntimeError("optimizer budget/process observation mismatch")
     if receipt.get("status") == "optimizer-failed":
         if (stage_dir / "raw-endpoint.xyz").exists():
             raise RuntimeError("optimizer failure has raw endpoint")
-        return receipt, None
+        return receipt, {}
     clusters = {}
     for key, filename in (
         ("raw_endpoint", "raw-endpoint.xyz"),
@@ -520,8 +658,26 @@ def _read_stage(
         if receipt.get(key) != _artifact(cluster, path):
             raise RuntimeError(f"{key} artifact mismatch")
         clusters[key] = cluster
+    for prefix, key in (("raw", "raw_evidence"), ("endpoint", "endpoint_evidence")):
+        if key not in receipt:
+            continue
+        saved = receipt[key]
+        for quantity in ("energy_hartree", "gradient_hartree_per_bohr"):
+            suffix = "energy" if quantity == "energy_hartree" else "gradient"
+            item = json.loads((stage_dir / f"{prefix}-{suffix}.json").read_text())
+            if item != {
+                k: saved[k] for k in ("settings", "geometry_fingerprint", quantity)
+            }:
+                raise RuntimeError("individual raw calculator receipt mismatch")
+    return receipt, clusters
+
+
+def _recompute_stage(output_root, source, spec, receipt, clusters, observations):
+    stage_dir = output_root / "stages" / spec.directory
+    if receipt.get("status") == "optimizer-failed":
+        return receipt, None
     raw = clusters["raw_endpoint"]
-    reproduce(raw, spec.settings, receipt.get("raw_evidence", {}))
+    reproduce(raw, spec.settings, receipt.get("raw_evidence", {}), observations)
     if receipt.get("status") != "complete":
         projected_coords = raw.coords.copy()
         projected_coords[source.cluster.frozen_indices] = source.cluster.coords[
@@ -551,7 +707,9 @@ def _read_stage(
         "reference_owners"
     ) != _owner_labels(source.cluster):
         raise RuntimeError("owner receipt mismatch")
-    fresh = reproduce(endpoint, spec.settings, receipt.get("endpoint_evidence", {}))
+    fresh = reproduce(
+        endpoint, spec.settings, receipt.get("endpoint_evidence", {}), observations
+    )
     metrics = independent_metrics(endpoint, fresh["gradient_hartree_per_bohr"], active)
     saved = receipt.get("evidence", {})
     for key, value in metrics.items():
@@ -559,7 +717,7 @@ def _read_stage(
             raise RuntimeError("projected gradient receipt mismatch")
     if (
         abs(fresh["energy_hartree"] - saved.get("energy_hartree", math.inf))
-        > a3g.ENERGY_REPRO_TOL
+        > ENERGY_REPRO_TOL
     ):
         raise RuntimeError("endpoint energy receipt mismatch")
     verified = {
@@ -569,11 +727,42 @@ def _read_stage(
         "observed_owners": owners,
         "owner_retaining": structure["owner_changes"] == [],
         "evidence": {**metrics, "energy_hartree": fresh["energy_hartree"]},
-        "stationary": optimizer.get("converged") is True and metrics["passed"],
+        "stationary": receipt.get("optimizer", {}).get("converged") is True
+        and metrics["passed"],
     }
     if spec.fully_released and verified["stationary"]:
-        verified["phva"] = phva(endpoint, spec.settings, fresh["energy_hartree"])
+        verified["phva"] = phva(
+            endpoint, spec.settings, fresh["energy_hartree"], observations
+        )
         saved_phva = receipt.get("phva", {})
+        raw_phva = json.loads((stage_dir / "raw-phva.json").read_text())
+        if receipt.get("raw_phva_sha256") != sha256_path(stage_dir / "raw-phva.json"):
+            raise RuntimeError("raw PHVA hash mismatch")
+        output = raw_phva.pop("output", None)
+        if not isinstance(output, dict) or any(
+            output.get(key) != raw_phva.get(key)
+            for key in (
+                "imaginary_cm",
+                "electronic_hartree",
+                "geometry_fingerprint",
+                "settings_fingerprint",
+            )
+        ):
+            raise RuntimeError("raw PHVA output mismatch")
+        if raw_phva != {
+            "settings": asdict(spec.settings),
+            "input_geometry_fingerprint": frequency_geometry_fingerprint(endpoint),
+            **{
+                key: saved_phva.get(key)
+                for key in (
+                    "imaginary_cm",
+                    "electronic_hartree",
+                    "geometry_fingerprint",
+                    "settings_fingerprint",
+                )
+            },
+        }:
+            raise RuntimeError("raw PHVA receipt mismatch")
         for key, value in verified["phva"].items():
             prior = saved_phva.get(key)
             if key == "imaginary_cm":
@@ -587,7 +776,7 @@ def _read_stage(
                 if (
                     not isinstance(prior, (int, float))
                     or not math.isfinite(prior)
-                    or abs(prior - value) > a3g.ENERGY_REPRO_TOL
+                    or abs(prior - value) > ENERGY_REPRO_TOL
                 ):
                     raise RuntimeError("PHVA energy mismatch")
             elif prior != value:
@@ -615,7 +804,7 @@ def constrained_release_allowed(receipt: dict) -> bool:
 
 def classify(constrained: dict, released: dict) -> str:
     if not constrained_release_allowed(constrained):
-        return a3g.INCONCLUSIVE_CANDIDATE
+        return INCONCLUSIVE_CANDIDATE
     if (
         released.get("status") != "complete"
         or not released.get("stationary")
@@ -623,192 +812,482 @@ def classify(constrained: dict, released: dict) -> str:
         or released.get("phva", {}).get("status") != "passed"
         or _finite_energy(released) is None
     ):
-        return a3g.INCONCLUSIVE_CANDIDATE
+        return INCONCLUSIVE_CANDIDATE
     before = constrained["observed_owners"]
     after = released["observed_owners"]
     if before == after and released["owner_changes"] == []:
-        return a3g.ACCEPTED_CANDIDATE
+        return ACCEPTED_CANDIDATE
     expected = ["H52:O9" if owner == "H52:O15" else owner for owner in before]
     if (
         after == expected
         and released["owner_changes"] == ["H52:O15->O9"]
         and released["evidence"]["energy_hartree"]
-        < constrained["evidence"]["energy_hartree"] - a3g.DOWNHILL_MIN_HARTREE
+        < constrained["evidence"]["energy_hartree"] - DOWNHILL_MIN_HARTREE
     ):
-        return a3g.ALTERNATIVE_CANDIDATE
-    return a3g.INCONCLUSIVE_CANDIDATE
+        return ALTERNATIVE_CANDIDATE
+    return INCONCLUSIVE_CANDIDATE
 
 
-def verify_experiment(
-    output_root: Path,
-    *,
-    verifier_identity: str,
-    source_root: Path = a3g.DEFAULT_SOURCE_ROOT,
-    source_override: a3g.SourceEvidence | None = None,
-    recompute_calculators: bool = True,
-) -> dict[str, Any]:
-    """Rehash source and independently derive the A3g terminal classification."""
-    output_root = output_root.resolve()
-    candidate: dict[str, Any] = {}
-    with exclusive_run(output_root):
-        try:
-            candidate_path = output_root / "candidate-terminal.json"
-            candidate = json.loads(candidate_path.read_text())
-            if candidate.get("schema") != "a3g-candidate-terminal-v1":
-                raise RuntimeError("candidate terminal schema mismatch")
-            executor_identity = candidate.get("executor_identity")
-            if (
-                not isinstance(executor_identity, str)
-                or not verifier_identity
-                or verifier_identity == executor_identity
-            ):
+def runtime_provenance():
+    """Observe the verifier process locally; caller labels cannot supply these facts."""
+    return {
+        "pid": os.getpid(),
+        "hostname": socket.gethostname(),
+        "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+        "process_start_ticks": Path("/proc/self/stat")
+        .read_text()
+        .rsplit(")", 1)[1]
+        .split()[19],
+        "executable_sha256": sha256_path(Path("/proc/self/exe")),
+        "implementation_sha256": sha256_path(Path(__file__)),
+    }
+
+
+def validate_identity(identity, executor, runtime=None):
+    runtime = runtime if runtime is not None else runtime_provenance()
+    if not isinstance(executor, str) or not executor.strip():
+        raise RuntimeError("missing executor identity")
+    allowed = {"worker_id", "profile", "hostname", "implementation_sha256"}
+    if (
+        not isinstance(identity, dict)
+        or set(identity) - allowed
+        or any(
+            not isinstance(identity.get(key), str) or not identity[key].strip()
+            for key in ("worker_id", "profile")
+        )
+    ):
+        raise RuntimeError(
+            "structured verifier identity receipt required; runtime facts are internal"
+        )
+    if identity["worker_id"] == executor:
+        raise RuntimeError("verifier identity must differ from executor identity")
+    for key in ("hostname", "implementation_sha256"):
+        if key in identity and identity[key] != runtime[key]:
+            raise RuntimeError("verifier identity host/implementation mismatch")
+
+
+def validate_process_independence(runtime, executor):
+    keys = ("hostname", "boot_id", "pid", "process_start_ticks")
+    if any(not executor.get(key) for key in keys):
+        raise RuntimeError("missing executor process identity")
+    if all(str(runtime[key]) == str(executor[key]) for key in keys):
+        raise RuntimeError("same-process verification is forbidden")
+
+
+def rejection_attempt(output_root, detail, observations=()):
+    result = {
+        "schema": "a3g-verification-attempt-v1",
+        "written_at": now(),
+        "status": "rejected",
+        "classification": VERIFIED_INCONCLUSIVE,
+        "detail": detail,
+        "calculator_evidence_recomputed": bool(observations),
+        "calculator_evidence_recomputed_count": len(observations),
+    }
+    atomic_json(
+        output_root / "verification-attempts" / f"{uuid.uuid4().hex}.json", result
+    )
+    return result
+
+
+def verify_experiment(output_root: Path, **kwargs) -> dict[str, Any]:
+    """Reject invalid/contending attempts without modifying canonical evidence."""
+    try:
+        return _verify_experiment(output_root, **kwargs)
+    except Exception as exc:
+        return rejection_attempt(output_root.resolve(), f"{type(exc).__name__}: {exc}")
+
+
+def compiled_code_digest(code):
+    # Independent normalization of executable instructions; paths/line locations
+    # are excluded so a separate worktree can check the recorded loaded code.
+    fields = {
+        "bytecode": code.co_code.hex(),
+        "constants": [
+            compiled_code_digest(c) if isinstance(c, CodeType) else repr(c)
+            for c in code.co_consts
+        ],
+        "names": code.co_names,
+        "variables": code.co_varnames,
+        "freevars": code.co_freevars,
+        "cellvars": code.co_cellvars,
+        "flags": code.co_flags,
+        "arguments": [
+            code.co_argcount,
+            code.co_posonlyargcount,
+            code.co_kwonlyargcount,
+        ],
+    }
+    return hashlib.sha256(json.dumps(fields, sort_keys=True).encode()).hexdigest()
+
+
+def validate_revision(worktree, revision, provenance):
+    def git(*args):
+        return subprocess.run(
+            ["git", "-C", str(worktree), *args],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    if (
+        git("symbolic-ref", "--short", "HEAD") != EXPECTED_BRANCH
+        or git("rev-parse", "HEAD") != revision
+        or git("rev-parse", f"origin/{EXPECTED_BRANCH}") != revision
+        or git("status", "--porcelain")
+    ):
+        raise RuntimeError(
+            "verification requires exact clean local/remote worktree revision"
+        )
+    verifier_path = worktree / "qm/scripts/a3g_verify.py"
+    if sha256_path(verifier_path) != sha256_path(Path(__file__)):
+        raise RuntimeError(
+            "running verifier is not the selected worktree implementation"
+        )
+    if (
+        not isinstance(provenance.get("pid"), int)
+        or provenance["pid"] <= 0
+        or not provenance.get("hostname")
+    ):
+        raise RuntimeError("missing executor process provenance")
+    if (
+        provenance.get("executable_sha256") != sha256_path(Path("/proc/self/exe"))
+        or not provenance.get("boot_id")
+        or not str(provenance.get("process_start_ticks", "")).isdigit()
+    ):
+        raise RuntimeError("missing executable/process-start provenance")
+    # Audited complete sources: one direct call in run_stage; pipeline constructs
+    # a new SCF and calls one mutually exclusive kernel branch, with no retry or
+    # Hessian input. Hash pins deliberately require a new audit after any change.
+    for function, filename in (
+        ("optimize_bounded", "qm/quarry/pipeline.py"),
+        ("run_stage", "qm/scripts/a3g_oaa_owner_basin.py"),
+    ):
+        code = (worktree / filename).read_text()
+        node = next(
+            n
+            for n in ast.parse(code).body
+            if isinstance(n, ast.FunctionDef) and n.name == function
+        )
+        digest = hashlib.sha256(
+            (ast.get_source_segment(code, node) + "\n").encode()
+        ).hexdigest()
+        compiled = compile(code, str(worktree / filename), "exec", dont_inherit=True)
+        function_code = next(
+            c
+            for c in compiled.co_consts
+            if isinstance(c, CodeType) and c.co_name == function
+        )
+        if provenance.get("loaded_code", {}).get(function) != compiled_code_digest(
+            function_code
+        ):
+            raise RuntimeError("loaded executable code differs from audited source")
+        if provenance.get("callables", {}).get(function) != digest:
+            raise RuntimeError("executed callable differs from audited source")
+    for name, digest in AUDITED_EXECUTOR_SOURCES.items():
+        path = worktree / name
+        if (
+            sha256_path(path) != digest
+            or hashlib.sha256(
+                subprocess.run(
+                    ["git", "-C", str(worktree), "show", f"{revision}:{name}"],
+                    check=True,
+                    capture_output=True,
+                ).stdout
+            ).hexdigest()
+            != digest
+            or provenance.get("files", {}).get(name) != digest
+        ):
+            raise RuntimeError("executor differs from audited one-shot implementation")
+
+
+def _prepare_stages(output_root, source, candidate, code_revision, reservation):
+    """Read and bind every stage receipt and endpoint before any calculator call."""
+    prepared = {}
+    endpoints: dict[str, Any | None] = {}
+    parent = {"stage": None, "receipt_sha256": None}
+    for spec in STAGES:
+        stage_state = candidate.get("stages", {}).get(spec.stage_id, {})
+        if spec.parent is None and stage_state.get("status") == "not-run":
+            raise RuntimeError("required first stage was not attempted")
+        if stage_state.get("status") == "not-run":
+            stage_dir = output_root / "stages" / spec.directory
+            if stage_dir.exists():
                 raise RuntimeError(
-                    "verifier identity must differ from executor identity"
+                    f"{spec.stage_id} is marked not-run but has artifacts"
                 )
-            if not recompute_calculators:
-                raise RuntimeError("verification requires calculator recomputation")
-            source = source_override or validate_source(source_root)
-            if candidate.get("source") != source_map(source):
-                raise RuntimeError("candidate source binding mismatch")
-            code_revision = candidate.get("code_revision")
-            if not isinstance(code_revision, str) or len(code_revision) != 40:
-                raise RuntimeError("candidate code revision is invalid")
-
-            receipts: dict[str, dict[str, Any]] = {}
-            endpoints: dict[str, Any | None] = {}
-            parent = {"stage": None, "receipt_sha256": None}
-            for spec in a3g.STAGES:
-                stage_state = candidate.get("stages", {}).get(spec.stage_id, {})
-                if stage_state.get("status") == "not-run":
-                    stage_dir = output_root / "stages" / spec.directory
-                    if stage_dir.exists():
-                        raise RuntimeError(
-                            f"{spec.stage_id} is marked not-run but has artifacts"
-                        )
-                    receipts[spec.stage_id] = {
-                        "schema": "a3g-stage-receipt-v1",
-                        "status": "not-run",
-                        "stage": spec.stage_id,
-                    }
-                    endpoints[spec.stage_id] = None
-                else:
-                    receipt_path = (
+            receipt = {
+                "schema": "a3g-stage-receipt-v1",
+                "status": "not-run",
+                "stage": spec.stage_id,
+            }
+            clusters = {}
+            endpoints[spec.stage_id] = None
+        else:
+            receipt_path = output_root / "stages" / spec.directory / "receipt.json"
+            if stage_state.get("receipt_sha256") != sha256_path(receipt_path):
+                raise RuntimeError(f"{spec.stage_id} candidate receipt hash mismatch")
+            receipt, clusters = _read_stage(
+                output_root,
+                source,
+                spec,
+                code_revision,
+                parent,
+                process=reservation["provenance"],
+                expected_seed=(
+                    source.cluster if spec.parent is None else endpoints[spec.parent]
+                ),
+            )
+            if stage_state.get("status") != receipt.get("status"):
+                raise RuntimeError("candidate stage status mismatch")
+            endpoints[spec.stage_id] = clusters.get("endpoint")
+        prepared[spec.stage_id] = (receipt, clusters)
+        if spec.parent is None:
+            parent = {
+                "stage": spec.stage_id,
+                "receipt_sha256": (
+                    sha256_path(
                         output_root / "stages" / spec.directory / "receipt.json"
                     )
-                    if stage_state.get("receipt_sha256") != sha256_path(receipt_path):
-                        raise RuntimeError(
-                            f"{spec.stage_id} candidate receipt hash mismatch"
-                        )
-                    receipt, endpoint = _read_stage(
-                        output_root,
-                        source,
-                        spec,
-                        code_revision,
-                        parent,
-                        recompute_calculators=recompute_calculators,
-                        expected_seed=(
-                            source.cluster
-                            if spec.parent is None
-                            else endpoints[spec.parent]
-                        ),
-                    )
-                    if stage_state.get("status") != receipt.get("status"):
-                        raise RuntimeError("candidate stage status mismatch")
-                    receipts[spec.stage_id] = receipt
-                    endpoints[spec.stage_id] = endpoint
-                if spec.parent is None:
-                    parent = {
-                        "stage": spec.stage_id,
-                        "receipt_sha256": (
-                            sha256_path(
-                                output_root / "stages" / spec.directory / "receipt.json"
-                            )
-                            if (
-                                output_root / "stages" / spec.directory / "receipt.json"
-                            ).is_file()
-                            else None
-                        ),
-                    }
-                elif (
+                    if (
+                        output_root / "stages" / spec.directory / "receipt.json"
+                    ).is_file()
+                    else None
+                ),
+            }
+        elif (output_root / "stages" / spec.directory / "receipt.json").is_file():
+            parent = {
+                "stage": spec.stage_id,
+                "receipt_sha256": sha256_path(
                     output_root / "stages" / spec.directory / "receipt.json"
-                ).is_file():
-                    parent = {
-                        "stage": spec.stage_id,
-                        "receipt_sha256": sha256_path(
-                            output_root / "stages" / spec.directory / "receipt.json"
-                        ),
-                    }
+                ),
+            }
 
-            conditioning = receipts[a3g.STAGES[0].stage_id]
-            constrained = receipts[a3g.STAGES[1].stage_id]
-            released = receipts[a3g.STAGES[2].stage_id]
-            if candidate.get("experiment_budget") != _experiment_budget(receipts):
-                raise RuntimeError("candidate experiment_budget mismatch")
-            if constrained.get("status") != "not-run" and not (
-                conditioning.get("status") == "complete"
-                and conditioning.get("owner_retaining") is True
-                and conditioning.get("owner_changes") == []
-                and _finite_energy(conditioning) is not None
-            ):
+    if candidate.get("experiment_budget") != _experiment_budget(
+        {stage_id: receipt for stage_id, (receipt, _) in prepared.items()}
+    ):
+        raise RuntimeError("candidate experiment_budget mismatch")
+    return prepared
+
+
+@dataclass(frozen=True)
+class VerificationPreflight:
+    candidate: dict[str, Any]
+    verifier_identity: dict[str, Any]
+    runtime: dict[str, Any]
+    source: a3g.SourceEvidence
+    source_rehashed: bool
+    code_revision: str
+    reservation: dict[str, Any]
+    stages: dict[str, tuple[dict[str, Any], dict[str, Cluster]]]
+
+
+def verification_preflight(
+    output_root: Path,
+    *,
+    verifier_identity: dict | Path,
+    worktree: Path,
+    source_root: Path,
+    source_override: a3g.SourceEvidence | None = None,
+    recompute_calculators: bool = True,
+) -> VerificationPreflight:
+    """Validate calculator-free prerequisites under the caller's run lock."""
+    if (output_root / "verified-terminal.json").exists():
+        raise RuntimeError("replay attempt: verified terminal already exists")
+    if isinstance(verifier_identity, Path):
+        verifier_identity = json.loads(verifier_identity.read_text())
+    runtime = runtime_provenance()
+    inventory = forbidden_inventory(output_root)
+    if inventory:
+        raise RuntimeError(f"forbidden artifacts present: {inventory}")
+    candidate_path = output_root / "candidate-terminal.json"
+    candidate = json.loads(candidate_path.read_text())
+    if candidate.get("schema") != "a3g-candidate-terminal-v1":
+        raise RuntimeError("candidate terminal schema mismatch")
+    executor_identity = candidate.get("executor_identity")
+    validate_identity(verifier_identity, executor_identity, runtime)
+    if (
+        candidate.get("forbidden_artifacts") != []
+        or candidate.get("forbidden_outputs_emitted") is not False
+    ):
+        raise RuntimeError("candidate forbidden artifact inventory mismatch")
+    if not recompute_calculators:
+        raise RuntimeError("verification requires calculator recomputation")
+    source = source_override or validate_source(source_root, repo_root=worktree)
+    if candidate.get("source") != source_map(source):
+        raise RuntimeError("candidate source binding mismatch")
+    code_revision = candidate.get("code_revision")
+    if (
+        not isinstance(code_revision, str)
+        or re.fullmatch("[0-9a-f]{40}", code_revision) is None
+    ):
+        raise RuntimeError("candidate code revision is invalid")
+
+    marker = output_root / "experiment-reservation.json"
+    reservation = json.loads(marker.read_text())
+    if (
+        candidate.get("experiment_reservation_sha256") != sha256_path(marker)
+        or reservation.get("schema") != "a3g-experiment-reservation-v2"
+        or reservation.get("source") != source_map(source)
+        or reservation.get("code_revision") != code_revision
+        or reservation.get("executor_identity") != executor_identity
+    ):
+        raise RuntimeError("experiment reservation mismatch")
+    validate_process_independence(runtime, reservation.get("provenance", {}))
+    validate_revision(worktree, code_revision, reservation.get("provenance", {}))
+    return VerificationPreflight(
+        candidate,
+        verifier_identity,
+        runtime,
+        source,
+        source_override is None,
+        code_revision,
+        reservation,
+        _prepare_stages(output_root, source, candidate, code_revision, reservation),
+    )
+
+
+def _verify_experiment(
+    output_root: Path,
+    *,
+    verifier_identity: dict | Path,
+    worktree: Path | None = None,
+    source_root: Path = DEFAULT_SOURCE_ROOT,
+    source_override: a3g.SourceEvidence | None = None,
+    recompute_calculators: bool = True,
+    initialize_gpu: bool | None = None,
+) -> dict[str, Any]:
+    """Share CLI/library preflight and retain its snapshot through recomputation."""
+    output_root = output_root.resolve()
+    worktree = (worktree or Path(__file__).resolve().parents[2]).resolve()
+    observations = []
+    with exclusive_run(output_root):
+        try:
+            preflight = verification_preflight(
+                output_root,
+                verifier_identity=verifier_identity,
+                worktree=worktree,
+                source_root=source_root,
+                source_override=source_override,
+                recompute_calculators=recompute_calculators,
+            )
+            production_ran = (
+                preflight.candidate.get("stages", {})
+                .get("constrained-production", {})
+                .get("status")
+                != "not-run"
+            )
+            # None is the library path, whose caller manages calculator setup.
+            if initialize_gpu is False and production_ran:
                 raise RuntimeError(
-                    "constrained stage ran without valid conditioning parent"
+                    "--gpu is required to recompute production calculator evidence"
                 )
-            if released.get("status") != "not-run" and not constrained_release_allowed(
-                constrained
-            ):
-                raise RuntimeError(
-                    "released stage ran without a valid constrained release gate"
-                )
-            classification = classify(constrained, released)
-            if classification != candidate.get("classification"):
-                raise RuntimeError(
-                    "candidate classification mismatch: "
-                    f"claimed {candidate.get('classification')!r}, "
-                    f"derived {classification!r}"
-                )
-            verified_classification = {
-                a3g.ACCEPTED_CANDIDATE: a3g.VERIFIED_ACCEPTED,
-                a3g.ALTERNATIVE_CANDIDATE: a3g.VERIFIED_ALTERNATIVE,
-                a3g.INCONCLUSIVE_CANDIDATE: a3g.VERIFIED_INCONCLUSIVE,
-            }[classification]
-            result = {
-                "schema": "a3g-verified-terminal-v1",
-                "written_at": now(),
-                "status": "verified",
-                "classification": verified_classification,
-                "executor_identity": executor_identity,
-                "verifier_identity": verifier_identity,
-                "candidate_terminal_sha256": sha256_path(candidate_path),
-                "source_rehashed": source_override is None,
-                "calculator_evidence_recomputed": True,
-                "code_revision": code_revision,
-                "stage_receipt_sha256": {
-                    spec.stage_id: candidate.get("stages", {})
-                    .get(spec.stage_id, {})
-                    .get("receipt_sha256")
-                    for spec in a3g.STAGES
-                },
-            }
+            if initialize_gpu:
+                preload_cutensor()
+            result = _recompute_experiment(output_root, preflight, observations)
         except Exception as exc:
-            revoke_terminals(output_root)
-            result = {
-                "schema": "a3g-verified-terminal-v1",
-                "written_at": now(),
-                "status": "rejected",
-                "classification": a3g.VERIFIED_INCONCLUSIVE,
-                "executor_identity": candidate.get("executor_identity"),
-                "verifier_identity": verifier_identity,
-                "detail": f"{type(exc).__name__}: {exc}",
-            }
+            return rejection_attempt(
+                output_root, f"{type(exc).__name__}: {exc}", observations
+            )
         atomic_json(output_root / "verified-terminal.json", result)
         return result
 
 
+def _recompute_experiment(
+    output_root: Path, preflight: VerificationPreflight, observations: list
+) -> dict[str, Any]:
+    candidate = preflight.candidate
+    candidate_path = output_root / "candidate-terminal.json"
+    verifier_identity = preflight.verifier_identity
+    executor_identity = candidate["executor_identity"]
+    runtime = preflight.runtime
+    source = preflight.source
+    code_revision = preflight.code_revision
+    receipts = {}
+    for spec in STAGES:
+        receipt, clusters = preflight.stages[spec.stage_id]
+        if receipt["status"] != "not-run":
+            receipt, _endpoint = _recompute_stage(
+                output_root, source, spec, receipt, clusters, observations
+            )
+        receipts[spec.stage_id] = receipt
+
+    conditioning = receipts[STAGES[0].stage_id]
+    constrained = receipts[STAGES[1].stage_id]
+    released = receipts[STAGES[2].stage_id]
+    if constrained.get("status") != "not-run" and not (
+        conditioning.get("status") == "complete"
+        and conditioning.get("owner_retaining") is True
+        and conditioning.get("owner_changes") == []
+        and _finite_energy(conditioning) is not None
+    ):
+        raise RuntimeError("constrained stage ran without valid conditioning parent")
+    if released.get("status") != "not-run" and not constrained_release_allowed(
+        constrained
+    ):
+        raise RuntimeError(
+            "released stage ran without a valid constrained release gate"
+        )
+    if constrained.get("status") == "not-run" and (
+        conditioning.get("status") == "complete"
+        and conditioning.get("owner_retaining") is True
+        and conditioning.get("owner_changes") == []
+        and _finite_energy(conditioning) is not None
+    ):
+        raise RuntimeError("required constrained stage was skipped")
+    if released.get("status") == "not-run" and constrained_release_allowed(constrained):
+        raise RuntimeError("required released stage was skipped")
+    classification = classify(constrained, released)
+    if classification != candidate.get("classification"):
+        raise RuntimeError(
+            "candidate classification mismatch: "
+            f"claimed {candidate.get('classification')!r}, "
+            f"derived {classification!r}"
+        )
+    verified_classification = {
+        ACCEPTED_CANDIDATE: VERIFIED_ACCEPTED,
+        ALTERNATIVE_CANDIDATE: VERIFIED_ALTERNATIVE,
+        INCONCLUSIVE_CANDIDATE: VERIFIED_INCONCLUSIVE,
+    }[classification]
+    if forbidden_inventory(output_root):
+        raise RuntimeError("forbidden artifacts appeared during verification")
+    result = {
+        "schema": "a3g-verified-terminal-v1",
+        "written_at": now(),
+        "status": "verified",
+        "classification": verified_classification,
+        "executor_identity": executor_identity,
+        "verifier_identity": verifier_identity,
+        "verifier_provenance": runtime,
+        "forbidden_artifacts": [],
+        "candidate_terminal_sha256": sha256_path(candidate_path),
+        "source_rehashed": preflight.source_rehashed,
+        "calculator_evidence_recomputed": bool(observations),
+        "calculator_evidence_recomputed_count": len(observations),
+        "code_revision": code_revision,
+        "stage_receipt_sha256": {
+            spec.stage_id: candidate.get("stages", {})
+            .get(spec.stage_id, {})
+            .get("receipt_sha256")
+            for spec in STAGES
+        },
+    }
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source-root", type=Path, default=a3g.DEFAULT_SOURCE_ROOT)
-    parser.add_argument("--output-root", type=Path, default=a3g.DEFAULT_OUTPUT_ROOT)
-    parser.add_argument("--verifier-identity", required=True)
+    parser.add_argument("--source-root", type=Path, default=DEFAULT_SOURCE_ROOT)
+    parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
+    parser.add_argument(
+        "--verifier-identity",
+        type=Path,
+        required=True,
+        help="JSON worker identity receipt",
+    )
+    parser.add_argument(
+        "--worktree", type=Path, default=Path(__file__).resolve().parents[2]
+    )
     parser.add_argument("--gpu", action="store_true")
     parser.add_argument("--gpu-mem-gb", type=float, default=16.0)
     parser.add_argument("--threads", type=int, default=16)
@@ -822,19 +1301,12 @@ def main() -> int:
     os.environ["OMP_NUM_THREADS"] = str(args.threads)
     os.environ["MKL_NUM_THREADS"] = str(args.threads)
     os.environ["OPENBLAS_NUM_THREADS"] = str(args.threads)
-    candidate = json.loads((args.output_root / "candidate-terminal.json").read_text())
-    production_ran = (
-        candidate.get("stages", {}).get("constrained-production", {}).get("status")
-        != "not-run"
-    )
-    if production_ran and not args.gpu:
-        parser.error("--gpu is required to recompute production calculator evidence")
-    if args.gpu:
-        preload_cutensor()
     result = verify_experiment(
         args.output_root,
         source_root=args.source_root,
         verifier_identity=args.verifier_identity,
+        worktree=args.worktree,
+        initialize_gpu=args.gpu,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result["status"] == "verified" else 1

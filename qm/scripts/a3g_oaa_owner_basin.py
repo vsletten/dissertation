@@ -6,16 +6,18 @@ from __future__ import annotations
 import argparse
 import fcntl
 import hashlib
+import inspect
 import json
 import math
 import os
-import shutil
+import socket
 import subprocess
 import sys
 import time
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from types import CodeType
 from typing import Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -149,6 +151,37 @@ STAGES = (
 STAGE_BY_ID = {stage.stage_id: stage for stage in STAGES}
 
 
+from quarry.durable_receipts import durable_mkdir, durable_replace  # noqa: E402
+
+# Card-scoped downstream artifacts, including family publication and store sidecars.
+FORBIDDEN_ARTIFACT_NAMES = frozenset(
+    {
+        "results.json",
+        "store.sqlite",
+        "store.sqlite-wal",
+        "store.sqlite-shm",
+        "store.sqlite-journal",
+        "store.task168.tmp.sqlite",
+        "store.sequential.tmp.sqlite",
+        "ts.xyz",
+        "barrier.json",
+        "petra.toml",
+        "family-progress.json",
+        "terminal-receipt.json",
+        "terminal.json",
+    }
+)
+
+
+def forbidden_inventory(output_root: Path) -> list[str]:
+    # No subtree exemptions: evidence/attempt directories cannot hide publication.
+    return sorted(
+        str(path.relative_to(output_root))
+        for path in output_root.rglob("*")
+        if path.name in FORBIDDEN_ARTIFACT_NAMES
+    )
+
+
 def now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S%z")
 
@@ -162,16 +195,18 @@ def sha256_path(path: Path) -> str:
 
 
 def atomic_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    durable_mkdir(path.parent)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     temporary.write_text(
         json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
     )
-    temporary.replace(path)
+    with temporary.open("rb") as stream:
+        os.fsync(stream.fileno())
+    durable_replace(temporary, path)
 
 
 def atomic_xyz(path: Path, cluster: Cluster) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    durable_mkdir(path.parent)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     temporary.write_text(
         "\n".join(
@@ -185,7 +220,9 @@ def atomic_xyz(path: Path, cluster: Cluster) -> None:
         )
         + "\n"
     )
-    temporary.replace(path)
+    with temporary.open("rb") as stream:
+        os.fsync(stream.fileno())
+    durable_replace(temporary, path)
 
 
 def canonical_template(repo_root: Path) -> Cluster:
@@ -344,7 +381,7 @@ def resolve_code_revision(worktree: Path) -> str:
 @contextmanager
 def exclusive_run(output_root: Path):
     lock_path = output_root / "run.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    durable_mkdir(lock_path.parent)
     with lock_path.open("a+") as lock:
         try:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -354,20 +391,6 @@ def exclusive_run(output_root: Path):
             yield
         finally:
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-
-
-def revoke_terminals(output_root: Path) -> None:
-    paths = [
-        output_root / name
-        for name in ("candidate-terminal.json", "verified-terminal.json")
-        if (output_root / name).exists()
-    ]
-    if not paths:
-        return
-    revoked = output_root / "revoked" / f"{time.time_ns()}-{os.getpid()}"
-    revoked.mkdir(parents=True, exist_ok=False)
-    for path in paths:
-        shutil.move(path, revoked / path.name)
 
 
 def h52_constraint(reference: Cluster) -> list[tuple[int, int, float]]:
@@ -401,8 +424,8 @@ def stage_signature(
         "constraints": [list(item) for item in active],
         "budget": {"max_steps": MAX_STEPS, "retry_allowed": False},
         "parent": spec.parent,
-        "fresh_optimizer": True,
-        "geometric_default_fresh_hessian": True,
+        "fresh_optimizer_requested": True,
+        "default_hessian_requested": True,
         "fully_released": spec.fully_released,
         "code_revision": code_revision,
     }
@@ -420,21 +443,53 @@ def _artifact(cluster: Cluster, path: Path) -> dict[str, Any]:
     }
 
 
-def _optimizer_record(
-    *,
-    converged: bool,
-    observed_calls: int,
-    observed_retries: int,
-    observed_max_steps: int,
-) -> dict[str, Any]:
+def _optimizer_record(*, converged, observation, requested_max_steps):
     return {
         "converged": converged,
-        "fresh_instance": True,
-        "geometric_default_fresh_hessian": True,
-        "observed_calls": observed_calls,
-        "observed_retries": observed_retries,
-        "observed_max_steps": observed_max_steps,
+        "fresh_optimizer_requested": True,
+        "default_hessian_requested": True,
+        "observed_calls": observation["calls"],
+        "observed_retries": max(0, observation["calls"] - 1),
+        "requested_max_steps": requested_max_steps,
+        "runtime_observation": dict(observation),
+        "limitations": (
+            "API exposes neither iteration count nor Hessian identity; "
+            "freshness is source-audited, not observed"
+        ),
     }
+
+
+@contextmanager
+def observe_optimizer(target, path):
+    observation = {
+        "calls": 0,
+        "kernel_calls": 0,
+        "pid": os.getpid(),
+        "hostname": socket.gethostname(),
+    }
+    previous = sys.getprofile()
+
+    def profile(frame, event, arg):
+        if event == "call":
+            code = frame.f_code
+            if code is target.__code__ or code.co_name == "optimize_bounded":
+                observation["calls"] += 1
+                atomic_json(path, observation)
+            if (
+                code.co_name == "kernel"
+                and "geomopt/geometric_solver" in code.co_filename
+            ):
+                observation["kernel_calls"] += 1
+                atomic_json(path, observation)
+        if previous is not None:
+            previous(frame, event, arg)
+
+    sys.setprofile(profile)
+    try:
+        yield observation
+    finally:
+        sys.setprofile(previous)
+        atomic_json(path, observation)
 
 
 def _experiment_budget(receipts: dict[str, dict[str, Any]]) -> dict[str, int]:
@@ -494,7 +549,7 @@ def run_stage(
     if resumed is not None:
         return resumed
 
-    stage_dir.mkdir(parents=True, exist_ok=True)
+    durable_mkdir(stage_dir)
     reservation = {
         "schema": "a3g-stage-reservation-v1",
         "status": "reserved",
@@ -511,14 +566,13 @@ def run_stage(
     kwargs: dict[str, Any] = {"max_steps": MAX_STEPS}
     if active:
         kwargs["fixed_distances"] = active
-    observed_calls = 0
-    observed_retries = 0
-    observed_max_steps = int(kwargs["max_steps"])
+    observation = {"calls": 0}
     try:
-        optimized = optimize_bounded(seed, spec.settings, **kwargs)
-        observed_calls = 1
+        with observe_optimizer(
+            optimize_bounded, stage_dir / "optimizer-observation.json"
+        ) as observation:
+            optimized = optimize_bounded(seed, spec.settings, **kwargs)
     except Exception as exc:
-        observed_calls = 1
         receipt = {
             "schema": "a3g-stage-receipt-v1",
             "status": "optimizer-failed",
@@ -530,9 +584,8 @@ def run_stage(
             "seed": reservation["seed"],
             "optimizer": _optimizer_record(
                 converged=False,
-                observed_calls=observed_calls,
-                observed_retries=observed_retries,
-                observed_max_steps=observed_max_steps,
+                observation=observation,
+                requested_max_steps=int(kwargs["max_steps"]),
             ),
             "detail": f"{type(exc).__name__}: {exc}",
         }
@@ -551,9 +604,8 @@ def run_stage(
         "seed": reservation["seed"],
         "optimizer": _optimizer_record(
             converged=bool(optimized.converged),
-            observed_calls=observed_calls,
-            observed_retries=observed_retries,
-            observed_max_steps=observed_max_steps,
+            observation=observation,
+            requested_max_steps=int(kwargs["max_steps"]),
         ),
         "raw_endpoint": _artifact(optimized.cluster, raw_path),
     }
@@ -563,7 +615,9 @@ def run_stage(
         # Persist raw calculator evidence before *any* scientific gate. Rejected
         # geometries remain reproducible; projected geometry gets its own evidence.
         receipt["terminal_stage"] = "raw-calculator-evidence"
-        receipt["raw_evidence"] = calculator_evidence(optimized.cluster, spec.settings)
+        receipt["raw_evidence"] = calculator_evidence(
+            optimized.cluster, spec.settings, stage_dir, "raw"
+        )
         atomic_json(stage_dir / "receipt.json", receipt)
         receipt["terminal_stage"] = "structural-gates"
         endpoint, raw_structure = a3b.structural_gate(
@@ -587,7 +641,9 @@ def run_stage(
             "raw_maximum_frozen_coordinate_drift_a"
         ]
         receipt["terminal_stage"] = "energy-evidence"
-        endpoint_evidence = calculator_evidence(endpoint, spec.settings)
+        endpoint_evidence = calculator_evidence(
+            endpoint, spec.settings, stage_dir, "endpoint"
+        )
         receipt["endpoint_evidence"] = endpoint_evidence
         atomic_json(stage_dir / "receipt.json", receipt)
         observed_energy = endpoint_evidence["energy_hartree"]
@@ -601,6 +657,22 @@ def run_stage(
         if spec.fully_released and stationary:
             receipt["terminal_stage"] = "phva-evidence"
             result = frequencies(endpoint, spec.settings)
+            atomic_json(
+                stage_dir / "raw-phva.json",
+                {
+                    "output": raw_value(vars(result)),
+                    "settings": asdict(spec.settings),
+                    "input_geometry_fingerprint": frequency_geometry_fingerprint(
+                        endpoint
+                    ),
+                    "imaginary_cm": raw_value(result.imaginary_cm),
+                    "electronic_hartree": raw_value(result.electronic_hartree),
+                    "geometry_fingerprint": result.geometry_fingerprint,
+                    "settings_fingerprint": result.settings_fingerprint,
+                },
+            )
+            receipt["raw_phva_sha256"] = sha256_path(stage_dir / "raw-phva.json")
+            atomic_json(stage_dir / "receipt.json", receipt)
             imaginary = [float(value) for value in result.imaginary_cm]
             if not math.isfinite(float(result.electronic_hartree)) or not all(
                 math.isfinite(value) and value >= 0 for value in imaginary
@@ -622,7 +694,7 @@ def run_stage(
                 ),
                 "imaginary_cm": imaginary,
                 "noise_floor_cm": NOISE_FLOOR_CM,
-                "fresh_hessian": True,
+                "fresh_hessian_requested": True,
                 "geometry_fingerprint": frequency_geometry_fingerprint(endpoint),
                 "settings_fingerprint": frequency_settings_fingerprint(spec.settings),
                 "electronic_hartree": float(result.electronic_hartree),
@@ -663,20 +735,43 @@ ENERGY_REPRO_TOL = 1.0e-7
 GRADIENT_REPRO_TOL = 1.0e-7
 
 
-def calculator_evidence(cluster: Cluster, settings: DftSettings) -> dict[str, Any]:
-    value = float(energy(cluster, settings))
-    forces = np.asarray(gradient(cluster, settings), dtype=float)
+def raw_value(value):
+    if isinstance(value, dict):
+        return {key: raw_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, np.ndarray)):
+        return [raw_value(item) for item in value]
+    if isinstance(value, (float, np.floating)) and not math.isfinite(value):
+        return str(value)
+    return value
+
+
+def calculator_evidence(cluster, settings, stage_dir, prefix):
+    binding = {
+        "settings": asdict(settings),
+        "geometry_fingerprint": frequency_geometry_fingerprint(cluster),
+    }
+    value = energy(cluster, settings)
+    atomic_json(
+        stage_dir / f"{prefix}-energy.json",
+        {**binding, "energy_hartree": raw_value(value)},
+    )
+    forces = gradient(cluster, settings)
+    atomic_json(
+        stage_dir / f"{prefix}-gradient.json",
+        {**binding, "gradient_hartree_per_bohr": raw_value(forces)},
+    )
+    value = float(value)
+    forces = np.asarray(forces, dtype=float)
     if (
         not math.isfinite(value)
         or forces.shape != cluster.coords.shape
-        or not np.all(np.isfinite(forces))
+        or not np.isfinite(forces).all()
     ):
         raise RuntimeError("non-finite or malformed energy/full gradient evidence")
     return {
+        **binding,
         "energy_hartree": value,
         "gradient_hartree_per_bohr": forces.tolist(),
-        "settings": asdict(settings),
-        "geometry_fingerprint": frequency_geometry_fingerprint(cluster),
     }
 
 
@@ -776,24 +871,49 @@ def _run_locked(
     code_revision: str,
     executor_identity: str,
 ) -> dict[str, Any]:
-    output_root.mkdir(parents=True, exist_ok=True)
-    revoke_terminals(output_root)
+    durable_mkdir(output_root)
     receipts: dict[str, dict[str, Any]] = {}
     # The reservation is written before any stage. Even a crash before stage one
     # spends this route; no continuation or orphan replay is authorized.
     marker = output_root / "experiment-reservation.json"
-    if marker.exists():
+    if marker.exists() or any(
+        (output_root / name).exists()
+        for name in ("candidate-terminal.json", "verified-terminal.json")
+    ):
         terminal = {
             "schema": "a3g-candidate-terminal-v1",
             "classification": INCONCLUSIVE_CANDIDATE,
             "detail": "experiment already reserved; zero retries/orphan replay",
             "executor_identity": executor_identity,
             "independent_verification_required": True,
-            "forbidden_outputs_emitted": False,
+            "forbidden_outputs_emitted": bool(forbidden_inventory(output_root)),
+            "forbidden_artifacts": forbidden_inventory(output_root),
+        }
+        replay_receipt(output_root, terminal)
+        return terminal
+    inventory = forbidden_inventory(output_root)
+    if inventory:
+        terminal = {
+            "schema": "a3g-candidate-terminal-v1",
+            "classification": INCONCLUSIVE_CANDIDATE,
+            "terminal_stage": "preflight-or-runner-error",
+            "detail": "forbidden artifacts present before reservation",
+            "forbidden_outputs_emitted": True,
+            "forbidden_artifacts": inventory,
+            "independent_verification_required": True,
         }
         atomic_json(output_root / "candidate-terminal.json", terminal)
         return terminal
-    atomic_json(marker, {"source": source_map(source), "code_revision": code_revision})
+    atomic_json(
+        marker,
+        {
+            "schema": "a3g-experiment-reservation-v2",
+            "source": source_map(source),
+            "code_revision": code_revision,
+            "executor_identity": executor_identity,
+            "provenance": execution_provenance(),
+        },
+    )
 
     conditioning, conditioned = run_stage(
         output_root, source, STAGES[0], source.cluster, code_revision, None
@@ -837,6 +957,7 @@ def _run_locked(
         )
     receipts[STAGES[2].stage_id] = released
     classification = classify(constrained, released)
+    inventory = forbidden_inventory(output_root)
     terminal = {
         "schema": "a3g-candidate-terminal-v1",
         "written_at": now(),
@@ -860,13 +981,21 @@ def _run_locked(
             for stage in STAGES
         },
         "independent_verification_required": True,
-        "forbidden_outputs_emitted": False,
+        "forbidden_outputs_emitted": bool(inventory),
+        "forbidden_artifacts": inventory,
         "experiment_budget": _experiment_budget(receipts),
+        "experiment_reservation_sha256": sha256_path(marker),
     }
     if classification == INCONCLUSIVE_CANDIDATE:
         terminal["detail"] = (
             "the single finite constrained-to-released route was inconclusive; "
             "this route and the Oaa-neutral n=2/4/6 family are closed; no replay"
+        )
+    if inventory:
+        terminal.update(
+            classification=INCONCLUSIVE_CANDIDATE,
+            terminal_stage="preflight-or-runner-error",
+            detail="forbidden artifacts present before candidate publication",
         )
     atomic_json(output_root / "candidate-terminal.json", terminal)
     return terminal
@@ -879,7 +1008,7 @@ def run_experiment(
     code_revision: str,
     executor_identity: str = EXECUTOR_IDENTITY,
 ) -> dict[str, Any]:
-    output_root.mkdir(parents=True, exist_ok=True)
+    durable_mkdir(output_root)
     with exclusive_run(output_root):
         return _run_locked(
             output_root,
@@ -887,6 +1016,66 @@ def run_experiment(
             code_revision=code_revision,
             executor_identity=executor_identity,
         )
+
+
+def executable_code_digest(code):
+    """Hash actual loaded instructions, not inspect's potentially stale disk text."""
+    payload = {
+        "bytecode": code.co_code.hex(),
+        "constants": [
+            executable_code_digest(c) if isinstance(c, CodeType) else repr(c)
+            for c in code.co_consts
+        ],
+        "names": code.co_names,
+        "variables": code.co_varnames,
+        "freevars": code.co_freevars,
+        "cellvars": code.co_cellvars,
+        "flags": code.co_flags,
+        "arguments": [
+            code.co_argcount,
+            code.co_posonlyargcount,
+            code.co_kwonlyargcount,
+        ],
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def execution_provenance():
+    root = Path(__file__).resolve().parents[2]
+    return {
+        "pid": os.getpid(),
+        "hostname": socket.gethostname(),
+        "executable_sha256": sha256_path(Path("/proc/self/exe")),
+        "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+        "process_start_ticks": Path("/proc/self/stat")
+        .read_text()
+        .rsplit(")", 1)[1]
+        .split()[19],
+        "loaded_code": {
+            name: executable_code_digest(fn.__code__)
+            for name, fn in (
+                ("optimize_bounded", optimize_bounded),
+                ("run_stage", run_stage),
+            )
+        },
+        "callables": {
+            name: hashlib.sha256(inspect.getsource(fn).encode()).hexdigest()
+            for name, fn in (
+                ("optimize_bounded", optimize_bounded),
+                ("run_stage", run_stage),
+            )
+        },
+        "files": {
+            name: sha256_path(root / name)
+            for name in ("qm/scripts/a3g_oaa_owner_basin.py", "qm/quarry/pipeline.py")
+        },
+    }
+
+
+def replay_receipt(root, receipt):
+    atomic_json(
+        root / "replay-attempts" / f"{time.time_ns()}-{os.getpid()}.json", receipt
+    )
 
 
 def dry_run(source: SourceEvidence, *, code_revision: str) -> dict[str, Any]:
@@ -941,7 +1130,7 @@ def main() -> int:
             executor_identity=args.executor_identity,
         )
     except Exception as exc:
-        args.output_root.mkdir(parents=True, exist_ok=True)
+        durable_mkdir(args.output_root)
         terminal = {
             "schema": "a3g-candidate-terminal-v1",
             "written_at": now(),
@@ -950,11 +1139,11 @@ def main() -> int:
             "terminal_stage": "preflight-or-runner-error",
             "detail": f"{type(exc).__name__}: {exc}",
             "independent_verification_required": True,
-            "forbidden_outputs_emitted": False,
+            "forbidden_outputs_emitted": bool(forbidden_inventory(args.output_root)),
+            "forbidden_artifacts": forbidden_inventory(args.output_root),
         }
         with exclusive_run(args.output_root):
-            revoke_terminals(args.output_root)
-            atomic_json(args.output_root / "candidate-terminal.json", terminal)
+            replay_receipt(args.output_root, terminal)
         print(json.dumps(terminal, indent=2, sort_keys=True))
         return 1
     print(json.dumps(terminal, indent=2, sort_keys=True))

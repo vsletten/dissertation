@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+import socket
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +17,35 @@ from quarry.store import geometry_hash
 from scripts import a3b_proton_microstate_stability as a3b
 from scripts import a3g_oaa_owner_basin as a3g
 from scripts import a3g_verify as verifier
+
+
+def _identity(worker="cold"):
+    return {
+        "worker_id": worker,
+        "profile": "cpu-test",
+        "hostname": socket.gethostname(),
+        "implementation_sha256": verifier.sha256_path(Path(verifier.__file__)),
+    }
+
+
+_REAL_RUNTIME_PROVENANCE = verifier.runtime_provenance
+_REAL_VALIDATE_REVISION = verifier.validate_revision
+
+
+@pytest.fixture(autouse=True)
+def fixture_revision_boundary(monkeypatch):
+    # Scientific mocks have no committed electronic-structure run. Exercise the
+    # real revision boundary separately using a temporary Git repository.
+    monkeypatch.setattr(verifier, "validate_revision", lambda *args: None)
+    # Model a fresh verifier process on the same host for scientific mock tests.
+    monkeypatch.setattr(
+        verifier,
+        "runtime_provenance",
+        lambda: {
+            **_REAL_RUNTIME_PROVENANCE(),
+            "process_start_ticks": "0",
+        },
+    )
 
 
 def _cluster() -> Cluster:
@@ -183,8 +213,8 @@ def test_exact_three_stage_budget_and_fresh_release(tmp_path, monkeypatch):
         receipt = json.loads(
             (tmp_path / "stages" / spec.directory / "receipt.json").read_text()
         )
-        assert receipt["optimizer"]["fresh_instance"] is True
-        assert receipt["optimizer"]["geometric_default_fresh_hessian"] is True
+        assert receipt["optimizer"]["fresh_optimizer_requested"] is True
+        assert receipt["optimizer"]["default_hessian_requested"] is True
         assert receipt["signature"]["budget"] == {
             "max_steps": 100,
             "retry_allowed": False,
@@ -330,7 +360,7 @@ def test_independent_verifier_recomputes_and_detects_tampering(tmp_path, monkeyp
     result = verifier.verify_experiment(
         tmp_path,
         source_override=source,
-        verifier_identity="cold-worker-2",
+        verifier_identity=_identity("cold-worker-2"),
     )
     assert result["status"] == "verified"
     assert result["classification"] == a3g.VERIFIED_ACCEPTED
@@ -341,10 +371,10 @@ def test_independent_verifier_recomputes_and_detects_tampering(tmp_path, monkeyp
     rejected = verifier.verify_experiment(
         tmp_path,
         source_override=source,
-        verifier_identity="cold-worker-2",
+        verifier_identity=_identity("cold-worker-2"),
     )
     assert rejected["status"] == "rejected"
-    assert "hash-mismatched" in rejected["detail"]
+    assert "replay attempt" in rejected["detail"]
 
 
 def test_verifier_refuses_executor_identity_and_no_recompute(tmp_path, monkeypatch):
@@ -358,16 +388,10 @@ def test_verifier_refuses_executor_identity_and_no_recompute(tmp_path, monkeypat
         verifier_identity=a3g.EXECUTOR_IDENTITY,
     )
     assert same["status"] == "rejected"
-    a3g.atomic_json(
-        tmp_path / "candidate-terminal.json",
-        json.loads(
-            next((tmp_path / "revoked").rglob("candidate-terminal.json")).read_text()
-        ),
-    )
     refused = verifier.verify_experiment(
         tmp_path,
         source_override=source,
-        verifier_identity="cold-worker-2",
+        verifier_identity=_identity("cold-worker-2"),
         recompute_calculators=False,
     )
     assert refused["status"] == "rejected"
@@ -381,7 +405,7 @@ def test_verifier_rejects_coordinated_raw_endpoint_and_receipt_tampering(
     endpoints = _endpoints(source.cluster)
     energy_values = {endpoint.name: -10.0 for endpoint in endpoints}
     _patch_calculators(monkeypatch, endpoints, energies=energy_values)
-    a3g.run_experiment(tmp_path, source, code_revision="g" * 40)
+    a3g.run_experiment(tmp_path, source, code_revision="a" * 40)
     monkeypatch.setattr(
         verifier, "energy", lambda cluster, _settings: energy_values[cluster.name]
     )
@@ -416,7 +440,7 @@ def test_verifier_rejects_coordinated_raw_endpoint_and_receipt_tampering(
     result = verifier.verify_experiment(
         tmp_path,
         source_override=source,
-        verifier_identity="cold-worker-2",
+        verifier_identity=_identity("cold-worker-2"),
     )
     assert result["status"] == "rejected"
     assert "raw" in result["detail"].casefold()
@@ -450,7 +474,7 @@ def test_spent_stage_receipts_persist_one_call_zero_retry_100_step_budget(
         )
         assert receipt["optimizer"]["observed_calls"] == 1
         assert receipt["optimizer"]["observed_retries"] == 0
-        assert receipt["optimizer"]["observed_max_steps"] == 100
+        assert receipt["optimizer"]["requested_max_steps"] == 100
 
 
 def test_verifier_rejects_spent_stage_budget_that_is_not_one_call_zero_retry_100_steps(
@@ -480,7 +504,7 @@ def test_verifier_rejects_spent_stage_budget_that_is_not_one_call_zero_retry_100
     receipt = json.loads(receipt_path.read_text())
     receipt["optimizer"]["observed_calls"] = 2
     receipt["optimizer"]["observed_retries"] = 1
-    receipt["optimizer"]["observed_max_steps"] = 200
+    receipt["optimizer"]["requested_max_steps"] = 200
     a3g.atomic_json(receipt_path, receipt)
     candidate_path = tmp_path / "candidate-terminal.json"
     candidate = json.loads(candidate_path.read_text())
@@ -492,7 +516,7 @@ def test_verifier_rejects_spent_stage_budget_that_is_not_one_call_zero_retry_100
     result = verifier.verify_experiment(
         tmp_path,
         source_override=source,
-        verifier_identity="cold-worker-2",
+        verifier_identity=_identity("cold-worker-2"),
     )
     assert result["status"] == "rejected"
     assert "budget" in result["detail"].casefold()
@@ -570,7 +594,7 @@ def test_both_positive_routes_require_fresh_phva(tmp_path, monkeypatch, transfer
     )
     assert terminal["classification"] == expected
     result = verifier.verify_experiment(
-        tmp_path, source_override=source, verifier_identity="independent"
+        tmp_path, source_override=source, verifier_identity=_identity("independent")
     )
     assert result["status"] == "verified", result
     assert result["classification"] == (
@@ -671,7 +695,7 @@ def test_only_exact_transfer_with_every_other_owner_unchanged(
         a3g.ALTERNATIVE_CANDIDATE if transfer == "exact" else a3g.INCONCLUSIVE_CANDIDATE
     )
     verified = verifier.verify_experiment(
-        tmp_path, source_override=source, verifier_identity="cold"
+        tmp_path, source_override=source, verifier_identity=_identity("cold")
     )
     assert verified["status"] == "verified", verified
     assert verified["classification"] == (
@@ -726,7 +750,7 @@ def test_raw_full_precision_and_calculators_persist_before_all_gates(
     terminal = a3g.run_experiment(tmp_path, source, code_revision="a" * 40)
     assert terminal["classification"] == a3g.ACCEPTED_CANDIDATE
     result = verifier.verify_experiment(
-        tmp_path, source_override=source, verifier_identity="cold"
+        tmp_path, source_override=source, verifier_identity=_identity("cold")
     )
     assert result["status"] == "verified", result
 
@@ -755,7 +779,7 @@ def test_completed_experiment_cannot_be_replayed(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("entrypoint", ["executor", "verifier"])
-def test_source_hash_failure_quarantines_both_stale_terminals(
+def test_source_failure_or_verifier_replay_preserves_both_terminals(
     tmp_path, monkeypatch, entrypoint
 ):
     source = _source()
@@ -774,20 +798,20 @@ def test_source_hash_failure_quarantines_both_stale_terminals(
             a3g.sys, "argv", ["a3g", "--output-root", str(tmp_path), "--dry-run"]
         )
         assert a3g.main() == 1
-        assert not (tmp_path / "verified-terminal.json").exists()
+        assert (tmp_path / "verified-terminal.json").read_bytes() == old_verified
+        assert (tmp_path / "candidate-terminal.json").read_bytes() == old_candidate
+        assert list((tmp_path / "replay-attempts").glob("*.json"))
+        return
     else:
         monkeypatch.setattr(verifier, "validate_source", fail)
-        result = verifier.verify_experiment(tmp_path, verifier_identity="cold")
+        result = verifier.verify_experiment(
+            tmp_path, verifier_identity=_identity("cold")
+        )
         assert result["status"] == "rejected"
-        assert not (tmp_path / "candidate-terminal.json").exists()
-    assert any(
-        p.read_bytes() == old_candidate
-        for p in (tmp_path / "revoked").rglob("candidate-terminal.json")
-    )
-    assert any(
-        p.read_bytes() == old_verified
-        for p in (tmp_path / "revoked").rglob("verified-terminal.json")
-    )
+        assert "replay attempt" in result["detail"]
+    assert (tmp_path / "candidate-terminal.json").read_bytes() == old_candidate
+    assert (tmp_path / "verified-terminal.json").read_bytes() == old_verified
+    assert list((tmp_path / "verification-attempts").glob("*.json"))
 
 
 def test_verifier_has_no_runtime_executor_or_shared_science_calls(
@@ -826,7 +850,7 @@ def test_verifier_has_no_runtime_executor_or_shared_science_calls(
         for name in names:
             monkeypatch.setattr(module, name, fail)
     result = verifier.verify_experiment(
-        tmp_path, source_override=source, verifier_identity="cold"
+        tmp_path, source_override=source, verifier_identity=_identity("cold")
     )
     assert result["status"] == "verified", result
     tree = ast.parse(Path(verifier.__file__).read_text())
@@ -887,7 +911,7 @@ def test_alternative_requires_independently_reproducible_evidence(
             ),
         )
     result = verifier.verify_experiment(
-        tmp_path, source_override=source, verifier_identity="cold"
+        tmp_path, source_override=source, verifier_identity=_identity("cold")
     )
     assert result["status"] == "rejected"
 
@@ -936,14 +960,14 @@ def test_coordinated_receipt_tampering_is_detected(tmp_path, monkeypatch, field)
     elif field == "parent":
         receipt["parent"]["receipt_sha256"] = "tampered"
     else:
-        receipt["optimizer"]["geometric_default_fresh_hessian"] = False
+        receipt["optimizer"]["default_hessian_requested"] = False
     a3g.atomic_json(path, receipt)
     candidate_path = tmp_path / "candidate-terminal.json"
     candidate = json.loads(candidate_path.read_text())
     candidate["stages"][stage.stage_id]["receipt_sha256"] = a3g.sha256_path(path)
     a3g.atomic_json(candidate_path, candidate)
     result = verifier.verify_experiment(
-        tmp_path, source_override=source, verifier_identity="cold"
+        tmp_path, source_override=source, verifier_identity=_identity("cold")
     )
     assert result["status"] == "rejected", result
 
@@ -966,7 +990,650 @@ def test_independently_verified_structural_failure(tmp_path, monkeypatch, failur
     terminal = a3g.run_experiment(tmp_path, source, code_revision="a" * 40)
     assert terminal["classification"] == a3g.INCONCLUSIVE_CANDIDATE
     result = verifier.verify_experiment(
-        tmp_path, source_override=source, verifier_identity="cold"
+        tmp_path, source_override=source, verifier_identity=_identity("cold")
     )
     assert result["status"] == "verified", result
     assert result["classification"] == a3g.VERIFIED_INCONCLUSIVE
+
+
+@pytest.mark.parametrize("marker", [False, True])
+def test_verifier_rejects_unattempted_experiment(tmp_path, monkeypatch, marker):
+    source = _source()
+    _patch_calculators(monkeypatch, _endpoints(source.cluster))
+    a3g.run_experiment(tmp_path, source, code_revision="a" * 40)
+    import shutil
+
+    shutil.rmtree(tmp_path / "stages")
+    path = tmp_path / "candidate-terminal.json"
+    candidate = json.loads(path.read_text())
+    candidate["stages"] = {
+        spec.stage_id: {"status": "not-run", "receipt_sha256": None}
+        for spec in verifier.STAGES
+    }
+    candidate["classification"] = verifier.INCONCLUSIVE_CANDIDATE
+    candidate["experiment_budget"] = {
+        "owner_conditioning": 0,
+        "constrained_production": 0,
+        "released_production": 0,
+        "retries": 0,
+    }
+    a3g.atomic_json(path, candidate)
+    if not marker:
+        (tmp_path / "experiment-reservation.json").unlink()
+    result = verifier.verify_experiment(
+        tmp_path, source_override=source, verifier_identity=_identity()
+    )
+    assert result["status"] == "rejected"
+    assert result["calculator_evidence_recomputed_count"] == 0
+    assert result["calculator_evidence_recomputed"] is False
+
+
+def test_attempted_optimizer_failure_has_zero_recomputed_items(tmp_path, monkeypatch):
+    def failure(*args, **kwargs):
+        raise RuntimeError("optimizer failed before geometry")
+
+    monkeypatch.setattr(a3g, "optimize_bounded", failure)
+    source = _source()
+    a3g.run_experiment(tmp_path, source, code_revision="a" * 40)
+    result = verifier.verify_experiment(
+        tmp_path, source_override=source, verifier_identity=_identity()
+    )
+    assert result["status"] == "verified", result
+    assert result["calculator_evidence_recomputed_count"] == 0
+    assert result["calculator_evidence_recomputed"] is False
+
+
+def test_executor_runtime_constant_drift_cannot_change_verdict(tmp_path, monkeypatch):
+    source = _source()
+    _patch_calculators(monkeypatch, _endpoints(source.cluster))
+    a3g.run_experiment(tmp_path, source, code_revision="a" * 40)
+    for name in (
+        "STAGES",
+        "STAGE_BY_ID",
+        "MAX_STEPS",
+        "NOISE_FLOOR_CM",
+        "DOWNHILL_MIN_HARTREE",
+        "ENERGY_REPRO_TOL",
+        "GRADIENT_REPRO_TOL",
+        "ACCEPTED_CANDIDATE",
+        "DEFAULT_SOURCE_ROOT",
+        "SOURCE_PATHS",
+    ):
+        monkeypatch.setattr(a3g, name, None)
+    result = verifier.verify_experiment(
+        tmp_path, source_override=source, verifier_identity=_identity()
+    )
+    assert result["status"] == "verified", result
+    assert result["classification"] == "accepted reactant minimum"
+    assert result["calculator_evidence_recomputed_count"] == 13
+    for node in ast.walk(ast.parse(Path(verifier.__file__).read_text())):
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "a3g"
+        ):
+            assert node.attr == "SourceEvidence"
+
+
+def test_hidden_optimizer_retry_is_counted_and_rejected(tmp_path, monkeypatch):
+    source = _source()
+    _patch_calculators(monkeypatch, _endpoints(source.cluster))
+    inner = a3g.optimize_bounded
+    entered = False
+
+    def retry(*args, **kwargs):
+        nonlocal entered
+        if not entered:
+            entered = True
+            retry(*args, **kwargs)
+        return inner(*args, **kwargs)
+
+    monkeypatch.setattr(a3g, "optimize_bounded", retry)
+    a3g.run_experiment(tmp_path, source, code_revision="a" * 40)
+    observation = json.loads(
+        (
+            tmp_path / "stages/01-owner-conditioning/optimizer-observation.json"
+        ).read_text()
+    )
+    assert observation["calls"] == 2
+    result = verifier.verify_experiment(
+        tmp_path, source_override=source, verifier_identity=_identity()
+    )
+    assert result["status"] == "rejected"
+    assert "budget" in result["detail"]
+
+
+@pytest.mark.parametrize("terminal", [False, True])
+def test_replay_preserves_canonical_bytes(tmp_path, monkeypatch, terminal):
+    source = _source()
+    if terminal:
+        _patch_calculators(monkeypatch, _endpoints(source.cluster))
+        a3g.run_experiment(tmp_path, source, code_revision="a" * 40)
+        verifier.verify_experiment(
+            tmp_path, source_override=source, verifier_identity=_identity()
+        )
+    else:
+        a3g.atomic_json(tmp_path / "experiment-reservation.json", {"reserved": True})
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    a3g.run_experiment(tmp_path, source, code_revision="a" * 40)
+    assert all(path.read_bytes() == content for path, content in before.items())
+    assert len(list((tmp_path / "replay-attempts").glob("*.json"))) == 1
+
+
+@pytest.mark.parametrize("quantity", ["energy", "gradient", "phva"])
+def test_each_return_survives_next_failure(tmp_path, monkeypatch, quantity):
+    source = _source()
+    _patch_calculators(monkeypatch, _endpoints(source.cluster))
+    if quantity == "energy":
+
+        def fail(*args):
+            raise RuntimeError("gradient failed")
+
+        monkeypatch.setattr(a3g, "gradient", fail)
+        filename = "01-owner-conditioning/raw-energy.json"
+    elif quantity == "gradient":
+
+        def fail(*args):
+            raise RuntimeError("structural gate failed")
+
+        monkeypatch.setattr(a3b, "structural_gate", fail)
+        filename = "01-owner-conditioning/raw-gradient.json"
+    else:
+        # Invalid returned PHVA must survive its own finite gate.
+        original = a3g.frequencies
+
+        def invalid(c, s):
+            result = original(c, s)
+            result.imaginary_cm = [float("nan")]
+            return result
+
+        monkeypatch.setattr(a3g, "frequencies", invalid)
+        filename = "03-released-production/raw-phva.json"
+    candidate = a3g.run_experiment(tmp_path, source, code_revision="a" * 40)
+    assert candidate["classification"] == a3g.INCONCLUSIVE_CANDIDATE
+    saved = json.loads((tmp_path / "stages" / filename).read_text())
+    assert saved["settings"]
+    assert saved.get("input_geometry_fingerprint", saved.get("geometry_fingerprint"))
+    if quantity == "phva":
+        assert saved["imaginary_cm"] == ["nan"]
+
+
+@pytest.mark.parametrize("revision", ["z" * 40, "A" * 40, "a" * 39])
+def test_invalid_revision_rejected(tmp_path, monkeypatch, revision):
+    source = _source()
+    _patch_calculators(monkeypatch, _endpoints(source.cluster))
+    a3g.run_experiment(tmp_path, source, code_revision=revision)
+    result = verifier.verify_experiment(
+        tmp_path, source_override=source, verifier_identity=_identity()
+    )
+    assert result["status"] == "rejected"
+    assert "revision is invalid" in result["detail"]
+
+
+@pytest.mark.parametrize(
+    "fault", [None, "dirty", "head", "remote", "branch", "callable", "file"]
+)
+def test_exact_revision_and_audited_source_boundary(tmp_path, monkeypatch, fault):
+    root = Path(__file__).resolve().parents[2]
+    provenance = a3g.execution_provenance()
+    # Autouse calculator guard changes the loaded optimizer; supply the real
+    # source digest to model an unmodified process, then tamper it explicitly.
+    code = (root / "qm/quarry/pipeline.py").read_text()
+    node = next(
+        n
+        for n in ast.parse(code).body
+        if isinstance(n, ast.FunctionDef) and n.name == "optimize_bounded"
+    )
+    import hashlib
+
+    provenance["callables"]["optimize_bounded"] = hashlib.sha256(
+        (ast.get_source_segment(code, node) + "\n").encode()
+    ).hexdigest()
+    compiled = compile(
+        code, str(root / "qm/quarry/pipeline.py"), "exec", dont_inherit=True
+    )
+    from types import CodeType
+
+    provenance["loaded_code"]["optimize_bounded"] = verifier.compiled_code_digest(
+        next(
+            c
+            for c in compiled.co_consts
+            if isinstance(c, CodeType) and c.co_name == "optimize_bounded"
+        )
+    )
+    if fault == "callable":
+        provenance["callables"]["optimize_bounded"] = "0" * 64
+    if fault == "file":
+        provenance["files"]["qm/quarry/pipeline.py"] = "0" * 64
+
+    def git(command, **kwargs):
+        assert command[:3] == ["git", "-C", str(root)]
+        args = command[3:]
+        if args[0] == "show":
+            return SimpleNamespace(
+                stdout=(root / args[1].split(":", 1)[1]).read_bytes()
+            )
+        value = "a" * 40
+        if args[0] == "symbolic-ref":
+            value = "wrong" if fault == "branch" else verifier.EXPECTED_BRANCH
+        elif args[0] == "status":
+            value = " M dirty" if fault == "dirty" else ""
+        elif (args[-1] == "HEAD" and fault == "head") or (
+            args[-1].startswith("origin/") and fault == "remote"
+        ):
+            value = "b" * 40
+        return SimpleNamespace(stdout=value)
+
+    monkeypatch.setattr(verifier.subprocess, "run", git)
+    if fault is None:
+        _REAL_VALIDATE_REVISION(root, "a" * 40, provenance)
+    else:
+        with pytest.raises(RuntimeError):
+            _REAL_VALIDATE_REVISION(root, "a" * 40, provenance)
+
+
+@pytest.mark.parametrize(
+    "fault", ["label", "same-worker", "hostname", "implementation", "profile"]
+)
+def test_structured_verifier_identity(fault):
+    identity = _identity()
+    if fault == "label":
+        identity = "different-label"
+    elif fault == "same-worker":
+        identity["worker_id"] = a3g.EXECUTOR_IDENTITY
+    else:
+        identity[
+            {
+                "hostname": "hostname",
+                "implementation": "implementation_sha256",
+                "profile": "profile",
+            }[fault]
+        ] = ""
+    with pytest.raises(RuntimeError):
+        verifier.validate_identity(identity, a3g.EXECUTOR_IDENTITY)
+
+
+def test_identity_receipt_bound_exactly(tmp_path, monkeypatch):
+    source = _source()
+    _patch_calculators(monkeypatch, _endpoints(source.cluster))
+    a3g.run_experiment(tmp_path, source, code_revision="a" * 40)
+    identity = _identity()
+    result = verifier.verify_experiment(
+        tmp_path, source_override=source, verifier_identity=identity
+    )
+    assert result["status"] == "verified", result
+    assert (
+        json.loads((tmp_path / "verified-terminal.json").read_text())[
+            "verifier_identity"
+        ]
+        == identity
+    )
+
+
+@pytest.mark.parametrize("module", [a3g, verifier])
+def test_atomic_write_fsyncs_file_before_rename_and_directory_after(
+    tmp_path, monkeypatch, module
+):
+    import os
+    import stat
+
+    from quarry import durable_receipts
+
+    events = []
+    real_replace = Path.replace
+    monkeypatch.setattr(
+        os,
+        "fsync",
+        lambda fd: events.append(
+            "dir" if stat.S_ISDIR(os.fstat(fd).st_mode) else "file"
+        ),
+    )
+
+    def replace(source, target):
+        events.append("rename")
+        return real_replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", replace)
+    module.atomic_json(tmp_path / "nested/receipt.json", {"value": 1})
+    assert events[-3:] == ["file", "rename", "dir"]
+    assert events[:2] == ["dir", "dir"]
+    events.clear()
+    durable_receipts.durable_replace(
+        tmp_path / "nested/receipt.json", tmp_path / "moved.json"
+    )
+    assert events == ["rename", "dir", "dir"]
+
+
+def test_loaded_bytecode_digest_detects_in_memory_replacement():
+    def original(value):
+        return value + 1
+
+    def replacement(value):
+        return value + 2
+
+    before = a3g.executable_code_digest(original.__code__)
+    assert before == verifier.compiled_code_digest(original.__code__)
+    original.__code__ = replacement.__code__
+    assert a3g.executable_code_digest(original.__code__) != before
+
+
+def test_raw_value_preserves_nonfinite_and_nested_phva_output():
+    assert a3g.raw_value({"modes": np.array([1.0, np.nan, np.inf, -np.inf])}) == {
+        "modes": [1.0, "nan", "inf", "-inf"]
+    }
+
+
+def test_atomic_xyz_fsync(tmp_path, monkeypatch):
+    import os
+    import stat
+
+    observed = []
+    monkeypatch.setattr(
+        os, "fsync", lambda fd: observed.append(stat.S_ISREG(os.fstat(fd).st_mode))
+    )
+    a3g.atomic_xyz(tmp_path / "raw.xyz", _cluster())
+    assert observed == [True, False]
+
+
+@pytest.mark.parametrize("fresh", [False, True])
+def test_internal_runtime_controls_independence(tmp_path, monkeypatch, fresh):
+    source = _source()
+    _patch_calculators(monkeypatch, _endpoints(source.cluster))
+    a3g.run_experiment(tmp_path, source, code_revision="a" * 40)
+    observed = _REAL_RUNTIME_PROVENANCE()
+    if fresh:
+        observed = {**observed, "pid": observed["pid"] + 1}
+    monkeypatch.setattr(verifier, "runtime_provenance", lambda: observed)
+    before = (tmp_path / "candidate-terminal.json").read_bytes()
+    result = verifier.verify_experiment(
+        tmp_path,
+        source_override=source,
+        verifier_identity={"worker_id": "fabricated-cold-label", "profile": "cold"},
+    )
+    assert (tmp_path / "candidate-terminal.json").read_bytes() == before
+    if fresh:
+        assert result["status"] == "verified", result
+        assert result["verifier_provenance"] == observed
+    else:
+        assert result["status"] == "rejected"
+        assert "same-process" in result["detail"]
+        assert not (tmp_path / "verified-terminal.json").exists()
+        assert len(list((tmp_path / "verification-attempts").glob("*.json"))) == 1
+
+
+def test_caller_cannot_supply_process_facts():
+    for key in ("pid", "boot_id", "process_start_ticks", "executable_sha256"):
+        with pytest.raises(RuntimeError, match="runtime facts are internal"):
+            verifier.validate_identity({**_identity(), key: "forged"}, "executor")
+
+
+@pytest.mark.parametrize("name", sorted(a3g.FORBIDDEN_ARTIFACT_NAMES))
+def test_dirty_output_root_never_reserves_or_calculates(tmp_path, name):
+    dirty = tmp_path / "nested" / name
+    dirty.parent.mkdir()
+    dirty.write_text("preserve")
+    result = a3g.run_experiment(tmp_path, _source(), code_revision="a" * 40)
+    assert result["terminal_stage"] == "preflight-or-runner-error"
+    assert result["forbidden_artifacts"] == [f"nested/{name}"]
+    assert result["forbidden_outputs_emitted"] is True
+    assert not (tmp_path / "experiment-reservation.json").exists()
+    assert not (tmp_path / "stages").exists()
+    assert dirty.read_text() == "preserve"
+    assert verifier.forbidden_inventory(tmp_path) == result["forbidden_artifacts"]
+
+
+def test_output_contract_independently_defined():
+    assert verifier.FORBIDDEN_ARTIFACT_NAMES == a3g.FORBIDDEN_ARTIFACT_NAMES
+    assert verifier.forbidden_inventory is not a3g.forbidden_inventory
+
+
+def test_new_forbidden_output_blocks_candidate_success(tmp_path, monkeypatch):
+    source = _source()
+    _patch_calculators(monkeypatch, _endpoints(source.cluster))
+    original = a3g.frequencies
+
+    def dirty(*args):
+        (tmp_path / "barrier.json").write_text("unexpected")
+        return original(*args)
+
+    monkeypatch.setattr(a3g, "frequencies", dirty)
+    result = a3g.run_experiment(tmp_path, source, code_revision="a" * 40)
+    assert result["classification"] == a3g.INCONCLUSIVE_CANDIDATE
+    assert result["terminal_stage"] == "preflight-or-runner-error"
+    assert result["forbidden_artifacts"] == ["barrier.json"]
+    assert result["forbidden_outputs_emitted"] is True
+
+
+@pytest.mark.parametrize("tamper", ["artifact", "claim", "source"])
+def test_invalid_verification_preserves_candidate_bytes(tmp_path, monkeypatch, tamper):
+    source = _source()
+    _patch_calculators(monkeypatch, _endpoints(source.cluster))
+    candidate = a3g.run_experiment(tmp_path, source, code_revision="a" * 40)
+    if tamper == "artifact":
+        (tmp_path / "stages" / "store.sqlite").write_text("tampered")
+    elif tamper == "claim":
+        candidate["forbidden_artifacts"] = ["results.json"]
+        a3g.atomic_json(tmp_path / "candidate-terminal.json", candidate)
+    else:
+        monkeypatch.setattr(
+            verifier,
+            "validate_source",
+            lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("source failure")),
+        )
+    before = (tmp_path / "candidate-terminal.json").read_bytes()
+    for _ in range(2):
+        result = verifier.verify_experiment(
+            tmp_path,
+            verifier_identity=_identity(),
+            **({} if tamper == "source" else {"source_override": source}),
+        )
+        assert result["status"] == "rejected"
+        assert (tmp_path / "candidate-terminal.json").read_bytes() == before
+        assert not (tmp_path / "verified-terminal.json").exists()
+    assert len(list((tmp_path / "verification-attempts").glob("*.json"))) == 2
+
+
+def test_verified_replay_never_recomputes_or_changes_bytes(tmp_path, monkeypatch):
+    source = _source()
+    _patch_calculators(monkeypatch, _endpoints(source.cluster))
+    a3g.run_experiment(tmp_path, source, code_revision="a" * 40)
+    assert (
+        verifier.verify_experiment(
+            tmp_path, source_override=source, verifier_identity=_identity()
+        )["status"]
+        == "verified"
+    )
+    names = ("candidate-terminal.json", "verified-terminal.json")
+    before = {name: (tmp_path / name).read_bytes() for name in names}
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("replay must not recompute or validate source")
+
+    for name in ("energy", "gradient", "frequencies", "validate_source"):
+        monkeypatch.setattr(verifier, name, forbidden)
+    for identity in (_identity(), "invalid", {"pid": 123}):
+        result = verifier.verify_experiment(tmp_path, verifier_identity=identity)
+        assert result["status"] == "rejected"
+        assert "replay attempt" in result["detail"]
+        assert {name: (tmp_path / name).read_bytes() for name in names} == before
+    assert len(list((tmp_path / "verification-attempts").glob("*.json"))) == 3
+
+
+def test_durable_receipts_discoverable_in_fresh_interpreter():
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import importlib.util; from quarry import durable_receipts; "
+            "assert importlib.util.find_spec('quarry.durable_receipts'); "
+            "assert callable(durable_receipts.durable_replace)",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_contending_verifier_writes_attempt_without_touching_candidate(tmp_path):
+    candidate = tmp_path / "candidate-terminal.json"
+    candidate.write_bytes(b"invalid candidate preserved")
+    with a3g.exclusive_run(tmp_path):
+        result = verifier.verify_experiment(tmp_path, verifier_identity=_identity())
+    assert result["status"] == "rejected"
+    assert "already active" in result["detail"]
+    assert candidate.read_bytes() == b"invalid candidate preserved"
+    assert len(list((tmp_path / "verification-attempts").glob("*.json"))) == 1
+
+
+def test_rejection_attempt_is_crash_durable_and_unique(tmp_path, monkeypatch):
+    import os
+    import stat
+
+    events = []
+    real_replace = Path.replace
+    monkeypatch.setattr(
+        os,
+        "fsync",
+        lambda fd: events.append(
+            "dir" if stat.S_ISDIR(os.fstat(fd).st_mode) else "file"
+        ),
+    )
+
+    def replace(source, target):
+        events.append("rename")
+        return real_replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", replace)
+    for _ in range(2):
+        result = verifier.rejection_attempt(tmp_path, "invalid")
+        assert result["status"] == "rejected"
+        assert events[-3:] == ["file", "rename", "dir"]
+    assert len(list((tmp_path / "verification-attempts").glob("*.json"))) == 2
+
+
+@pytest.mark.parametrize("replay", [False, True])
+def test_verifier_cli_invalid_or_replay_attempt_is_nondestructive(
+    tmp_path, monkeypatch, replay
+):
+    candidate = tmp_path / "candidate-terminal.json"
+    candidate.write_bytes(b"malformed candidate")
+    verified = tmp_path / "verified-terminal.json"
+    if replay:
+        verified.write_bytes(b"prior verified bytes")
+
+    def forbidden():
+        pytest.fail("CLI replay must not initialize GPU support")
+
+    monkeypatch.setattr(verifier, "preload_cutensor", forbidden)
+    monkeypatch.setattr(
+        verifier.sys,
+        "argv",
+        [
+            "a3g_verify",
+            "--output-root",
+            str(tmp_path),
+            "--verifier-identity",
+            str(tmp_path / "missing.json"),
+            "--gpu",
+        ],
+    )
+    assert verifier.main() == 1
+    assert candidate.read_bytes() == b"malformed candidate"
+    if replay:
+        assert verified.read_bytes() == b"prior verified bytes"
+    else:
+        assert not verified.exists()
+    assert len(list((tmp_path / "verification-attempts").glob("*.json"))) == 1
+
+
+@pytest.mark.parametrize("identity_fault", ["missing", "malformed", "invalid"])
+def test_cli_production_candidate_rejects_identity_before_gpu(
+    tmp_path, monkeypatch, identity_fault, capsys
+):
+    source = _source()
+    _patch_calculators(monkeypatch, _endpoints(source.cluster))
+    candidate = a3g.run_experiment(tmp_path, source, code_revision="a" * 40)
+    assert candidate["stages"]["constrained-production"]["status"] == "complete"
+    path = tmp_path / "identity.json"
+    if identity_fault == "malformed":
+        path.write_text("invalid JSON")
+    elif identity_fault == "invalid":
+        path.write_text(json.dumps({"worker_id": "missing-profile"}))
+    before = (tmp_path / "candidate-terminal.json").read_bytes()
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("invalid identity must not initialize GPU or calculators")
+
+    for name in ("preload_cutensor", "energy", "gradient", "frequencies"):
+        monkeypatch.setattr(verifier, name, forbidden)
+    monkeypatch.setattr(
+        verifier.sys,
+        "argv",
+        [
+            "a3g_verify",
+            "--output-root",
+            str(tmp_path),
+            "--verifier-identity",
+            str(path),
+            "--gpu",
+        ],
+    )
+    assert verifier.main() == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "rejected"
+    assert not result["calculator_evidence_recomputed"]
+    assert (tmp_path / "candidate-terminal.json").read_bytes() == before
+    assert not (tmp_path / "verified-terminal.json").exists()
+    assert len(list((tmp_path / "verification-attempts").glob("*.json"))) == 1
+
+
+@pytest.mark.parametrize("tamper", [False, True])
+def test_cli_shared_preflight_precedes_gpu_and_runs_once(tmp_path, monkeypatch, tamper):
+    source = _source()
+    _patch_calculators(monkeypatch, _endpoints(source.cluster))
+    a3g.run_experiment(tmp_path, source, code_revision="a" * 40)
+    identity = tmp_path / "identity.json"
+    identity.write_text(json.dumps(_identity()))
+    if tamper:
+        (
+            tmp_path / "stages" / verifier.STAGES[-1].directory / "endpoint.xyz"
+        ).write_text("tampered")
+    events = []
+    original = verifier.verification_preflight
+
+    def preflight(*args, **kwargs):
+        events.append("preflight")
+        result = original(*args, **kwargs)
+        events.append("validated")
+        return result
+
+    monkeypatch.setattr(verifier, "verification_preflight", preflight)
+    monkeypatch.setattr(verifier, "validate_source", lambda *args, **kwargs: source)
+    monkeypatch.setattr(verifier, "preload_cutensor", lambda: events.append("gpu"))
+    original_recompute = verifier._recompute_experiment
+
+    def recompute(*args):
+        events.append("recompute")
+        return original_recompute(*args)
+
+    monkeypatch.setattr(verifier, "_recompute_experiment", recompute)
+    monkeypatch.setattr(
+        verifier.sys,
+        "argv",
+        [
+            "a3g_verify",
+            "--output-root",
+            str(tmp_path),
+            "--verifier-identity",
+            str(identity),
+            "--gpu",
+        ],
+    )
+    assert verifier.main() == (1 if tamper else 0)
+    assert events == (
+        ["preflight"] if tamper else ["preflight", "validated", "gpu", "recompute"]
+    )

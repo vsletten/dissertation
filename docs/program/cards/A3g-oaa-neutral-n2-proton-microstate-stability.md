@@ -97,6 +97,54 @@ report only `unverified: candidate outcome`.
 
 - 2026-09-06 15:28 PDT (hermes-custom-build-001; profile=workstation) — Filed from the fail-closed Oaa-neutral family attempt after an independent evidence verifier confirmed the n=2 supervisor failure and a separate cold scientific review rejected both an identical replay and a terminal inference from the missing HF-only endpoint. This is the only authorized next Oaa-neutral n=2 calculation: one finite H52-O15-constrained → released B3LYP basin test with raw-endpoint persistence and independent verification.
 
+### Implementation evidence contract (2026-09-06 repair)
+
+Verification requires `--worktree` to identify the exact clean branch revision
+matching its remote-tracking ref. The verifier independently pins the audited
+executor and pipeline sources and compares recorded loaded optimizer/stage
+instructions against code compiled from that revision. These paths implement one
+bounded call per stage, a new SCF/kernel invocation, and no Hessian input or retry.
+Changing either audited file requires review and an explicit verifier pin update.
+
+The experiment reservation binds executor identity, executable/source/loaded-code
+hashes, hostname, PID, boot ID and process start ticks. Per-stage profiling records
+optimizer and kernel entries; requested step/Hessian settings are explicitly named
+as requests. The API does not return an iteration count or Hessian object identity.
+These are local process records and independent code checks, not cryptographic
+attestation against a writer with control of the entire machine or receipt store.
+
+`--verifier-identity` supplies only durable `worker_id` and `profile`, with optional
+expected `hostname` and `implementation_sha256`. Process facts supplied by the
+caller are rejected. The verifier internally observes PID, boot ID, process start
+ticks, hostname, executable hash and verifier implementation hash, and embeds them
+as `verifier_provenance`. Both the worker ID and the process identity must differ
+from the executor reservation. A fresh process on the same host is allowed;
+renaming the worker in the executor process is rejected. This does not establish
+independent human operators: worker/profile labels still depend on operator
+honesty, and a host or evidence-store owner can alter code or forge reservations.
+Local process observation is not remote attestation.
+
+Energy and gradient returns are persisted separately before subsequent operations;
+raw PHVA includes the complete returned object before gates. Nonfinite numbers are
+retained as explicit strings in raw evidence. Executor replay writes only a
+separate `replay-attempts/` receipt. Every rejected verifier invocation writes a
+unique, crash-durable `verification-attempts/` receipt. Canonical candidate and
+verified terminals are never quarantined or overwritten by verifier rejection;
+an existing verified terminal rejects replay before source checks or calculators.
+
+Executor and verifier independently define the same recursive forbidden-name
+contract: `results.json`, `store.sqlite` and its WAL/SHM/journal sidecars,
+`store.task168.tmp.sqlite`, `store.sequential.tmp.sqlite`, `ts.xyz`, `barrier.json`,
+`petra.toml`, `family-progress.json`, `terminal-receipt.json`, and `terminal.json`.
+No evidence or attempt subtree is exempt. The executor inventories before
+reservation and candidate publication; dirty roots yield a terminal error with
+the observed inventory. The verifier inventories before recomputation and again
+before publication and requires the candidate's explicit empty inventory. A missing first-stage attempt cannot become a verified
+experiment; verified optimizer failure explicitly reports zero recomputed items.
+
+This repair ran only mocked CPU tests. The scientific experiment and its result
+remain pending; no real calculator or downstream scientific output was produced.
+
 ## Result
 
 Pending.
