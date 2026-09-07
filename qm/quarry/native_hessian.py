@@ -32,6 +32,13 @@ _HESSIAN_SYMMETRY_RTOL = 1.0e-8
 _HESSIAN_SYMMETRY_ATOL_SCALE = 2.0e-9
 
 
+def _immutable_f64(array: np.ndarray) -> np.ndarray:
+    """Return an irrevocably read-only float64 array backed by immutable bytes."""
+
+    contiguous = np.ascontiguousarray(array, dtype="<f8")
+    return np.frombuffer(contiguous.tobytes(), dtype="<f8").reshape(contiguous.shape)
+
+
 @dataclass(frozen=True)
 class NativeHessianResult:
     """One fresh SCF/gradient/Hessian evaluation in canonical Cartesian layout."""
@@ -100,10 +107,8 @@ class NativeHessianResult:
             raise ValueError("native Hessian fallback provenance is inconsistent")
         if not self.geometry_fingerprint or not self.settings_fingerprint:
             raise ValueError("native Hessian fingerprints must be non-empty")
-        gradient = gradient.copy()
-        gradient.setflags(write=False)
-        canonical_hessian = (0.5 * (hessian + hessian.T)).copy()
-        canonical_hessian.setflags(write=False)
+        gradient = _immutable_f64(gradient)
+        canonical_hessian = _immutable_f64(0.5 * (hessian + hessian.T))
         object.__setattr__(self, "gradient_hartree_per_bohr", gradient)
         object.__setattr__(
             self,

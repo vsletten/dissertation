@@ -308,6 +308,7 @@ def _strict_gate_fixture(
     eigenvalues: np.ndarray,
     *,
     fmax: float = 0.001,
+    route_mode_index: int = 0,
 ):
     from quarry import reaction_path
     from quarry.clusters import Cluster
@@ -338,11 +339,24 @@ def _strict_gate_fixture(
         geometry_fingerprint=frequency_geometry_fingerprint(cluster),
         settings_fingerprint="settings",
     )
-    return cluster, masses, native, vibrational[:, 0]
+    displacement = (
+        vibrational[:, route_mode_index] / np.repeat(np.sqrt(masses), 3)
+    ).reshape(cluster.coords.shape)
+    reactant = cluster.coords - 0.01 * displacement
+    product = cluster.coords + 0.01 * displacement
+    mapped_path = reaction_path.build_mass_scaled_path(
+        np.stack((reactant, cluster.coords, product)),
+        masses,
+        transition_state_index=1,
+    )
+    route_vector = (
+        mapped_path.mass_scaled_coordinates[2] - mapped_path.mass_scaled_coordinates[0]
+    )
+    return cluster, masses, native, route_vector, reactant, product
 
 
 def _validate_strict_gate(fixture):
-    cluster, masses, native, reaction_vector = fixture
+    cluster, masses, native, reaction_vector, reactant, product = fixture
     return campaign.validate_transition_state_gate(
         cluster,
         masses,
@@ -350,6 +364,8 @@ def _validate_strict_gate(fixture):
         expected_settings_fingerprint="settings",
         reaction_vector_mass_scaled=reaction_vector,
         reaction_vector_source="route-fixture:mapped-reactant-product-displacement",
+        mapped_reactant_coordinates_angstrom=reactant,
+        mapped_product_coordinates_angstrom=product,
     )
 
 
@@ -391,17 +407,22 @@ def test_strict_transition_state_gate_rejects_nonstationary_geometry():
 def test_strict_transition_state_gate_rejects_stale_geometry_settings_and_masses():
     from dataclasses import replace
 
-    cluster, masses, native, reaction_vector = _strict_gate_fixture(
+    cluster, masses, native, reaction_vector, reactant, product = _strict_gate_fixture(
         np.array([-0.02, 0.01, 0.03])
     )
+    route_kwargs = {
+        "reaction_vector_mass_scaled": reaction_vector,
+        "reaction_vector_source": "route-fixture:mapped-reactant-product-displacement",
+        "mapped_reactant_coordinates_angstrom": reactant,
+        "mapped_product_coordinates_angstrom": product,
+    }
     with pytest.raises(ValueError, match="geometry fingerprint"):
         campaign.validate_transition_state_gate(
             cluster,
             masses,
             replace(native, geometry_fingerprint="wrong"),
             expected_settings_fingerprint="settings",
-            reaction_vector_mass_scaled=reaction_vector,
-            reaction_vector_source="route-fixture:mapped-reactant-product-displacement",
+            **route_kwargs,
         )
     with pytest.raises(ValueError, match="settings fingerprint"):
         campaign.validate_transition_state_gate(
@@ -409,8 +430,7 @@ def test_strict_transition_state_gate_rejects_stale_geometry_settings_and_masses
             masses,
             native,
             expected_settings_fingerprint="different",
-            reaction_vector_mass_scaled=reaction_vector,
-            reaction_vector_source="route-fixture:mapped-reactant-product-displacement",
+            **route_kwargs,
         )
     with pytest.raises(ValueError, match="isotopic standard"):
         campaign.validate_transition_state_gate(
@@ -418,45 +438,29 @@ def test_strict_transition_state_gate_rejects_stale_geometry_settings_and_masses
             masses + 0.001,
             native,
             expected_settings_fingerprint="settings",
-            reaction_vector_mass_scaled=reaction_vector,
-            reaction_vector_source="route-fixture:mapped-reactant-product-displacement",
+            **route_kwargs,
         )
 
 
 def test_strict_transition_state_gate_rejects_orthogonal_deep_spectator_mode():
-    cluster, masses, native, _ = _strict_gate_fixture(np.array([-0.02, 0.01, 0.03]))
-    from quarry import reaction_path
-
-    rigid = reaction_path._rigid_motion_basis(cluster.coords, masses)
-    vibrational = np.linalg.svd(rigid.T, full_matrices=True)[2][6:].T
+    cluster, masses, native, reaction_vector, reactant, product = _strict_gate_fixture(
+        np.array([0.01, -0.02, 0.03]), route_mode_index=0
+    )
     with pytest.raises(ValueError, match="imaginary mode overlap"):
         campaign.validate_transition_state_gate(
             cluster,
             masses,
             native,
             expected_settings_fingerprint="settings",
-            reaction_vector_mass_scaled=vibrational[:, 1],
-            reaction_vector_source="route-fixture:mapped-reactant-product-displacement",
-        )
-
-
-def test_strict_transition_state_gate_rejects_stale_fmax_and_unbound_vector():
-    cluster, masses, native, reaction_vector = _strict_gate_fixture(
-        np.array([-0.02, 0.01, 0.03])
-    )
-    native.gradient_hartree_per_bohr.setflags(write=True)
-    native.gradient_hartree_per_bohr[0, 0] = 1.0
-    with pytest.raises(ValueError, match="physical fmax is stale"):
-        campaign.validate_transition_state_gate(
-            cluster,
-            masses,
-            native,
-            expected_settings_fingerprint="settings",
             reaction_vector_mass_scaled=reaction_vector,
             reaction_vector_source="route-fixture:mapped-reactant-product-displacement",
+            mapped_reactant_coordinates_angstrom=reactant,
+            mapped_product_coordinates_angstrom=product,
         )
 
-    cluster, masses, native, reaction_vector = _strict_gate_fixture(
+
+def test_strict_transition_state_gate_rejects_unbound_vector():
+    cluster, masses, native, reaction_vector, reactant, product = _strict_gate_fixture(
         np.array([-0.02, 0.01, 0.03])
     )
     with pytest.raises(ValueError, match="reaction vector source"):
@@ -467,4 +471,27 @@ def test_strict_transition_state_gate_rejects_stale_fmax_and_unbound_vector():
             expected_settings_fingerprint="settings",
             reaction_vector_mass_scaled=reaction_vector,
             reaction_vector_source="",
+            mapped_reactant_coordinates_angstrom=reactant,
+            mapped_product_coordinates_angstrom=product,
+        )
+
+
+def test_strict_transition_state_gate_rejects_vector_not_derived_from_mapped_basins():
+    cluster, masses, native, _, reactant, product = _strict_gate_fixture(
+        np.array([-0.02, 0.01, 0.03])
+    )
+    from quarry import reaction_path
+
+    rigid = reaction_path._rigid_motion_basis(cluster.coords, masses)
+    unrelated = np.linalg.svd(rigid.T, full_matrices=True)[2][7]
+    with pytest.raises(ValueError, match="does not match the receipt-bound"):
+        campaign.validate_transition_state_gate(
+            cluster,
+            masses,
+            native,
+            expected_settings_fingerprint="settings",
+            reaction_vector_mass_scaled=unrelated,
+            reaction_vector_source="route-fixture:forged",
+            mapped_reactant_coordinates_angstrom=reactant,
+            mapped_product_coordinates_angstrom=product,
         )

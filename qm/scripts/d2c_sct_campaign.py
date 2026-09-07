@@ -51,6 +51,7 @@ from quarry.pipeline import (  # noqa: E402
     frequency_geometry_fingerprint,
 )
 from quarry.reaction_path import (  # noqa: E402
+    build_mass_scaled_path,
     hessian_eigenvalues_to_wavenumbers_cm,
     project_vibrational_hessian,
 )
@@ -243,6 +244,8 @@ def validate_transition_state_gate(
     expected_settings_fingerprint: str,
     reaction_vector_mass_scaled: Any,
     reaction_vector_source: str,
+    mapped_reactant_coordinates_angstrom: Any,
+    mapped_product_coordinates_angstrom: Any,
 ) -> dict[str, Any]:
     """Apply the strict fresh first-order-saddle gate before any IRC call."""
 
@@ -312,6 +315,32 @@ def validate_transition_state_gate(
             f"reaction imaginary mode {imaginary:.12g} cm^-1 is below "
             f"{minimum_imaginary:.12g} cm^-1"
         )
+    reactant = np.asarray(mapped_reactant_coordinates_angstrom, dtype=float)
+    product = np.asarray(mapped_product_coordinates_angstrom, dtype=float)
+    if (
+        reactant.shape != coordinates.shape
+        or product.shape != coordinates.shape
+        or not np.all(np.isfinite(reactant))
+        or not np.all(np.isfinite(product))
+    ):
+        raise ValueError("mapped route basin geometries must be finite (N,3) arrays")
+    mapped_path = build_mass_scaled_path(
+        np.stack((reactant, coordinates, product)),
+        masses,
+        transition_state_index=1,
+        reference_mass_amu=REFERENCE_MASS_AMU,
+    )
+    route_vector = (
+        mapped_path.mass_scaled_coordinates[2] - mapped_path.mass_scaled_coordinates[0]
+    )
+    route_vector = modes.vibrational_basis @ (modes.vibrational_basis.T @ route_vector)
+    route_norm = float(np.linalg.norm(route_vector))
+    if route_norm <= 1.0e-12:
+        raise ValueError(
+            "mapped route has no non-rigid reactant-to-product displacement"
+        )
+    route_vector /= route_norm
+
     reaction_vector = np.asarray(reaction_vector_mass_scaled, dtype=float)
     if reaction_vector.shape == coordinates.shape:
         reaction_vector = reaction_vector.reshape(-1)
@@ -335,6 +364,11 @@ def validate_transition_state_gate(
         raise ValueError(
             "reaction vector source must identify its mapped route construction"
         )
+    route_binding_overlap = float(abs(np.dot(reaction_vector, route_vector)))
+    if route_binding_overlap < 1.0 - 1.0e-10:
+        raise ValueError(
+            "reaction vector does not match the receipt-bound mapped route geometries"
+        )
     unstable_mode = modes.mass_weighted_eigenvectors[
         np.flatnonzero(negative)[0]
     ].reshape(-1)
@@ -352,6 +386,8 @@ def validate_transition_state_gate(
         native_hessian.cartesian_hessian_hartree_per_bohr2, dtype="<f8"
     ).tobytes()
     reaction_vector_bytes = np.ascontiguousarray(reaction_vector, dtype="<f8").tobytes()
+    reactant_bytes = np.ascontiguousarray(reactant, dtype="<f8").tobytes()
+    product_bytes = np.ascontiguousarray(product, dtype="<f8").tobytes()
     return {
         "accepted": True,
         "physical_fmax_ev_per_angstrom": gradient_fmax,
@@ -364,6 +400,9 @@ def validate_transition_state_gate(
         "minimum_mapped_reaction_vector_overlap": minimum_overlap,
         "reaction_vector_source": reaction_vector_source,
         "reaction_vector_sha256": hashlib.sha256(reaction_vector_bytes).hexdigest(),
+        "reaction_vector_route_binding_overlap": route_binding_overlap,
+        "mapped_reactant_geometry_sha256": hashlib.sha256(reactant_bytes).hexdigest(),
+        "mapped_product_geometry_sha256": hashlib.sha256(product_bytes).hexdigest(),
         "eigenvalues_hartree_per_bohr2_amu": modes.eigenvalues.tolist(),
         "masses_amu": masses.tolist(),
         "gradient_sha256": hashlib.sha256(gradient_bytes).hexdigest(),

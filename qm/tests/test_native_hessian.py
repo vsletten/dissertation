@@ -78,6 +78,10 @@ def test_native_cartesian_hessian_records_gradient_fmax_and_backend(monkeypatch)
     assert result.gpu_fallback_used is True
     assert result.gradient_hartree_per_bohr.flags.writeable is False
     assert result.cartesian_hessian_hartree_per_bohr2.flags.writeable is False
+    with pytest.raises(ValueError, match="cannot set WRITEABLE flag"):
+        result.gradient_hartree_per_bohr.setflags(write=True)
+    with pytest.raises(ValueError, match="cannot set WRITEABLE flag"):
+        result.cartesian_hessian_hartree_per_bohr2.setflags(write=True)
 
 
 def test_execute_native_hessian_retries_only_known_gpu_assertion(monkeypatch):
