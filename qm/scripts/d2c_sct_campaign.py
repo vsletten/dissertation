@@ -61,12 +61,12 @@ from quarry.reaction_path import (  # noqa: E402
     hessian_eigenvalues_to_wavenumbers_cm,
     project_vibrational_hessian,
 )
-from quarry.ts import IrcPoint, SellaIrcTrace  # noqa: E402
+from quarry.ts import IrcDirectionPath, IrcPoint, SellaIrcTrace  # noqa: E402
 from scripts import d2c_input_bundle
 from scripts.production_energetics import load_xyz_like
 from scripts.surface_rate_protocol import reactions
 
-SCHEMA = "d2c-sct-campaign-preflight-v3"
+SCHEMA = "d2c-sct-campaign-preflight-v4"
 PREFLIGHT_RECEIPT = "preflight.json"
 DEFAULT_BUNDLE_ROOT = (
     Path(__file__).resolve().parent.parent
@@ -294,6 +294,7 @@ BOUNDS: dict[str, Any] = {
     "hessian": {
         "coverage": "every retained IRC point including TS and endpoints",
         "maximum_retained_points_per_direction": 201,
+        "electronic_energy_reproduction_absolute_tolerance_ev": 1.0e-6,
         "cartesian_hessian_units": "hartree / bohr^2",
         "transverse_negative_eigenvalue_tolerance": 1.0e-8,
         "transverse_negative_eigenvalue_tolerance_units": "hartree / bohr^2 / amu",
@@ -577,6 +578,21 @@ class PublishedTypedIrcPath:
     transition_state_index: int
     point_provenance: tuple[dict[str, Any], ...]
     mass_scaled_path: MassScaledPath
+
+
+@dataclass(frozen=True)
+class _CanonicalQualificationAncestry:
+    """Validated preflight and TS-qualification authority for one route."""
+
+    root: Path
+    route: str
+    preflight: dict[str, Any]
+    preflight_receipt_sha256: str
+    campaign_identity: str
+    atom_mapping_sha256: str
+    qualified_transition_state: Cluster
+    unstable_mode_mass_scaled: np.ndarray
+    ts_qualification_receipt_sha256: str
 
 
 def _immutable_little_f64(
@@ -995,6 +1011,7 @@ def _path_receipt_payload(
     atom_mapping_sha256: str,
     qualified_transition_state: Cluster,
     oriented: OrientedIrcPath,
+    ancestor_receipts: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], bytes]:
     coordinates_bytes = oriented.coordinates_angstrom.tobytes()
     points = []
@@ -1012,7 +1029,11 @@ def _path_receipt_payload(
             }
         )
     receipt = {
-        "schema": "d2c-typed-irc-path-v1",
+        "schema": (
+            "d2c-typed-irc-path-v2"
+            if ancestor_receipts is not None
+            else "d2c-typed-irc-path-v1"
+        ),
         "stage": "typed_irc_path",
         "state": "accepted",
         "accepted": True,
@@ -1053,6 +1074,8 @@ def _path_receipt_payload(
         },
         "points": points,
     }
+    if ancestor_receipts is not None:
+        receipt["ancestor_receipts"] = ancestor_receipts
     return receipt, coordinates_bytes
 
 
@@ -1069,6 +1092,408 @@ def _read_json_object(path: Path, *, label: str) -> tuple[dict[str, Any], bytes]
     return payload, raw
 
 
+def _validated_preflight(root: Path, route: str) -> tuple[dict[str, Any], str]:
+    """Read and validate the canonical preflight rather than caller assertions."""
+
+    if route not in ENDPOINT_ROUTE_STATES:
+        raise ValueError(f"unsupported typed endpoint route: {route}")
+    preflight, raw = _read_json_object(
+        root / PREFLIGHT_RECEIPT, label="D2c preflight receipt"
+    )
+    expected_keys = {
+        "schema",
+        "state",
+        "accepted_result",
+        "dry_run",
+        "created_utc",
+        "identity",
+        "campaign",
+        "routes",
+        "campaign_stages",
+        "resume_policy",
+    }
+    if set(preflight) != expected_keys:
+        raise ValueError("D2c preflight receipt fields are unexpected or incomplete")
+    _strict_json_equal(preflight.get("schema"), SCHEMA, label="preflight schema")
+    _strict_json_equal(preflight.get("state"), "pending", label="preflight state")
+    _strict_json_equal(preflight.get("accepted_result"), None, label="preflight result")
+    _strict_json_equal(preflight.get("dry_run"), True, label="preflight dry-run flag")
+    identity = _require_json_string(
+        preflight.get("identity"), label="campaign identity"
+    )
+    _require_sha(identity, length=64, label="campaign identity")
+    campaign = preflight.get("campaign")
+    routes = preflight.get("routes")
+    if type(campaign) is not dict or type(routes) is not dict:
+        raise ValueError("D2c preflight campaign inventory is invalid")
+    if _canonical_hash(campaign) != identity:
+        raise ValueError("D2c preflight campaign identity mismatch")
+    _strict_json_equal(campaign.get("schema"), SCHEMA, label="campaign schema")
+    _strict_json_equal(campaign.get("bounds"), BOUNDS, label="campaign bounds")
+    _strict_json_equal(
+        campaign.get("required_route_stages"),
+        ROUTE_STAGE_CONTRACT,
+        label="campaign route-stage contract",
+    )
+    campaign_routes = campaign.get("routes")
+    if (
+        type(campaign_routes) is not dict
+        or route not in routes
+        or route not in campaign_routes
+    ):
+        raise ValueError(f"route is absent from canonical preflight: {route}")
+    route_record = routes[route]
+    campaign_route = campaign_routes[route]
+    if type(route_record) is not dict or type(campaign_route) is not dict:
+        raise ValueError("canonical preflight route record is invalid")
+    for key, value in campaign_route.items():
+        _strict_json_equal(
+            route_record.get(key), value, label=f"preflight route {route} {key}"
+        )
+    _strict_json_equal(
+        route_record.get("stages"),
+        _pending_stages(ROUTE_STAGE_CONTRACT),
+        label=f"preflight route {route} stage inventory",
+    )
+    return preflight, hashlib.sha256(raw).hexdigest()
+
+
+def _validated_unit_mode(values: Any, atom_count: int) -> np.ndarray:
+    try:
+        mode = np.asarray(values, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("qualified TS unstable mode must be finite") from exc
+    if mode.shape == (atom_count, 3):
+        mode = mode.reshape(-1)
+    if mode.shape != (3 * atom_count,) or not np.all(np.isfinite(mode)):
+        raise ValueError("qualified TS unstable mode must be finite with length 3N")
+    norm = float(np.linalg.norm(mode))
+    if not math.isfinite(norm) or norm <= 1.0e-12:
+        raise ValueError("qualified TS unstable mode must have finite nonzero norm")
+    mode = _immutable_little_f64(mode / norm)
+    if not math.isclose(float(np.linalg.norm(mode)), 1.0, rel_tol=0.0, abs_tol=1.0e-12):
+        raise ValueError("qualified TS unstable mode must be normalized")
+    return mode
+
+
+def _ts_qualification_receipt_payload(
+    *,
+    preflight: dict[str, Any],
+    preflight_receipt_sha256: str,
+    route: str,
+    qualified_transition_state: Cluster,
+    unstable_mode_mass_scaled: Any,
+) -> dict[str, Any]:
+    """Build the strict canonical TS-qualification publication contract."""
+
+    _require_sha(
+        preflight_receipt_sha256,
+        length=64,
+        label="preflight receipt SHA-256",
+    )
+    route_record = preflight["routes"][route]
+    campaign_identity = preflight["identity"]
+    atom_mapping_sha256 = route_record["atom_mapping_sha256"]
+    _route_identity_cluster(route, qualified_transition_state, label="qualified TS")
+    mode = _validated_unit_mode(
+        unstable_mode_mass_scaled, len(qualified_transition_state.symbols)
+    )
+    coordinates = np.ascontiguousarray(
+        qualified_transition_state.coords, dtype="<f8"
+    ).tobytes()
+    mode_bytes = mode.tobytes()
+    return {
+        "schema": "d2c-ts-qualification-v1",
+        "stage": "transition_state_qualification",
+        "state": "accepted",
+        "accepted": True,
+        "preflight_receipt_sha256": preflight_receipt_sha256,
+        "campaign_identity": campaign_identity,
+        "route": route,
+        "atom_mapping_sha256": atom_mapping_sha256,
+        "qualified_transition_state_geometry_fingerprint": (
+            frequency_geometry_fingerprint(qualified_transition_state)
+        ),
+        "symbols": list(qualified_transition_state.symbols),
+        "charge": qualified_transition_state.charge,
+        "spin_2s": qualified_transition_state.spin,
+        "frozen_indices": list(qualified_transition_state.frozen_indices),
+        "masses_amu": [
+            ISOTOPIC_MASSES_AMU[symbol] for symbol in qualified_transition_state.symbols
+        ],
+        "coordinates": {
+            "path": "coordinates.f64",
+            "dtype": "little-endian float64",
+            "shape": [len(qualified_transition_state.symbols), 3],
+            "units": "angstrom",
+            "sha256": hashlib.sha256(coordinates).hexdigest(),
+        },
+        "unstable_mode_mass_scaled": {
+            "values": mode.tolist(),
+            "shape": [3 * len(qualified_transition_state.symbols)],
+            "normalization": "unit Euclidean norm in mass-scaled Cartesian space",
+            "sha256": hashlib.sha256(mode_bytes).hexdigest(),
+        },
+    }
+
+
+def _load_canonical_qualification(
+    run_root: Path, route: str
+) -> _CanonicalQualificationAncestry:
+    root = _safe_absolute_root(run_root)
+    preflight, preflight_sha = _validated_preflight(root, route)
+    qualification_root = root / route / "ts-qualification"
+    if qualification_root.is_symlink() or not qualification_root.is_dir():
+        raise ValueError("canonical TS qualification must be a real directory")
+    observed = {child.name for child in qualification_root.iterdir()}
+    if observed != {"coordinates.f64", "receipt.json"}:
+        raise ValueError(
+            "canonical TS qualification artifacts are incomplete or unexpected"
+        )
+    receipt, receipt_raw = _read_json_object(
+        qualification_root / "receipt.json", label="TS qualification receipt"
+    )
+    if receipt.get("preflight_receipt_sha256") != preflight_sha:
+        raise ValueError("TS qualification preflight receipt SHA-256 mismatch")
+    state = ENDPOINT_ROUTE_STATES[route]
+    atom_count = len(state["symbols"])
+    coordinates_path = qualification_root / "coordinates.f64"
+    if coordinates_path.is_symlink() or not coordinates_path.is_file():
+        raise ValueError("qualified TS coordinates must be a regular file")
+    coordinate_bytes = coordinates_path.read_bytes()
+    if len(coordinate_bytes) != atom_count * 3 * 8:
+        raise ValueError("qualified TS coordinate byte length mismatch")
+    coordinates = np.frombuffer(coordinate_bytes, dtype="<f8").reshape(atom_count, 3)
+    if not np.all(np.isfinite(coordinates)):
+        raise ValueError("qualified TS coordinates must be finite")
+    transition_state = Cluster(
+        name=f"{route}-qualified-ts",
+        symbols=list(state["symbols"]),
+        coords=coordinates,
+        charge=state["charge"],
+        spin=state["spin"],
+        frozen_indices=list(state["frozen_indices"]),
+    )
+    mode_record = receipt.get("unstable_mode_mass_scaled")
+    if type(mode_record) is not dict:
+        raise ValueError("qualified TS unstable mode receipt is invalid")
+    mode = _validated_unit_mode(mode_record.get("values"), atom_count)
+    expected = _ts_qualification_receipt_payload(
+        preflight=preflight,
+        preflight_receipt_sha256=preflight_sha,
+        route=route,
+        qualified_transition_state=transition_state,
+        unstable_mode_mass_scaled=mode,
+    )
+    _strict_json_equal(receipt, expected, label="TS qualification receipt")
+    return _CanonicalQualificationAncestry(
+        root=root,
+        route=route,
+        preflight=preflight,
+        preflight_receipt_sha256=preflight_sha,
+        campaign_identity=preflight["identity"],
+        atom_mapping_sha256=preflight["routes"][route]["atom_mapping_sha256"],
+        qualified_transition_state=transition_state,
+        unstable_mode_mass_scaled=mode,
+        ts_qualification_receipt_sha256=hashlib.sha256(receipt_raw).hexdigest(),
+    )
+
+
+def _mass_scaled_tangent_overlap(
+    direction: IrcDirectionPath,
+    masses_amu: np.ndarray,
+    unstable_mode_mass_scaled: np.ndarray,
+) -> float:
+    if len(direction.points) < 2:
+        raise ValueError(
+            "each IRC direction must retain TS and at least one adjacent point"
+        )
+    tangent = np.asarray(
+        direction.points[1].coordinates_angstrom
+        - direction.points[0].coordinates_angstrom,
+        dtype=float,
+    ).reshape(-1)
+    with np.errstate(over="ignore", invalid="ignore"):
+        tangent *= np.repeat(np.sqrt(masses_amu), 3)
+        norm = float(np.linalg.norm(tangent))
+    if not np.all(np.isfinite(tangent)) or not math.isfinite(norm) or norm <= 1.0e-12:
+        raise ValueError(
+            "mass-scaled TS-adjacent IRC tangent must be finite and nonzero"
+        )
+    overlap = float(abs(np.dot(tangent / norm, unstable_mode_mass_scaled)))
+    if not math.isfinite(overlap):
+        raise ValueError("mass-scaled TS-adjacent tangent overlap must be finite")
+    return overlap
+
+
+def _validate_irc_direction_contract(
+    direction: IrcDirectionPath,
+    qualified_transition_state: Cluster,
+    unstable_mode_mass_scaled: np.ndarray,
+) -> float:
+    expected_sign = 1 if direction.sella_direction == "forward" else -1
+    if direction.sella_direction not in {"forward", "reverse"}:
+        raise ValueError("IRC direction must be exactly forward or reverse")
+    if direction.algebraic_direction != expected_sign:
+        raise ValueError("IRC direction algebraic sign is invalid")
+    maximum_steps = BOUNDS["irc"]["maximum_steps_per_direction"]
+    maximum_points = BOUNDS["hessian"]["maximum_retained_points_per_direction"]
+    if not 2 <= len(direction.points) <= maximum_points:
+        raise ValueError(
+            f"IRC direction exceeds maximum {maximum_points} retained points"
+        )
+    expected_shape = np.asarray(qualified_transition_state.coords).shape
+    for outer_step, point in enumerate(direction.points):
+        if type(point.outer_step) is not int or point.outer_step != outer_step:
+            raise ValueError("IRC outer steps must be contiguous integers")
+        if outer_step > maximum_steps:
+            raise ValueError(f"IRC direction exceeds maximum {maximum_steps} steps")
+        coordinates = np.asarray(point.coordinates_angstrom, dtype=float)
+        if coordinates.shape != expected_shape or not np.all(np.isfinite(coordinates)):
+            raise ValueError(
+                "IRC point coordinates must be finite with route atom shape"
+            )
+        if type(point.electronic_energy_ev) is not float or not math.isfinite(
+            point.electronic_energy_ev
+        ):
+            raise ValueError("IRC point electronic energy must be a finite float")
+        if (
+            type(point.projected_fmax_ev_per_angstrom) is not float
+            or not math.isfinite(point.projected_fmax_ev_per_angstrom)
+            or point.projected_fmax_ev_per_angstrom < 0.0
+        ):
+            raise ValueError(
+                "IRC point projected fmax must be a finite nonnegative float"
+            )
+    if not np.array_equal(
+        direction.points[0].coordinates_angstrom,
+        qualified_transition_state.coords,
+    ):
+        raise ValueError("IRC direction must start at the canonical qualified TS")
+    terminal_limit = BOUNDS["irc"]["outer_fmax_ev_per_angstrom"]
+    if direction.points[-1].projected_fmax_ev_per_angstrom >= terminal_limit:
+        raise ValueError(
+            f"terminal IRC fmax must be strictly below {terminal_limit:.12g} eV/A"
+        )
+    masses = np.asarray(
+        [ISOTOPIC_MASSES_AMU[symbol] for symbol in qualified_transition_state.symbols]
+    )
+    overlap = _mass_scaled_tangent_overlap(direction, masses, unstable_mode_mass_scaled)
+    minimum_overlap = BOUNDS["transition_state_qualification"][
+        "minimum_irc_tangent_overlap"
+    ]
+    if overlap < minimum_overlap:
+        raise ValueError(
+            f"mass-scaled TS-adjacent tangent overlap {overlap:.12g} is below "
+            f"{minimum_overlap:.12g}"
+        )
+    return overlap
+
+
+def _irc_direction_receipt_payload(
+    *,
+    preflight: dict[str, Any],
+    preflight_receipt_sha256: str,
+    ts_qualification_receipt_sha256: str,
+    route: str,
+    qualified_transition_state: Cluster,
+    unstable_mode_mass_scaled: Any,
+    direction: IrcDirectionPath,
+) -> dict[str, Any]:
+    """Build one receipt; publication validation independently applies the gates."""
+
+    mode = _validated_unit_mode(
+        unstable_mode_mass_scaled, len(qualified_transition_state.symbols)
+    )
+    masses = np.asarray(
+        [ISOTOPIC_MASSES_AMU[symbol] for symbol in qualified_transition_state.symbols]
+    )
+    overlap = _mass_scaled_tangent_overlap(direction, masses, mode)
+    irc_bounds = BOUNDS["irc"]
+    return {
+        "schema": "d2c-irc-direction-v1",
+        "stage": f"irc_{direction.sella_direction}",
+        "state": "accepted",
+        "accepted": True,
+        "preflight_receipt_sha256": preflight_receipt_sha256,
+        "campaign_identity": preflight["identity"],
+        "route": route,
+        "atom_mapping_sha256": preflight["routes"][route]["atom_mapping_sha256"],
+        "ts_qualification_receipt_sha256": ts_qualification_receipt_sha256,
+        "qualified_transition_state_geometry_fingerprint": (
+            frequency_geometry_fingerprint(qualified_transition_state)
+        ),
+        "direction": direction.sella_direction,
+        "algebraic_direction": direction.algebraic_direction,
+        "algorithm": irc_bounds["algorithm"],
+        "step_size_angstrom": irc_bounds["step_size_angstrom"],
+        "maximum_steps": irc_bounds["maximum_steps_per_direction"],
+        "maximum_retained_points": BOUNDS["hessian"][
+            "maximum_retained_points_per_direction"
+        ],
+        "outer_fmax_ev_per_angstrom": irc_bounds["outer_fmax_ev_per_angstrom"],
+        "inner_fmax_ev_per_angstrom": irc_bounds["inner_fmax_ev_per_angstrom"],
+        "point_count": len(direction.points),
+        "terminal_projected_fmax_ev_per_angstrom": (
+            direction.points[-1].projected_fmax_ev_per_angstrom
+        ),
+        "ts_adjacent_tangent_overlap": overlap,
+        "minimum_ts_adjacent_tangent_overlap": BOUNDS["transition_state_qualification"][
+            "minimum_irc_tangent_overlap"
+        ],
+        "points": [
+            {
+                "outer_step": point.outer_step,
+                "geometry_sha256": hashlib.sha256(
+                    np.ascontiguousarray(
+                        point.coordinates_angstrom, dtype="<f8"
+                    ).tobytes()
+                ).hexdigest(),
+                "electronic_energy_ev": point.electronic_energy_ev,
+                "projected_fmax_ev_per_angstrom": (
+                    point.projected_fmax_ev_per_angstrom
+                ),
+            }
+            for point in direction.points
+        ],
+    }
+
+
+def _validate_canonical_irc_receipts(
+    ancestry: _CanonicalQualificationAncestry,
+    directions: tuple[IrcDirectionPath, IrcDirectionPath],
+) -> dict[str, str]:
+    if len(directions) != 2:
+        raise ValueError("canonical publication requires exactly two IRC directions")
+    by_name = {direction.sella_direction: direction for direction in directions}
+    if set(by_name) != {"forward", "reverse"}:
+        raise ValueError(
+            "canonical publication requires forward and reverse IRC directions"
+        )
+    hashes: dict[str, str] = {}
+    for name in ("forward", "reverse"):
+        direction = by_name[name]
+        _validate_irc_direction_contract(
+            direction,
+            ancestry.qualified_transition_state,
+            ancestry.unstable_mode_mass_scaled,
+        )
+        receipt_path = ancestry.root / ancestry.route / f"irc-{name}" / "receipt.json"
+        receipt, raw = _read_json_object(receipt_path, label=f"IRC {name} receipt")
+        expected = _irc_direction_receipt_payload(
+            preflight=ancestry.preflight,
+            preflight_receipt_sha256=ancestry.preflight_receipt_sha256,
+            ts_qualification_receipt_sha256=(ancestry.ts_qualification_receipt_sha256),
+            route=ancestry.route,
+            qualified_transition_state=ancestry.qualified_transition_state,
+            unstable_mode_mass_scaled=ancestry.unstable_mode_mass_scaled,
+            direction=direction,
+        )
+        _strict_json_equal(receipt, expected, label=f"IRC {name} receipt")
+        hashes[name] = hashlib.sha256(raw).hexdigest()
+    return hashes
+
+
 def _validate_published_path(
     path_dir: Path,
     *,
@@ -1076,6 +1501,7 @@ def _validate_published_path(
     route: str,
     atom_mapping_sha256: str,
     qualified_transition_state: Cluster,
+    ancestor_receipts: dict[str, str] | None = None,
 ) -> PublishedTypedIrcPath:
     if path_dir.is_symlink() or not path_dir.is_dir():
         raise ValueError(
@@ -1112,10 +1538,16 @@ def _validate_published_path(
         "endpoints",
         "points",
     }
+    if ancestor_receipts is not None:
+        expected_receipt_keys.add("ancestor_receipts")
     if set(receipt) != expected_receipt_keys:
         raise ValueError("typed path receipt fields are unexpected or incomplete")
     expected_identity = {
-        "schema": "d2c-typed-irc-path-v1",
+        "schema": (
+            "d2c-typed-irc-path-v2"
+            if ancestor_receipts is not None
+            else "d2c-typed-irc-path-v1"
+        ),
         "stage": "typed_irc_path",
         "state": "accepted",
         "accepted": True,
@@ -1133,6 +1565,8 @@ def _validate_published_path(
         "spin_2s": qualified_transition_state.spin,
         "frozen_indices": list(qualified_transition_state.frozen_indices),
     }
+    if ancestor_receipts is not None:
+        expected_identity["ancestor_receipts"] = ancestor_receipts
     for key, value in expected_identity.items():
         _strict_json_equal(receipt.get(key), value, label=f"typed path receipt {key}")
     point_count = receipt.get("point_count")
@@ -1320,7 +1754,7 @@ def _validate_published_path(
     )
 
 
-def publish_typed_irc_path(
+def _publish_typed_irc_path(
     run_root: Path,
     *,
     campaign_identity: str,
@@ -1328,9 +1762,11 @@ def publish_typed_irc_path(
     atom_mapping_sha256: str,
     qualified_transition_state: Cluster,
     trace: SellaIrcTrace | None,
+    ancestor_receipts: dict[str, str] | None = None,
+    _ancestry_validator: Callable[[], None] | None = None,
     _failure_injector: Callable[[str], None] | None = None,
 ) -> PublishedTypedIrcPath:
-    """Atomically publish or validate/resume one typed path stage."""
+    """Low-level atomic path primitive; production callers use the public wrapper."""
 
     _require_sha(campaign_identity, length=64, label="campaign identity")
     _require_sha(atom_mapping_sha256, length=64, label="atom mapping SHA-256")
@@ -1354,6 +1790,7 @@ def publish_typed_irc_path(
                 route=route,
                 atom_mapping_sha256=atom_mapping_sha256,
                 qualified_transition_state=qualified_transition_state,
+                ancestor_receipts=ancestor_receipts,
             )
         if trace is None:
             raise ValueError(
@@ -1366,6 +1803,7 @@ def publish_typed_irc_path(
             atom_mapping_sha256,
             qualified_transition_state,
             oriented,
+            ancestor_receipts,
         )
         temporary = route_root / f".path.{os.getpid()}.{time.time_ns()}.tmp"
         temporary.mkdir(mode=0o700)
@@ -1379,7 +1817,10 @@ def publish_typed_irc_path(
                 route=route,
                 atom_mapping_sha256=atom_mapping_sha256,
                 qualified_transition_state=qualified_transition_state,
+                ancestor_receipts=ancestor_receipts,
             )
+            if _ancestry_validator is not None:
+                _ancestry_validator()
             if _failure_injector is not None:
                 _failure_injector("before_path_commit")
             if path_dir.exists() or path_dir.is_symlink():
@@ -1397,7 +1838,180 @@ def publish_typed_irc_path(
             route=route,
             atom_mapping_sha256=atom_mapping_sha256,
             qualified_transition_state=qualified_transition_state,
+            ancestor_receipts=ancestor_receipts,
         )
+
+
+def _validated_path_ancestor_receipts(receipt: dict[str, Any]) -> dict[str, str]:
+    ancestors = receipt.get("ancestor_receipts")
+    expected_keys = {
+        "preflight",
+        "transition_state_qualification",
+        "irc_forward",
+        "irc_reverse",
+    }
+    if type(ancestors) is not dict or set(ancestors) != expected_keys:
+        raise ValueError("typed path canonical ancestor receipts are incomplete")
+    validated: dict[str, str] = {}
+    for label in sorted(expected_keys):
+        value = _require_json_string(
+            ancestors[label], label=f"typed path {label} receipt SHA-256"
+        )
+        validated[label] = _require_sha(
+            value, length=64, label=f"typed path {label} receipt SHA-256"
+        )
+    return validated
+
+
+def _directions_from_published_path(
+    path: PublishedTypedIrcPath,
+) -> tuple[IrcDirectionPath, IrcDirectionPath]:
+    directions: list[IrcDirectionPath] = []
+    for name in ("forward", "reverse"):
+        points = [
+            IrcPoint(
+                outer_step=0,
+                coordinates_angstrom=path.coordinates_angstrom[
+                    path.transition_state_index
+                ],
+                electronic_energy_ev=path.receipt["points"][
+                    path.transition_state_index
+                ]["electronic_energy_ev"],
+                projected_fmax_ev_per_angstrom=path.receipt["points"][
+                    path.transition_state_index
+                ]["projected_fmax_ev_per_angstrom"],
+            )
+        ]
+        sourced: list[tuple[int, int]] = []
+        for index, record in enumerate(path.receipt["points"]):
+            source = record["source"]
+            if source.get("source_sella_direction") == name:
+                sourced.append((source["source_outer_step"], index))
+        for outer_step, index in sorted(sourced):
+            record = path.receipt["points"][index]
+            points.append(
+                IrcPoint(
+                    outer_step=outer_step,
+                    coordinates_angstrom=path.coordinates_angstrom[index],
+                    electronic_energy_ev=record["electronic_energy_ev"],
+                    projected_fmax_ev_per_angstrom=record[
+                        "projected_fmax_ev_per_angstrom"
+                    ],
+                )
+            )
+        if name == "forward":
+            directions.append(IrcDirectionPath("forward", 1, tuple(points)))
+        else:
+            directions.append(IrcDirectionPath("reverse", -1, tuple(points)))
+    return directions[0], directions[1]
+
+
+def publish_typed_irc_path(
+    run_root: Path,
+    *,
+    route: str,
+    trace: SellaIrcTrace | None,
+    _failure_injector: Callable[[str], None] | None = None,
+) -> PublishedTypedIrcPath:
+    """Publish/resume only from canonical preflight, TS, and IRC receipts."""
+
+    ancestry = _load_canonical_qualification(run_root, route)
+    path_dir = ancestry.root / route / "path"
+    revalidate_before_commit: Callable[[], None] | None = None
+    if trace is not None:
+        if not isinstance(trace, SellaIrcTrace):
+            raise TypeError("trace must be a SellaIrcTrace")
+        irc_hashes = _validate_canonical_irc_receipts(ancestry, trace.directions)
+        ancestor_receipts = {
+            "preflight": ancestry.preflight_receipt_sha256,
+            "transition_state_qualification": (
+                ancestry.ts_qualification_receipt_sha256
+            ),
+            "irc_forward": irc_hashes["forward"],
+            "irc_reverse": irc_hashes["reverse"],
+        }
+
+        def validate_again() -> None:
+            current = _load_canonical_qualification(run_root, route)
+            current_hashes = _validate_canonical_irc_receipts(current, trace.directions)
+            current_ancestors = {
+                "preflight": current.preflight_receipt_sha256,
+                "transition_state_qualification": (
+                    current.ts_qualification_receipt_sha256
+                ),
+                "irc_forward": current_hashes["forward"],
+                "irc_reverse": current_hashes["reverse"],
+            }
+            _strict_json_equal(
+                current_ancestors,
+                ancestor_receipts,
+                label="typed path canonical ancestry before publication",
+            )
+
+        revalidate_before_commit = validate_again
+    else:
+        receipt, _ = _read_json_object(
+            path_dir / "receipt.json", label="typed path receipt"
+        )
+        ancestor_receipts = _validated_path_ancestor_receipts(receipt)
+    published = _publish_typed_irc_path(
+        ancestry.root,
+        campaign_identity=ancestry.campaign_identity,
+        route=route,
+        atom_mapping_sha256=ancestry.atom_mapping_sha256,
+        qualified_transition_state=ancestry.qualified_transition_state,
+        trace=trace,
+        ancestor_receipts=ancestor_receipts,
+        _ancestry_validator=revalidate_before_commit,
+        _failure_injector=_failure_injector,
+    )
+    irc_hashes = _validate_canonical_irc_receipts(
+        ancestry, _directions_from_published_path(published)
+    )
+    expected_ancestors = {
+        "preflight": ancestry.preflight_receipt_sha256,
+        "transition_state_qualification": ancestry.ts_qualification_receipt_sha256,
+        "irc_forward": irc_hashes["forward"],
+        "irc_reverse": irc_hashes["reverse"],
+    }
+    _strict_json_equal(
+        published.receipt.get("ancestor_receipts"),
+        expected_ancestors,
+        label="typed path canonical ancestry",
+    )
+    return published
+
+
+def _validate_authoritative_published_path(
+    run_root: Path, route: str
+) -> tuple[_CanonicalQualificationAncestry, PublishedTypedIrcPath, dict[str, str]]:
+    ancestry = _load_canonical_qualification(run_root, route)
+    path_dir = ancestry.root / route / "path"
+    receipt, _ = _read_json_object(
+        path_dir / "receipt.json", label="typed path receipt"
+    )
+    ancestor_receipts = _validated_path_ancestor_receipts(receipt)
+    path = _validate_published_path(
+        path_dir,
+        campaign_identity=ancestry.campaign_identity,
+        route=route,
+        atom_mapping_sha256=ancestry.atom_mapping_sha256,
+        qualified_transition_state=ancestry.qualified_transition_state,
+        ancestor_receipts=ancestor_receipts,
+    )
+    irc_hashes = _validate_canonical_irc_receipts(
+        ancestry, _directions_from_published_path(path)
+    )
+    expected = {
+        "preflight": ancestry.preflight_receipt_sha256,
+        "transition_state_qualification": ancestry.ts_qualification_receipt_sha256,
+        "irc_forward": irc_hashes["forward"],
+        "irc_reverse": irc_hashes["reverse"],
+    }
+    _strict_json_equal(
+        ancestor_receipts, expected, label="typed path canonical ancestry"
+    )
+    return ancestry, path, ancestor_receipts
 
 
 @dataclass(frozen=True)
@@ -1901,7 +2515,7 @@ def _validate_hessian_aggregate(
     )
 
 
-def publish_path_hessians(
+def _publish_path_hessians(
     run_root: Path,
     *,
     campaign_identity: str,
@@ -1912,25 +2526,37 @@ def publish_path_hessians(
     settings_fingerprint: str,
     backend_policy: dict[str, Any],
     evaluator: Callable[[Cluster], NativeHessianResult],
+    ancestor_receipts: dict[str, str] | None = None,
+    energy_reproduction_tolerance_ev: float | None = None,
+    _ancestry_validator: Callable[[], None] | None = None,
     _failure_injector: Callable[[str], None] | None = None,
 ) -> PublishedPathHessians:
-    """Publish crash-resumable immutable native Hessians for every typed path point."""
+    """Low-level Hessian primitive; the public wrapper enforces production ancestry."""
 
     _require_sha(campaign_identity, length=64, label="campaign identity")
     _require_sha(atom_mapping_sha256, length=64, label="atom mapping SHA-256")
     if not isinstance(settings_fingerprint, str) or not settings_fingerprint:
         raise ValueError("native Hessian settings fingerprint must be non-empty")
+    if energy_reproduction_tolerance_ev is not None and (
+        type(energy_reproduction_tolerance_ev) is not float
+        or not math.isfinite(energy_reproduction_tolerance_ev)
+        or energy_reproduction_tolerance_ev <= 0.0
+    ):
+        raise ValueError("electronic-energy reproduction tolerance must be positive")
     policy = _validated_backend_policy(backend_policy)
     _route_identity_cluster(route, qualified_transition_state, label="qualified TS")
     root = _safe_absolute_root(run_root)
     route_root = root / route
     with _exclusive_route_claim(route_root):
+        if _ancestry_validator is not None:
+            _ancestry_validator()
         current_path = _validate_published_path(
             route_root / "path",
             campaign_identity=campaign_identity,
             route=route,
             atom_mapping_sha256=atom_mapping_sha256,
             qualified_transition_state=qualified_transition_state,
+            ancestor_receipts=ancestor_receipts,
         )
         if current_path.receipt_sha256 != path.receipt_sha256 or not np.array_equal(
             current_path.coordinates_angstrom, path.coordinates_angstrom
@@ -1966,7 +2592,9 @@ def publish_path_hessians(
             hessian_root, points_root, len(path.coordinates_angstrom)
         )
         aggregate_path = hessian_root / "receipt.json"
-        if aggregate_path.exists() or aggregate_path.is_symlink():
+        if energy_reproduction_tolerance_ev is None and (
+            aggregate_path.exists() or aggregate_path.is_symlink()
+        ):
             return _validate_hessian_aggregate(
                 hessian_root,
                 campaign_identity=campaign_identity,
@@ -1982,6 +2610,37 @@ def publish_path_hessians(
         child_hashes: list[str] = []
         for point_index, coordinates in enumerate(path.coordinates_angstrom):
             point_dir = points_root / f"{point_index:06d}"
+            cluster = _cluster_at_coordinates(
+                qualified_transition_state,
+                coordinates,
+                name=f"{route}-path-point-{point_index}",
+            )
+            fresh_result: NativeHessianResult | None = None
+            path_energy_ev = _require_json_float(
+                path.receipt["points"][point_index]["electronic_energy_ev"],
+                label=f"typed path point {point_index} electronic energy",
+            )
+            if energy_reproduction_tolerance_ev is not None:
+                if _ancestry_validator is not None:
+                    _ancestry_validator()
+                fresh_result = _validate_evaluated_native_hessian(
+                    evaluator(cluster),
+                    cluster,
+                    settings_fingerprint=settings_fingerprint,
+                    backend_policy=policy,
+                )
+                reproduced_energy_ev = fresh_result.electronic_hartree * HARTREE_TO_EV
+                difference_ev = abs(reproduced_energy_ev - path_energy_ev)
+                if (
+                    not math.isfinite(reproduced_energy_ev)
+                    or not math.isfinite(difference_ev)
+                    or difference_ev > energy_reproduction_tolerance_ev
+                ):
+                    raise ValueError(
+                        f"Hessian point {point_index} electronic energy reproduction "
+                        f"difference {difference_ev:.12g} eV exceeds "
+                        f"absolute tolerance {energy_reproduction_tolerance_ev:.12g} eV"
+                    )
             if point_dir.exists() or point_dir.is_symlink():
                 result, child_hash = _validate_hessian_point(
                     point_dir,
@@ -1994,13 +2653,21 @@ def publish_path_hessians(
                     settings_fingerprint=settings_fingerprint,
                     backend_policy=policy,
                 )
+                if energy_reproduction_tolerance_ev is not None:
+                    persisted_difference_ev = abs(
+                        result.electronic_hartree * HARTREE_TO_EV - path_energy_ev
+                    )
+                    if (
+                        not math.isfinite(persisted_difference_ev)
+                        or persisted_difference_ev > energy_reproduction_tolerance_ev
+                    ):
+                        raise ValueError(
+                            f"persisted Hessian point {point_index} electronic energy "
+                            f"difference {persisted_difference_ev:.12g} eV exceeds "
+                            "the canonical reproduction tolerance"
+                        )
             else:
-                cluster = _cluster_at_coordinates(
-                    qualified_transition_state,
-                    coordinates,
-                    name=f"{route}-path-point-{point_index}",
-                )
-                result = _validate_evaluated_native_hessian(
+                result = fresh_result or _validate_evaluated_native_hessian(
                     evaluator(cluster),
                     cluster,
                     settings_fingerprint=settings_fingerprint,
@@ -2038,6 +2705,8 @@ def publish_path_hessians(
                         settings_fingerprint=settings_fingerprint,
                         backend_policy=policy,
                     )
+                    if _ancestry_validator is not None:
+                        _ancestry_validator()
                     if _failure_injector is not None:
                         _failure_injector(f"before_hessian_point_commit:{point_index}")
                     if point_dir.exists() or point_dir.is_symlink():
@@ -2063,6 +2732,19 @@ def publish_path_hessians(
             results.append(result)
             child_hashes.append(child_hash)
 
+        if _ancestry_validator is not None:
+            _ancestry_validator()
+        if aggregate_path.exists() or aggregate_path.is_symlink():
+            return _validate_hessian_aggregate(
+                hessian_root,
+                campaign_identity=campaign_identity,
+                route=route,
+                atom_mapping_sha256=atom_mapping_sha256,
+                qualified_transition_state=qualified_transition_state,
+                path=path,
+                settings_fingerprint=settings_fingerprint,
+                backend_policy=policy,
+            )
         aggregate = _aggregate_hessian_receipt(
             campaign_identity=campaign_identity,
             route=route,
@@ -2103,6 +2785,64 @@ def publish_path_hessians(
             settings_fingerprint=settings_fingerprint,
             backend_policy=policy,
         )
+
+
+def publish_path_hessians(
+    run_root: Path,
+    *,
+    route: str,
+    settings_fingerprint: str,
+    backend_policy: dict[str, Any],
+    evaluator: Callable[[Cluster], NativeHessianResult],
+    _failure_injector: Callable[[str], None] | None = None,
+) -> PublishedPathHessians:
+    """Publish/resume Hessians only through the canonical receipt ancestry."""
+
+    ancestry, path, ancestor_receipts = _validate_authoritative_published_path(
+        run_root, route
+    )
+    initial_path_sha = path.receipt_sha256
+
+    def revalidate_ancestry() -> None:
+        current_ancestry, current_path, current_ancestors = (
+            _validate_authoritative_published_path(run_root, route)
+        )
+        if (
+            current_ancestry.preflight_receipt_sha256
+            != ancestry.preflight_receipt_sha256
+            or current_ancestry.ts_qualification_receipt_sha256
+            != ancestry.ts_qualification_receipt_sha256
+            or current_path.receipt_sha256 != initial_path_sha
+        ):
+            raise ValueError("canonical Hessian publication ancestry changed")
+        _strict_json_equal(
+            current_ancestors,
+            ancestor_receipts,
+            label="canonical Hessian publication ancestry",
+        )
+
+    tolerance = ancestry.preflight["campaign"]["bounds"]["hessian"][
+        "electronic_energy_reproduction_absolute_tolerance_ev"
+    ]
+    if type(tolerance) is not float or not math.isfinite(tolerance) or tolerance <= 0.0:
+        raise ValueError(
+            "canonical electronic-energy reproduction tolerance is invalid"
+        )
+    return _publish_path_hessians(
+        ancestry.root,
+        campaign_identity=ancestry.campaign_identity,
+        route=route,
+        atom_mapping_sha256=ancestry.atom_mapping_sha256,
+        qualified_transition_state=ancestry.qualified_transition_state,
+        path=path,
+        settings_fingerprint=settings_fingerprint,
+        backend_policy=backend_policy,
+        evaluator=evaluator,
+        ancestor_receipts=ancestor_receipts,
+        energy_reproduction_tolerance_ev=tolerance,
+        _ancestry_validator=revalidate_ancestry,
+        _failure_injector=_failure_injector,
+    )
 
 
 def validate_transition_state_gate(

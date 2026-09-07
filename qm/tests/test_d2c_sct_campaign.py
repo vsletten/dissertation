@@ -121,6 +121,7 @@ def test_dry_run_identity_and_exact_four_route_inventory(tmp_path: Path):
     assert first["campaign"]["bounds"]["hessian"] == {
         "cartesian_hessian_units": "hartree / bohr^2",
         "coverage": "every retained IRC point including TS and endpoints",
+        "electronic_energy_reproduction_absolute_tolerance_ev": 1.0e-6,
         "maximum_retained_points_per_direction": 201,
         "required_transverse_mode_count": "3N-7",
         "transverse_eigenvalue_units": "hartree / bohr^2 / amu",
@@ -464,7 +465,7 @@ def test_boolean_cluster_state_cannot_publish_path_and_corrected_retry_succeeds(
     with pytest.raises(ValueError, match="electronic state.*integer"):
         campaign.classify_endpoint_basin(route, bad_endpoint)
     with pytest.raises(ValueError, match="electronic state.*integer"):
-        campaign.publish_typed_irc_path(
+        campaign._publish_typed_irc_path(
             run_root,
             campaign_identity="c" * 64,
             route=route,
@@ -474,7 +475,7 @@ def test_boolean_cluster_state_cannot_publish_path_and_corrected_retry_succeeds(
         )
 
     assert not (run_root / route / "path").exists()
-    corrected = campaign.publish_typed_irc_path(
+    corrected = campaign._publish_typed_irc_path(
         run_root,
         campaign_identity="c" * 64,
         route=route,
@@ -488,7 +489,7 @@ def test_boolean_cluster_state_cannot_publish_path_and_corrected_retry_succeeds(
 def test_preflight_binds_trusted_typed_endpoint_evidence(tmp_path: Path):
     receipt = _preflight(tmp_path / "run")
 
-    assert receipt["schema"] == "d2c-sct-campaign-preflight-v3"
+    assert receipt["schema"] == "d2c-sct-campaign-preflight-v4"
     assert receipt["campaign"]["endpoint_classification_policy"] == (
         campaign.endpoint_classification_policy_payload()
     )
@@ -638,7 +639,7 @@ def test_atomic_path_publication_resume_and_tamper_fail_closed(tmp_path: Path):
         "qualified_transition_state": transition_state,
     }
 
-    published = campaign.publish_typed_irc_path(run_root, trace=trace, **kwargs)
+    published = campaign._publish_typed_irc_path(run_root, trace=trace, **kwargs)
     path_dir = run_root / route / "path"
     assert set(path.name for path in path_dir.iterdir()) == {
         "coordinates.f64",
@@ -648,7 +649,7 @@ def test_atomic_path_publication_resume_and_tamper_fail_closed(tmp_path: Path):
     assert published.receipt["stage"] == "typed_irc_path"
     assert len(published.receipt_sha256) == 64
 
-    resumed = campaign.publish_typed_irc_path(run_root, trace=None, **kwargs)
+    resumed = campaign._publish_typed_irc_path(run_root, trace=None, **kwargs)
     assert resumed.receipt_sha256 == published.receipt_sha256
     assert np.array_equal(resumed.coordinates_angstrom, published.coordinates_angstrom)
 
@@ -658,7 +659,7 @@ def test_atomic_path_publication_resume_and_tamper_fail_closed(tmp_path: Path):
     coordinates_path.write_bytes(tampered)
     tampered_bytes = coordinates_path.read_bytes()
     with pytest.raises(ValueError, match="coordinates hash"):
-        campaign.publish_typed_irc_path(run_root, trace=None, **kwargs)
+        campaign._publish_typed_irc_path(run_root, trace=None, **kwargs)
     assert coordinates_path.read_bytes() == tampered_bytes
 
 
@@ -672,7 +673,7 @@ def test_atomic_path_failure_injection_leaves_no_canonical_partial(tmp_path: Pat
             raise RuntimeError("injected path crash")
 
     with pytest.raises(RuntimeError, match="injected path crash"):
-        campaign.publish_typed_irc_path(
+        campaign._publish_typed_irc_path(
             run_root,
             campaign_identity="c" * 64,
             route=route,
@@ -706,12 +707,12 @@ def test_path_precommit_rejects_boolean_outer_step_and_corrected_retry_succeeds(
     }
 
     with pytest.raises(ValueError, match="outer_step.*integer"):
-        campaign.publish_typed_irc_path(
+        campaign._publish_typed_irc_path(
             run_root, trace=malformed_trace, **publication_kwargs
         )
 
     assert not (run_root / route / "path").exists()
-    corrected = campaign.publish_typed_irc_path(
+    corrected = campaign._publish_typed_irc_path(
         run_root, trace=trace, **publication_kwargs
     )
     assert corrected.receipt_path.is_file()
@@ -727,18 +728,18 @@ def test_path_resume_rejects_unexpected_file_and_symlink(tmp_path: Path):
         "qualified_transition_state": transition_state,
     }
     run_root = tmp_path / "run"
-    campaign.publish_typed_irc_path(run_root, trace=trace, **kwargs)
+    campaign._publish_typed_irc_path(run_root, trace=trace, **kwargs)
     unexpected = run_root / route / "path" / "extra"
     unexpected.write_text("untrusted")
     with pytest.raises(ValueError, match="unexpected path artifact"):
-        campaign.publish_typed_irc_path(run_root, trace=None, **kwargs)
+        campaign._publish_typed_irc_path(run_root, trace=None, **kwargs)
 
     other_root = tmp_path / "other"
     other_root.mkdir()
     symlink_root = tmp_path / "linked"
     symlink_root.symlink_to(other_root, target_is_directory=True)
     with pytest.raises(ValueError, match="symlink"):
-        campaign.publish_typed_irc_path(symlink_root, trace=trace, **kwargs)
+        campaign._publish_typed_irc_path(symlink_root, trace=trace, **kwargs)
 
 
 def test_path_resume_preserves_malformed_receipt(tmp_path: Path):
@@ -751,20 +752,20 @@ def test_path_resume_preserves_malformed_receipt(tmp_path: Path):
         "atom_mapping_sha256": "d" * 64,
         "qualified_transition_state": transition_state,
     }
-    campaign.publish_typed_irc_path(run_root, trace=trace, **kwargs)
+    campaign._publish_typed_irc_path(run_root, trace=trace, **kwargs)
     receipt_path = run_root / route / "path" / "receipt.json"
     receipt_path.write_bytes(b"not-json\n")
     original = receipt_path.read_bytes()
 
     with pytest.raises(ValueError, match="malformed typed path receipt"):
-        campaign.publish_typed_irc_path(run_root, trace=None, **kwargs)
+        campaign._publish_typed_irc_path(run_root, trace=None, **kwargs)
     assert receipt_path.read_bytes() == original
 
 
 def _published_path(run_root: Path):
     route = "h-co-1w-cside"
     transition_state, trace = _trace(route, "irc_back.xyz", "irc_fwd.xyz")
-    path = campaign.publish_typed_irc_path(
+    path = campaign._publish_typed_irc_path(
         run_root,
         campaign_identity="c" * 64,
         route=route,
@@ -797,7 +798,7 @@ def _native_result(
 
 
 def _publish_hessians(run_root: Path, path, transition_state, evaluator, **kwargs):
-    return campaign.publish_path_hessians(
+    return campaign._publish_path_hessians(
         run_root,
         campaign_identity="c" * 64,
         route="h-co-1w-cside",
@@ -830,7 +831,7 @@ def test_stale_private_path_temporary_is_removed_not_promoted(tmp_path: Path):
         "atom_mapping_sha256": "d" * 64,
         "qualified_transition_state": transition_state,
     }
-    original = campaign.publish_typed_irc_path(
+    original = campaign._publish_typed_irc_path(
         run_root, trace=trace, **publication_kwargs
     )
     route_root = run_root / route
@@ -839,7 +840,7 @@ def test_stale_private_path_temporary_is_removed_not_promoted(tmp_path: Path):
     (temporary / "coordinates.f64").write_bytes(b"private coordinates")
     (temporary / "receipt.json").write_bytes(b"private receipt\n")
 
-    resumed = campaign.publish_typed_irc_path(
+    resumed = campaign._publish_typed_irc_path(
         run_root, trace=None, **publication_kwargs
     )
 
@@ -886,7 +887,7 @@ def test_path_publication_destination_race_never_clobbers(monkeypatch, tmp_path:
         campaign, "_renameat2_noreplace", create_destination_then_rename
     )
     with pytest.raises(FileExistsError):
-        campaign.publish_typed_irc_path(
+        campaign._publish_typed_irc_path(
             run_root,
             campaign_identity="c" * 64,
             route=route,
@@ -996,7 +997,7 @@ def test_malformed_private_temporary_is_preserved_and_rejected(
         temporary.symlink_to(outside, target_is_directory=True)
 
         def call():
-            return campaign.publish_typed_irc_path(
+            return campaign._publish_typed_irc_path(
                 run_root,
                 campaign_identity="c" * 64,
                 route=route,
@@ -1005,7 +1006,7 @@ def test_malformed_private_temporary_is_preserved_and_rejected(
                 trace=trace,
             )
     else:
-        path = campaign.publish_typed_irc_path(
+        path = campaign._publish_typed_irc_path(
             run_root,
             campaign_identity="c" * 64,
             route=route,
@@ -1059,7 +1060,7 @@ def test_path_receipt_rejects_extra_keys_and_primitive_type_substitution(
     malformed = receipt_path.read_bytes()
 
     with pytest.raises(ValueError):
-        campaign.publish_typed_irc_path(
+        campaign._publish_typed_irc_path(
             run_root,
             campaign_identity="c" * 64,
             route=route,
@@ -1151,11 +1152,11 @@ def test_run_root_and_route_path_escapes_are_rejected(tmp_path: Path):
     }
 
     with pytest.raises(ValueError, match="path escape"):
-        campaign.publish_typed_irc_path(
+        campaign._publish_typed_irc_path(
             tmp_path / "safe" / ".." / "escaped", route=route, **kwargs
         )
     with pytest.raises(ValueError, match="unsupported typed endpoint route"):
-        campaign.publish_typed_irc_path(tmp_path / "run", route="../escaped", **kwargs)
+        campaign._publish_typed_irc_path(tmp_path / "run", route="../escaped", **kwargs)
     assert not (tmp_path / "escaped").exists()
 
 
@@ -1424,6 +1425,419 @@ def test_hessian_precommit_rejects_int_fallback_and_corrected_retry_succeeds(
     assert not point_zero.exists()
     corrected = _publish_hessians(run_root, path, transition_state, _native_result)
     assert corrected.receipt_path.is_file()
+
+
+def _authoritative_ancestry(
+    run_root: Path,
+    *,
+    route: str = "h-co-1w-cside",
+    unstable_mode: np.ndarray | None = None,
+):
+    preflight = _preflight(run_root)
+    transition_state, trace = _trace(route, "irc_back.xyz", "irc_fwd.xyz")
+    masses = np.array(
+        [campaign.ISOTOPIC_MASSES_AMU[symbol] for symbol in transition_state.symbols]
+    )
+    if unstable_mode is None:
+        tangents = []
+        mass_factors = np.repeat(np.sqrt(masses), 3)
+        for direction in trace.directions:
+            tangent = (
+                direction.points[1].coordinates_angstrom
+                - direction.points[0].coordinates_angstrom
+            ).reshape(-1)
+            tangent = tangent * mass_factors
+            tangents.append(tangent / np.linalg.norm(tangent))
+        sign = 1.0 if np.dot(tangents[0], tangents[1]) >= 0.0 else -1.0
+        unstable_mode = tangents[0] + sign * tangents[1]
+    unstable_mode = np.asarray(unstable_mode, dtype=float)
+    unstable_mode = unstable_mode / np.linalg.norm(unstable_mode)
+
+    preflight_path = run_root / campaign.PREFLIGHT_RECEIPT
+    preflight_sha = bundle.sha256_path(preflight_path)
+    qualification_root = run_root / route / "ts-qualification"
+    qualification_root.mkdir(parents=True)
+    qualification_coordinates = np.ascontiguousarray(
+        transition_state.coords, dtype="<f8"
+    ).tobytes()
+    (qualification_root / "coordinates.f64").write_bytes(qualification_coordinates)
+    qualification = campaign._ts_qualification_receipt_payload(
+        preflight=preflight,
+        preflight_receipt_sha256=preflight_sha,
+        route=route,
+        qualified_transition_state=transition_state,
+        unstable_mode_mass_scaled=unstable_mode,
+    )
+    qualification_path = qualification_root / "receipt.json"
+    qualification_path.write_bytes(campaign._json_bytes(qualification))
+    qualification_sha = bundle.sha256_path(qualification_path)
+
+    for direction in trace.directions:
+        direction_root = run_root / route / f"irc-{direction.sella_direction}"
+        direction_root.mkdir()
+        receipt = campaign._irc_direction_receipt_payload(
+            preflight=preflight,
+            preflight_receipt_sha256=preflight_sha,
+            ts_qualification_receipt_sha256=qualification_sha,
+            route=route,
+            qualified_transition_state=transition_state,
+            unstable_mode_mass_scaled=unstable_mode,
+            direction=direction,
+        )
+        (direction_root / "receipt.json").write_bytes(campaign._json_bytes(receipt))
+    return preflight, transition_state, trace
+
+
+def _authoritative_path(run_root: Path):
+    _, transition_state, trace = _authoritative_ancestry(run_root)
+    path = campaign.publish_typed_irc_path(
+        run_root,
+        route="h-co-1w-cside",
+        trace=trace,
+    )
+    return transition_state, path
+
+
+def _energy_reproducing_result(cluster, path, *, offset_ev: float = 0.0):
+    point_index = int(cluster.name.rsplit("-", 1)[-1])
+    result = _native_result(cluster)
+    path_energy_ev = path.receipt["points"][point_index]["electronic_energy_ev"]
+    return replace(
+        result,
+        electronic_hartree=(path_energy_ev + offset_ev) / campaign.HARTREE_TO_EV,
+    )
+
+
+def test_authoritative_path_direct_and_resume_revalidate_canonical_ancestry(
+    tmp_path: Path,
+):
+    run_root = tmp_path / "run"
+    preflight, _, trace = _authoritative_ancestry(run_root)
+
+    published = campaign.publish_typed_irc_path(
+        run_root, route="h-co-1w-cside", trace=trace
+    )
+    assert published.receipt["schema"] == "d2c-typed-irc-path-v2"
+    assert set(published.receipt["ancestor_receipts"]) == {
+        "preflight",
+        "transition_state_qualification",
+        "irc_forward",
+        "irc_reverse",
+    }
+    resumed = campaign.publish_typed_irc_path(
+        run_root, route="h-co-1w-cside", trace=None
+    )
+    assert resumed.receipt_sha256 == published.receipt_sha256
+
+    preflight_path = run_root / campaign.PREFLIGHT_RECEIPT
+    preflight["created_utc"] = "2026-09-07T12:00:01Z"
+    preflight_path.write_bytes(campaign._json_bytes(preflight))
+    with pytest.raises(ValueError, match="preflight receipt SHA-256"):
+        campaign.publish_typed_irc_path(run_root, route="h-co-1w-cside", trace=None)
+
+
+def test_authoritative_path_api_does_not_accept_caller_identity_or_ts(tmp_path: Path):
+    run_root = tmp_path / "run"
+    _, transition_state, trace = _authoritative_ancestry(run_root)
+
+    with pytest.raises(TypeError, match="campaign_identity"):
+        campaign.publish_typed_irc_path(
+            run_root,
+            route="h-co-1w-cside",
+            trace=trace,
+            campaign_identity="f" * 64,
+            qualified_transition_state=transition_state,
+        )
+    assert not (run_root / "h-co-1w-cside" / "path").exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("algorithm", "claimed-sella"),
+        ("step_size_angstrom", 0.0500000001),
+        ("maximum_steps", 201),
+        ("maximum_retained_points", 202),
+        ("outer_fmax_ev_per_angstrom", 0.0500000001),
+        ("inner_fmax_ev_per_angstrom", 0.0100000001),
+    ],
+)
+def test_authoritative_path_rejects_irc_contract_tamper(
+    tmp_path: Path, field: str, value
+):
+    run_root = tmp_path / field
+    _, _, trace = _authoritative_ancestry(run_root)
+    receipt_path = run_root / "h-co-1w-cside" / "irc-forward" / "receipt.json"
+    _rewrite_canonical_json(
+        receipt_path, lambda receipt: receipt.__setitem__(field, value)
+    )
+
+    with pytest.raises(ValueError, match="IRC forward receipt"):
+        campaign.publish_typed_irc_path(run_root, route="h-co-1w-cside", trace=trace)
+    assert not (run_root / "h-co-1w-cside" / "path").exists()
+
+
+def test_authoritative_path_terminal_fmax_boundary_is_strict(tmp_path: Path):
+    run_root = tmp_path / "run"
+    _, _, trace = _authoritative_ancestry(run_root)
+    directions = list(trace.directions)
+    points = list(directions[0].points)
+    points[-1] = replace(
+        points[-1],
+        projected_fmax_ev_per_angstrom=campaign.BOUNDS["irc"][
+            "outer_fmax_ev_per_angstrom"
+        ],
+    )
+    directions[0] = replace(directions[0], points=tuple(points))
+
+    with pytest.raises(ValueError, match="terminal IRC fmax must be strictly below"):
+        campaign.publish_typed_irc_path(
+            run_root,
+            route="h-co-1w-cside",
+            trace=replace(trace, directions=tuple(directions)),
+        )
+
+
+@pytest.mark.parametrize("point_count", [201, 202])
+def test_authoritative_path_enforces_retained_point_boundary(
+    tmp_path: Path, point_count: int
+):
+    run_root = tmp_path / str(point_count)
+    _, _, trace = _authoritative_ancestry(run_root)
+
+    def expand(direction):
+        start = direction.points[0]
+        terminal = direction.points[-1]
+        return replace(
+            direction,
+            points=tuple(
+                IrcPoint(
+                    outer_step=index,
+                    coordinates_angstrom=(
+                        start.coordinates_angstrom
+                        + (index / (point_count - 1))
+                        * (terminal.coordinates_angstrom - start.coordinates_angstrom)
+                    ),
+                    electronic_energy_ev=float(-10.0 - index / 1000.0),
+                    projected_fmax_ev_per_angstrom=0.01,
+                )
+                for index in range(point_count)
+            ),
+        )
+
+    expanded = replace(
+        trace, directions=tuple(expand(direction) for direction in trace.directions)
+    )
+    if point_count == 201:
+        ancestry = campaign._load_canonical_qualification(run_root, "h-co-1w-cside")
+        for direction in expanded.directions:
+            receipt = campaign._irc_direction_receipt_payload(
+                preflight=ancestry.preflight,
+                preflight_receipt_sha256=ancestry.preflight_receipt_sha256,
+                ts_qualification_receipt_sha256=(
+                    ancestry.ts_qualification_receipt_sha256
+                ),
+                route="h-co-1w-cside",
+                qualified_transition_state=ancestry.qualified_transition_state,
+                unstable_mode_mass_scaled=ancestry.unstable_mode_mass_scaled,
+                direction=direction,
+            )
+            receipt_path = (
+                run_root
+                / "h-co-1w-cside"
+                / f"irc-{direction.sella_direction}"
+                / "receipt.json"
+            )
+            receipt_path.write_bytes(campaign._json_bytes(receipt))
+        assert (
+            campaign.publish_typed_irc_path(
+                run_root, route="h-co-1w-cside", trace=expanded
+            ).receipt["point_count"]
+            == 401
+        )
+    else:
+        with pytest.raises(ValueError, match="maximum 201 retained points"):
+            campaign.publish_typed_irc_path(
+                run_root, route="h-co-1w-cside", trace=expanded
+            )
+
+
+def test_authoritative_path_rejects_nonfinite_or_low_ts_tangent_overlap(tmp_path: Path):
+    route = "h-co-1w-cside"
+    transition_state, trace = _trace(route, "irc_back.xyz", "irc_fwd.xyz")
+    tangent = (
+        trace.directions[0].points[1].coordinates_angstrom - transition_state.coords
+    ).reshape(-1)
+    masses = np.array(
+        [campaign.ISOTOPIC_MASSES_AMU[symbol] for symbol in transition_state.symbols]
+    )
+    tangent *= np.repeat(np.sqrt(masses), 3)
+    orthogonal = np.zeros_like(tangent)
+    orthogonal[np.argmin(np.abs(tangent))] = 1.0
+    orthogonal -= tangent * np.dot(orthogonal, tangent) / np.dot(tangent, tangent)
+
+    run_root = tmp_path / "low"
+    _authoritative_ancestry(run_root, unstable_mode=orthogonal)
+    with pytest.raises(ValueError, match="TS-adjacent tangent overlap"):
+        campaign.publish_typed_irc_path(run_root, route=route, trace=trace)
+
+    nan_root = tmp_path / "nan"
+    _, _, nan_trace = _authoritative_ancestry(nan_root)
+    receipt_path = nan_root / route / "ts-qualification" / "receipt.json"
+
+    def poison(receipt):
+        receipt["unstable_mode_mass_scaled"]["values"][0] = "nan"
+
+    _rewrite_canonical_json(receipt_path, poison)
+    with pytest.raises(ValueError, match="unstable mode.*finite"):
+        campaign.publish_typed_irc_path(nan_root, route=route, trace=nan_trace)
+
+
+def test_authoritative_hessian_recomputes_energy_on_direct_and_full_resume(
+    tmp_path: Path,
+):
+    run_root = tmp_path / "run"
+    _, path = _authoritative_path(run_root)
+    direct_calls = []
+
+    def direct(cluster):
+        direct_calls.append(int(cluster.name.rsplit("-", 1)[-1]))
+        return _energy_reproducing_result(cluster, path)
+
+    first = campaign.publish_path_hessians(
+        run_root,
+        route="h-co-1w-cside",
+        settings_fingerprint="settings-v1",
+        backend_policy={
+            "requested_backend": "gpu4pyscf",
+            "allow_cpu_fallback": True,
+        },
+        evaluator=direct,
+    )
+    assert direct_calls == list(range(5))
+    assert first.receipt["accepted"] is True
+
+    resume_calls = []
+
+    def resume(cluster):
+        resume_calls.append(int(cluster.name.rsplit("-", 1)[-1]))
+        return _energy_reproducing_result(cluster, path)
+
+    resumed = campaign.publish_path_hessians(
+        run_root,
+        route="h-co-1w-cside",
+        settings_fingerprint="settings-v1",
+        backend_policy={
+            "requested_backend": "gpu4pyscf",
+            "allow_cpu_fallback": True,
+        },
+        evaluator=resume,
+    )
+    assert resume_calls == list(range(5))
+    assert resumed.receipt_sha256 == first.receipt_sha256
+
+
+@pytest.mark.parametrize("multiple", [0.999, 1.001])
+def test_authoritative_hessian_energy_tolerance_boundary(
+    tmp_path: Path, multiple: float
+):
+    run_root = tmp_path / str(multiple)
+    _, path = _authoritative_path(run_root)
+    tolerance = campaign.BOUNDS["hessian"][
+        "electronic_energy_reproduction_absolute_tolerance_ev"
+    ]
+
+    def evaluator(cluster):
+        index = int(cluster.name.rsplit("-", 1)[-1])
+        offset = tolerance * multiple if index == 2 else 0.0
+        return _energy_reproducing_result(cluster, path, offset_ev=offset)
+
+    kwargs = {
+        "route": "h-co-1w-cside",
+        "settings_fingerprint": "settings-v1",
+        "backend_policy": {
+            "requested_backend": "gpu4pyscf",
+            "allow_cpu_fallback": True,
+        },
+        "evaluator": evaluator,
+    }
+    if multiple < 1.0:
+        assert campaign.publish_path_hessians(run_root, **kwargs).receipt["accepted"]
+    else:
+        with pytest.raises(ValueError, match="electronic energy reproduction"):
+            campaign.publish_path_hessians(run_root, **kwargs)
+        assert not (
+            run_root / "h-co-1w-cside" / "hessians" / "points" / "000002"
+        ).exists()
+
+
+def test_authoritative_hessian_resume_rejects_irc_ancestry_tamper_before_compute(
+    tmp_path: Path,
+):
+    run_root = tmp_path / "run"
+    _, path = _authoritative_path(run_root)
+
+    def evaluator(cluster):
+        return _energy_reproducing_result(cluster, path)
+
+    kwargs = {
+        "route": "h-co-1w-cside",
+        "settings_fingerprint": "settings-v1",
+        "backend_policy": {
+            "requested_backend": "gpu4pyscf",
+            "allow_cpu_fallback": True,
+        },
+    }
+    campaign.publish_path_hessians(run_root, evaluator=evaluator, **kwargs)
+    receipt_path = run_root / "h-co-1w-cside" / "irc-reverse" / "receipt.json"
+    _rewrite_canonical_json(
+        receipt_path,
+        lambda receipt: receipt.__setitem__("algorithm", "tampered"),
+    )
+
+    with pytest.raises(ValueError, match="IRC reverse receipt"):
+        campaign.publish_path_hessians(
+            run_root,
+            evaluator=lambda _cluster: pytest.fail("tamper reached evaluator"),
+            **kwargs,
+        )
+
+
+def test_authoritative_hessian_rejects_low_level_unreproduced_checkpoint(
+    tmp_path: Path,
+):
+    run_root = tmp_path / "run"
+    _, path = _authoritative_path(run_root)
+    ancestry, _, ancestor_receipts = campaign._validate_authoritative_published_path(
+        run_root, "h-co-1w-cside"
+    )
+    campaign._publish_path_hessians(
+        run_root,
+        campaign_identity=ancestry.campaign_identity,
+        route="h-co-1w-cside",
+        atom_mapping_sha256=ancestry.atom_mapping_sha256,
+        qualified_transition_state=ancestry.qualified_transition_state,
+        path=path,
+        settings_fingerprint="settings-v1",
+        backend_policy={
+            "requested_backend": "gpu4pyscf",
+            "allow_cpu_fallback": True,
+        },
+        evaluator=_native_result,
+        ancestor_receipts=ancestor_receipts,
+    )
+
+    with pytest.raises(ValueError, match="persisted Hessian point 0 electronic energy"):
+        campaign.publish_path_hessians(
+            run_root,
+            route="h-co-1w-cside",
+            settings_fingerprint="settings-v1",
+            backend_policy={
+                "requested_backend": "gpu4pyscf",
+                "allow_cpu_fallback": True,
+            },
+            evaluator=lambda cluster: _energy_reproducing_result(cluster, path),
+        )
 
 
 def _strict_gate_fixture(
