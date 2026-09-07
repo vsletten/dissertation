@@ -136,3 +136,16 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   execution remains injectable/self-attested; and an in-process crash during the
   expensive two-direction Sella run loses partial work. No production calculator,
   literature benchmark, D2b gate flip, or D3b table ran.
+- 2026-09-07 15:59 PDT (hermes-custom-build-001; profile=workstation) —
+  SHARED IRC ANCESTRY CHECKPOINT: exact pushed head `784de7e` makes the shared
+  `irc-execution` receipt mandatory, requires its embedded directions to equal both
+  standalone receipts, binds all five preflight/TS/execution/direction hashes into
+  immutable typed-path-v3 and path-Hessian ancestry, and rereads the complete chain
+  after final IRC publication so delete/replace/divergence races fail closed without
+  deleting foreign artifacts. Adversarial delete, nested-divergence, final-race,
+  legacy-v2, resume, and Hessian-precommit regressions pass; independent spec review
+  passed and code-quality review approved after the v3 correction. Whole-QM gates are
+  `1005 passed, 1 skipped` with Ruff/format/diff clean. Production remains prohibited
+  pending current-environment/trusted-endpoint rebinding, non-injectable native-Hessian
+  provenance, and durable mid-IRC restart; no production calculator, literature
+  benchmark, D2b gate flip, or D3b table ran.
