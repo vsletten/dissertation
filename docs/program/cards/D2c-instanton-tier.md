@@ -120,3 +120,19 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   not R(1)'s prefactor. The tracked anchor fixture binds the downloaded paper
   SHA-256. Focused Ruff and 64 tests pass. No full-IRC/Hessian compute or D3b
   table ran; the existing endpoint-only checkpoints are inputs, not SCT evidence.
+- 2026-09-07 14:35 PDT (hermes-custom-build-001; profile=workstation) —
+  CANONICAL PUBLICATION HARDENING CHECKPOINT, REVIEW-RED: exact pushed head
+  `fd7f7bcc02598f11a20cd20ec8e82ee6837891cc` now replays persisted native-Hessian
+  TS evidence, validates IRC tangents in the rigid-horizontal molecular quotient,
+  skips only fully validated cached path Hessians, enforces fresh path-energy
+  reproduction, and reconstructs public typed paths from canonical direction
+  receipts instead of accepting a caller trace. A bound IRC wrapper records the
+  exact `0.05 A` / 200-step / `0.05` outer-`fmax` / `0.01` inner-`fmax` contract
+  and shared run identity. Whole-QM verification is `997 passed, 1 skipped` with
+  Ruff/format/diff clean. Two independent cold reviews still prohibit production:
+  typed-path acceptance does not yet require the shared execution receipt; final
+  IRC publication has a receipt/ancestry race; trusted frozen endpoint fingerprints
+  and current code/dependency identity are not re-bound at execution; native-Hessian
+  execution remains injectable/self-attested; and an in-process crash during the
+  expensive two-direction Sella run loses partial work. No production calculator,
+  literature benchmark, D2b gate flip, or D3b table ran.
