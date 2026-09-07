@@ -5,7 +5,7 @@
 - priority: P2
 - machine: workstation
 - depends: D2b
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## Objective
 
@@ -39,3 +39,13 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
 - 2026-08-28 — created by D2b closeout: the campaign validated the
   barrier tier (1w abstraction barrier = S&K's surface value to 2 K)
   and named Eckart-vs-instanton as the sole remaining gap.
+- 2026-09-06 22:38 PDT (hermes-custom-build-001; profile=workstation) —
+  DEVIATION: implemented and unit-tested the reusable Liu/Pilgrim SCT action,
+  effective-mass, and I1/I2/I3 thermal-integration kernel (33 focused/rates
+  tests pass). An independent adversarial review rejected the first sparse
+  quick-IRC/relaxed-scan benchmark as scientifically non-SCT and its site-envelope
+  gate as false-green; the provisional D3b table and driver were deleted rather
+  than laundered as a result. Acceptance still requires a mass-scaled full IRC,
+  transverse frequencies/eigenvectors at path points, a vibrationally adiabatic
+  potential, matched-site branching, and immutable tracked provenance. No D3b
+  rate table has been emitted.
