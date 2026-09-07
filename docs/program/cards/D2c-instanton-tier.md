@@ -61,7 +61,7 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   campaign bounds, and stage receipts under a crash-recoverable exclusive run-root
   claim. Two independent correction rounds closed all critical/important scientific
   review findings; final review approved with one non-blocking native PySCF Hessian-layout
-  note for the production driver. Whole-QM verification is 865 passed, 1 skipped plus
+  note for the production driver. Whole-QM verification is 868 passed, 1 skipped plus
   whole-tree Ruff/format; no IRC/Hessian production compute or D3b table ran. Acceptance
   remains red until the resumable production stages execute and matched-site 12-20 K
   literature/branching gates pass.
