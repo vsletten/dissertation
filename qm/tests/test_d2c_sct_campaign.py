@@ -5,6 +5,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from scripts import d2c_input_bundle as bundle
@@ -300,4 +301,133 @@ def test_injected_dependency_inventory_must_include_exact_gpu_identity(tmp_path:
             tmp_path / "run",
             git_sha=FIXED_GIT_SHA,
             dependency_versions=incomplete,
+        )
+
+
+def _strict_gate_fixture(
+    eigenvalues: np.ndarray,
+    *,
+    fmax: float = 0.001,
+):
+    from quarry import reaction_path
+    from quarry.clusters import Cluster
+    from quarry.native_hessian import HARTREE_TO_EV, NativeHessianResult
+    from quarry.pipeline import BOHR_TO_ANGSTROM, frequency_geometry_fingerprint
+
+    cluster = Cluster(
+        name="strict-gate",
+        symbols=["C", "O", "H"],
+        coords=np.array([[0.0, 0.0, 0.0], [1.2, 0.1, 0.0], [0.1, 0.9, 0.4]]),
+    )
+    masses = np.array([campaign.ISOTOPIC_MASSES_AMU[s] for s in cluster.symbols])
+    rigid = reaction_path._rigid_motion_basis(cluster.coords, masses)
+    vibrational = np.linalg.svd(rigid.T, full_matrices=True)[2][6:].T
+    mass_weighted = vibrational @ np.diag(eigenvalues) @ vibrational.T
+    factors = np.repeat(np.sqrt(masses), 3)
+    hessian = factors[:, None] * mass_weighted * factors[None, :]
+    gradient = np.zeros_like(cluster.coords)
+    gradient[0, 0] = fmax * BOHR_TO_ANGSTROM / HARTREE_TO_EV
+    native = NativeHessianResult(
+        electronic_hartree=-100.0,
+        gradient_hartree_per_bohr=gradient,
+        physical_fmax_ev_per_angstrom=fmax,
+        cartesian_hessian_hartree_per_bohr2=hessian,
+        requested_backend="gpu4pyscf",
+        actual_backend="gpu4pyscf",
+        gpu_fallback_used=False,
+        geometry_fingerprint=frequency_geometry_fingerprint(cluster),
+        settings_fingerprint="settings",
+    )
+    return cluster, masses, native, vibrational[:, 0]
+
+
+def _validate_strict_gate(fixture):
+    cluster, masses, native, reaction_vector = fixture
+    return campaign.validate_transition_state_gate(
+        cluster,
+        masses,
+        native,
+        expected_settings_fingerprint="settings",
+        reaction_vector_mass_scaled=reaction_vector,
+    )
+
+
+def test_strict_transition_state_gate_accepts_one_deep_imaginary_mode():
+    receipt = _validate_strict_gate(_strict_gate_fixture(np.array([-0.02, 0.01, 0.03])))
+
+    assert receipt["accepted"] is True
+    assert receipt["imaginary_mode_count"] == 1
+    assert receipt["imaginary_wavenumber_cm"] >= 200.0
+    assert receipt["mapped_reaction_vector_overlap"] == pytest.approx(1.0)
+    assert len(receipt["gradient_sha256"]) == 64
+    assert len(receipt["canonical_hessian_sha256"]) == 64
+
+
+@pytest.mark.parametrize(
+    "eigenvalues",
+    [
+        np.array([0.01, 0.02, 0.03]),
+        np.array([-0.02, -1.0e-5, 0.03]),
+        np.array([-0.02, -1.0e-10, 0.03]),
+    ],
+)
+def test_strict_transition_state_gate_rejects_zero_second_or_noise_floor_modes(
+    eigenvalues: np.ndarray,
+):
+    with pytest.raises(ValueError, match="exactly one significant negative"):
+        _validate_strict_gate(_strict_gate_fixture(eigenvalues))
+
+
+def test_strict_transition_state_gate_rejects_nonstationary_geometry():
+    with pytest.raises(ValueError, match="not stationary"):
+        _validate_strict_gate(
+            _strict_gate_fixture(np.array([-0.02, 0.01, 0.03]), fmax=0.02)
+        )
+
+
+def test_strict_transition_state_gate_rejects_stale_geometry_settings_and_masses():
+    from dataclasses import replace
+
+    cluster, masses, native, reaction_vector = _strict_gate_fixture(
+        np.array([-0.02, 0.01, 0.03])
+    )
+    with pytest.raises(ValueError, match="geometry fingerprint"):
+        campaign.validate_transition_state_gate(
+            cluster,
+            masses,
+            replace(native, geometry_fingerprint="wrong"),
+            expected_settings_fingerprint="settings",
+            reaction_vector_mass_scaled=reaction_vector,
+        )
+    with pytest.raises(ValueError, match="settings fingerprint"):
+        campaign.validate_transition_state_gate(
+            cluster,
+            masses,
+            native,
+            expected_settings_fingerprint="different",
+            reaction_vector_mass_scaled=reaction_vector,
+        )
+    with pytest.raises(ValueError, match="isotopic standard"):
+        campaign.validate_transition_state_gate(
+            cluster,
+            masses + 0.001,
+            native,
+            expected_settings_fingerprint="settings",
+            reaction_vector_mass_scaled=reaction_vector,
+        )
+
+
+def test_strict_transition_state_gate_rejects_orthogonal_deep_spectator_mode():
+    cluster, masses, native, _ = _strict_gate_fixture(np.array([-0.02, 0.01, 0.03]))
+    from quarry import reaction_path
+
+    rigid = reaction_path._rigid_motion_basis(cluster.coords, masses)
+    vibrational = np.linalg.svd(rigid.T, full_matrices=True)[2][6:].T
+    with pytest.raises(ValueError, match="imaginary mode overlap"):
+        campaign.validate_transition_state_gate(
+            cluster,
+            masses,
+            native,
+            expected_settings_fingerprint="settings",
+            reaction_vector_mass_scaled=vibrational[:, 1],
         )

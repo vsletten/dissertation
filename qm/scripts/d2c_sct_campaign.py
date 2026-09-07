@@ -42,11 +42,20 @@ if __name__ == "__main__":
         default_run_root=Path(__file__).resolve().parent.parent / "runs",
     )
 
+import numpy as np  # noqa: E402
+
+from quarry.clusters import Cluster  # noqa: E402
+from quarry.native_hessian import NativeHessianResult  # noqa: E402
+from quarry.pipeline import frequency_geometry_fingerprint  # noqa: E402
+from quarry.reaction_path import (  # noqa: E402
+    hessian_eigenvalues_to_wavenumbers_cm,
+    project_vibrational_hessian,
+)
 from scripts import d2c_input_bundle
 from scripts.production_energetics import load_xyz_like
 from scripts.surface_rate_protocol import reactions
 
-SCHEMA = "d2c-sct-campaign-preflight-v1"
+SCHEMA = "d2c-sct-campaign-preflight-v2"
 PREFLIGHT_RECEIPT = "preflight.json"
 DEFAULT_BUNDLE_ROOT = (
     Path(__file__).resolve().parent.parent
@@ -106,11 +115,21 @@ ISOTOPIC_MASSES_AMU = {
 }
 REFERENCE_MASS_AMU = 1.0
 BOUNDS: dict[str, Any] = {
+    "transition_state_qualification": {
+        "physical_fmax_ev_per_angstrom_exclusive_maximum": 0.02,
+        "negative_eigenvalue_tolerance_hartree_per_bohr2_amu": 1.0e-8,
+        "required_significant_imaginary_mode_count": 1,
+        "minimum_reaction_imaginary_wavenumber_cm": 200.0,
+        "minimum_mapped_reaction_vector_overlap": 0.20,
+        "minimum_irc_tangent_overlap": 0.80,
+        "spectator_imaginary_modes_forbidden": True,
+        "full_index_gate_precedes_transverse_projection": True,
+    },
     "irc": {
         "directions": ["forward", "reverse"],
         "algorithm": "sella-gonzalez-schlegel",
         "step_size_angstrom": 0.05,
-        "maximum_steps_per_direction": 400,
+        "maximum_steps_per_direction": 200,
         "outer_fmax_ev_per_angstrom": 0.05,
         "inner_fmax_ev_per_angstrom": 0.01,
     },
@@ -148,6 +167,13 @@ BOUNDS: dict[str, Any] = {
     },
 }
 ROUTE_STAGE_CONTRACT: dict[str, dict[str, Any]] = {
+    "transition_state_qualification": {
+        "required": True,
+        "receipt": "ts-qualification/receipt.json",
+        "requirement": (
+            "fresh physical gradient and strict full 3N-6 first-order-saddle gate"
+        ),
+    },
     "irc_forward": {
         "required": True,
         "receipt": "irc-forward/receipt.json",
@@ -157,6 +183,11 @@ ROUTE_STAGE_CONTRACT: dict[str, dict[str, Any]] = {
         "required": True,
         "receipt": "irc-reverse/receipt.json",
         "requirement": "bounded IRC in the reverse direction",
+    },
+    "typed_irc_path": {
+        "required": True,
+        "receipt": "path/receipt.json",
+        "requirement": "typed endpoints and one oriented reactant-to-product path",
     },
     "hessian_every_path_point": {
         "required": True,
@@ -183,7 +214,9 @@ CAMPAIGN_STAGE_CONTRACT: dict[str, dict[str, Any]] = {
     "branching_common_reference_gate": {
         "required": True,
         "receipt": "branching-common-reference.json",
-        "requirement": "all four routes compared from one explicitly common reference",
+        "requirement": (
+            "both competing H2CO channels use one exact common-reactant receipt"
+        ),
     },
     "final_freeze": {
         "required": True,
@@ -197,6 +230,123 @@ _FORBIDDEN_ACCEPTED_RESULTS = (
     "final-result.json",
     "results.json",
 )
+
+
+def validate_transition_state_gate(
+    cluster: Cluster,
+    masses_amu: Any,
+    native_hessian: NativeHessianResult,
+    *,
+    expected_settings_fingerprint: str,
+    reaction_vector_mass_scaled: Any,
+) -> dict[str, Any]:
+    """Apply the strict fresh first-order-saddle gate before any IRC call."""
+
+    coordinates = np.asarray(cluster.coords, dtype=float)
+    if native_hessian.geometry_fingerprint != frequency_geometry_fingerprint(cluster):
+        raise ValueError(
+            "native Hessian geometry fingerprint does not match TS geometry"
+        )
+    if (
+        not expected_settings_fingerprint
+        or native_hessian.settings_fingerprint != expected_settings_fingerprint
+    ):
+        raise ValueError("native Hessian settings fingerprint does not match campaign")
+    masses = np.asarray(masses_amu, dtype=float)
+    expected_masses = np.asarray(
+        [ISOTOPIC_MASSES_AMU[symbol] for symbol in cluster.symbols], dtype=float
+    )
+    if masses.shape != expected_masses.shape or not np.array_equal(
+        masses, expected_masses
+    ):
+        raise ValueError(
+            "mass vector does not match the receipt-bound isotopic standard"
+        )
+    bounds = BOUNDS["transition_state_qualification"]
+    fmax_limit = bounds["physical_fmax_ev_per_angstrom_exclusive_maximum"]
+    if native_hessian.physical_fmax_ev_per_angstrom >= fmax_limit:
+        raise ValueError(
+            "transition state is not stationary: physical fmax "
+            f"{native_hessian.physical_fmax_ev_per_angstrom:.12g} >= "
+            f"{fmax_limit:.12g} eV/A"
+        )
+    modes = project_vibrational_hessian(
+        coordinates,
+        masses,
+        native_hessian.cartesian_hessian_hartree_per_bohr2,
+    )
+    tolerance = bounds["negative_eigenvalue_tolerance_hartree_per_bohr2_amu"]
+    negative = modes.eigenvalues < -tolerance
+    near_zero = np.abs(modes.eigenvalues) <= tolerance
+    if int(np.count_nonzero(negative)) != 1 or bool(np.any(near_zero)):
+        raise ValueError(
+            "transition state must have exactly one significant negative "
+            "full-vibrational mode and no zero/noise-floor modes"
+        )
+    if bool(np.any(modes.eigenvalues[~negative] <= 0.0)):
+        raise ValueError(
+            "every non-reaction full-vibrational mode must be strictly positive"
+        )
+    wavenumbers = hessian_eigenvalues_to_wavenumbers_cm(modes.eigenvalues)
+    imaginary = float(abs(wavenumbers[negative][0]))
+    minimum_imaginary = bounds["minimum_reaction_imaginary_wavenumber_cm"]
+    if imaginary < minimum_imaginary:
+        raise ValueError(
+            f"reaction imaginary mode {imaginary:.12g} cm^-1 is below "
+            f"{minimum_imaginary:.12g} cm^-1"
+        )
+    reaction_vector = np.asarray(reaction_vector_mass_scaled, dtype=float)
+    if reaction_vector.shape == coordinates.shape:
+        reaction_vector = reaction_vector.reshape(-1)
+    if reaction_vector.shape != (3 * len(cluster.symbols),) or not np.all(
+        np.isfinite(reaction_vector)
+    ):
+        raise ValueError(
+            "reaction vector must be a finite mass-scaled (N,3) or (3N,) vector"
+        )
+    reaction_vector = modes.vibrational_basis @ (
+        modes.vibrational_basis.T @ reaction_vector
+    )
+    reaction_norm = float(np.linalg.norm(reaction_vector))
+    if reaction_norm <= 1.0e-12:
+        raise ValueError("reaction vector has no non-rigid vibrational component")
+    reaction_vector /= reaction_norm
+    unstable_mode = modes.mass_weighted_eigenvectors[
+        np.flatnonzero(negative)[0]
+    ].reshape(-1)
+    reaction_overlap = float(abs(np.dot(unstable_mode, reaction_vector)))
+    minimum_overlap = bounds["minimum_mapped_reaction_vector_overlap"]
+    if reaction_overlap < minimum_overlap:
+        raise ValueError(
+            f"imaginary mode overlap {reaction_overlap:.12g} is below mapped-reaction "
+            f"minimum {minimum_overlap:.12g}"
+        )
+    gradient_bytes = np.ascontiguousarray(
+        native_hessian.gradient_hartree_per_bohr, dtype="<f8"
+    ).tobytes()
+    hessian_bytes = np.ascontiguousarray(
+        native_hessian.cartesian_hessian_hartree_per_bohr2, dtype="<f8"
+    ).tobytes()
+    return {
+        "accepted": True,
+        "physical_fmax_ev_per_angstrom": (native_hessian.physical_fmax_ev_per_angstrom),
+        "physical_fmax_exclusive_limit_ev_per_angstrom": fmax_limit,
+        "vibrational_mode_count": int(modes.eigenvalues.size),
+        "imaginary_mode_count": 1,
+        "imaginary_wavenumber_cm": imaginary,
+        "minimum_imaginary_wavenumber_cm": minimum_imaginary,
+        "mapped_reaction_vector_overlap": reaction_overlap,
+        "minimum_mapped_reaction_vector_overlap": minimum_overlap,
+        "eigenvalues_hartree_per_bohr2_amu": modes.eigenvalues.tolist(),
+        "masses_amu": masses.tolist(),
+        "gradient_sha256": hashlib.sha256(gradient_bytes).hexdigest(),
+        "canonical_hessian_sha256": hashlib.sha256(hessian_bytes).hexdigest(),
+        "requested_backend": native_hessian.requested_backend,
+        "actual_backend": native_hessian.actual_backend,
+        "gpu_fallback_used": native_hessian.gpu_fallback_used,
+        "geometry_fingerprint": native_hessian.geometry_fingerprint,
+        "settings_fingerprint": native_hessian.settings_fingerprint,
+    }
 
 
 def _require_sha(value: str, *, length: int, label: str) -> str:

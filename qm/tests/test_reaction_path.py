@@ -11,6 +11,7 @@ from quarry.reaction_path import (
     molecular_path_tangents_and_curvature,
     path_tangents_and_curvature,
     project_transverse_hessian,
+    project_vibrational_hessian,
     rotate_cartesian_hessian,
     vibrationally_adiabatic_potential,
 )
@@ -357,6 +358,32 @@ def test_nonlinear_transverse_projection_recovers_distinct_modes_and_constraints
         assert mass_weighted_hessian @ eigenvector == pytest.approx(
             eigenvalue * eigenvector, abs=2.0e-12
         )
+
+
+def test_full_vibrational_projection_preserves_negative_index_and_rigid_invariance():
+    coordinates = np.array([[0.0, 0.0, 0.0], [1.2, 0.1, 0.0], [0.1, 0.9, 0.4]])
+    masses = np.array([12.0, 16.0, 1.0])
+    rigid = np.linalg.qr(_mass_weighted_rigid_motions(coordinates, masses))[0]
+    vibrational = np.linalg.svd(rigid.T, full_matrices=True)[2][6:].T
+    expected = np.array([-2.0, 3.0, 5.0])
+    mass_weighted = vibrational @ np.diag(expected) @ vibrational.T
+    factors = np.repeat(np.sqrt(masses), 3)
+    hessian = factors[:, None] * mass_weighted * factors[None, :]
+
+    result = project_vibrational_hessian(coordinates, masses, hessian)
+    assert result.eigenvalues == pytest.approx(expected, abs=2.0e-12)
+    assert result.mass_weighted_eigenvectors.shape == (3, 3, 3)
+    eigenvectors = result.mass_weighted_eigenvectors.reshape(3, -1)
+    assert eigenvectors @ rigid == pytest.approx(np.zeros((3, 6)), abs=2.0e-12)
+
+    rotation = _rotation_z(0.41)
+    cartesian_rotation = np.kron(np.eye(3), rotation)
+    rotated = project_vibrational_hessian(
+        coordinates @ rotation.T + np.array([3.0, -2.0, 0.5]),
+        masses,
+        cartesian_rotation @ hessian @ cartesian_rotation.T,
+    )
+    assert rotated.eigenvalues == pytest.approx(expected, abs=2.0e-12)
 
 
 def test_nonlinear_transverse_projection_rejects_significant_negative_mode():

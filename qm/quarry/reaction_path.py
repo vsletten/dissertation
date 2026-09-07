@@ -27,6 +27,8 @@ _ANGSTROM_M = 1.0e-10
 _C_CM_S = 2.99792458e10
 _H_J_S = 6.62607015e-34
 _HBAR_J_S = _H_J_S / (2.0 * math.pi)
+_HARTREE_J = 4.3597447222071e-18
+_BOHR_M = 5.29177210903e-11
 _AVOGADRO_MOL = 6.02214076e23
 _WAVENUMBER_TO_KJ_MOL = _H_J_S * 299792458.0 * 100.0 * _AVOGADRO_MOL / 1000.0
 _DUPLICATE_TOLERANCE_ANGSTROM = 1.0e-12
@@ -82,6 +84,15 @@ class TransverseHessianModes:
     transverse_basis: np.ndarray
     negative_eigenvalue_tolerance: float
     negative_eigenvalue_tolerance_units: str = "same as cartesian_hessian / amu"
+
+
+@dataclass(frozen=True)
+class VibrationalHessianModes:
+    """The complete ``3N-6`` nonlinear vibrational Hessian eigenpairs."""
+
+    eigenvalues: np.ndarray
+    mass_weighted_eigenvectors: np.ndarray
+    vibrational_basis: np.ndarray
 
 
 @dataclass(frozen=True)
@@ -353,6 +364,79 @@ def _rigid_motion_basis(
             "coordinates must describe a nonlinear molecule with six rigid modes"
         )
     return left[:, :6]
+
+
+def project_vibrational_hessian(
+    coordinates_angstrom: Sequence[Sequence[float]] | np.ndarray,
+    masses_amu: Sequence[float] | np.ndarray,
+    cartesian_hessian: Sequence[Sequence[float]] | np.ndarray,
+) -> VibrationalHessianModes:
+    """Remove six rigid modes and diagonalize the full nonlinear vibration space.
+
+    Unlike :func:`project_transverse_hessian`, this function does not remove a
+    proposed reaction tangent and does not forgive negative modes. It is therefore
+    the correct first-order-saddle/index gate before IRC or transverse projection.
+    """
+
+    coordinates = np.asarray(coordinates_angstrom, dtype=float)
+    if coordinates.ndim != 2 or coordinates.shape[1] != 3 or coordinates.shape[0] < 3:
+        raise ValueError(
+            "coordinates_angstrom must have shape (n_atoms, 3), n_atoms >= 3"
+        )
+    if not np.all(np.isfinite(coordinates)):
+        raise ValueError("coordinates_angstrom must be finite")
+    atom_count = coordinates.shape[0]
+    masses = _positive_masses(masses_amu, atom_count)
+    hessian = np.asarray(cartesian_hessian, dtype=float)
+    if hessian.shape == (atom_count, 3, atom_count, 3):
+        hessian = hessian.reshape(3 * atom_count, 3 * atom_count)
+    if hessian.shape != (3 * atom_count, 3 * atom_count):
+        raise ValueError("cartesian_hessian must have shape (3N, 3N) or (N, 3, N, 3)")
+    if not np.all(np.isfinite(hessian)):
+        raise ValueError("cartesian_hessian must be finite")
+    symmetry_scale = max(1.0, float(np.max(np.abs(hessian))))
+    if not np.allclose(
+        hessian,
+        hessian.T,
+        rtol=1.0e-10,
+        atol=1.0e-12 * symmetry_scale,
+    ):
+        raise ValueError("cartesian_hessian must be symmetric")
+    hessian = 0.5 * (hessian + hessian.T)
+
+    rigid = _rigid_motion_basis(coordinates, masses)
+    _, _, right_transpose = np.linalg.svd(rigid.T, full_matrices=True)
+    vibrational_basis = right_transpose[6:].T
+    expected_modes = 3 * atom_count - 6
+    if vibrational_basis.shape != (3 * atom_count, expected_modes):
+        raise RuntimeError("failed to construct the exact 3N-6 vibrational space")
+    mass_factors = np.repeat(np.sqrt(masses), 3)
+    mass_weighted_hessian = hessian / (mass_factors[:, None] * mass_factors[None, :])
+    projected = vibrational_basis.T @ mass_weighted_hessian @ vibrational_basis
+    eigenvalues, eigenvectors_in_basis = np.linalg.eigh(0.5 * (projected + projected.T))
+    eigenvectors = (vibrational_basis @ eigenvectors_in_basis).T.reshape(
+        expected_modes, atom_count, 3
+    )
+    return VibrationalHessianModes(
+        eigenvalues=eigenvalues,
+        mass_weighted_eigenvectors=eigenvectors,
+        vibrational_basis=vibrational_basis,
+    )
+
+
+def hessian_eigenvalues_to_wavenumbers_cm(
+    eigenvalues_hartree_per_bohr2_amu: Sequence[float] | np.ndarray,
+) -> np.ndarray:
+    """Convert mass-weighted Hessian eigenvalues to signed wavenumbers."""
+
+    eigenvalues = np.asarray(eigenvalues_hartree_per_bohr2_amu, dtype=float)
+    if eigenvalues.ndim != 1 or not np.all(np.isfinite(eigenvalues)):
+        raise ValueError("Hessian eigenvalues must be a finite one-dimensional array")
+    angular_frequency = np.sqrt(
+        np.abs(eigenvalues) * _HARTREE_J / (_AMU_KG * _BOHR_M**2)
+    )
+    wavenumbers = angular_frequency / (2.0 * math.pi * _C_CM_S)
+    return np.where(eigenvalues < 0.0, -wavenumbers, wavenumbers)
 
 
 def molecular_path_tangents_and_curvature(
