@@ -251,9 +251,9 @@ def _validate_store_schema(connection: sqlite3.Connection) -> None:
         ):
             if not index["unique"]:
                 continue
+            # Index names come from the untrusted store; bind into pragma_index_info.
             columns = tuple(
                 str(row["name"])
-                # index name comes from the untrusted store; bind it into pragma_index_info
                 for row in connection.execute(
                     "SELECT * FROM pragma_index_info(?)",
                     (index["name"],),

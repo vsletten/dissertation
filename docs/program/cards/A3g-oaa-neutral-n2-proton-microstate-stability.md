@@ -1,11 +1,11 @@
 # A3g-oaa-neutral-n2-proton-microstate-stability — test the H52 owner basin
 
-- status: ready
+- status: done
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
 - depends: A3 Oaa-neutral n=2 advisory failure recorded and supervisor merged
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## Objective
 
@@ -97,6 +97,72 @@ report only `unverified: candidate outcome`.
 
 - 2026-09-06 15:28 PDT (hermes-custom-build-001; profile=workstation) — Filed from the fail-closed Oaa-neutral family attempt after an independent evidence verifier confirmed the n=2 supervisor failure and a separate cold scientific review rejected both an identical replay and a terminal inference from the missing HF-only endpoint. This is the only authorized next Oaa-neutral n=2 calculation: one finite H52-O15-constrained → released B3LYP basin test with raw-endpoint persistence and independent verification.
 
+### Implementation evidence contract (2026-09-06 repair)
+
+Verification requires `--worktree` to identify the exact clean branch revision
+matching its remote-tracking ref. The verifier independently pins the audited
+executor and pipeline sources and compares recorded loaded optimizer/stage
+instructions against code compiled from that revision. These paths implement one
+bounded call per stage, a new SCF/kernel invocation, and no Hessian input or retry.
+Changing either audited file requires review and an explicit verifier pin update.
+
+The experiment reservation binds executor identity, executable/source/loaded-code
+hashes, hostname, PID, boot ID and process start ticks. Per-stage profiling records
+optimizer and kernel entries; requested step/Hessian settings are explicitly named
+as requests. The API does not return an iteration count or Hessian object identity.
+These are local process records and independent code checks, not cryptographic
+attestation against a writer with control of the entire machine or receipt store.
+
+`--verifier-identity` supplies only durable `worker_id` and `profile`, with optional
+expected `hostname` and `implementation_sha256`. Process facts supplied by the
+caller are rejected. The verifier internally observes PID, boot ID, process start
+ticks, hostname, executable hash and verifier implementation hash, and embeds them
+as `verifier_provenance`. Both the worker ID and the process identity must differ
+from the executor reservation. A fresh process on the same host is allowed;
+renaming the worker in the executor process is rejected. This does not establish
+independent human operators: worker/profile labels still depend on operator
+honesty, and a host or evidence-store owner can alter code or forge reservations.
+Local process observation is not remote attestation.
+
+Energy and gradient returns are persisted separately before subsequent operations;
+raw PHVA includes the complete returned object before gates. Nonfinite numbers are
+retained as explicit strings in raw evidence. Executor replay writes only a
+separate `replay-attempts/` receipt. Every rejected verifier invocation writes a
+unique, crash-durable `verification-attempts/` receipt. Canonical candidate and
+verified terminals are never quarantined or overwritten by verifier rejection;
+an existing verified terminal rejects replay before source checks or calculators.
+
+Executor and verifier independently define the same recursive forbidden-name
+contract: `results.json`, `store.sqlite` and its WAL/SHM/journal sidecars,
+`store.task168.tmp.sqlite`, `store.sequential.tmp.sqlite`, `ts.xyz`, `barrier.json`,
+`petra.toml`, `family-progress.json`, `terminal-receipt.json`, and `terminal.json`.
+No evidence or attempt subtree is exempt. The executor inventories before
+reservation and candidate publication; dirty roots yield a terminal error with
+the observed inventory. The verifier inventories before recomputation and again
+before publication and requires the candidate's explicit empty inventory. A missing first-stage attempt cannot become a verified
+experiment; verified optimizer failure explicitly reports zero recomputed items.
+
+At this implementation checkpoint, the repair had run only mocked CPU tests; no
+real calculator or downstream scientific output had yet been produced.
+
+- 2026-09-06 19:45 PDT (hermes-custom-build-001; profile=workstation) — The bounded experiment and a distinct delegated verifier process completed. The sole owner-conditioning optimizer spent its one 100-step HF/STO-3G budget without convergence, changed three original proton owners (`H41:O11->O15`, `H48:O26->O28`, `H54:O28->O11`), and failed independently recomputed projected-gradient gates (`1.3994921840965815e-3/4.996643654196831e-3 Eh/Bohr` RMS/max versus `3.0e-4/4.5e-4`). `H52` itself remained unambiguously owned by `O15` (0.960017 A; 0.686038 A margin) and the constraint residual, finite-energy, frozen-shell, and collision gates passed, but those narrower passes cannot authorize production. Constrained B3LYP, release, and PHVA therefore did not run. The independent verifier rehashed source and receipts, recomputed four calculator quantities, found no forbidden artifacts, and published verified terminal SHA-256 `6786d6796a4b233f6a73b1272cf6804783b8f6cb3634b4ec6cfe9bd96c57171c`.
+
 ## Result
 
-Pending.
+**Independently verified outcome: inconclusive terminal failure.** The exact
+`oaa-neutral-n2-s2` H52-O15-constrained route is exhausted with one
+owner-conditioning call and zero retries. Its endpoint was persisted with finite
+energy (`-3316.690344523382 Eh`) and passed the H52 residual, frozen-shell, and
+collision gates, but the optimizer did not converge, three other proton owners
+changed, and independently recomputed projected gradients were above both fixed
+thresholds. No constrained-production or released-production optimizer, PHVA,
+barrier, store, Petra fragment, family publication, or CALCULATIONS value ran or
+was emitted.
+
+The verified terminal receipt is
+`/mnt/data/vsletten/dissertation-data/a3g-oaa-neutral-n2-proton-microstate-stability/verified-terminal.json`
+(SHA-256 `6786d6796a4b233f6a73b1272cf6804783b8f6cb3634b4ec6cfe9bd96c57171c`);
+the hash-bound stage receipt is `7ff5632ef99476284a8c1254a74a8a11b7f0144c36053aca7faa7639bb50866f`.
+Per this card's zero-retry terminal contract, Oaa-neutral n=2/4/6 is closed and
+parent A3 returns only to a different independently gated family. No A3h retry
+card is authorized or filed.

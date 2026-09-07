@@ -148,3 +148,12 @@ needed to justify a materially different recovery. Persist a hash/settings-bound
 atomic receipt for every attempt, including unconverged exits, and prove the
 both-attempts-fail path emits no canonical energy/result/store. Never turn a
 missing diagnostic into permission for an identical expensive replay.
+
+### One-shot receipts need observations and independent code checks (2026-09-06)
+A reservation or requested optimizer budget alone does not prove an experiment ran: require the first-stage call observation and bind the actual loaded instructions to an independently audited clean revision. Persist energy, gradient and complete frequency returns separately before gates; replay attempts must not replace earlier canonical terminals. Where the optimizer API does not expose iterations or Hessian identity, label requests and source-audit conclusions explicitly rather than fabricating runtime observations.
+
+### A3g cold verification must observe its own process (2026-09-06)
+A different worker label does not establish process independence: compare internally observed host/boot/PID/start ticks with the executor reservation and preserve the separate worker-ID requirement. Verification failures and replays belong in unique durable attempt receipts, never in destructive canonical-terminal rewrites; inventory forbidden downstream names recursively on both sides of publication.
+
+### A3g verifier preflight must precede GPU initialization (2026-09-06)
+A syntactically valid production candidate previously reached cuTENSOR preload before its verifier identity receipt was parsed or validated. CLI and library verification now share one locked preflight, passing its validated source, runtime, reservation, and stage snapshots into recomputation; CPU-only regressions assert identity rejection and late-stage artifact rejection never initialize the GPU.
