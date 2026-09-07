@@ -93,6 +93,21 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   endpoint-basin classification, per-path Hessian receipt, or D3b table ran. The next
   continuation must implement typed endpoint classification plus atomic resumable route
   and per-point Hessian publishing before any bounded production launch.
+- 2026-09-07 11:26 PDT (hermes-custom-build-001; profile=workstation) —
+  TYPED PATH/RECEIPT CHECKPOINT, REVIEW-RED: exact pushed head
+  `dc86dd80ba22c15cc91916c3ce263db2e5cda235` adds four-route exact-graph endpoint
+  typing, chemistry-based two-direction Sella orientation, no-clobber atomic path
+  publication, and strict crash-resumable per-point native-Hessian plus aggregate
+  receipts. Three spec-review rounds closed stale-temporary, destination-race,
+  bool/int, precommit-poisoning, and extra-direction false greens. Whole-QM gates are
+  `961 passed, 1 skipped` with Ruff/format/diff clean; no production calculator or D3b
+  output ran. Final independent scientific review rejected production launch because
+  the publisher does not yet bind/read the real preflight + TS/IRC receipt chain,
+  enforce all frozen IRC bounds (`max steps/points`, terminal `fmax`, step size,
+  tangent overlap), or require fresh Hessian energies to reproduce path energies.
+  Next continuation must close those three gates adversarially before enabling any
+  production execution. The checkpoint is durable infrastructure, not accepted SCT
+  evidence.
 - 2026-09-06 23:33 PDT (hermes-custom-build-001; profile=workstation) —
   INPUT GATE CLOSED: froze the four predeclared direct-CC one-water D2b routes
   (both H+CO orientations plus both H2CO channels) into a tracked 29-file,
