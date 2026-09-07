@@ -1,11 +1,11 @@
 # A3-barrier-ladder — connectivity × protonation barrier ladder (Phase 2)
 
-- status: ready
+- status: blocked
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaigns; cluster-builder code is machine-any)
-- depends: —
-- claimed-by:
+- depends: A3h-calc005-si-attachment-protocol
+- claimed-by: hermes-custom-build-001
 
 ## Constraints
 Ready is **not** authority to continue the OSS-neutral (300s Si–O–Si)
@@ -65,6 +65,30 @@ produce accepted reactant minima — never via closed OSS or Oaa neutral rungs.
   emitted petra fragment that compiles via petra-cli round-trip, and the
   CALCULATIONS.md row updated — one PR per family.
 - Full fast test suite + ruff green on every PR.
+
+## Result — CALC-005 pre-launch design gate
+
+- 2026-09-06 20:39 PDT (hermes-custom-build-001; profile=workstation) —
+  **BLOCKED on READY A3h; no fourth family launched.** Two independent
+  context-cold reviews selected the 200s Si attachment/detachment lane as the
+  lowest-risk remaining A3 work because HANDOFF defines CALC-005 as minima-only
+  and the existing builder produces exact, distinct Si n=1..4 structures. Both
+  reviews also found that production is not yet scientifically specified: the
+  repository has no balanced occupied/vacancy cycle, dissolved-Si and standard-
+  state contract, thermodynamic-to-kinetic closure, or exact mapping from the
+  builder's `n_intact` to Petra's split Si environment expression.
+- 2026-09-06 20:39 PDT (hermes-custom-build-001; profile=workstation) — READY
+  `A3h-calc005-si-attachment-protocol` now owns that design and CPU-only proof.
+  It requires one fixed-center matched-pair cycle, sign/unit/detailed-balance
+  derivation, graph-provenance vacancy construction, a dedicated minima-only
+  driver and fail-closed evidence contract, one-rung pilot envelope, and a
+  context-cold scientific/KMC verification. Parent A3 may resume only for that
+  verified one-rung pilot; n=2–4 and Al remain gated.
+- 2026-09-06 20:39 PDT (hermes-custom-build-001; profile=workstation) — No
+  electronic-structure call, shared-service isolation, GPU lease, database,
+  credential, Store/Petra/CALCULATIONS value, or surrogate barrier was created.
+  Neutral Osa, OSS, and Oaa closures remain unchanged. This is a protocol
+  correction, not a scientific result.
 
 ## Result (historical OSS-neutral n=4 pilot — non-actionable)
 
@@ -130,6 +154,11 @@ OSS n=2–4. A3f closed the exact n=1 route; n=2–4 remains prohibited.
 - 2026-09-06 16:00 PDT (hermes-custom-build-001; profile=workstation) — An adversarial review round regression-closed stale approach/product reuse after TS incompatibility, quick-IRC frozen-coordinate drift, reduced lookalike Store schemas and inconsistent electronic barriers, bool/arbitrary-route acceptance, and missing physical all-rung Oaa builder coverage. Its 672-test count was superseded by the newer 16:19 closure. The failed first `uv run pytest` attempt used an uninstalled fresh worktree environment and collected 31 import errors; the required main-venv invocation then passed the complete suite.
 
 ## Progress
+- 2026-09-06 20:39 PDT (hermes-custom-build-001; profile=workstation) — Pre-launch
+  repository archaeology plus two independent cold reviews rejected an immediate
+  fourth-family calculator launch. Selected the remaining 200s Si CALC-005 lane,
+  but split its missing physical/kinetic contract into READY A3h before any GPU
+  work. Parent A3 is blocked on that executable design gate.
 - 2026-09-06 19:45 PDT (hermes-custom-build-001; profile=workstation) — A3g closed Oaa-neutral n=2/4/6 with an independently verified terminal failure and no production/downstream output. Parent A3 returns to READY for a different family already in the Objective; Osa-, OSS-, and Oaa-neutral replays/rungs remain prohibited.
 - 2026-09-06 15:28 PDT (hermes-custom-build-001; profile=workstation) — Reconciled the finite Oaa-neutral terminal receipt and two independent cold reviews. The supervisor correctly fail-closed at n=2 after advisory optimizer exhaustion plus ambiguous H52 ownership; no production or family output was emitted. READY A3g owns the only authorized Oaa continuation, with fixed gates and a terminal no-A3h default.
 - 2026-09-06 16:19 PDT (hermes-custom-build-001; profile=workstation) — Closed the final cold-review reproductions with provenance-bound approach/product receipts, declared-reactant attacker ownership at quick-IRC return, exact Oaa physical-build plus durable-geometry Store validation, and exact typed cluster metadata. Fresh full CPU-only QA is 683 passed plus whole-QM Ruff/format/diff gates. No production calculator call was made in closeout.
