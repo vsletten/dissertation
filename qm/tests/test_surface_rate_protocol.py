@@ -102,9 +102,9 @@ def test_cluster_seeds_have_no_atom_collisions():
 
 
 def test_literature_fit_matches_modified_arrhenius_form():
-    fit = surf.LiteratureFit(3146e10, 1.0, 830.0, 119.6, "fixture", 59.0)
+    fit = surf.LiteratureFit(3.14e10, 1.0, 830.0, 119.6, "fixture", 59.0)
     expected = (
-        3146e10
+        3.14e10
         * (75.0 / 300.0)
         * np.exp(-830.0 * (75.0 + 119.6) / (75.0**2 + 119.6**2))
     )

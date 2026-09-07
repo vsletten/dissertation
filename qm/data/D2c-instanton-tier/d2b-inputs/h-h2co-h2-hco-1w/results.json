@@ -1,0 +1,433 @@
+{
+  "reaction": "H + H2CO -> H2 + HCO [1w]",
+  "key": "h-h2co-h2-hco-1w",
+  "family": "h-h2co-h2-hco",
+  "site": "1w",
+  "n_water": 1,
+  "classification": "first-order-saddle",
+  "barrier_zpe_dft_kj_mol": 21.86471844430781,
+  "reverse_barrier_zpe_dft_kj_mol": 66.3034776862061,
+  "dft_barrier_electronic_kj_mol": 31.699023025417745,
+  "cc_delta_kj_mol": 3.314536108502608,
+  "cc_delta_source": "direct-tz",
+  "cc": {
+    "mode": "tz",
+    "electronic_kj": {
+      "reactant": -501927.8197980506,
+      "ts": -501892.8062389167,
+      "product": -501979.8307362913
+    },
+    "uhf_spin_square": {
+      "reactant": {
+        "cc-pVTZ": 0.7500073301369081
+      },
+      "ts": {
+        "cc-pVTZ": 0.7946653896727014
+      },
+      "product": {
+        "cc-pVTZ": 0.7637610492559013
+      }
+    }
+  },
+  "imaginary_frequency_cm": 1598.8873189962997,
+  "crossover_temperature_k": 366.12673792163486,
+  "andersson_crossover_k": null,
+  "simons_adopted_s": 150000.0,
+  "fuchs_effective": [
+    {
+      "temperature_k": 12.0,
+      "barrier_k": 415.0,
+      "barrier_err_k": 40.0,
+      "rate_s": 0.0002
+    },
+    {
+      "temperature_k": 13.5,
+      "barrier_k": 435.0,
+      "barrier_err_k": 50.0,
+      "rate_s": 0.001
+    },
+    {
+      "temperature_k": 15.0,
+      "barrier_k": 470.0,
+      "barrier_err_k": 60.0,
+      "rate_s": 0.001
+    },
+    {
+      "temperature_k": 16.5,
+      "barrier_k": 500.0,
+      "barrier_err_k": 70.0,
+      "rate_s": 0.001
+    }
+  ],
+  "rates": [
+    {
+      "temperature_k": 50.0,
+      "eckart_extrapolated": false,
+      "delta_g_gas_kj": 22.13587088865461,
+      "delta_g_surface_kj": 22.08989893127,
+      "eckart_kappa_dft": 1.927654709373612e+18,
+      "k_gas_dft_s": 15069300.05573227,
+      "k_surface_dft_s": 16831340.878747594,
+      "eckart_kappa_cc": 1.0346801080035954e+21,
+      "k_surface_cc_s": 3113803.284602761,
+      "k_headline_s": 3113803.284602761,
+      "fuchs_effective_barrier_k": 553.5113872701908,
+      "literature_fit_s": 333257.2429379502,
+      "headline_over_fit": 9.343542715386763,
+      "fit_extrapolated": true
+    },
+    {
+      "temperature_k": 60.0,
+      "eckart_extrapolated": false,
+      "delta_g_gas_kj": 22.209290818776935,
+      "delta_g_surface_kj": 22.154124469903763,
+      "eckart_kappa_dft": 367653235834993.7,
+      "k_gas_dft_s": 21275963.343537487,
+      "k_surface_dft_s": 23763744.18471787,
+      "eckart_kappa_cc": 5.289305482685058e+16,
+      "k_surface_cc_s": 4450117.314861862,
+      "k_headline_s": 4450117.314861862,
+      "fuchs_effective_barrier_k": 642.7885312085527,
+      "literature_fit_s": 380106.17882363003,
+      "headline_over_fit": 11.707563735570647,
+      "fit_extrapolated": false
+    },
+    {
+      "temperature_k": 75.0,
+      "eckart_extrapolated": false,
+      "delta_g_gas_kj": 22.327925757912453,
+      "delta_g_surface_kj": 22.258967821951956,
+      "eckart_kappa_dft": 75959993397.66481,
+      "k_gas_dft_s": 33437069.408522476,
+      "k_surface_dft_s": 37346838.34117673,
+      "eckart_kappa_cc": 2949513846395.188,
+      "k_surface_cc_s": 7128799.986870778,
+      "k_headline_s": 7128799.986870778,
+      "fuchs_effective_barrier_k": 768.1447297541637,
+      "literature_fit_s": 509060.51124576427,
+      "headline_over_fit": 14.0038361440083,
+      "fit_extrapolated": false
+    },
+    {
+      "temperature_k": 100.0,
+      "eckart_extrapolated": false,
+      "delta_g_gas_kj": 22.544133161602076,
+      "delta_g_surface_kj": 22.45218924683286,
+      "eckart_kappa_dft": 18380157.88547556,
+      "k_gas_dft_s": 64203634.80704269,
+      "k_surface_dft_s": 71710912.85563041,
+      "eckart_kappa_cc": 195595739.4075043,
+      "k_surface_cc_s": 14167499.438552536,
+      "k_headline_s": 14167499.438552536,
+      "fuchs_effective_barrier_k": 955.5122076097792,
+      "literature_fit_s": 1016174.7969994383,
+      "headline_over_fit": 13.941990571293776,
+      "fit_extrapolated": false
+    },
+    {
+      "temperature_k": 150.0,
+      "eckart_extrapolated": false,
+      "delta_g_gas_kj": 23.026441431196872,
+      "delta_g_surface_kj": 22.88852555898484,
+      "eckart_kappa_dft": 6649.853783891744,
+      "k_gas_dft_s": 199236075.6545152,
+      "k_surface_dft_s": 222532585.61707273,
+      "eckart_kappa_cc": 20314.597294664258,
+      "k_surface_cc_s": 47663756.69084986,
+      "k_headline_s": 47663756.69084986,
+      "fuchs_effective_barrier_k": 1251.2852031368427,
+      "literature_fit_s": 5620123.336424627,
+      "headline_over_fit": 8.480909374699289,
+      "fit_extrapolated": false
+    },
+    {
+      "temperature_k": 200.0,
+      "eckart_extrapolated": false,
+      "delta_g_gas_kj": 23.542289681266993,
+      "delta_g_surface_kj": 23.35840185172856,
+      "eckart_kappa_dft": 190.5951220233401,
+      "k_gas_dft_s": 564253095.6084132,
+      "k_surface_dft_s": 630230744.5567868,
+      "eckart_kappa_cc": 332.5362230395974,
+      "k_surface_cc_s": 149822025.4715163,
+      "k_headline_s": 149822025.4715163,
+      "fuchs_effective_barrier_k": 1439.3249105470281,
+      "literature_fit_s": 28491911.74811716,
+      "headline_over_fit": 5.258405501042486,
+      "fit_extrapolated": false
+    },
+    {
+      "temperature_k": 250.0,
+      "eckart_extrapolated": false,
+      "delta_g_gas_kj": 24.064222374581732,
+      "delta_g_surface_kj": 23.83436258765869,
+      "eckart_kappa_dft": 30.478188602737635,
+      "k_gas_dft_s": 1489054570.877617,
+      "k_surface_dft_s": 1663168493.3478215,
+      "eckart_kappa_cc": 40.57868279709123,
+      "k_surface_cc_s": 449494272.9278814,
+      "k_headline_s": 449494272.9278814,
+      "fuchs_effective_barrier_k": 1524.487383170811,
+      "literature_fit_s": 108022857.84251347,
+      "headline_over_fit": 4.1611033248462945,
+      "fit_extrapolated": false
+    },
+    {
+      "temperature_k": 300.0,
+      "eckart_extrapolated": false,
+      "delta_g_gas_kj": 24.576875879021827,
+      "delta_g_surface_kj": 24.301044134772383,
+      "eckart_kappa_dft": 10.856529329714801,
+      "k_gas_dft_s": 3568690268.351136,
+      "k_surface_dft_s": 3985974277.0890627,
+      "eckart_kappa_cc": 12.681399657698142,
+      "k_surface_cc_s": 1232849144.6282485,
+      "k_headline_s": 1232849144.6282485,
+      "fuchs_effective_barrier_k": 1526.696849425308,
+      "literature_fit_s": 309767436.6560435,
+      "headline_over_fit": 3.979918476702789,
+      "fit_extrapolated": false
+    }
+  ],
+  "deep_tunneling_rates": [
+    {
+      "temperature_k": 12.0,
+      "eckart_extrapolated": true,
+      "delta_g_gas_kj": 21.921590180776548,
+      "delta_g_surface_kj": 21.910556911083404,
+      "eckart_kappa_dft": 1.3623178556105065e+90,
+      "k_gas_dft_s": 1294054.1594571788,
+      "k_surface_dft_s": 1445366.8435528078,
+      "eckart_kappa_cc": 6.464850459218151e+103,
+      "k_surface_cc_s": 256294.7982747244,
+      "k_headline_s": 256294.7982747244,
+      "fuchs_effective_barrier_k": 162.80999504164635,
+      "literature_fit_s": 228250.34987887042,
+      "headline_over_fit": 1.1228670554535265,
+      "fit_extrapolated": true
+    },
+    {
+      "temperature_k": 13.5,
+      "eckart_extrapolated": true,
+      "delta_g_gas_kj": 21.928166156227235,
+      "delta_g_surface_kj": 21.915753727720585,
+      "eckart_kappa_dft": 3.9052122924853853e+79,
+      "k_gas_dft_s": 1575023.6554772737,
+      "k_surface_dft_s": 1759189.8722840482,
+      "eckart_kappa_cc": 4.629667022593915e+91,
+      "k_surface_cc_s": 312433.1350526035,
+      "k_headline_s": 312433.1350526035,
+      "fuchs_effective_barrier_k": 180.4874055218357,
+      "literature_fit_s": 239931.0696165291,
+      "headline_over_fit": 1.302178728048648,
+      "fit_extrapolated": true
+    },
+    {
+      "temperature_k": 15.0,
+      "eckart_extrapolated": true,
+      "delta_g_gas_kj": 21.934708539629355,
+      "delta_g_surface_kj": 21.920916952367406,
+      "eckart_kappa_dft": 1.449708427274009e+71,
+      "k_gas_dft_s": 1880400.1977380174,
+      "k_surface_dft_s": 2100273.842272525,
+      "eckart_kappa_cc": 8.983074767169932e+81,
+      "k_surface_cc_s": 373598.9180998852,
+      "k_headline_s": 373598.9180998852,
+      "fuchs_effective_barrier_k": 197.859676710601,
+      "literature_fit_s": 249613.9583941339,
+      "headline_over_fit": 1.4967068368427632,
+      "fit_extrapolated": true
+    },
+    {
+      "temperature_k": 16.5,
+      "eckart_extrapolated": true,
+      "delta_g_gas_kj": 21.941296238452196,
+      "delta_g_surface_kj": 21.926125492551364,
+      "eckart_kappa_dft": 1.848836111865021e+64,
+      "k_gas_dft_s": 2209122.2703206073,
+      "k_surface_dft_s": 2467433.114166013,
+      "eckart_kappa_cc": 1.024370412186974e+74,
+      "k_surface_cc_s": 439605.781430455,
+      "k_headline_s": 439605.781430455,
+      "fuchs_effective_barrier_k": 214.96116758322827,
+      "literature_fit_s": 257632.7302590227,
+      "headline_over_fit": 1.7063273792443896,
+      "fit_extrapolated": true
+    },
+    {
+      "temperature_k": 20.0,
+      "eckart_extrapolated": true,
+      "delta_g_gas_kj": 21.9571281617973,
+      "delta_g_surface_kj": 21.938739378761966,
+      "eckart_kappa_dft": 1.6262863301413532e+52,
+      "k_gas_dft_s": 3062243.3016512096,
+      "k_surface_dft_s": 3420308.886171861,
+      "eckart_kappa_cc": 1.318696830291794e+60,
+      "k_surface_cc_s": 611649.0156054236,
+      "k_headline_s": 611649.0156054236,
+      "fuchs_effective_barrier_k": 253.95338620857927,
+      "literature_fit_s": 271407.7252563615,
+      "headline_over_fit": 2.2536168232782727,
+      "fit_extrapolated": true
+    },
+    {
+      "temperature_k": 30.0,
+      "eckart_extrapolated": true,
+      "delta_g_gas_kj": 22.008092137402855,
+      "delta_g_surface_kj": 21.980508962937165,
+      "eckart_kappa_dft": 2.0388505964195935e+33,
+      "k_gas_dft_s": 6117722.419131759,
+      "k_surface_dft_s": 6833062.655303027,
+      "eckart_kappa_cc": 2.1755275261250667e+38,
+      "k_surface_cc_s": 1235342.1242374105,
+      "k_headline_s": 1235342.1242374105,
+      "fuchs_effective_barrier_k": 359.8417407042057,
+      "literature_fit_s": 291247.71348435973,
+      "headline_over_fit": 4.2415513222690056,
+      "fit_extrapolated": true
+    },
+    {
+      "temperature_k": 40.0,
+      "eckart_extrapolated": true,
+      "delta_g_gas_kj": 22.068216677580494,
+      "delta_g_surface_kj": 22.031439111742657,
+      "eckart_kappa_dft": 7.947902175452009e+23,
+      "k_gas_dft_s": 10082508.359910153,
+      "k_surface_dft_s": 11261447.741779756,
+      "eckart_kappa_cc": 3.094485378368189e+27,
+      "k_surface_cc_s": 2059086.771708369,
+      "k_headline_s": 2059086.771708369,
+      "fuchs_effective_barrier_k": 459.352403029055,
+      "literature_fit_s": 306666.12885889737,
+      "headline_over_fit": 6.714425161233871,
+      "fit_extrapolated": true
+    }
+  ],
+  "method": {
+    "xc": "pwb6k",
+    "basis": "def2-svp",
+    "solvent": null,
+    "dispersion": "d3bj",
+    "composite": null,
+    "grid_level": null,
+    "density_fit": true,
+    "use_gpu": true
+  },
+  "frequency_data": {
+    "reactant": {
+      "frequencies_cm": [
+        16.99852294323,
+        119.8867795948899,
+        180.10336507802492,
+        186.82092196564102,
+        203.4898730933163,
+        245.56050165570846,
+        321.7438300496861,
+        578.2774669753051,
+        1258.2019005229727,
+        1306.7572209907341,
+        1552.616516840372,
+        1693.2204753635242,
+        1928.3604336296503,
+        3027.1263527806746,
+        3137.76012495009,
+        3911.28355865543,
+        4044.3007562110406
+      ],
+      "imaginary_cm": [
+        12.255487056601071
+      ],
+      "electronic_hartree": -191.35411334434778,
+      "molar_mass_kg": 0.049,
+      "rotational_temperatures_k": [
+        1.5280884291407393,
+        0.2021622101363801,
+        0.18058133150831415
+      ],
+      "linear": false
+    },
+    "ts": {
+      "frequencies_cm": [
+        106.95165982558774,
+        152.31389787342505,
+        163.38086211429626,
+        178.1679477038004,
+        248.05654974935788,
+        364.2396092631657,
+        463.853755292151,
+        489.684823596644,
+        1191.8796156932215,
+        1233.3719314326192,
+        1372.9897004705083,
+        1404.8359032942553,
+        1681.0072084601047,
+        1994.6674933578822,
+        3021.2881997176523,
+        3948.186068237679,
+        4053.466040215264
+      ],
+      "imaginary_cm": [
+        1598.8873189962997
+      ],
+      "electronic_hartree": -191.34203982411233,
+      "molar_mass_kg": 0.049,
+      "rotational_temperatures_k": [
+        1.5468537178534039,
+        0.22576419933225148,
+        0.19928208816424392
+      ],
+      "linear": false
+    },
+    "product": {
+      "frequencies_cm": [
+        24.016605987747056,
+        32.04957141276172,
+        112.29513462491875,
+        116.900258620379,
+        143.47579742802895,
+        189.59811431057307,
+        219.3514007497593,
+        223.64604409585422,
+        243.41820578649376,
+        303.7146005744394,
+        383.08218758272767,
+        1136.2634852370518,
+        1674.7113945095637,
+        2061.0705657605818,
+        2874.9951503031502,
+        3960.179144200121,
+        4060.1218587120957,
+        4453.250502884064
+      ],
+      "imaginary_cm": [],
+      "electronic_hartree": -191.3676210827213,
+      "molar_mass_kg": 0.049,
+      "rotational_temperatures_k": [
+        1.0608044553784444,
+        0.19363037295264868,
+        0.16533173606276366
+      ],
+      "linear": false
+    }
+  },
+  "provenance": {
+    "generated_utc": "2026-08-28T04:45:27Z",
+    "git_sha": "c311c3ef4b31cdfb8d0e5a8add0f92b0c769d126",
+    "python": "3.13.1",
+    "omp_num_threads": "16",
+    "gpu_requested": true,
+    "site": "1w",
+    "n_water": 1,
+    "literature_sources": {
+      "fit": "Song & Kaestner 2017, ApJ 850 118 (arXiv:2009.05442), Table 2/Table 4",
+      "simons_adopted": "Simons, Lamberts & Cuppen 2020, A&A 634 A52, Table 2",
+      "fuchs_effective": "Fuchs et al. 2009, A&A 505 629, Table 2 (effective, nu=2e11 s^-1)",
+      "andersson_crossover": null
+    },
+    "geometry_sha256": {
+      "reactant": "7a7a4efb4f1dc1ce53ada54fcf467a932e0a1ba82dfbc4730493bea47bebd7ef",
+      "ts": "b7ddb448dd754f45bbc7cefe0b74bde1635333cb9f58fb9c3e56da69f4d07135",
+      "product": "0ca6a15447617548ca58ce12975d53e43e64d718af7579592b57f37fe0a0a796"
+    }
+  }
+}

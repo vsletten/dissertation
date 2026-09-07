@@ -1,0 +1,249 @@
+{
+  "purpose": "Immutable direct-CC one-water D2b inputs for D2c SCT",
+  "routes": {
+    "h-co-1w-cside": {
+      "canonical_checkpoint_geometry_sha256": {
+        "irc_back.xyz": "2a1018e2f00bfb5dad4171fa66b7a4d224fc6d6111e769f5f8e67cf10be290a4",
+        "irc_fwd.xyz": "9a678f1ed4551143aca887d7d66bcaee5977a88392d8624289013f934e3fea9a",
+        "ts.xyz": "4265cd1ee5dfcc082027bafa8322587aa505f200589adcaf9cbb97e5b7eb7f2b"
+      },
+      "family": "h-co",
+      "files": {
+        "cc-product-tz.json": {
+          "bytes": 614,
+          "sha256": "bd4653744d2e7638980276e4b103c377a5599ca3a31cd7c5c154891cdac11f09"
+        },
+        "cc-reactant-tz.json": {
+          "bytes": 612,
+          "sha256": "11dff93a5fbcb24aed9cd94fcaa781aee2775cdf04c74ec2bff3775aa088f45d"
+        },
+        "cc-ts-tz.json": {
+          "bytes": 614,
+          "sha256": "a6c62a3def6324d57498dad3846e7f8113fa041e40773facd28681f02a00484d"
+        },
+        "irc_back.xyz": {
+          "bytes": 240,
+          "sha256": "d4025f53cbfa5723cb0aaff25dcd8539134ed462a82098f82a205dc09ddc8eec"
+        },
+        "irc_fwd.xyz": {
+          "bytes": 239,
+          "sha256": "b980041316556cc2fc150e3887d073805bbc6c6f8e6b74b2f65722a5815c339c"
+        },
+        "results.json": {
+          "bytes": 11782,
+          "sha256": "a93fccc3404e9fef35d8256c790ba86d874ba94739225a961d4b09d8a1904e93"
+        },
+        "ts.xyz": {
+          "bytes": 236,
+          "sha256": "459d0d1863ccd7c429702ee9e569c49b6a0dc3d2850240f8334c83720ab53c8f"
+        }
+      },
+      "generated_utc": "2026-08-28T05:39:29Z",
+      "generating_git_sha": "87ea5eb8f15d70fac4795cb371d305cdead1af1b",
+      "geometry_sha256": {
+        "product": "9a678f1ed4551143aca887d7d66bcaee5977a88392d8624289013f934e3fea9a",
+        "reactant": "2a1018e2f00bfb5dad4171fa66b7a4d224fc6d6111e769f5f8e67cf10be290a4",
+        "ts": "4265cd1ee5dfcc082027bafa8322587aa505f200589adcaf9cbb97e5b7eb7f2b"
+      },
+      "method": {
+        "basis": "def2-svp",
+        "composite": null,
+        "density_fit": true,
+        "dispersion": "d3bj",
+        "grid_level": null,
+        "solvent": null,
+        "use_gpu": true,
+        "xc": "pwb6k"
+      },
+      "n_water": 1,
+      "site": "1w-cside"
+    },
+    "h-co-1w-oside": {
+      "canonical_checkpoint_geometry_sha256": {
+        "irc_back.xyz": "4d5e450139117b75c0d0161331caf78a49e639b8c9fa7f6e09c30977f02f1b0b",
+        "irc_fwd.xyz": "b86e012fdbf6e28e83eed17b802629358817a8215294a50f947a30a371bf5ce3",
+        "ts.xyz": "7c121ddaddfb47932b95301593524498fdb7ed98faaf741ee383e04c49880106"
+      },
+      "family": "h-co",
+      "files": {
+        "cc-product-tz.json": {
+          "bytes": 613,
+          "sha256": "f6e10e24782ba8c04e07ae57bcc556faf9c1e75e1c46d017f937ed2104c86b58"
+        },
+        "cc-reactant-tz.json": {
+          "bytes": 611,
+          "sha256": "d5f1c739affa11ab7269fa3d306cd623a1fa4e3c0763609113d47cf45c07240e"
+        },
+        "cc-ts-tz.json": {
+          "bytes": 612,
+          "sha256": "b6e7873bd1a041f6efa896948503cc8869e1372bf7032c440e30eb0e45fe3aef"
+        },
+        "irc_back.xyz": {
+          "bytes": 245,
+          "sha256": "8e8bbd3a34a5e98fd95cdf3afe873112a7dc5a149b2bcb634a125a20a5dd2854"
+        },
+        "irc_fwd.xyz": {
+          "bytes": 249,
+          "sha256": "4ac3c871b4177c921926e73ce454c01d2af4cb6c1f835e22ac487d7f64bcd448"
+        },
+        "results.json": {
+          "bytes": 11783,
+          "sha256": "f8232f5f1d40d10c9c26905a74b2d38364a27ed704030e4e41ff6f29a9322069"
+        },
+        "ts.xyz": {
+          "bytes": 244,
+          "sha256": "7be18d1bc51f5d18b7dad288178fd47d1e716e206dc9d8de06e8c2e0204e673a"
+        }
+      },
+      "generated_utc": "2026-08-28T04:08:12Z",
+      "generating_git_sha": "f60c810682cbecbccbb2a7fc18a6aa0ef518114a",
+      "geometry_sha256": {
+        "product": "8e8bbd3a34a5e98fd95cdf3afe873112a7dc5a149b2bcb634a125a20a5dd2854",
+        "reactant": "4ac3c871b4177c921926e73ce454c01d2af4cb6c1f835e22ac487d7f64bcd448",
+        "ts": "7be18d1bc51f5d18b7dad288178fd47d1e716e206dc9d8de06e8c2e0204e673a"
+      },
+      "method": {
+        "basis": "def2-svp",
+        "composite": null,
+        "density_fit": true,
+        "dispersion": "d3bj",
+        "grid_level": null,
+        "solvent": null,
+        "use_gpu": true,
+        "xc": "pwb6k"
+      },
+      "n_water": 1,
+      "site": "1w-oside"
+    },
+    "h-h2co-ch3o-1w": {
+      "canonical_checkpoint_geometry_sha256": {
+        "irc_back.xyz": "dc27197ec50d88424a9f35500a51404fd2df0a77786a3c20dbfad13332f8301f",
+        "irc_fwd.xyz": "28243da36a389ff9f7ea0548887de4e7a77c6c1da0503b551c394a3e170b116a",
+        "ts.xyz": "c5602e65b972f2703d467781cca1c8e1299eb06d68d13fd3889cbf75c294d6bf"
+      },
+      "family": "h-h2co-ch3o",
+      "files": {
+        "cc-product-tz.json": {
+          "bytes": 614,
+          "sha256": "f9b4de037d5c001d39f7de8107a86ca3803969c8f9180632894abad639cc1a08"
+        },
+        "cc-reactant-tz.json": {
+          "bytes": 612,
+          "sha256": "309ac7de8da29a3007acce1b89a6e0e9d8c4919666f95cc5d7a98ac847602c17"
+        },
+        "cc-ts-tz.json": {
+          "bytes": 614,
+          "sha256": "aa91326cf389bd9607f60f925e7c17f7d8a2c8566c9d9211b9d649d47ebaffae"
+        },
+        "irc_back.xyz": {
+          "bytes": 317,
+          "sha256": "21340d103a01f7b5206d326dde7dcc8fa5aadeb93b1626768e8aec2cb45c4130"
+        },
+        "irc_fwd.xyz": {
+          "bytes": 319,
+          "sha256": "63c01a51689b5bce687786733dc699601512195e66cbc4d5f0b9d3313e11ebf2"
+        },
+        "results.json": {
+          "bytes": 14220,
+          "sha256": "027021e3886ee5e88e445d08ce92941c9447fd50aa31c97af2f405e10c4f39b0"
+        },
+        "ts.xyz": {
+          "bytes": 312,
+          "sha256": "60f7d592f01e0bc8841b1ea6bb2f9ecbacea5649a53b64eb3a2700aaea11874b"
+        }
+      },
+      "generated_utc": "2026-08-28T04:28:18Z",
+      "generating_git_sha": "c311c3ef4b31cdfb8d0e5a8add0f92b0c769d126",
+      "geometry_sha256": {
+        "product": "21340d103a01f7b5206d326dde7dcc8fa5aadeb93b1626768e8aec2cb45c4130",
+        "reactant": "63c01a51689b5bce687786733dc699601512195e66cbc4d5f0b9d3313e11ebf2",
+        "ts": "60f7d592f01e0bc8841b1ea6bb2f9ecbacea5649a53b64eb3a2700aaea11874b"
+      },
+      "method": {
+        "basis": "def2-svp",
+        "composite": null,
+        "density_fit": true,
+        "dispersion": "d3bj",
+        "grid_level": null,
+        "solvent": null,
+        "use_gpu": true,
+        "xc": "pwb6k"
+      },
+      "n_water": 1,
+      "site": "1w"
+    },
+    "h-h2co-h2-hco-1w": {
+      "canonical_checkpoint_geometry_sha256": {
+        "irc_back.xyz": "3e6f426a379fc62f34402f37232d6d858bb5fd2b80687d0eaefac0417a8231e4",
+        "irc_fwd.xyz": "8e038fc5c5b5c63460f9753e6be33b37b6eea5864d1e16455beb9b603582d6a5",
+        "ts.xyz": "a1b804833d74cd77b7382cd516b84af7981fd37f18417ae7a858a7898a8225bf"
+      },
+      "family": "h-h2co-h2-hco",
+      "files": {
+        "cc-product-tz.json": {
+          "bytes": 614,
+          "sha256": "f6fc49a34a219ad80e140a2c369c812e8e4dc5a8ccb6a59251a0fb05b2eb7894"
+        },
+        "cc-reactant-tz.json": {
+          "bytes": 613,
+          "sha256": "1807d82893a6685f8a2fb796de7bae6b1e44a6f626d7ae632766ded7ca66e93e"
+        },
+        "cc-ts-tz.json": {
+          "bytes": 615,
+          "sha256": "535383d92ce4072c8c5f3d9f8e323a0dd65edcaa615084059c477314be0a03e6"
+        },
+        "irc_back.xyz": {
+          "bytes": 322,
+          "sha256": "0ca6a15447617548ca58ce12975d53e43e64d718af7579592b57f37fe0a0a796"
+        },
+        "irc_fwd.xyz": {
+          "bytes": 321,
+          "sha256": "7a7a4efb4f1dc1ce53ada54fcf467a932e0a1ba82dfbc4730493bea47bebd7ef"
+        },
+        "results.json": {
+          "bytes": 14188,
+          "sha256": "44348192c8b776721c5bd783650aa0d67554fb21cceb31c7170c22c547a3568a"
+        },
+        "ts.xyz": {
+          "bytes": 317,
+          "sha256": "b7ddb448dd754f45bbc7cefe0b74bde1635333cb9f58fb9c3e56da69f4d07135"
+        }
+      },
+      "generated_utc": "2026-08-28T04:45:27Z",
+      "generating_git_sha": "c311c3ef4b31cdfb8d0e5a8add0f92b0c769d126",
+      "geometry_sha256": {
+        "product": "0ca6a15447617548ca58ce12975d53e43e64d718af7579592b57f37fe0a0a796",
+        "reactant": "7a7a4efb4f1dc1ce53ada54fcf467a932e0a1ba82dfbc4730493bea47bebd7ef",
+        "ts": "b7ddb448dd754f45bbc7cefe0b74bde1635333cb9f58fb9c3e56da69f4d07135"
+      },
+      "method": {
+        "basis": "def2-svp",
+        "composite": null,
+        "density_fit": true,
+        "dispersion": "d3bj",
+        "grid_level": null,
+        "solvent": null,
+        "use_gpu": true,
+        "xc": "pwb6k"
+      },
+      "n_water": 1,
+      "site": "1w"
+    }
+  },
+  "schema": "d2c-input-bundle-v1",
+  "selection": {
+    "routes": [
+      "h-co-1w-oside",
+      "h-co-1w-cside",
+      "h-h2co-ch3o-1w",
+      "h-h2co-h2-hco-1w"
+    ],
+    "rule": "predeclared direct-CC one-water routes; both H+CO orientations and matched-label H2CO channels"
+  },
+  "source": {
+    "aggregate_results_sha256": "345ecdcd3d7c4696d20ebc6eff693eea9c527cb7d60872905da5f31abd557be7",
+    "branch": "agents/D2b-explicit-surface-rates",
+    "repository": "vsletten/dissertation",
+    "revision": "afc9e13ca220edf23fd25724175e827ba9a31b62"
+  }
+}

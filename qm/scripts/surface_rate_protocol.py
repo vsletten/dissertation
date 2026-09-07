@@ -278,7 +278,7 @@ def reactions(*, gpu: bool, basis: str) -> dict[str, Reaction]:
     pwb6k = DftSettings(
         xc="pwb6k", basis=basis, dispersion="d3bj", density_fit=True, use_gpu=gpu
     )
-    song_ch3o = LiteratureFit(3146e10, 1.0, 830.0, 119.6, SONG, 59.0)
+    song_ch3o = LiteratureFit(3.14e10, 1.0, 830.0, 119.6, SONG, 59.0)
     song_abstraction = LiteratureFit(4.13e10, 1.0, 1222.0, 147.7, SONG, 59.0)
 
     # H+CO is an early TS on a very flat approach: the crest near 1.9 A

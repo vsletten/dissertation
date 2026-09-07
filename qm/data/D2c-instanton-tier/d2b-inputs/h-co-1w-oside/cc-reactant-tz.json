@@ -1,0 +1,19 @@
+{
+  "ccsd_correlation_hartree": -0.6248262584238063,
+  "completed_at": "2026-08-27T21:05:09-0700",
+  "correlation_hartree": -0.649202314330554,
+  "elapsed_seconds": 77.9458794593811,
+  "engine": "pyscf-uhf-uccsd(t)",
+  "identity": {
+    "basis": "cc-pvtz",
+    "charge": 0,
+    "frozen_core_orbitals": 3,
+    "geometry_sha256": "4ac3c871b4177c921926e73ce454c01d2af4cb6c1f835e22ac487d7f64bcd448",
+    "method": "uhf-uccsd(t)",
+    "spin_2s": 1
+  },
+  "scf_hartree": -189.3393699633451,
+  "total_hartree": -189.98857227767564,
+  "triples_hartree": -0.024376055906747636,
+  "uhf_spin_square": 0.7500034519935461
+}

@@ -1,0 +1,52 @@
+{
+  "schema": "d2c-literature-anchors-v1",
+  "sources": {
+    "simons_2020": {
+      "citation": "Simons, Lamberts & Cuppen 2020, A&A 634 A52, Table 2",
+      "doi": "10.1051/0004-6361/201936522",
+      "role": "experiment-benchmarked KMC input, not a measured intrinsic-rate uncertainty distribution"
+    },
+    "song_kaestner_2017": {
+      "citation": "Song & Kaestner 2017, ApJ 850 118, Table 4",
+      "doi": "10.3847/1538-4357/aa943e",
+      "downloaded_pdf_sha256": "ee3f6f2075f73d7876645d3ecd8a127371e15ea2dfc697329c33c4489a4cf0d7",
+      "locator": "Table 4, LH mechanism rows",
+      "url": "https://arxiv.org/pdf/2009.05442"
+    }
+  },
+  "anchors": {
+    "simons_2020": {
+      "h_co_s^-1": 200000.0,
+      "h_h2co_ch3o_s^-1": 150000.0,
+      "h_h2co_h2_hco_s^-1": 150000.0
+    },
+    "song_kaestner_2017_lh": {
+      "h_h2co_ch3o": {
+        "alpha_s^-1": 31400000000.0,
+        "beta": 1.0,
+        "gamma_k": 830.0,
+        "t0_k": 119.6,
+        "valid_floor_k": 59.0
+      },
+      "h_h2co_ch2oh": {
+        "alpha_s^-1": 11400000000.0,
+        "beta": 1.0,
+        "gamma_k": 3146.0,
+        "t0_k": 219.3,
+        "valid_floor_k": 75.0
+      },
+      "h_h2co_h2_hco": {
+        "alpha_s^-1": 41300000000.0,
+        "beta": 1.0,
+        "gamma_k": 1222.0,
+        "t0_k": 147.7,
+        "valid_floor_k": 59.0
+      }
+    }
+  },
+  "interpretation": {
+    "deep_temperature_grid_k": [12.0, 13.5, 15.0, 16.5, 20.0],
+    "song_kaestner_below_floor": "extrapolation only; not a low-temperature truth criterion",
+    "simons_factor_of_ten_band": "application-level comparison chosen by the D2c card, not a published uncertainty interval"
+  }
+}

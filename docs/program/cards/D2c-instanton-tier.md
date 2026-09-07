@@ -1,6 +1,6 @@
 # D2c-instanton-tier — deep-tunneling rates that flip the D2b gate
 
-- status: ready
+- status: active
 - track: D (astrochemistry)
 - priority: P2
 - machine: workstation
@@ -49,3 +49,15 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   transverse frequencies/eigenvectors at path points, a vibrationally adiabatic
   potential, matched-site branching, and immutable tracked provenance. No D3b
   rate table has been emitted.
+- 2026-09-06 23:33 PDT (hermes-custom-build-001; profile=workstation) —
+  INPUT GATE CLOSED: froze the four predeclared direct-CC one-water D2b routes
+  (both H+CO orientations plus both H2CO channels) into a tracked 29-file,
+  71,934-byte bundle whose manifest binds every byte/geometry, the source branch
+  at `afc9e13ca220edf23fd25724175e827ba9a31b62`, and aggregate D2b receipt
+  `345ecdcd3d7c4696d20ebc6eff693eea9c527cb7d60872905da5f31abd557be7`.
+  The generator rejects source, aggregate, geometry, CC-identity, and bundled-byte
+  drift. Independent literature readback also found and fixed a material Table 4
+  transcription bug: R(1) CH3O is `alpha=3.14e10 s^-1`; `3146` is R(2)'s gamma,
+  not R(1)'s prefactor. The tracked anchor fixture binds the downloaded paper
+  SHA-256. Focused Ruff and 64 tests pass. No full-IRC/Hessian compute or D3b
+  table ran; the existing endpoint-only checkpoints are inputs, not SCT evidence.

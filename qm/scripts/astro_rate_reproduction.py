@@ -135,7 +135,7 @@ def reactions(*, gpu: bool, basis: str) -> dict[str, Reaction]:
             scan_floor_a=1.1,
             literature_barrier_k=1900.0,
             literature_imag_cm=831.0,
-            literature_fit=LiteratureFit(3146e10, 1.0, 830.0, 119.6, song, 59.0),
+            literature_fit=LiteratureFit(3.14e10, 1.0, 830.0, 119.6, song, 59.0),
             method=pwb6k,
         ),
         "h-h2co-ch2oh": Reaction(
