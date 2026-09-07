@@ -126,6 +126,13 @@ def test_path_adapter_preserves_both_directions_and_explicit_masses(monkeypatch)
     assert np.all(constructor_masses[0] > 0.0)
     assert constructor_masses[0] == pytest.approx(frozen_masses)
     assert np.array_equal(trace.masses_amu, constructor_masses[0])
+    assert trace.execution_contract == ts_module.IrcExecutionContract(
+        algorithm="sella-gonzalez-schlegel",
+        step_size_angstrom=0.12,
+        maximum_steps=7,
+        outer_fmax_ev_per_angstrom=0.05,
+        inner_fmax_ev_per_angstrom=0.01,
+    )
     with pytest.raises(ValueError):
         trace.masses_amu[0] = 1.0
 

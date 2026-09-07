@@ -146,6 +146,48 @@ def _mass_weighted_kabsch(
     return centred @ rotation, rotation
 
 
+def mass_scaled_quotient_displacement(
+    moving_coordinates_angstrom: Sequence[Sequence[float]] | np.ndarray,
+    reference_coordinates_angstrom: Sequence[Sequence[float]] | np.ndarray,
+    masses_amu: Sequence[float] | np.ndarray,
+    *,
+    reference_mass_amu: float = 1.0,
+) -> np.ndarray:
+    """Return the rigid-invariant mass-scaled displacement into a reference frame.
+
+    The moving geometry is mass-centred and Kabsch-aligned to the independently
+    mass-centred reference geometry.  The returned flattened displacement therefore
+    lives in the same molecular quotient-space convention as
+    :func:`build_mass_scaled_path`. It is invariant to translations and to a rigid
+    rotation of the moving geometry; it rotates covariantly with the reference frame,
+    so overlaps with vectors in that same frame are globally rotation invariant.
+    """
+
+    moving = np.asarray(moving_coordinates_angstrom, dtype=float)
+    reference = np.asarray(reference_coordinates_angstrom, dtype=float)
+    if (
+        moving.ndim != 2
+        or moving.shape[1] != 3
+        or moving.shape[0] < 2
+        or reference.shape != moving.shape
+        or not np.all(np.isfinite(moving))
+        or not np.all(np.isfinite(reference))
+    ):
+        raise ValueError(
+            "moving and reference coordinates must be finite matching (N, 3) arrays"
+        )
+    if not math.isfinite(reference_mass_amu) or reference_mass_amu <= 0.0:
+        raise ValueError("reference_mass_amu must be finite and positive")
+    masses = _positive_masses(masses_amu, moving.shape[0])
+    reference_centred = reference - np.average(reference, axis=0, weights=masses)
+    moving_aligned, _ = _mass_weighted_kabsch(moving, reference_centred, masses)
+    scale = np.sqrt(masses / reference_mass_amu)[:, None]
+    displacement = ((moving_aligned - reference_centred) * scale).reshape(-1)
+    if not np.all(np.isfinite(displacement)):
+        raise ValueError("mass-scaled quotient displacement must be finite")
+    return displacement
+
+
 def build_mass_scaled_path(
     coordinates_angstrom: Sequence[Sequence[Sequence[float]]] | np.ndarray,
     masses_amu: Sequence[float] | np.ndarray,

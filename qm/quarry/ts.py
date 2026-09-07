@@ -100,11 +100,38 @@ class IrcDirectionPath:
 
 
 @dataclass(frozen=True)
+class IrcExecutionContract:
+    """Observed arguments and implementation used for one full Sella IRC run."""
+
+    algorithm: str
+    step_size_angstrom: float
+    maximum_steps: int
+    outer_fmax_ev_per_angstrom: float
+    inner_fmax_ev_per_angstrom: float
+
+    def __post_init__(self) -> None:
+        if self.algorithm != "sella-gonzalez-schlegel":
+            raise ValueError("unsupported IRC execution algorithm")
+        if type(self.maximum_steps) is not int or self.maximum_steps <= 0:
+            raise ValueError("IRC execution maximum_steps must be a positive integer")
+        for name, value in (
+            ("step_size_angstrom", self.step_size_angstrom),
+            ("outer_fmax_ev_per_angstrom", self.outer_fmax_ev_per_angstrom),
+            ("inner_fmax_ev_per_angstrom", self.inner_fmax_ev_per_angstrom),
+        ):
+            if type(value) is not float or not np.isfinite(value) or value <= 0.0:
+                raise ValueError(
+                    f"IRC execution {name} must be a positive finite float"
+                )
+
+
+@dataclass(frozen=True)
 class SellaIrcTrace:
     """Both paths generated from one shared-Hessian Sella IRC object."""
 
     masses_amu: np.ndarray
     directions: tuple[IrcDirectionPath, IrcDirectionPath]
+    execution_contract: IrcExecutionContract | None = None
 
     def __post_init__(self) -> None:
         masses = _immutable_float_array(self.masses_amu)
@@ -120,6 +147,10 @@ class SellaIrcTrace:
             raise ValueError("an IRC trace requires Sella forward then reverse paths")
         object.__setattr__(self, "masses_amu", masses)
         object.__setattr__(self, "directions", directions)
+        if self.execution_contract is not None and not isinstance(
+            self.execution_contract, IrcExecutionContract
+        ):
+            raise TypeError("IRC execution_contract must be an IrcExecutionContract")
 
 
 def make_ase_calculator(settings: DftSettings, charge: int, spin: int):
@@ -1052,6 +1083,13 @@ def trace_sella_irc(
     return SellaIrcTrace(
         masses_amu=recorded_masses_amu,
         directions=(direction_paths[0], direction_paths[1]),
+        execution_contract=IrcExecutionContract(
+            algorithm="sella-gonzalez-schlegel",
+            step_size_angstrom=float(step_size_a),
+            maximum_steps=max_steps,
+            outer_fmax_ev_per_angstrom=float(fmax_ev_a),
+            inner_fmax_ev_per_angstrom=float(fmax_inner_ev_a),
+        ),
     )
 
 

@@ -8,6 +8,7 @@ import pytest
 from quarry.reaction_path import (
     build_mass_scaled_path,
     curvature_effective_mass_profile,
+    mass_scaled_quotient_displacement,
     molecular_path_tangents_and_curvature,
     path_tangents_and_curvature,
     project_transverse_hessian,
@@ -90,6 +91,36 @@ def test_straight_path_has_mass_scaled_coordinate_and_zero_curvature():
         np.zeros(len(bond_lengths)), abs=2.0e-12
     )
     assert np.linalg.norm(geometry.unit_tangents, axis=1) == pytest.approx(1.0)
+
+
+def test_quotient_displacement_matches_adjacent_path_and_removes_rigid_motion():
+    transition_state = np.array(
+        [[0.0, 0.0, 0.0], [1.2, 0.1, 0.0], [0.1, 0.9, 0.4], [0.3, -0.4, 0.8]]
+    )
+    displacement = np.array(
+        [
+            [0.03, -0.01, 0.02],
+            [-0.02, 0.04, 0.01],
+            [0.01, 0.02, -0.03],
+            [0.0, -0.02, 0.01],
+        ]
+    )
+    masses = np.array([12.0, 16.0, 1.0, 14.0])
+    moving = transition_state + displacement
+    path = build_mass_scaled_path(
+        np.stack((transition_state - displacement, transition_state, moving)),
+        masses,
+        transition_state_index=1,
+    )
+    expected = path.mass_scaled_coordinates[2] - path.mass_scaled_coordinates[1]
+    observed = mass_scaled_quotient_displacement(moving, transition_state, masses)
+    assert observed == pytest.approx(expected, abs=2.0e-12)
+
+    rotation = _axis_angle_rotation([1.0, -2.0, 0.5], 0.71)
+    rigid_moving = moving @ rotation + np.array([8.0, -3.0, 4.0])
+    assert mass_scaled_quotient_displacement(
+        rigid_moving, transition_state, masses
+    ) == pytest.approx(observed, abs=2.0e-12)
 
 
 def test_nonuniform_circle_recovers_curvature():
