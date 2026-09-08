@@ -484,19 +484,42 @@ def run(preflight_root: Path, output_root: Path) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--create-preflight", action="store_true")
+    mode.add_argument("--finalize-if-running", action="store_true")
     parser.add_argument("--preflight-root", type=Path)
-    parser.add_argument("--output-root", type=Path, required=True)
-    parser.add_argument("--finalize-if-running", action="store_true")
+    parser.add_argument("--output-root", type=Path)
     parser.add_argument("--threads", type=int, default=16)
     parser.add_argument("--nice", type=int, default=10)
     parser.add_argument("--log")
     args = parser.parse_args()
+    if args.create_preflight:
+        if args.preflight_root is None:
+            parser.error("--preflight-root is required with --create-preflight")
+        receipt = campaign.create_preflight_receipt(
+            campaign.DEFAULT_BUNDLE_ROOT, args.preflight_root.resolve()
+        )
+        print(
+            json.dumps(
+                {
+                    "state": "pending",
+                    "identity": receipt["identity"],
+                    "preflight": str(args.preflight_root.resolve() / "preflight.json"),
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
     if args.finalize_if_running:
+        if args.output_root is None:
+            parser.error("--output-root is required with --finalize-if-running")
         terminal = finalize_if_running(args.output_root.resolve())
         print(json.dumps(terminal, sort_keys=True))
         return 0
     if args.preflight_root is None:
         parser.error("--preflight-root is required unless --finalize-if-running is set")
+    if args.output_root is None:
+        parser.error("--output-root is required for a diagnostic run")
     receipt = run(args.preflight_root.resolve(), args.output_root.resolve())
     print(
         json.dumps(
