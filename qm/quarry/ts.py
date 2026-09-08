@@ -39,6 +39,11 @@ from quarry.pipeline import (
 
 HARTREE_TO_EV = 27.211386245988
 BOHR_TO_ANGSTROM = 0.529177210903
+_SELLA_CURRENT_PES_KEYS = frozenset(
+    {"L", "Ucons", "Ufree", "Unred", "drdx", "f", "g", "state_hash", "x"}
+)
+_SELLA_PREVIOUS_PES_KEYS = frozenset({"f", "g", "x"})
+_MAX_SELLA_RESTART_ATOMS = 512
 
 
 def _immutable_float_array(values: np.ndarray) -> np.ndarray:
@@ -137,31 +142,94 @@ class IrcExecutionContract:
                 )
 
 
-def _copy_sella_pes_state(
-    state: Any, *, label: str
-) -> dict[str, np.ndarray | float | bytes | None]:
-    """Copy only the deterministic value types used by Sella PES caches."""
+def _sella_cache_array_shapes(
+    atom_count: int, frozen_count: int
+) -> dict[str, tuple[int, ...]]:
+    dimension = 3 * atom_count
+    constraint_dimension = 3 * frozen_count
+    return {
+        "L": (constraint_dimension,),
+        "Ucons": (dimension, constraint_dimension),
+        "Ufree": (dimension, dimension - constraint_dimension),
+        "Unred": (dimension, dimension),
+        "drdx": (constraint_dimension, dimension),
+        "g": (dimension,),
+        "x": (dimension,),
+    }
 
-    if type(state) is not dict or not {"x", "f", "g"}.issubset(state):
-        raise RuntimeError(f"{label} is not a restorable Sella PES state")
-    copied: dict[str, np.ndarray | float | bytes | None] = {}
-    for key, value in state.items():
-        if type(key) is not str:
-            raise RuntimeError(f"{label} contains a non-string field")
-        if value is None:
-            copied[key] = None
+
+def _sella_cache_byte_count(
+    state: dict[str, np.ndarray | float | bytes | None],
+) -> int:
+    total = 0
+    for value in state.values():
+        if isinstance(value, np.ndarray):
+            total += value.nbytes
         elif isinstance(value, bytes):
-            copied[key] = bytes(value)
-        elif np.isscalar(value):
+            total += len(value)
+        elif value is not None:
+            total += 8
+    return total
+
+
+def _copy_sella_pes_state(
+    state: Any,
+    *,
+    label: str,
+    atom_count: int,
+    frozen_count: int,
+    x0: np.ndarray,
+    current: bool,
+) -> dict[str, np.ndarray | float | bytes | None]:
+    """Validate and copy the exact bounded Sella 2.5 PES cache schema."""
+
+    expected_keys = _SELLA_CURRENT_PES_KEYS if current else _SELLA_PREVIOUS_PES_KEYS
+    if type(state) is not dict or set(state) != expected_keys:
+        raise RuntimeError(f"{label} does not have the exact Sella 2.5 cache fields")
+    if not current:
+        if any(state[key] is not None for key in _SELLA_PREVIOUS_PES_KEYS):
+            raise RuntimeError(f"{label} is not the pristine previous Sella PES state")
+        return {key: None for key in sorted(_SELLA_PREVIOUS_PES_KEYS)}
+
+    shapes = _sella_cache_array_shapes(atom_count, frozen_count)
+    copied: dict[str, np.ndarray | float | bytes | None] = {}
+    for key in sorted(_SELLA_CURRENT_PES_KEYS):
+        value = state[key]
+        if key in shapes:
+            try:
+                array = _immutable_float_array(np.asarray(value, dtype=float))
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError(f"{label} {key} array is invalid") from exc
+            if array.shape != shapes[key] or not np.all(np.isfinite(array)):
+                raise RuntimeError(
+                    f"{label} {key} must be a finite array with shape {shapes[key]}"
+                )
+            copied[key] = array
+        elif key == "f":
+            if not np.isscalar(value):
+                raise RuntimeError(f"{label} f must be one finite scalar")
             scalar = float(value)
             if not np.isfinite(scalar):
-                raise RuntimeError(f"{label} contains a non-finite scalar")
+                raise RuntimeError(f"{label} f must be one finite scalar")
             copied[key] = scalar
         else:
-            array = _immutable_float_array(np.asarray(value, dtype=float))
-            if not np.all(np.isfinite(array)):
-                raise RuntimeError(f"{label} contains a non-finite array")
-            copied[key] = array
+            if not isinstance(value, bytes):
+                raise RuntimeError(f"{label} state_hash must be exact bytes")
+            copied[key] = bytes(value)
+
+    expected_x0 = np.ascontiguousarray(x0, dtype=float)
+    if not np.array_equal(copied["x"], expected_x0):
+        raise RuntimeError(f"{label} x does not equal the Sella TS x0")
+    expected_state_hash = expected_x0.tobytes()
+    if copied["state_hash"] != expected_state_hash:
+        raise RuntimeError(f"{label} state_hash does not equal x0.tobytes()")
+    expected_bytes = (
+        sum(np.prod(shape, dtype=int) for shape in shapes.values()) * 8
+        + 8
+        + len(expected_state_hash)
+    )
+    if _sella_cache_byte_count(copied) != expected_bytes:
+        raise RuntimeError(f"{label} byte total does not match its bounded schema")
     return copied
 
 
@@ -169,10 +237,11 @@ def _sella_state_value_payload(
     value: np.ndarray | float | bytes | None,
 ) -> dict[str, Any]:
     if value is None:
-        return {"kind": "none"}
+        return {"byte_count": 0, "kind": "none"}
     if isinstance(value, bytes):
         return {
             "kind": "bytes",
+            "byte_count": len(value),
             "hex": value.hex(),
             "sha256": hashlib.sha256(value).hexdigest(),
         }
@@ -181,45 +250,77 @@ def _sella_state_value_payload(
         raw = array.tobytes()
         return {
             "kind": "float64-array",
+            "byte_count": len(raw),
             "shape": list(array.shape),
             "values": array.reshape(-1).tolist(),
             "sha256": hashlib.sha256(raw).hexdigest(),
         }
-    return {"kind": "float", "value": value}
+    return {"byte_count": 8, "kind": "float", "value": value}
 
 
-def _sella_state_value_from_payload(payload: Any, *, label: str):
+def _sella_state_value_from_payload(
+    payload: Any,
+    *,
+    label: str,
+    expected_kind: str,
+    expected_shape: tuple[int, ...] | None = None,
+    expected_bytes: bytes | None = None,
+):
     if type(payload) is not dict or type(payload.get("kind")) is not str:
         raise ValueError(f"{label} payload is invalid")
     kind = payload["kind"]
-    if kind == "none" and set(payload) == {"kind"}:
+    if kind != expected_kind:
+        raise ValueError(f"{label} payload kind is invalid")
+    if kind == "none" and payload == {"byte_count": 0, "kind": "none"}:
         return None
-    if kind == "float" and set(payload) == {"kind", "value"}:
+    if kind == "float" and set(payload) == {"byte_count", "kind", "value"}:
         value = payload["value"]
-        if type(value) is not float or not np.isfinite(value):
+        if (
+            payload["byte_count"] != 8
+            or type(value) is not float
+            or not np.isfinite(value)
+        ):
             raise ValueError(f"{label} scalar is invalid")
         return value
-    if kind == "bytes" and set(payload) == {"kind", "hex", "sha256"}:
+    if kind == "bytes" and set(payload) == {
+        "byte_count",
+        "kind",
+        "hex",
+        "sha256",
+    }:
+        if expected_bytes is None or payload["byte_count"] != len(expected_bytes):
+            raise ValueError(f"{label} byte length is invalid")
+        value_hex = payload["hex"]
+        if type(value_hex) is not str or len(value_hex) != 2 * len(expected_bytes):
+            raise ValueError(f"{label} bytes are invalid")
         try:
-            value = bytes.fromhex(payload["hex"])
+            value = bytes.fromhex(value_hex)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"{label} bytes are invalid") from exc
         if hashlib.sha256(value).hexdigest() != payload["sha256"]:
             raise ValueError(f"{label} bytes hash mismatch")
+        if value != expected_bytes:
+            raise ValueError(f"{label} bytes do not match their trusted source")
         return value
     if kind == "float64-array" and set(payload) == {
+        "byte_count",
         "kind",
         "shape",
         "values",
         "sha256",
     }:
         shape = payload["shape"]
-        if type(shape) is not list or any(
-            type(size) is not int or size < 0 for size in shape
-        ):
+        if expected_shape is None or shape != list(expected_shape):
             raise ValueError(f"{label} array shape is invalid")
+        value_count = int(np.prod(expected_shape, dtype=int))
+        if (
+            payload["byte_count"] != value_count * 8
+            or type(payload["values"]) is not list
+            or len(payload["values"]) != value_count
+        ):
+            raise ValueError(f"{label} array byte total is invalid")
         try:
-            array = np.asarray(payload["values"], dtype="<f8").reshape(tuple(shape))
+            array = np.asarray(payload["values"], dtype="<f8").reshape(expected_shape)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"{label} array values are invalid") from exc
         if not np.all(np.isfinite(array)):
@@ -249,7 +350,7 @@ class SellaIrcInitializationState:
 
     def __post_init__(self) -> None:
         symbols = tuple(self.symbols)
-        if not symbols or any(
+        if not 1 <= len(symbols) <= _MAX_SELLA_RESTART_ATOMS or any(
             type(symbol) is not str or not symbol for symbol in symbols
         ):
             raise ValueError("Sella initialization symbols are invalid")
@@ -278,18 +379,63 @@ class SellaIrcInitializationState:
         v0ts = _immutable_float_array(self.v0ts)
         if x0.shape != (dimension,) or not np.all(np.isfinite(x0)):
             raise ValueError("Sella initialization TS coordinates are invalid")
-        if masses.shape != (len(symbols),) or np.any(masses <= 0.0):
+        if (
+            masses.shape != (len(symbols),)
+            or not np.all(np.isfinite(masses))
+            or np.any(masses <= 0.0)
+        ):
             raise ValueError("Sella initialization masses are invalid")
         if h0.shape != (dimension, dimension) or not np.all(np.isfinite(h0)):
             raise ValueError("Sella initialization Hessian is invalid")
         if not np.array_equal(h0, h0.T):
             raise ValueError("Sella initialization Hessian is not symmetric")
-        if (
-            v0ts.shape != (dimension,)
-            or not np.all(np.isfinite(v0ts))
-            or float(np.linalg.norm(v0ts)) < 1e-12
-        ):
+        if v0ts.shape != (dimension,) or not np.all(np.isfinite(v0ts)):
             raise ValueError("Sella initialization TS vector is invalid")
+        sqrt_masses = np.repeat(np.sqrt(masses), 3)
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            mass_weighted_hessian = h0 / np.outer(sqrt_masses, sqrt_masses)
+            mass_weighted_kick = sqrt_masses * v0ts
+            kick_norm = float(np.linalg.norm(mass_weighted_kick))
+        if not np.all(np.isfinite(mass_weighted_hessian)) or not np.all(
+            np.isfinite(mass_weighted_kick)
+        ):
+            raise ValueError("Sella initialization mass-weighted kick is non-finite")
+        dx = self.execution_contract.step_size_angstrom
+        if not np.isfinite(kick_norm) or not np.isclose(
+            kick_norm, dx, rtol=1.0e-12, atol=1.0e-14
+        ):
+            raise ValueError(
+                "Sella initialization mass-weighted kick norm does not match IRC dx"
+            )
+        nonzero = np.flatnonzero(v0ts)
+        if nonzero.size == 0 or v0ts[nonzero[0]] <= 0.0:
+            raise ValueError("Sella initialization kick sign convention is invalid")
+        unit_kick = mass_weighted_kick / kick_norm
+        try:
+            eigenvalues = np.linalg.eigvalsh(mass_weighted_hessian)
+        except np.linalg.LinAlgError as exc:
+            raise ValueError(
+                "Sella initialization mass-weighted Hessian is invalid"
+            ) from exc
+        lowest = float(eigenvalues[0])
+        with np.errstate(over="ignore", invalid="ignore"):
+            rayleigh = float(unit_kick @ mass_weighted_hessian @ unit_kick)
+            residual = mass_weighted_hessian @ unit_kick - lowest * unit_kick
+            residual_norm = float(np.linalg.norm(residual))
+            scale = max(1.0, float(np.max(np.abs(mass_weighted_hessian))))
+        tolerance = 256.0 * np.finfo(float).eps * dimension * scale
+        if (
+            not np.isfinite(lowest)
+            or not np.isfinite(rayleigh)
+            or not np.all(np.isfinite(residual))
+            or not np.isfinite(residual_norm)
+            or abs(rayleigh - lowest) > tolerance
+            or residual_norm > tolerance
+        ):
+            raise ValueError(
+                "Sella initialization kick is not the lowest mass-weighted H0 "
+                "eigendirection with finite residual"
+            )
         object.__setattr__(self, "symbols", symbols)
         object.__setattr__(self, "frozen_indices", frozen)
         object.__setattr__(self, "x0", x0)
@@ -299,12 +445,26 @@ class SellaIrcInitializationState:
         object.__setattr__(
             self,
             "pes_current",
-            _copy_sella_pes_state(self.pes_current, label="Sella current PES state"),
+            _copy_sella_pes_state(
+                self.pes_current,
+                label="Sella current PES state",
+                atom_count=len(symbols),
+                frozen_count=len(frozen),
+                x0=x0,
+                current=True,
+            ),
         )
         object.__setattr__(
             self,
             "pes_last",
-            _copy_sella_pes_state(self.pes_last, label="Sella previous PES state"),
+            _copy_sella_pes_state(
+                self.pes_last,
+                label="Sella previous PES state",
+                atom_count=len(symbols),
+                frozen_count=len(frozen),
+                x0=x0,
+                current=False,
+            ),
         )
 
     @property
@@ -323,7 +483,7 @@ def _sella_irc_initialization_identity_payload(
 ) -> dict[str, Any]:
     contract = state.execution_contract
     return {
-        "schema": "sella-irc-shared-initialization-v1",
+        "schema": "sella-irc-shared-initialization-v2",
         "symbols": list(state.symbols),
         "charge": state.charge,
         "spin": state.spin,
@@ -338,10 +498,12 @@ def _sella_irc_initialization_identity_payload(
             key: _sella_state_value_payload(value)
             for key, value in sorted(state.pes_current.items())
         },
+        "pes_current_byte_count": _sella_cache_byte_count(state.pes_current),
         "pes_last": {
             key: _sella_state_value_payload(value)
             for key, value in sorted(state.pes_last.items())
         },
+        "pes_last_byte_count": _sella_cache_byte_count(state.pes_last),
     }
 
 
@@ -367,13 +529,27 @@ def _sella_irc_initialization_from_payload(payload: Any) -> SellaIrcInitializati
         "H0",
         "v0ts",
         "pes_current",
+        "pes_current_byte_count",
         "pes_last",
+        "pes_last_byte_count",
         "fingerprint",
     }
     if type(payload) is not dict or set(payload) != expected:
         raise ValueError("Sella initialization checkpoint fields are unexpected")
-    if payload["schema"] != "sella-irc-shared-initialization-v1":
+    if payload["schema"] != "sella-irc-shared-initialization-v2":
         raise ValueError("unsupported Sella initialization checkpoint schema")
+    symbols_payload = payload["symbols"]
+    frozen_payload = payload["frozen_indices"]
+    if (
+        type(symbols_payload) is not list
+        or not 1 <= len(symbols_payload) <= _MAX_SELLA_RESTART_ATOMS
+        or type(frozen_payload) is not list
+        or len(frozen_payload) > len(symbols_payload)
+    ):
+        raise ValueError("Sella initialization atom inventory is invalid")
+    atom_count = len(symbols_payload)
+    frozen_count = len(frozen_payload)
+    dimension = 3 * atom_count
     contract_payload = payload["execution_contract"]
     if type(contract_payload) is not dict:
         raise ValueError("Sella initialization execution contract is invalid")
@@ -381,30 +557,73 @@ def _sella_irc_initialization_from_payload(payload: Any) -> SellaIrcInitializati
         contract = IrcExecutionContract(**contract_payload)
     except (TypeError, ValueError) as exc:
         raise ValueError("Sella initialization execution contract is invalid") from exc
-    for state_name in ("pes_current", "pes_last"):
-        if type(payload[state_name]) is not dict:
-            raise ValueError(f"Sella initialization {state_name} is invalid")
+    current_payload = payload["pes_current"]
+    last_payload = payload["pes_last"]
+    if (
+        type(current_payload) is not dict
+        or set(current_payload) != _SELLA_CURRENT_PES_KEYS
+    ):
+        raise ValueError("Sella initialization pes_current has unexpected fields")
+    if type(last_payload) is not dict or set(last_payload) != _SELLA_PREVIOUS_PES_KEYS:
+        raise ValueError("Sella initialization pes_last has unexpected fields")
+    shapes = _sella_cache_array_shapes(atom_count, frozen_count)
+    x0 = _sella_state_value_from_payload(
+        payload["x0"],
+        label="Sella x0",
+        expected_kind="float64-array",
+        expected_shape=(dimension,),
+    )
+    expected_state_hash = np.ascontiguousarray(x0, dtype=float).tobytes()
+    pes_current = {
+        key: _sella_state_value_from_payload(
+            current_payload[key],
+            label=f"Sella current {key}",
+            expected_kind=(
+                "float64-array" if key in shapes else "float" if key == "f" else "bytes"
+            ),
+            expected_shape=shapes.get(key),
+            expected_bytes=expected_state_hash if key == "state_hash" else None,
+        )
+        for key in sorted(_SELLA_CURRENT_PES_KEYS)
+    }
+    pes_last = {
+        key: _sella_state_value_from_payload(
+            last_payload[key], label=f"Sella previous {key}", expected_kind="none"
+        )
+        for key in sorted(_SELLA_PREVIOUS_PES_KEYS)
+    }
+    if payload["pes_current_byte_count"] != _sella_cache_byte_count(pes_current):
+        raise ValueError("Sella current PES cache byte total mismatch")
+    if payload["pes_last_byte_count"] != _sella_cache_byte_count(pes_last):
+        raise ValueError("Sella previous PES cache byte total mismatch")
     state = SellaIrcInitializationState(
-        symbols=tuple(payload["symbols"]),
+        symbols=tuple(symbols_payload),
         charge=payload["charge"],
         spin=payload["spin"],
-        frozen_indices=tuple(payload["frozen_indices"]),
+        frozen_indices=tuple(frozen_payload),
         settings_fingerprint=payload["settings_fingerprint"],
         execution_contract=contract,
-        x0=_sella_state_value_from_payload(payload["x0"], label="Sella x0"),
+        x0=x0,
         masses_amu=_sella_state_value_from_payload(
-            payload["masses_amu"], label="Sella masses"
+            payload["masses_amu"],
+            label="Sella masses",
+            expected_kind="float64-array",
+            expected_shape=(atom_count,),
         ),
-        h0=_sella_state_value_from_payload(payload["H0"], label="Sella H0"),
-        v0ts=_sella_state_value_from_payload(payload["v0ts"], label="Sella v0ts"),
-        pes_current={
-            key: _sella_state_value_from_payload(value, label=f"Sella current {key}")
-            for key, value in payload["pes_current"].items()
-        },
-        pes_last={
-            key: _sella_state_value_from_payload(value, label=f"Sella previous {key}")
-            for key, value in payload["pes_last"].items()
-        },
+        h0=_sella_state_value_from_payload(
+            payload["H0"],
+            label="Sella H0",
+            expected_kind="float64-array",
+            expected_shape=(dimension, dimension),
+        ),
+        v0ts=_sella_state_value_from_payload(
+            payload["v0ts"],
+            label="Sella v0ts",
+            expected_kind="float64-array",
+            expected_shape=(dimension,),
+        ),
+        pes_current=pes_current,
+        pes_last=pes_last,
     )
     if payload["fingerprint"] != state.fingerprint:
         raise ValueError("Sella initialization checkpoint fingerprint mismatch")
@@ -1303,24 +1522,72 @@ def _restore_sella_irc_initialization(
         pes is None
         or not callable(getattr(pes, "set_x", None))
         or not callable(getattr(pes, "set_H", None))
+        or not callable(getattr(pes, "_calc_basis", None))
+        or not callable(getattr(pes, "_update_basis", None))
     ):
         raise RuntimeError(
             "installed Sella IRC cannot restore exact shared initialization state"
         )
+    atom_count = len(state.symbols)
+    frozen_count = len(state.frozen_indices)
+    persisted_current = _copy_sella_pes_state(
+        state.pes_current,
+        label="Sella current PES checkpoint",
+        atom_count=atom_count,
+        frozen_count=frozen_count,
+        x0=state.x0,
+        current=True,
+    )
+    persisted_last = _copy_sella_pes_state(
+        state.pes_last,
+        label="Sella previous PES checkpoint",
+        atom_count=atom_count,
+        frozen_count=frozen_count,
+        x0=state.x0,
+        current=False,
+    )
     try:
+        # Rebuild all coordinate/constraint-derived cache fields from the fresh,
+        # manifest-bound Sella implementation. Only the expensive physical f/g
+        # evaluation is retained from the checkpoint.
+        pes.set_x(state.x0.copy())
+        pes.curr = {
+            "x": state.x0.copy(),
+            "f": persisted_current["f"],
+            "g": np.asarray(persisted_current["g"], dtype=float).copy(),
+            "state_hash": state.x0.tobytes(),
+        }
+        pes.last = persisted_last.copy()
+        pes._update_basis(pes._calc_basis())
+        rebuilt_current = _copy_sella_pes_state(
+            pes.curr,
+            label="reconstructed Sella current PES checkpoint",
+            atom_count=atom_count,
+            frozen_count=frozen_count,
+            x0=state.x0,
+            current=True,
+        )
+        for key in sorted(_SELLA_CURRENT_PES_KEYS):
+            observed = persisted_current[key]
+            rebuilt = rebuilt_current[key]
+            if isinstance(observed, np.ndarray):
+                equal = isinstance(rebuilt, np.ndarray) and np.array_equal(
+                    observed, rebuilt
+                )
+            else:
+                equal = observed == rebuilt
+            if not equal:
+                raise ValueError(
+                    f"Sella current PES checkpoint {key} does not match reconstruction"
+                )
         # Fresh Sella 2.5 IRC objects do not create ``pescurr``/``peslast``
-        # until their first diagonalization. A durable resume must install
-        # those snapshots before ``irun()`` enters its no-diagonalization
-        # restore branch rather than requiring them to exist already.
+        # until their first diagonalization. Install the verified reconstruction
+        # before ``irun()`` enters its no-diagonalization restore branch.
         irc.x0 = state.x0.copy()
         irc.H0 = state.h0.copy()
         irc.v0ts = state.v0ts.copy()
-        irc.pescurr = _copy_sella_pes_state(
-            state.pes_current, label="Sella current PES checkpoint"
-        )
-        irc.peslast = _copy_sella_pes_state(
-            state.pes_last, label="Sella previous PES checkpoint"
-        )
+        irc.pescurr = rebuilt_current
+        irc.peslast = persisted_last
     except (AttributeError, TypeError) as exc:
         raise RuntimeError(
             "installed Sella IRC cannot install exact shared initialization state"

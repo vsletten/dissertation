@@ -5,6 +5,7 @@ import inspect
 import json
 import shutil
 import subprocess
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -34,6 +35,15 @@ FIXED_DEPENDENCIES = {
     "pyscf": "2.10.0",
     "sella": "2.5.1",
 }
+FIXED_MODULE_MANIFEST = {
+    name: {
+        "origin": f"/opt/d2c-test-modules/{name.replace('.', '/')}.py",
+        "sha256": hashlib.sha256(name.encode()).hexdigest(),
+        "byte_count": len(name),
+        "trust_class": trust_class,
+    }
+    for name, trust_class in campaign.EXECUTABLE_MODULES.items()
+}
 BUNDLE_ROOT = Path(__file__).parents[1] / "data" / "D2c-instanton-tier" / "d2b-inputs"
 
 
@@ -47,6 +57,9 @@ def _fixed_production_runtime_identity(monkeypatch):
         lambda: {
             "git_sha": FIXED_GIT_SHA,
             "dependencies": dict(FIXED_DEPENDENCIES),
+            "executable_modules": {
+                name: dict(record) for name, record in FIXED_MODULE_MANIFEST.items()
+            },
             "python": campaign.platform.python_version(),
         },
     )
@@ -131,6 +144,22 @@ def _sella_initialization_state(
         [campaign.ISOTOPIC_MASSES_AMU[symbol] for symbol in transition_state.symbols]
     )
     settings = campaign.DftSettings(**campaign.DFT_SETTINGS)
+    h0 = np.eye(dimension)
+    h0[0, 0] = -1.0
+    v0ts = np.zeros(dimension)
+    v0ts[0] = trace.execution_contract.step_size_angstrom / np.sqrt(masses[0])
+    identity = np.eye(dimension)
+    pes_current = {
+        "L": np.zeros(0),
+        "Ucons": np.zeros((dimension, 0)),
+        "Ufree": identity,
+        "Unred": identity,
+        "drdx": np.zeros((0, dimension)),
+        "f": -10.0,
+        "g": np.zeros(dimension),
+        "state_hash": x0.tobytes(),
+        "x": x0,
+    }
     return campaign.quarry_ts.SellaIrcInitializationState(
         symbols=tuple(transition_state.symbols),
         charge=transition_state.charge,
@@ -142,14 +171,9 @@ def _sella_initialization_state(
         execution_contract=trace.execution_contract,
         x0=x0,
         masses_amu=masses,
-        h0=np.eye(dimension),
-        v0ts=np.eye(1, dimension, 0).reshape(-1),
-        pes_current={
-            "x": x0,
-            "f": -10.0,
-            "g": np.zeros(dimension),
-            "state_hash": transition_state.coords.tobytes(),
-        },
+        h0=h0,
+        v0ts=v0ts,
+        pes_current=pes_current,
         pes_last={"x": None, "f": None, "g": None},
     )
 
@@ -186,6 +210,7 @@ def _preflight(run_root: Path, bundle_root: Path = BUNDLE_ROOT) -> dict:
         run_root,
         git_sha=FIXED_GIT_SHA,
         dependency_versions=FIXED_DEPENDENCIES,
+        executable_module_manifest=FIXED_MODULE_MANIFEST,
         created_utc="2026-09-07T12:00:00Z",
     )
 
@@ -200,6 +225,7 @@ def test_dry_run_identity_and_exact_four_route_inventory(tmp_path: Path):
         tmp_path / "third",
         git_sha=FIXED_GIT_SHA,
         dependency_versions=changed_gpu,
+        executable_module_manifest=FIXED_MODULE_MANIFEST,
         created_utc="2026-09-07T12:00:00Z",
     )
 
@@ -587,7 +613,7 @@ def test_boolean_cluster_state_cannot_publish_path_and_corrected_retry_succeeds(
 def test_preflight_binds_trusted_typed_endpoint_evidence(tmp_path: Path):
     receipt = _preflight(tmp_path / "run")
 
-    assert receipt["schema"] == "d2c-sct-campaign-preflight-v4"
+    assert receipt["schema"] == "d2c-sct-campaign-preflight-v5"
     assert receipt["campaign"]["endpoint_classification_policy"] == (
         campaign.endpoint_classification_policy_payload()
     )
@@ -1659,6 +1685,10 @@ def _rewrite_direction_receipt(
         irc_run_identity=run_identity,
     )
     receipt_path.write_bytes(campaign._json_bytes(receipt))
+    restart_path = (
+        run_root / route / "irc-restart" / direction.sella_direction / "receipt.json"
+    )
+    restart_path.write_bytes(campaign._json_bytes(receipt))
     execution_path = run_root / route / "irc-execution" / "receipt.json"
     execution = json.loads(execution_path.read_text())
     execution["direction_receipts"][direction.sella_direction] = receipt
@@ -1842,7 +1872,10 @@ def test_public_path_rejects_standalone_irc_run_identity_divergence(tmp_path: Pa
         lambda receipt: receipt.__setitem__("irc_run_identity", "f" * 64),
     )
 
-    with pytest.raises(ValueError, match="standalone/shared execution receipt"):
+    with pytest.raises(
+        ValueError,
+        match="(standalone/shared execution|restart/final canonical).*receipt",
+    ):
         campaign.publish_typed_irc_path(run_root, route="h-co-1w-cside")
     assert not (run_root / "h-co-1w-cside" / "path").exists()
 
@@ -1875,7 +1908,7 @@ def test_canonical_ts_qualification_persists_native_evidence_and_reruns_gate(
         "mapped-product.f64",
         "receipt.json",
     }
-    assert published.receipt["schema"] == "d2c-ts-qualification-v2"
+    assert published.receipt["schema"] == "d2c-ts-qualification-v3"
     assert published.receipt["gate_evidence"]["accepted"] is True
     assert published.receipt["native_hessian"]["electronic_hartree"] == -100.0
     assert (
@@ -1943,7 +1976,7 @@ def test_legacy_v3_and_self_attested_v1_roots_fail_with_fresh_root_guidance(
     preflight = _preflight(v3_root)
     preflight["schema"] = "d2c-sct-campaign-preflight-v3"
     (v3_root / campaign.PREFLIGHT_RECEIPT).write_bytes(campaign._json_bytes(preflight))
-    with pytest.raises(ValueError, match="legacy D2c v3 run root.*fresh v4 run root"):
+    with pytest.raises(ValueError, match="legacy D2c v3 run root.*fresh v5 run root"):
         campaign._publish_transition_state_qualification(v3_root, route="h-co-1w-cside")
 
     v1_root = tmp_path / "v1"
@@ -1953,7 +1986,9 @@ def test_legacy_v3_and_self_attested_v1_roots_fail_with_fresh_root_guidance(
     (qualification / "receipt.json").write_bytes(
         campaign._json_bytes({"schema": "d2c-ts-qualification-v1"})
     )
-    with pytest.raises(ValueError, match="TS qualification v1.*fresh v4 run root"):
+    with pytest.raises(
+        ValueError, match="legacy D2c TS qualification.*fresh v5 run root"
+    ):
         campaign._publish_transition_state_qualification(v1_root, route="h-co-1w-cside")
 
 
@@ -2066,7 +2101,7 @@ def test_authoritative_path_rejects_shared_nested_direction_divergence(
 
     _rewrite_canonical_json(execution_path, mutate_nested_direction)
 
-    with pytest.raises(ValueError, match="standalone/shared execution receipt"):
+    with pytest.raises(ValueError, match="restart/final canonical.*receipt"):
         campaign.publish_typed_irc_path(run_root, route=route)
     assert not (run_root / route / "path").exists()
 
@@ -2384,7 +2419,10 @@ def test_authoritative_hessian_resume_rejects_irc_ancestry_tamper_before_compute
         lambda receipt: receipt.__setitem__("algorithm", "tampered"),
     )
 
-    with pytest.raises(ValueError, match="standalone/shared execution receipt"):
+    with pytest.raises(
+        ValueError,
+        match="(standalone/shared execution|restart/final canonical).*receipt",
+    ):
         campaign._publish_authoritative_path_hessians(
             run_root,
             evaluator=lambda _cluster: pytest.fail("tamper reached evaluator"),
@@ -2412,7 +2450,10 @@ def test_hessian_precommit_revalidation_rejects_shared_execution_mutation(
         _rewrite_canonical_json(execution_path, mutate_nested_direction)
         return _energy_reproducing_result(cluster, path)
 
-    with pytest.raises(ValueError, match="standalone/shared execution receipt"):
+    with pytest.raises(
+        ValueError,
+        match="(standalone/shared execution|restart/final canonical).*receipt",
+    ):
         campaign._publish_authoritative_path_hessians(
             run_root,
             route=route,
@@ -2550,7 +2591,10 @@ def test_authoritative_hessian_post_commit_ancestry_mutation_fails_closed(
                 lambda receipt: receipt.__setitem__("algorithm", "raced"),
             )
 
-    with pytest.raises(ValueError, match="standalone/shared execution receipt"):
+    with pytest.raises(
+        ValueError,
+        match="(standalone/shared execution|restart/final canonical).*receipt",
+    ):
         campaign._publish_authoritative_path_hessians(
             run_root,
             route="h-co-1w-cside",
@@ -2955,6 +2999,7 @@ def test_production_boundary_rejects_code_dependency_and_endpoint_drift(
         lambda: {
             "git_sha": "b" * 40,
             "dependencies": FIXED_DEPENDENCIES,
+            "executable_modules": FIXED_MODULE_MANIFEST,
             "python": preflight["campaign"]["python"],
         },
     )
@@ -2972,6 +3017,7 @@ def test_production_boundary_rejects_code_dependency_and_endpoint_drift(
         lambda: {
             "git_sha": FIXED_GIT_SHA,
             "dependencies": FIXED_DEPENDENCIES,
+            "executable_modules": FIXED_MODULE_MANIFEST,
             "python": preflight["campaign"]["python"],
         },
     )
@@ -3133,7 +3179,14 @@ def test_complete_irc_resume_rejects_invalid_shared_initialization_before_backen
         if corruption == "replaced-ancestry":
             replacement_x0 = initialization.x0.copy()
             replacement_x0[0] += 0.01
-            replacement = replace(initialization, x0=replacement_x0)
+            replacement_pes = dict(initialization.pes_current)
+            replacement_pes["x"] = replacement_x0
+            replacement_pes["state_hash"] = replacement_x0.tobytes()
+            replacement = replace(
+                initialization,
+                x0=replacement_x0,
+                pes_current=replacement_pes,
+            )
         elif corruption == "replaced-environment":
             replacement = replace(initialization, settings_fingerprint="f" * 64)
         else:
@@ -3427,6 +3480,7 @@ def test_public_resume_rejects_runtime_drift_before_backend(
         lambda: {
             "git_sha": FIXED_GIT_SHA,
             "dependencies": {**FIXED_DEPENDENCIES, "sella": "drifted"},
+            "executable_modules": FIXED_MODULE_MANIFEST,
             "python": campaign.platform.python_version(),
         },
     )
@@ -3437,3 +3491,187 @@ def test_public_resume_rejects_runtime_drift_before_backend(
     )
     with pytest.raises(ValueError, match="current dependency identity"):
         campaign.run_and_publish_irc(run_root, route=route)
+
+
+def test_trusted_xyz_fails_closed_during_path_replacement(monkeypatch, tmp_path: Path):
+    route = "h-co-1w-cside"
+    source = BUNDLE_ROOT / route / "ts.xyz"
+    candidate = tmp_path / "ts.xyz"
+    candidate.write_bytes(source.read_bytes())
+    replacement = tmp_path / "replacement.xyz"
+    original_read = campaign.os.read
+    raced = False
+
+    def replace_path_after_first_read(descriptor, size):
+        nonlocal raced
+        data = original_read(descriptor, size)
+        if data and not raced:
+            raced = True
+            replacement.write_bytes(b"attacker-controlled replacement\n")
+            replacement.replace(candidate)
+        return data
+
+    monkeypatch.setattr(campaign.os, "read", replace_path_after_first_read)
+    with pytest.raises(ValueError, match="changed while its snapshot was read"):
+        campaign._trusted_xyz_snapshot(
+            candidate,
+            _route_template(route),
+            name="race-safe-ts",
+            expected_file_sha256=campaign.TRUSTED_TRANSITION_STATE_FILE_SHA256[route],
+            expected_geometry_sha256=campaign.TRUSTED_CANONICAL_TS_GEOMETRY_SHA256[
+                route
+            ],
+        )
+
+    assert raced is True
+    assert candidate.read_bytes() == b"attacker-controlled replacement\n"
+
+
+def test_trusted_xyz_rejects_symlink_before_read(tmp_path: Path):
+    route = "h-co-1w-cside"
+    link = tmp_path / "ts.xyz"
+    link.symlink_to(BUNDLE_ROOT / route / "ts.xyz")
+    with pytest.raises(ValueError, match="trusted regular file"):
+        campaign._trusted_xyz_snapshot(
+            link,
+            _route_template(route),
+            name="symlinked-ts",
+            expected_file_sha256=campaign.TRUSTED_TRANSITION_STATE_FILE_SHA256[route],
+            expected_geometry_sha256=campaign.TRUSTED_CANONICAL_TS_GEOMETRY_SHA256[
+                route
+            ],
+        )
+
+
+def test_resumed_qualification_rejects_trusted_input_fingerprint_drift(tmp_path: Path):
+    route = "h-co-1w-cside"
+    run_root = tmp_path / "run"
+    _qualified_ancestry(run_root, route=route)
+    receipt_path = run_root / route / "ts-qualification" / "receipt.json"
+
+    def tamper(receipt):
+        receipt["trusted_input_fingerprints"]["reactant"]["file_sha256"] = "f" * 64
+
+    _rewrite_canonical_json(receipt_path, tamper)
+    with pytest.raises(ValueError, match="resumed TS qualification trusted input"):
+        campaign._load_canonical_qualification(run_root, route)
+
+
+def test_shared_irc_validator_rejects_restart_direction_divergence(tmp_path: Path):
+    route = "h-co-1w-cside"
+    run_root = tmp_path / "run"
+    _authoritative_ancestry(run_root, route=route)
+    restart_direction = run_root / route / "irc-restart" / "forward" / "receipt.json"
+
+    def tamper(receipt):
+        receipt["points"][-1]["electronic_energy_ev"] -= 0.125
+
+    _rewrite_canonical_json(restart_direction, tamper)
+    ancestry = campaign._load_canonical_qualification(run_root, route)
+    with pytest.raises(ValueError, match="restart/final canonical forward receipt"):
+        campaign._validate_canonical_irc_receipts(ancestry)
+
+
+def test_executable_module_manifest_hashes_concrete_repository_leaf(monkeypatch):
+    monkeypatch.setattr(
+        campaign, "EXECUTABLE_MODULES", {"quarry.clusters": "repository"}
+    )
+    manifest = campaign._executable_module_manifest()
+    record = manifest["quarry.clusters"]
+    origin = Path(record["origin"])
+    assert (
+        origin
+        == Path(campaign.__file__).resolve().parents[1] / "quarry" / "clusters.py"
+    )
+    assert record["byte_count"] == origin.stat().st_size
+    assert record["sha256"] == hashlib.sha256(origin.read_bytes()).hexdigest()
+
+
+def test_executable_module_manifest_rejects_import_origin_escape(
+    monkeypatch, tmp_path: Path
+):
+    escaped = tmp_path / "clusters.py"
+    escaped.write_text("raise RuntimeError('not the trusted module')\n")
+
+    class FakeSpec:
+        origin = str(escaped)
+
+    class FakeModule:
+        __spec__ = FakeSpec()
+        __file__ = str(escaped)
+
+    monkeypatch.setattr(
+        campaign, "EXECUTABLE_MODULES", {"quarry.clusters": "repository"}
+    )
+    monkeypatch.setattr(campaign.importlib, "import_module", lambda _name: FakeModule())
+    with pytest.raises(
+        RuntimeError, match="repository executable module origin drifted"
+    ):
+        campaign._executable_module_manifest()
+
+
+@pytest.mark.parametrize("field", ["origin", "sha256"])
+def test_production_boundary_rejects_executable_module_origin_or_hash_drift(
+    monkeypatch, tmp_path: Path, field: str
+):
+    route = "h-co-1w-cside"
+    run_root = tmp_path / "run"
+    preflight = _preflight(run_root)
+    modules = {name: dict(record) for name, record in FIXED_MODULE_MANIFEST.items()}
+    target = "sella.peswrapper"
+    modules[target][field] = (
+        "/opt/attacker/sella/peswrapper.py" if field == "origin" else "f" * 64
+    )
+    monkeypatch.setattr(
+        campaign,
+        "_current_code_dependency_identity",
+        lambda: {
+            "git_sha": FIXED_GIT_SHA,
+            "dependencies": dict(FIXED_DEPENDENCIES),
+            "executable_modules": modules,
+            "python": preflight["campaign"]["python"],
+        },
+    )
+
+    with pytest.raises(ValueError, match="current executable module identity"):
+        campaign._validate_production_boundary(run_root, route)
+
+
+def test_native_ts_hessian_evaluation_and_publication_share_one_route_claim(
+    monkeypatch, tmp_path: Path
+):
+    route = "h-co-1w-cside"
+    run_root = tmp_path / "run"
+    preflight = _preflight(run_root)
+    active = False
+    claim_calls = 0
+    evaluator_observed_claim = False
+
+    @contextmanager
+    def nonreentrant_claim(route_root):
+        nonlocal active, claim_calls
+        assert active is False, "nested route claim would deadlock"
+        route_root.mkdir(parents=True, exist_ok=True)
+        claim_calls += 1
+        active = True
+        try:
+            yield
+        finally:
+            active = False
+
+    def evaluate(transition_state, _settings):
+        nonlocal evaluator_observed_claim
+        evaluator_observed_claim = active
+        reactant = _frozen_endpoint(route, "irc_back.xyz").coords
+        product = _frozen_endpoint(route, "irc_fwd.xyz").coords
+        return _qualification_native_result(
+            preflight, transition_state, reactant, product
+        )
+
+    monkeypatch.setattr(campaign, "_exclusive_route_claim", nonreentrant_claim)
+    monkeypatch.setattr(campaign, "native_cartesian_hessian", evaluate)
+    published = campaign.publish_transition_state_qualification(run_root, route=route)
+
+    assert evaluator_observed_claim is True
+    assert claim_calls == 1
+    assert published.receipt["accepted"] is True

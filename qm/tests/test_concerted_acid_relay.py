@@ -206,13 +206,21 @@ def _initialize_fake_sella_irc(irc) -> None:
         return
     dimension = irc.atoms.positions.size
     irc.x0 = irc.atoms.positions.reshape(-1).copy()
-    irc.H0 = np.eye(dimension)
-    irc.v0ts = np.eye(1, dimension, 0).reshape(-1)
+    irc.H0 = np.diag(np.arange(1, dimension + 1, dtype=float))
+    irc.v0ts = np.zeros(dimension)
+    dx = getattr(irc, "kwargs", {}).get("dx", 0.1)
+    irc.v0ts[0] = dx / np.sqrt(irc.atoms.get_masses()[0])
+    identity = np.eye(dimension)
     irc.pescurr = {
+        "L": np.zeros(0),
+        "Ucons": np.zeros((dimension, 0)),
+        "Ufree": identity,
+        "Unred": identity,
+        "drdx": np.zeros((0, dimension)),
         "x": irc.x0.copy(),
         "f": -1.0,
         "g": np.zeros(dimension),
-        "state_hash": irc.atoms.positions.tobytes(),
+        "state_hash": irc.x0.tobytes(),
     }
     irc.peslast = {"x": None, "f": None, "g": None}
 

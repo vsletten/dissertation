@@ -14,6 +14,7 @@ import ctypes
 import errno
 import fcntl
 import hashlib
+import importlib
 import importlib.metadata
 import json
 import math
@@ -22,12 +23,13 @@ import platform
 import re
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager, suppress
-from dataclasses import dataclass
+from contextlib import contextmanager, nullcontext, suppress
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -77,10 +79,10 @@ from quarry.ts import (  # noqa: E402
     SellaIrcTrace,
 )
 from scripts import d2c_input_bundle
-from scripts.production_energetics import load_xyz_like
+from scripts.production_energetics import parse_xyz
 from scripts.surface_rate_protocol import reactions
 
-SCHEMA = "d2c-sct-campaign-preflight-v4"
+SCHEMA = "d2c-sct-campaign-preflight-v5"
 PREFLIGHT_RECEIPT = "preflight.json"
 DEFAULT_BUNDLE_ROOT = (
     Path(__file__).resolve().parent.parent
@@ -118,6 +120,38 @@ DEPENDENCY_VERSION_KEYS = frozenset(
         "cuda_device_count",
     )
 )
+_TRUSTED_XYZ_MAXIMUM_BYTES = 64 * 1024
+_MODULE_FILE_MAXIMUM_BYTES = 64 * 1024 * 1024
+EXECUTABLE_MODULES: dict[str, Literal["repository", "third-party"]] = {
+    "quarry.clusters": "repository",
+    "quarry.native_hessian": "repository",
+    "quarry.pipeline": "repository",
+    "quarry.reaction_path": "repository",
+    "quarry.ts": "repository",
+    "scripts.d2c_input_bundle": "repository",
+    "scripts.d2c_sct_campaign": "repository",
+    "scripts.production_energetics": "repository",
+    "scripts.surface_rate_protocol": "repository",
+    "numpy._core._multiarray_umath": "third-party",
+    "numpy.linalg._linalg": "third-party",
+    "ase.atoms": "third-party",
+    "ase.calculators.calculator": "third-party",
+    "ase.constraints": "third-party",
+    "ase.optimize.optimize": "third-party",
+    "pyscf.dft.uks": "third-party",
+    "pyscf.grad.uks": "third-party",
+    "pyscf.gto.mole": "third-party",
+    "pyscf.hessian.uks": "third-party",
+    "pyscf.scf.hf": "third-party",
+    "sella.optimize.irc": "third-party",
+    "sella.optimize.restricted_step": "third-party",
+    "sella.optimize.stepper": "third-party",
+    "sella.peswrapper": "third-party",
+    "gpu4pyscf.dft.uks": "third-party",
+    "gpu4pyscf.grad.uks": "third-party",
+    "gpu4pyscf.hessian.uks": "third-party",
+    "cupy._core.core": "third-party",
+}
 # These geometry hashes are trusted source constants, deliberately independent of
 # the mutable manifest being verified.  They bind atom row identity even if a copied
 # bundle and all of its ordinary byte receipts are coherently rewritten.
@@ -129,6 +163,16 @@ TRUSTED_CANONICAL_TS_GEOMETRY_SHA256 = {
     ),
     "h-h2co-h2-hco-1w": (
         "a1b804833d74cd77b7382cd516b84af7981fd37f18417ae7a858a7898a8225bf"
+    ),
+}
+TRUSTED_TRANSITION_STATE_FILE_SHA256 = {
+    "h-co-1w-cside": "459d0d1863ccd7c429702ee9e569c49b6a0dc3d2850240f8334c83720ab53c8f",
+    "h-co-1w-oside": "7be18d1bc51f5d18b7dad288178fd47d1e716e206dc9d8de06e8c2e0204e673a",
+    "h-h2co-ch3o-1w": (
+        "60f7d592f01e0bc8841b1ea6bb2f9ecbacea5649a53b64eb3a2700aaea11874b"
+    ),
+    "h-h2co-h2-hco-1w": (
+        "b7ddb448dd754f45bbc7cefe0b74bde1635333cb9f58fb9c3e56da69f4d07135"
     ),
 }
 # Independent, source-reviewed endpoint constants. Neither these values nor their
@@ -287,6 +331,10 @@ ISOTOPIC_MASSES_AMU = {
 }
 REFERENCE_MASS_AMU = 1.0
 BOUNDS: dict[str, Any] = {
+    "trusted_inputs": {
+        "maximum_xyz_bytes": _TRUSTED_XYZ_MAXIMUM_BYTES,
+        "open_once_no_follow_regular_file_required": True,
+    },
     "transition_state_qualification": {
         "physical_fmax_ev_per_angstrom_exclusive_maximum": 0.02,
         "negative_eigenvalue_tolerance_hartree_per_bohr2_amu": 1.0e-8,
@@ -1277,7 +1325,7 @@ def _validated_preflight(root: Path, route: str) -> tuple[dict[str, Any], str]:
     if observed_schema != SCHEMA:
         if observed_schema == "d2c-sct-campaign-preflight-v3":
             raise ValueError(
-                "incompatible legacy D2c v3 run root; create a fresh v4 run root "
+                "incompatible legacy D2c v3 run root; create a fresh v5 run root "
                 "because automatic migration is forbidden"
             )
         raise ValueError(
@@ -1315,6 +1363,7 @@ def _validated_preflight(root: Path, route: str) -> tuple[dict[str, Any], str]:
         "git_sha",
         "dft_settings",
         "dependencies",
+        "executable_modules",
         "python",
         "mass_standard",
         "reference_mass_amu",
@@ -1366,6 +1415,7 @@ def _validated_preflight(root: Path, route: str) -> tuple[dict[str, Any], str]:
         or any(type(value) is not str or not value for value in dependencies.values())
     ):
         raise ValueError("campaign dependency identity is incomplete")
+    _validated_executable_module_manifest(campaign.get("executable_modules"))
     _require_json_string(campaign.get("python"), label="campaign Python version")
     campaign_routes = campaign.get("routes")
     if (
@@ -1499,6 +1549,71 @@ def _mapped_route_vector(
     return path.mass_scaled_coordinates[2] - path.mass_scaled_coordinates[0]
 
 
+def _trusted_input_fingerprints_from_route_record(
+    route_record: dict[str, Any],
+) -> dict[str, dict[str, str]]:
+    endpoints = route_record.get("frozen_endpoint_evidence")
+    if type(endpoints) is not dict or set(endpoints) != {"irc_fwd.xyz", "irc_back.xyz"}:
+        raise ValueError("canonical trusted endpoint fingerprints are incomplete")
+    by_basin: dict[str, dict[str, str]] = {}
+    for record in endpoints.values():
+        if type(record) is not dict or record.get("basin") not in {
+            "reactant",
+            "product",
+        }:
+            raise ValueError("canonical trusted endpoint fingerprints are invalid")
+        by_basin[record["basin"]] = {
+            "file_sha256": _require_sha(
+                _require_json_string(
+                    record.get("trusted_file_sha256"),
+                    label="trusted endpoint file SHA-256",
+                ),
+                length=64,
+                label="trusted endpoint file SHA-256",
+            ),
+            "geometry_sha256": _require_sha(
+                _require_json_string(
+                    record.get("trusted_geometry_sha256"),
+                    label="trusted endpoint geometry SHA-256",
+                ),
+                length=64,
+                label="trusted endpoint geometry SHA-256",
+            ),
+            "geometry_fingerprint": _require_json_string(
+                record.get("geometry_fingerprint"),
+                label="trusted endpoint geometry fingerprint",
+            ),
+        }
+    if set(by_basin) != {"reactant", "product"}:
+        raise ValueError("canonical trusted endpoint basin fingerprints are incomplete")
+    return {
+        "transition_state": {
+            "file_sha256": _require_sha(
+                _require_json_string(
+                    route_record.get("transition_state_sha256"),
+                    label="trusted TS file SHA-256",
+                ),
+                length=64,
+                label="trusted TS file SHA-256",
+            ),
+            "geometry_sha256": _require_sha(
+                _require_json_string(
+                    route_record.get("canonical_transition_state_geometry_sha256"),
+                    label="trusted TS geometry SHA-256",
+                ),
+                length=64,
+                label="trusted TS geometry SHA-256",
+            ),
+            "geometry_fingerprint": _require_json_string(
+                route_record.get("transition_state_geometry_fingerprint"),
+                label="trusted TS geometry fingerprint",
+            ),
+        },
+        "reactant": by_basin["reactant"],
+        "product": by_basin["product"],
+    }
+
+
 def _ts_qualification_receipt_payload(
     *,
     preflight: dict[str, Any],
@@ -1518,6 +1633,9 @@ def _ts_qualification_receipt_payload(
         label="preflight receipt SHA-256",
     )
     route_record = preflight["routes"][route]
+    trusted_input_fingerprints = _trusted_input_fingerprints_from_route_record(
+        route_record
+    )
     campaign_identity = preflight["identity"]
     atom_mapping_sha256 = route_record["atom_mapping_sha256"]
     _route_identity_cluster(route, qualified_transition_state, label="qualified TS")
@@ -1573,8 +1691,31 @@ def _ts_qualification_receipt_payload(
         raise ValueError("mapped reactant geometry is not in the route reactant basin")
     if product_classification.basin != "product":
         raise ValueError("mapped product geometry is not in the route product basin")
+    observed_input_fingerprints = {
+        "transition_state": frequency_geometry_fingerprint(qualified_transition_state),
+        "reactant": frequency_geometry_fingerprint(
+            _cluster_at_coordinates(
+                qualified_transition_state,
+                mapped_reactant_coordinates_angstrom,
+                name=f"{route}-trusted-reactant-check",
+            )
+        ),
+        "product": frequency_geometry_fingerprint(
+            _cluster_at_coordinates(
+                qualified_transition_state,
+                mapped_product_coordinates_angstrom,
+                name=f"{route}-trusted-product-check",
+            )
+        ),
+    }
+    for name, observed in observed_input_fingerprints.items():
+        _strict_json_equal(
+            observed,
+            trusted_input_fingerprints[name]["geometry_fingerprint"],
+            label=f"qualified {name} trusted geometry fingerprint",
+        )
     receipt = {
-        "schema": "d2c-ts-qualification-v2",
+        "schema": "d2c-ts-qualification-v3",
         "stage": "transition_state_qualification",
         "state": "accepted",
         "accepted": True,
@@ -1582,6 +1723,7 @@ def _ts_qualification_receipt_payload(
         "campaign_identity": campaign_identity,
         "route": route,
         "atom_mapping_sha256": atom_mapping_sha256,
+        "trusted_input_fingerprints": trusted_input_fingerprints,
         "qualified_transition_state_geometry_fingerprint": (
             frequency_geometry_fingerprint(qualified_transition_state)
         ),
@@ -1660,6 +1802,7 @@ def _publish_transition_state_qualification(
     native_hessian: NativeHessianResult | None = None,
     mapped_reactant_coordinates_angstrom: Any = None,
     mapped_product_coordinates_angstrom: Any = None,
+    _route_claim_held: bool = False,
     _boundary_validator: Callable[[], None] | None = None,
     _failure_injector: Callable[[str], None] | None = None,
 ) -> PublishedTransitionStateQualification:
@@ -1670,7 +1813,8 @@ def _publish_transition_state_qualification(
         _boundary_validator()
     preflight, preflight_sha = _validated_preflight(root, route)
     route_root = root / route
-    with _exclusive_route_claim(route_root):
+    claim = nullcontext() if _route_claim_held else _exclusive_route_claim(route_root)
+    with claim:
         if _boundary_validator is not None:
             _boundary_validator()
         _remove_owned_temporary_directories(
@@ -1813,46 +1957,42 @@ def publish_transition_state_qualification(
 ) -> PublishedTransitionStateQualification:
     """Evaluate and publish the canonical TS gate from repository-bound inputs."""
 
-    preflight, _ = _validate_production_boundary(run_root, route)
-
     def validate_boundary() -> None:
         _validate_production_boundary(run_root, route)
 
     root = _safe_absolute_root(run_root)
-    qualification_root = root / route / "ts-qualification"
-    if qualification_root.exists() or qualification_root.is_symlink():
+    route_root = root / route
+    with _exclusive_route_claim(route_root):
+        preflight, _ = _validate_production_boundary(root, route)
+        bundle_root = _safe_absolute_root(DEFAULT_BUNDLE_ROOT)
+        template = reactions(gpu=True, basis="def2-svp")[route].cluster
+        fingerprints = _trusted_input_fingerprints_from_route_record(
+            preflight["routes"][route]
+        )
+        inputs = _trusted_route_input_snapshots(
+            bundle_root, route, template, fingerprints
+        )
+        qualification_root = route_root / "ts-qualification"
+        if qualification_root.exists() or qualification_root.is_symlink():
+            return _publish_transition_state_qualification(
+                root,
+                route=route,
+                _route_claim_held=True,
+                _boundary_validator=validate_boundary,
+            )
+        transition_state = inputs["transition_state"]
+        settings, _ = _canonical_dft_settings(preflight)
+        evaluated = native_cartesian_hessian(transition_state, settings)
         return _publish_transition_state_qualification(
             root,
             route=route,
+            qualified_transition_state=transition_state,
+            native_hessian=evaluated,
+            mapped_reactant_coordinates_angstrom=inputs["reactant"].coords,
+            mapped_product_coordinates_angstrom=inputs["product"].coords,
+            _route_claim_held=True,
             _boundary_validator=validate_boundary,
         )
-
-    bundle_root = _safe_absolute_root(DEFAULT_BUNDLE_ROOT)
-    template = reactions(gpu=True, basis="def2-svp")[route].cluster
-    transition_state = load_xyz_like(
-        bundle_root / route / "ts.xyz",
-        template,
-        name=f"{route}-qualified-ts",
-    )
-    endpoints: dict[str, np.ndarray] = {}
-    for filename, evidence in TRUSTED_FROZEN_ENDPOINT_EVIDENCE[route].items():
-        endpoint = load_xyz_like(
-            bundle_root / route / filename,
-            template,
-            name=f"{route}-{evidence['basin']}",
-        )
-        endpoints[evidence["basin"]] = endpoint.coords
-    settings, _ = _canonical_dft_settings(preflight)
-    evaluated = native_cartesian_hessian(transition_state, settings)
-    return _publish_transition_state_qualification(
-        root,
-        route=route,
-        qualified_transition_state=transition_state,
-        native_hessian=evaluated,
-        mapped_reactant_coordinates_angstrom=endpoints["reactant"],
-        mapped_product_coordinates_angstrom=endpoints["product"],
-        _boundary_validator=validate_boundary,
-    )
 
 
 def _load_canonical_qualification(
@@ -1867,12 +2007,12 @@ def _load_canonical_qualification(
         qualification_root / "receipt.json", label="TS qualification receipt"
     )
     observed_schema = receipt.get("schema")
-    if observed_schema == "d2c-ts-qualification-v1":
+    if observed_schema in {"d2c-ts-qualification-v1", "d2c-ts-qualification-v2"}:
         raise ValueError(
-            "incompatible legacy D2c TS qualification v1; use a fresh v4 run root "
-            "because self-attested modes cannot be migrated"
+            "incompatible legacy D2c TS qualification; use a fresh v5 run root "
+            "because trusted input fingerprints cannot be migrated"
         )
-    if observed_schema != "d2c-ts-qualification-v2":
+    if observed_schema != "d2c-ts-qualification-v3":
         raise ValueError(f"unsupported D2c TS qualification schema {observed_schema!r}")
     observed = {child.name for child in qualification_root.iterdir()}
     expected_files = {
@@ -1889,6 +2029,11 @@ def _load_canonical_qualification(
         )
     if receipt.get("preflight_receipt_sha256") != preflight_sha:
         raise ValueError("TS qualification preflight receipt SHA-256 mismatch")
+    _strict_json_equal(
+        receipt.get("trusted_input_fingerprints"),
+        _trusted_input_fingerprints_from_route_record(preflight["routes"][route]),
+        label="resumed TS qualification trusted input fingerprints",
+    )
     state = ENDPOINT_ROUTE_STATES[route]
     atom_count = len(state["symbols"])
     coordinates = _read_array_artifact(
@@ -2460,6 +2605,15 @@ def _validate_canonical_irc_receipts(
     }
     direction_receipts = execution_receipt["direction_receipts"]
     for name in ("forward", "reverse"):
+        restart_receipt, _ = _read_json_object(
+            ancestry.root / ancestry.route / "irc-restart" / name / "receipt.json",
+            label=f"IRC restart {name} checkpoint receipt",
+        )
+        _strict_json_equal(
+            restart_receipt,
+            direction_receipts[name],
+            label=f"IRC restart/final canonical {name} receipt",
+        )
         receipt_path = ancestry.root / ancestry.route / f"irc-{name}" / "receipt.json"
         receipt, raw = _read_json_object(receipt_path, label=f"IRC {name} receipt")
         _strict_json_equal(
@@ -2723,7 +2877,7 @@ def _irc_initialization_receipt_payload(
     if not np.array_equal(state.masses_amu, expected_masses):
         raise ValueError("IRC shared initialization masses do not match qualified TS")
     return {
-        "schema": "d2c-irc-initialization-v1",
+        "schema": "d2c-irc-initialization-v2",
         "stage": "irc_shared_sella_initialization",
         "state": "checkpointed",
         "accepted": False,
@@ -5128,6 +5282,130 @@ def _installed_distribution(label: str, candidates: tuple[str, ...]) -> tuple[st
     return installed[0]
 
 
+def _validated_executable_module_manifest(payload: Any) -> dict[str, dict[str, Any]]:
+    if type(payload) is not dict or set(payload) != set(EXECUTABLE_MODULES):
+        raise ValueError(
+            "executable module manifest must have an exact module inventory"
+        )
+    validated: dict[str, dict[str, Any]] = {}
+    for module_name, trust_class in EXECUTABLE_MODULES.items():
+        record = payload[module_name]
+        if type(record) is not dict or set(record) != {
+            "origin",
+            "sha256",
+            "byte_count",
+            "trust_class",
+        }:
+            raise ValueError(
+                f"executable module manifest record is invalid: {module_name}"
+            )
+        origin = _require_json_string(
+            record.get("origin"), label=f"{module_name} module origin"
+        )
+        if not Path(origin).is_absolute():
+            raise ValueError(f"{module_name} module origin must be absolute")
+        digest = _require_sha(
+            _require_json_string(
+                record.get("sha256"), label=f"{module_name} module SHA-256"
+            ),
+            length=64,
+            label=f"{module_name} module SHA-256",
+        )
+        byte_count = record.get("byte_count")
+        if (
+            type(byte_count) is not int
+            or not 1 <= byte_count <= _MODULE_FILE_MAXIMUM_BYTES
+            or record.get("trust_class") != trust_class
+        ):
+            raise ValueError(
+                f"executable module manifest bounds are invalid: {module_name}"
+            )
+        validated[module_name] = {
+            "origin": origin,
+            "sha256": digest,
+            "byte_count": byte_count,
+            "trust_class": trust_class,
+        }
+    return validated
+
+
+def _executable_module_manifest() -> dict[str, dict[str, Any]]:
+    """Bind concrete imported executable files, not distribution labels."""
+
+    qm_root = Path(__file__).resolve().parents[1]
+    environment_root = Path(sys.prefix).resolve()
+    records: dict[str, dict[str, Any]] = {}
+    for module_name, trust_class in EXECUTABLE_MODULES.items():
+        if module_name == "scripts.d2c_sct_campaign":
+            source_path = Path(__file__)
+            if source_path.is_symlink():
+                raise RuntimeError(
+                    "campaign executable module source cannot be a symlink"
+                )
+            origin = source_path.resolve(strict=True)
+        else:
+            module = importlib.import_module(module_name)
+            spec = getattr(module, "__spec__", None)
+            origin_value = getattr(spec, "origin", None)
+            file_value = getattr(module, "__file__", None)
+            if type(origin_value) is not str or type(file_value) is not str:
+                raise RuntimeError(
+                    f"executable module has no concrete origin: {module_name}"
+                )
+            origin_path = Path(origin_value)
+            file_path = Path(file_value)
+            if (
+                not origin_path.is_absolute()
+                or not file_path.is_absolute()
+                or origin_path.is_symlink()
+                or file_path.is_symlink()
+            ):
+                raise RuntimeError(
+                    "executable module origin is not a real absolute file: "
+                    f"{module_name}"
+                )
+            origin = origin_path.resolve(strict=True)
+            if origin != file_path.resolve(strict=True):
+                raise RuntimeError(
+                    f"executable module origin disagrees with __file__: {module_name}"
+                )
+        if trust_class == "repository":
+            expected = qm_root / Path(*module_name.split(".")).with_suffix(".py")
+            if origin != expected.resolve(strict=True):
+                raise RuntimeError(
+                    f"repository executable module origin drifted: {module_name}"
+                )
+        else:
+            try:
+                origin.relative_to(environment_root)
+            except ValueError as exc:
+                raise RuntimeError(
+                    "third-party executable module escaped the active environment: "
+                    f"{module_name}"
+                ) from exc
+            try:
+                origin.relative_to(qm_root)
+            except ValueError:
+                pass
+            else:
+                raise RuntimeError(
+                    "third-party executable module resolves inside the repository: "
+                    f"{module_name}"
+                )
+        raw = _read_bounded_regular_snapshot(
+            origin,
+            label=f"{module_name} executable module",
+            maximum_bytes=_MODULE_FILE_MAXIMUM_BYTES,
+        )
+        records[module_name] = {
+            "origin": str(origin),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "byte_count": len(raw),
+            "trust_class": trust_class,
+        }
+    return _validated_executable_module_manifest(records)
+
+
 def _dependency_versions() -> dict[str, str]:
     """Inventory the exact CPU packages, GPU backend, and live CUDA runtime."""
 
@@ -5261,6 +5539,179 @@ def _semantic_atom_identity_labels(route: str, template: Any) -> tuple[str, ...]
     return labels
 
 
+def _read_bounded_regular_snapshot(
+    path: Path, *, label: str, maximum_bytes: int
+) -> bytes:
+    """Read one immutable in-memory snapshot from one O_NOFOLLOW descriptor."""
+
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        raise RuntimeError("O_NOFOLLOW is required for trusted D2c snapshots")
+    try:
+        descriptor = os.open(path, os.O_RDONLY | nofollow)
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be opened as a trusted regular file") from exc
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_size <= 0
+            or before.st_size > maximum_bytes
+        ):
+            raise ValueError(
+                f"{label} must be a nonempty regular file no larger than "
+                f"{maximum_bytes} bytes"
+            )
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(remaining, 64 * 1024))
+            if not chunk:
+                raise ValueError(f"{label} changed while its snapshot was read")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            raise ValueError(f"{label} grew while its snapshot was read")
+        after = os.fstat(descriptor)
+        identity_before = (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        )
+        identity_after = (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        )
+        if identity_after != identity_before:
+            raise ValueError(f"{label} changed while its snapshot was read")
+        raw = b"".join(chunks)
+        if len(raw) != before.st_size:
+            raise ValueError(f"{label} snapshot byte count changed")
+        return raw
+    finally:
+        os.close(descriptor)
+
+
+def _geometry_hash_xyz_bytes(raw: bytes, *, label: str) -> str:
+    try:
+        lines = raw.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{label} is not UTF-8 XYZ") from exc
+    if len(lines) < 3:
+        raise ValueError(f"invalid XYZ file: {label}")
+    try:
+        atom_count = int(lines[0])
+    except ValueError as exc:
+        raise ValueError(f"invalid XYZ atom count: {label}") from exc
+    atom_lines = lines[2:]
+    if atom_count <= 0 or len(atom_lines) != atom_count:
+        raise ValueError(f"XYZ atom count mismatch: {label}")
+    for line in atom_lines:
+        fields = line.split()
+        if len(fields) != 4:
+            raise ValueError(f"invalid XYZ atom row: {label}")
+        try:
+            coordinates = [float(value) for value in fields[1:]]
+        except ValueError as exc:
+            raise ValueError(f"invalid XYZ coordinate: {label}") from exc
+        if not all(math.isfinite(value) for value in coordinates):
+            raise ValueError(f"non-finite XYZ coordinate: {label}")
+    canonical = f"{atom_count}\ngeometry\n" + "\n".join(atom_lines)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _trusted_xyz_snapshot(
+    path: Path,
+    template: Cluster,
+    *,
+    name: str,
+    expected_file_sha256: str,
+    expected_geometry_sha256: str,
+) -> Cluster:
+    label = str(path)
+    raw = _read_bounded_regular_snapshot(
+        path, label=label, maximum_bytes=_TRUSTED_XYZ_MAXIMUM_BYTES
+    )
+    if hashlib.sha256(raw).hexdigest() != expected_file_sha256:
+        raise ValueError(f"trusted XYZ file fingerprint drifted: {label}")
+    if _geometry_hash_xyz_bytes(raw, label=label) != expected_geometry_sha256:
+        raise ValueError(f"trusted XYZ geometry fingerprint drifted: {label}")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"trusted XYZ is not UTF-8: {label}") from exc
+    candidate = parse_xyz(
+        text,
+        name=name,
+        charge=template.charge,
+        spin=template.spin,
+    )
+    if candidate.symbols != template.symbols:
+        raise ValueError(f"{label}: atom order differs from trusted template")
+    return replace(candidate, frozen_indices=list(template.frozen_indices))
+
+
+def _trusted_route_input_snapshots(
+    bundle_root: Path,
+    route: str,
+    template: Cluster,
+    expected_fingerprints: dict[str, dict[str, str]],
+) -> dict[str, Cluster]:
+    transition_state = _trusted_xyz_snapshot(
+        bundle_root / route / "ts.xyz",
+        template,
+        name=f"{route}-qualified-ts",
+        expected_file_sha256=TRUSTED_TRANSITION_STATE_FILE_SHA256[route],
+        expected_geometry_sha256=TRUSTED_CANONICAL_TS_GEOMETRY_SHA256[route],
+    )
+    snapshots = {"transition_state": transition_state}
+    for filename, evidence in TRUSTED_FROZEN_ENDPOINT_EVIDENCE[route].items():
+        basin = evidence["basin"]
+        snapshots[basin] = _trusted_xyz_snapshot(
+            bundle_root / route / filename,
+            template,
+            name=f"{route}-{basin}",
+            expected_file_sha256=evidence["file_sha256"],
+            expected_geometry_sha256=evidence["geometry_sha256"],
+        )
+    observed = {
+        "transition_state": {
+            "file_sha256": TRUSTED_TRANSITION_STATE_FILE_SHA256[route],
+            "geometry_sha256": TRUSTED_CANONICAL_TS_GEOMETRY_SHA256[route],
+            "geometry_fingerprint": frequency_geometry_fingerprint(transition_state),
+        },
+        **{
+            basin: {
+                "file_sha256": next(
+                    evidence["file_sha256"]
+                    for evidence in TRUSTED_FROZEN_ENDPOINT_EVIDENCE[route].values()
+                    if evidence["basin"] == basin
+                ),
+                "geometry_sha256": next(
+                    evidence["geometry_sha256"]
+                    for evidence in TRUSTED_FROZEN_ENDPOINT_EVIDENCE[route].values()
+                    if evidence["basin"] == basin
+                ),
+                "geometry_fingerprint": frequency_geometry_fingerprint(
+                    snapshots[basin]
+                ),
+            }
+            for basin in ("reactant", "product")
+        },
+    }
+    _strict_json_equal(
+        observed,
+        expected_fingerprints,
+        label="current trusted TS/reactant/product fingerprints",
+    )
+    return snapshots
+
+
 def _frozen_endpoint_evidence(
     bundle_root: Path,
     manifest_route: dict[str, Any],
@@ -5282,19 +5733,21 @@ def _frozen_endpoint_evidence(
         path = bundle_root / route / filename
         expected = trusted[filename]
         declared_file = declared_files.get(filename)
-        observed_geometry = d2c_input_bundle.geometry_hash_xyz(path)
-        observed_file = d2c_input_bundle.sha256_path(path)
         if (
             declared_geometry.get(filename) != expected["geometry_sha256"]
             or not isinstance(declared_file, dict)
             or declared_file.get("sha256") != expected["file_sha256"]
-            or observed_geometry != expected["geometry_sha256"]
-            or observed_file != expected["file_sha256"]
         ):
             raise ValueError(
                 f"trusted frozen endpoint evidence drifted: {route}/{filename}"
             )
-        endpoint = load_xyz_like(path, template.cluster, name=f"{route}-{filename}")
+        endpoint = _trusted_xyz_snapshot(
+            path,
+            template.cluster,
+            name=f"{route}-{filename}",
+            expected_file_sha256=expected["file_sha256"],
+            expected_geometry_sha256=expected["geometry_sha256"],
+        )
         classification = classify_endpoint_basin(route, endpoint)
         if classification.basin != expected["basin"]:
             raise ValueError(
@@ -5330,21 +5783,24 @@ def _route_inventory(bundle_root: Path, manifest: dict[str, Any]) -> dict[str, A
         declared_canonical_hashes = manifest_route.get(
             "canonical_checkpoint_geometry_sha256"
         )
-        observed_geometry_hash = d2c_input_bundle.geometry_hash_xyz(
-            bundle_root / route / "ts.xyz"
-        )
+        declared_files = manifest_route.get("files")
+        expected_file_hash = TRUSTED_TRANSITION_STATE_FILE_SHA256[route]
         if (
             not isinstance(declared_canonical_hashes, dict)
             or declared_canonical_hashes.get("ts.xyz") != expected_geometry_hash
-            or observed_geometry_hash != expected_geometry_hash
+            or not isinstance(declared_files, dict)
+            or not isinstance(declared_files.get("ts.xyz"), dict)
+            or declared_files["ts.xyz"].get("sha256") != expected_file_hash
         ):
             raise ValueError(
                 f"canonical transition-state geometry/mapping identity drifted: {route}"
             )
-        transition_state = load_xyz_like(
+        transition_state = _trusted_xyz_snapshot(
             bundle_root / route / "ts.xyz",
             template.cluster,
             name=f"{route}-ts",
+            expected_file_sha256=expected_file_hash,
+            expected_geometry_sha256=expected_geometry_hash,
         )
         try:
             masses = [
@@ -5383,10 +5839,11 @@ def _route_inventory(bundle_root: Path, manifest: dict[str, Any]) -> dict[str, A
             "atom_identity_labels": list(atom_identity_labels),
             "atom_mapping_sha256": atom_mapping_sha256,
             "canonical_transition_state_geometry_sha256": expected_geometry_hash,
-            "masses_amu": masses,
-            "transition_state_sha256": d2c_input_bundle.sha256_path(
-                bundle_root / route / "ts.xyz"
+            "transition_state_geometry_fingerprint": (
+                frequency_geometry_fingerprint(transition_state)
             ),
+            "masses_amu": masses,
+            "transition_state_sha256": expected_file_hash,
             "frozen_endpoint_evidence": frozen_endpoint_evidence,
             "stages": _pending_stages(ROUTE_STAGE_CONTRACT),
         }
@@ -5408,6 +5865,9 @@ def _identity_route_inventory(routes: dict[str, Any]) -> dict[str, Any]:
             "canonical_transition_state_geometry_sha256": record[
                 "canonical_transition_state_geometry_sha256"
             ],
+            "transition_state_geometry_fingerprint": record[
+                "transition_state_geometry_fingerprint"
+            ],
             "masses_amu": record["masses_amu"],
             "transition_state_sha256": record["transition_state_sha256"],
             "frozen_endpoint_evidence": record["frozen_endpoint_evidence"],
@@ -5422,6 +5882,7 @@ def _current_code_dependency_identity() -> dict[str, Any]:
     return {
         "git_sha": _git_sha(Path(__file__).resolve().parents[2]),
         "dependencies": _dependency_versions(),
+        "executable_modules": _executable_module_manifest(),
         "python": platform.python_version(),
     }
 
@@ -5442,6 +5903,11 @@ def _validate_production_boundary(
         current.get("dependencies"),
         campaign["dependencies"],
         label="current dependency identity",
+    )
+    _strict_json_equal(
+        _validated_executable_module_manifest(current.get("executable_modules")),
+        _validated_executable_module_manifest(campaign["executable_modules"]),
+        label="current executable module identity",
     )
     _strict_json_equal(
         current.get("python"), campaign["python"], label="current Python version"
@@ -5533,12 +5999,13 @@ def create_preflight_receipt(
     *,
     git_sha: str | None = None,
     dependency_versions: dict[str, str] | None = None,
+    executable_module_manifest: dict[str, dict[str, Any]] | None = None,
     created_utc: str | None = None,
 ) -> dict[str, Any]:
     """Validate all immutable inputs and publish one pending campaign receipt.
 
-    ``git_sha`` and ``dependency_versions`` are injectable to keep unit tests free
-    of live Git and environment discovery.  Normal CLI use always resolves both.
+    Code/dependency identity inputs are injectable to keep unit tests free of live
+    Git and GPU discovery. Normal CLI use always resolves every identity input.
     No existing receipt or accepted/final result is deleted, reused, or overwritten.
     """
 
@@ -5573,6 +6040,11 @@ def create_preflight_receipt(
     if cuda_device_count < 1:
         raise ValueError("CUDA device count must be a positive integer")
     routes = _route_inventory(bundle_root, manifest)
+    modules = _validated_executable_module_manifest(
+        _executable_module_manifest()
+        if executable_module_manifest is None
+        else executable_module_manifest
+    )
 
     identity_payload = {
         "schema": SCHEMA,
@@ -5580,6 +6052,7 @@ def create_preflight_receipt(
         "git_sha": revision,
         "dft_settings": DFT_SETTINGS,
         "dependencies": dependencies,
+        "executable_modules": modules,
         "python": platform.python_version(),
         "mass_standard": "ground-state neutral isotopic masses",
         "reference_mass_amu": REFERENCE_MASS_AMU,
@@ -5590,6 +6063,9 @@ def create_preflight_receipt(
                 "atom_mapping_sha256": record["atom_mapping_sha256"],
                 "canonical_transition_state_geometry_sha256": record[
                     "canonical_transition_state_geometry_sha256"
+                ],
+                "transition_state_geometry_fingerprint": record[
+                    "transition_state_geometry_fingerprint"
                 ],
                 "masses_amu": record["masses_amu"],
                 "transition_state_sha256": record["transition_state_sha256"],
@@ -5644,6 +6120,7 @@ def main(
     *,
     git_sha: str | None = None,
     dependency_versions: dict[str, str] | None = None,
+    executable_module_manifest: dict[str, dict[str, Any]] | None = None,
 ) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true")
@@ -5667,6 +6144,7 @@ def main(
         args.run_root,
         git_sha=git_sha,
         dependency_versions=dependency_versions,
+        executable_module_manifest=executable_module_manifest,
     )
     print(
         json.dumps(

@@ -18,6 +18,63 @@ def _force(atom_count: int, fmax: float) -> np.ndarray:
     return forces
 
 
+def _exact_sella_pes_caches(x0, *, energy=-10.0, frozen_indices=()):
+    dimension = len(x0)
+    constrained = [
+        3 * atom_index + axis for atom_index in frozen_indices for axis in range(3)
+    ]
+    free = [index for index in range(dimension) if index not in constrained]
+    identity = np.eye(dimension)
+    current = {
+        "L": np.zeros(len(constrained)),
+        "Ucons": identity[:, constrained],
+        "Ufree": identity[:, free],
+        "Unred": identity,
+        "drdx": identity[constrained],
+        "f": float(energy),
+        "g": np.zeros(dimension),
+        "state_hash": np.asarray(x0, dtype=float).tobytes(),
+        "x": np.asarray(x0, dtype=float).copy(),
+    }
+    return current, {"f": None, "g": None, "x": None}
+
+
+def _valid_initialization_state():
+    import quarry.ts as ts_module
+
+    transition_state = water()
+    masses = np.array([15.99, 1.01, 1.02])
+    dimension = transition_state.coords.size
+    contract = ts_module.IrcExecutionContract(
+        algorithm="sella-gonzalez-schlegel",
+        step_size_angstrom=0.1,
+        maximum_steps=7,
+        outer_fmax_ev_per_angstrom=0.05,
+        inner_fmax_ev_per_angstrom=0.01,
+    )
+    x0 = transition_state.coords.reshape(-1).copy()
+    return ts_module.SellaIrcInitializationState(
+        symbols=tuple(transition_state.symbols),
+        charge=transition_state.charge,
+        spin=transition_state.spin,
+        frozen_indices=(),
+        settings_fingerprint=hashlib.sha256(
+            ts_module.frequency_settings_fingerprint(CHEAP).encode()
+        ).hexdigest(),
+        execution_contract=contract,
+        x0=x0,
+        masses_amu=masses,
+        h0=np.diag(np.arange(1, dimension + 1, dtype=float)),
+        v0ts=(
+            np.eye(1, dimension, 0).reshape(-1)
+            * contract.step_size_angstrom
+            / np.sqrt(masses[0])
+        ),
+        pes_current=_exact_sella_pes_caches(x0)[0],
+        pes_last=_exact_sella_pes_caches(x0)[1],
+    )
+
+
 def _install_fake_irc(monkeypatch, routes):
     import sella
 
@@ -49,6 +106,26 @@ def _install_fake_irc(monkeypatch, routes):
             assert initialized is True
             self.optimizer.restored_hessian = np.asarray(target).copy()
 
+        def _calc_basis(self):
+            current, _ = _exact_sella_pes_caches(
+                self.optimizer.x0,
+                energy=self.curr["f"],
+                frozen_indices=self.optimizer.frozen_indices,
+            )
+            return tuple(current[key] for key in ("drdx", "Ucons", "Unred", "Ufree"))
+
+        def _update_basis(self, basis):
+            drdx, ucons, unred, ufree = basis
+            self.curr.update(
+                {
+                    "L": np.zeros(drdx.shape[0]),
+                    "Ucons": ucons,
+                    "Ufree": ufree,
+                    "Unred": unred,
+                    "drdx": drdx,
+                }
+            )
+
     class FakeIRC:
         def __init__(self, atoms, **kwargs):
             assert "masses" in atoms.arrays
@@ -66,6 +143,11 @@ def _install_fake_irc(monkeypatch, routes):
             self.H0 = None
             self.pescurr = None
             self.peslast = None
+            self.frozen_indices = tuple(
+                index
+                for constraint in atoms.constraints
+                for index in getattr(constraint, "index", ())
+            )
             self.restored_hessian = None
             self.terminal_convergence_calls = 0
             instances.append(self)
@@ -83,14 +165,10 @@ def _install_fake_irc(monkeypatch, routes):
                 dimension = atom_count * 3
                 self.H0 = np.diag(np.arange(1, dimension + 1, dtype=float))
                 self.v0ts = np.zeros(dimension)
-                self.v0ts[0] = 0.1
-                self.pescurr = {
-                    "x": self.x0.copy(),
-                    "f": -10.0,
-                    "g": np.zeros(dimension),
-                    "state_hash": self.atoms.positions.tobytes(),
-                }
-                self.peslast = {"x": None, "f": None, "g": None}
+                self.v0ts[0] = self.kwargs["dx"] / np.sqrt(self.atoms.get_masses()[0])
+                self.pescurr, self.peslast = _exact_sella_pes_caches(
+                    self.x0, frozen_indices=self.frozen_indices
+                )
             else:
                 # Match Sella 2.5's new-direction branch: a restored v0ts must
                 # bypass the TS kick/diagonalization and reinstall the exact
@@ -333,10 +411,14 @@ def test_restore_installs_checkpoint_before_fresh_real_sella_irc_has_pes_caches(
         execution_contract=contract,
         x0=x0,
         masses_amu=masses,
-        h0=np.eye(dimension),
-        v0ts=np.eye(1, dimension, 0).reshape(-1),
-        pes_current={"x": x0, "f": -1.0, "g": np.zeros(dimension)},
-        pes_last={"x": None, "f": None, "g": None},
+        h0=np.diag(np.arange(1, dimension + 1, dtype=float)),
+        v0ts=(
+            np.eye(1, dimension, 0).reshape(-1)
+            * contract.step_size_angstrom
+            / np.sqrt(masses[0])
+        ),
+        pes_current=_exact_sella_pes_caches(x0, energy=-1.0)[0],
+        pes_last=_exact_sella_pes_caches(x0, energy=-1.0)[1],
     )
     atoms = Atoms(symbols=transition_state.symbols, positions=transition_state.coords)
     atoms.set_masses(masses)
@@ -368,6 +450,112 @@ def test_restore_installs_checkpoint_before_fresh_real_sella_irc_has_pes_caches(
     expected_pes_x = state.pes_current["x"]
     assert isinstance(expected_pes_x, np.ndarray)
     assert np.array_equal(irc.pes.curr["x"], expected_pes_x)
+
+
+@pytest.mark.parametrize(
+    ("corruption", "match"),
+    [
+        ("extra-key", "exact Sella 2.5 cache fields"),
+        ("x-drift", "x does not equal"),
+        ("state-hash-drift", "state_hash does not equal"),
+        ("nonpristine-last", "pristine previous"),
+    ],
+)
+def test_sella_restart_rejects_adversarial_cache_schema(corruption, match):
+    state = _valid_initialization_state()
+    current = dict(state.pes_current)
+    previous = dict(state.pes_last)
+    if corruption == "extra-key":
+        current["attacker"] = np.zeros(1)
+    elif corruption == "x-drift":
+        current["x"] = np.asarray(current["x"]).copy()
+        current["x"][0] += 1.0e-3
+    elif corruption == "state-hash-drift":
+        current["state_hash"] = b"0" * len(state.x0.tobytes())
+    else:
+        previous["f"] = -1.0
+    with pytest.raises(RuntimeError, match=match):
+        replace(state, pes_current=current, pes_last=previous)
+
+
+@pytest.mark.parametrize(
+    ("corruption", "match"),
+    [
+        ("shape", "array shape"),
+        ("byte-total", "byte total"),
+        ("too-many-atoms", "atom inventory"),
+    ],
+)
+def test_sella_restart_payload_is_strictly_bounded(corruption, match):
+    import quarry.ts as ts_module
+
+    payload = ts_module._sella_irc_initialization_payload(_valid_initialization_state())
+    if corruption == "shape":
+        payload["pes_current"]["g"]["shape"] = [10]
+    elif corruption == "byte-total":
+        payload["pes_current"]["g"]["byte_count"] += 8
+    else:
+        payload["symbols"] = ["H"] * (ts_module._MAX_SELLA_RESTART_ATOMS + 1)
+    with pytest.raises(ValueError, match=match):
+        ts_module._sella_irc_initialization_from_payload(payload)
+
+
+@pytest.mark.parametrize(
+    ("v0ts", "match"),
+    [
+        ("wrong-norm", "norm does not match IRC dx"),
+        ("wrong-mode", "lowest mass-weighted H0 eigendirection"),
+        ("wrong-sign", "sign convention"),
+    ],
+)
+def test_sella_restart_binds_mass_weighted_kick_to_hessian_masses_and_dx(v0ts, match):
+    state = _valid_initialization_state()
+    kick = np.zeros_like(state.v0ts)
+    if v0ts == "wrong-norm":
+        kick[0] = (
+            2.0
+            * state.execution_contract.step_size_angstrom
+            / np.sqrt(state.masses_amu[0])
+        )
+    elif v0ts == "wrong-mode":
+        kick[3] = state.execution_contract.step_size_angstrom / np.sqrt(
+            state.masses_amu[1]
+        )
+    else:
+        kick[0] = -state.execution_contract.step_size_angstrom / np.sqrt(
+            state.masses_amu[0]
+        )
+    with pytest.raises(ValueError, match=match):
+        replace(state, v0ts=kick)
+
+
+def test_sella_restore_reconstructs_and_rejects_derived_cache_drift():
+    from ase import Atoms
+    from ase.calculators.lj import LennardJones
+    from sella import IRC
+
+    import quarry.ts as ts_module
+
+    state = _valid_initialization_state()
+    corrupted = dict(state.pes_current)
+    corrupted["Ufree"] = np.asarray(corrupted["Ufree"]).copy()
+    corrupted["Ufree"][0, 0] = 0.5
+    state = replace(state, pes_current=corrupted)
+    transition_state = water()
+    atoms = Atoms(symbols=transition_state.symbols, positions=transition_state.coords)
+    atoms.set_masses(state.masses_amu)
+    atoms.calc = LennardJones()
+    irc = IRC(atoms, logfile=None, dx=state.execution_contract.step_size_angstrom)
+
+    with pytest.raises(ValueError, match="Ufree does not match reconstruction"):
+        ts_module._restore_sella_irc_initialization(
+            irc,
+            state,
+            transition_state,
+            CHEAP,
+            state.masses_amu,
+            state.execution_contract,
+        )
 
 
 def test_path_adapter_resume_fails_closed_without_exact_shared_initialization(
