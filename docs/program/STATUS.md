@@ -4,6 +4,8 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-08 01:36 PDT — (hermes-custom-build-001; profile=workstation) — D2c ACTIVE/SCIPY REGISTRY ATTESTATION: the live preflight exposed SciPy's source-declared empty integrator registry being populated with local classes during verified module execution. Attestation now binds only unique same-module source-declared class identities and rejects foreign injection; the sabotage regression fails without it, and all 182 D2c tests plus focused Ruff/format/diff pass. No calculator ran.
+
 - 2026-09-08 01:30 PDT — (hermes-custom-build-001; profile=workstation) — D2c ACTIVE/PREFLIGHT CAPTURE: the corrected preflight now captures modules imported by GPU dependency discovery before preimporting and attesting the complete executable inventory. The new sabotage regression fails without that scope; all 181 D2c tests plus focused Ruff/format/diff pass. No calculator ran; the live receipt remains pending the corrected pushed head.
 
 - 2026-09-08 01:26 PDT — (hermes-custom-build-001; profile=workstation) — D2c ACTIVE/PREFLIGHT FIX: the live GPU-environment dry preflight exposed an import-order false refusal (`scipy._lib._util` loaded lazily after capture). The manifest now preimports every declared executable module before attestation; the regression fails against the old ordering and all 180 D2c tests plus focused Ruff/format/diff pass. No calculator or scientific result ran; receipt generation follows from the corrected pushed head.

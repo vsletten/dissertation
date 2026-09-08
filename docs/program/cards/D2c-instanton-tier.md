@@ -198,3 +198,12 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   attestation. A second regression demonstrably fails without this capture scope; all
   181 D2c tests and focused Ruff/format/diff gates pass. No calculator ran; the next
   live dry preflight is pinned to the corrected pushed head.
+- 2026-09-08 01:36 PDT (hermes-custom-build-001; profile=workstation) —
+  SCIPY REGISTRY ATTESTATION CLOSED: the next live preflight reached source/runtime
+  state comparison and found SciPy's `IntegratorBase.integrator_classes` is declared
+  as an empty list then populated during the same verified module execution. The
+  attestor now permits only a unique ordered registry of classes declared in that
+  exact source module, binds their qualified identities, and still rejects any
+  injected foreign class. The sabotage regression fails without the rule; all 182
+  D2c tests plus focused Ruff/format/diff pass. No calculator ran; receipt generation
+  remains pinned to the next corrected pushed head.

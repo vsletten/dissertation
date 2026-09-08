@@ -5818,6 +5818,9 @@ def _loaded_literal_state_identity(module: Any, module_name: str, raw: bytes) ->
             f"Python executable module source cannot be parsed: {module_name}"
         ) from exc
     records: list[tuple[str, Any]] = []
+    declared_top_level_classes = {
+        node.name for node in tree.body if isinstance(node, ast.ClassDef)
+    }
     unsupported = object()
 
     def state_mismatch(label: str) -> RuntimeError:
@@ -5841,6 +5844,29 @@ def _loaded_literal_state_identity(module: Any, module_name: str, raw: bytes) ->
         return value
 
     def require_equal(label: str, expected: Any, observed: Any) -> None:
+        if expected == [] and type(observed) is list and observed:
+            class_names = [
+                getattr(item, "__qualname__", None)
+                for item in observed
+                if inspect.isclass(item)
+                and getattr(item, "__module__", None) == module_name
+            ]
+            if (
+                len(class_names) == len(observed)
+                and len(set(class_names)) == len(class_names)
+                and set(class_names) <= declared_top_level_classes
+            ):
+                records.append(
+                    (
+                        label,
+                        {
+                            "runtime-local-class-registry": [
+                                f"{module_name}.{name}" for name in class_names
+                            ]
+                        },
+                    )
+                )
+                return
         expected_payload = _literal_state_payload(expected)
         try:
             observed_payload = _literal_state_payload(observed)

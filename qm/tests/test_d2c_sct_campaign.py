@@ -4021,6 +4021,43 @@ def test_preflight_captures_modules_loaded_by_dependency_inventory(
         sys.modules.pop(module_name, None)
 
 
+def test_manifest_attests_source_populated_local_class_registry(
+    monkeypatch, tmp_path: Path
+):
+    module_name = "d2c_local_class_registry_fixture"
+    source = tmp_path / f"{module_name}.py"
+    source.write_text(
+        "class Base:\n"
+        "    registry = []\n"
+        "    def __init_subclass__(cls):\n"
+        "        Base.registry.append(cls)\n"
+        "class First(Base):\n"
+        "    pass\n"
+        "class Second(Base):\n"
+        "    pass\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(campaign.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(campaign, "EXECUTABLE_MODULES", {module_name: "third-party"})
+    imported = campaign._import_executable_module(module_name)
+
+    class Foreign:
+        pass
+
+    try:
+        manifest = campaign._executable_module_manifest()
+        assert manifest[module_name]["execution_identity"]["loaded_state_sha256"]
+        imported.Base.registry.append(Foreign)
+        with pytest.raises(
+            RuntimeError,
+            match=r"loaded Python module state disagrees with source: .*registry",
+        ):
+            campaign._executable_module_manifest()
+    finally:
+        campaign._OBSERVED_MODULE_CODE.pop(module_name, None)
+        sys.modules.pop(module_name, None)
+
+
 def test_manifest_fails_closed_for_python_module_loaded_before_execution_capture(
     monkeypatch, tmp_path: Path
 ):
