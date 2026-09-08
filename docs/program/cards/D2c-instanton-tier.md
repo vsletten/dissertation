@@ -149,3 +149,21 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   pending current-environment/trusted-endpoint rebinding, non-injectable native-Hessian
   provenance, and durable mid-IRC restart; no production calculator, literature
   benchmark, D2b gate flip, or D3b table ran.
+- 2026-09-07 19:40 PDT (hermes-custom-build-001; profile=workstation) —
+  PRODUCTION RESTART HARDENING CHECKPOINT, QUALITY-REVIEW RED: exact pushed head
+  `db7aa17c47a5ec740d57376eec50a0bfd2abb9d1` rebinds code/dependency and trusted
+  frozen-endpoint identity at public production/resume boundaries, makes native TS/IRC/
+  path-Hessian backends internal-only, removes public failure-injection seams, and adds
+  atomic partial/full IRC restart receipts bound to one serialized Sella TS initialization.
+  Missing, corrupt, replaced, or divergent initialization/direction evidence now fails
+  closed before computation or overwrite; a valid restart avoids a second TS
+  diagonalization. Independent spec review passed after three correction rounds, and
+  whole-QM verification is `1031 passed, 1 skipped` with Ruff/format/diff clean. Final
+  code-quality review still prohibits production until the next continuation: define a
+  strict bounded PES-cache schema (or reconstruct caches), bind/validate the mass-weighted
+  kick against H0/masses/dx, load immutable trusted TS/endpoints without a validation/load
+  race and compare resumed qualification fingerprints, compare restart directions with
+  final canonical IRC directions in the shared validator, bind executable imported-module
+  origins/hashes rather than package versions alone, and hold the route claim across native
+  TS Hessian evaluation/publication. No production calculator, literature benchmark,
+  D2b gate flip, D3b table, or PR exists.
