@@ -169,6 +169,17 @@ def _bind_trace_initialization(
     )
 
 
+def _checkpointing_trace_runner(transition_state: Cluster, trace: SellaIrcTrace):
+    initialization = _sella_initialization_state(transition_state, trace)
+    bound_trace = _bind_trace_initialization(trace, initialization)
+
+    def runner(*_args, _initialization_callback, **_kwargs):
+        _initialization_callback(initialization)
+        return bound_trace
+
+    return bound_trace, runner
+
+
 def _preflight(run_root: Path, bundle_root: Path = BUNDLE_ROOT) -> dict:
     return campaign.create_preflight_receipt(
         bundle_root,
@@ -1611,10 +1622,11 @@ def _authoritative_ancestry(
     route: str = "h-co-1w-cside",
 ):
     preflight, transition_state, trace = _qualified_ancestry(run_root, route=route)
+    trace, runner = _checkpointing_trace_runner(transition_state, trace)
     campaign._run_and_publish_irc(
         run_root,
         route=route,
-        _runner=lambda *_args, **_kwargs: trace,
+        _runner=runner,
     )
     return preflight, transition_state, trace
 
@@ -1656,10 +1668,13 @@ def _rewrite_direction_receipt(
 def test_bound_irc_runner_receives_every_exact_campaign_argument(tmp_path: Path):
     run_root = tmp_path / "run"
     _, transition_state, trace = _qualified_ancestry(run_root)
+    initialization = _sella_initialization_state(transition_state, trace)
+    trace = _bind_trace_initialization(trace, initialization)
     calls = []
 
     def spy(ts, settings, **kwargs):
         calls.append((ts, settings, kwargs))
+        kwargs["_initialization_callback"](initialization)
         return trace
 
     published = campaign._run_and_publish_irc(
@@ -1741,12 +1756,15 @@ def test_bound_irc_runner_rejects_wrong_observed_arguments_before_publication(
 
 def test_irc_direction_crash_resumes_without_runner_or_overwrite(tmp_path: Path):
     run_root = tmp_path / "run"
-    _, _, trace = _qualified_ancestry(run_root)
+    _, transition_state, trace = _qualified_ancestry(run_root)
+    initialization = _sella_initialization_state(transition_state, trace)
+    trace = _bind_trace_initialization(trace, initialization)
     runner_calls = 0
 
-    def runner(*_args, **_kwargs):
+    def runner(*_args, _initialization_callback, **_kwargs):
         nonlocal runner_calls
         runner_calls += 1
+        _initialization_callback(initialization)
         return trace
 
     def fail_after_forward(stage: str) -> None:
@@ -1780,7 +1798,8 @@ def test_irc_direction_crash_resumes_without_runner_or_overwrite(tmp_path: Path)
 def test_irc_final_validation_rejects_shared_execution_race(tmp_path: Path, race: str):
     route = "h-co-1w-cside"
     run_root = tmp_path / race
-    _, _, trace = _qualified_ancestry(run_root, route=route)
+    _, transition_state, trace = _qualified_ancestry(run_root, route=route)
+    trace, runner = _checkpointing_trace_runner(transition_state, trace)
     execution_path = run_root / route / "irc-execution" / "receipt.json"
     replacement_raw = None
 
@@ -1802,7 +1821,7 @@ def test_irc_final_validation_rejects_shared_execution_race(tmp_path: Path, race
         campaign._run_and_publish_irc(
             run_root,
             route=route,
-            _runner=lambda *_args, **_kwargs: trace,
+            _runner=runner,
             _failure_injector=race_after_reverse,
         )
 
@@ -3069,6 +3088,123 @@ def test_mid_irc_crash_checkpoints_completed_direction_and_resume_skips_it(
 
 
 @pytest.mark.parametrize(
+    ("corruption", "match"),
+    [
+        ("deleted", "lacks shared Sella initialization"),
+        ("tampered", "Sella H0 array hash mismatch"),
+        ("replaced-ancestry", "initialization TS geometry does not match"),
+        ("replaced-environment", "identity does not match qualified TS"),
+        ("replaced-contract", "initialization execution contract drifted"),
+    ],
+)
+def test_complete_irc_resume_rejects_invalid_shared_initialization_before_backend(
+    monkeypatch, tmp_path: Path, corruption: str, match: str
+):
+    route = "h-co-1w-cside"
+    run_root = tmp_path / corruption
+    _, transition_state, trace = _qualified_ancestry(run_root, route=route)
+    initialization = _sella_initialization_state(transition_state, trace)
+    trace = _bind_trace_initialization(trace, initialization)
+
+    def checkpointing_runner(*_args, _initialization_callback, **_kwargs):
+        _initialization_callback(initialization)
+        return trace
+
+    published = campaign._run_and_publish_irc(
+        run_root,
+        route=route,
+        _runner=checkpointing_runner,
+    )
+    route_root = run_root / route
+    initialization_root = route_root / "irc-restart" / "initialization"
+    initialization_path = initialization_root / "receipt.json"
+
+    if corruption == "deleted":
+        shutil.rmtree(initialization_root)
+        corrupted_initialization = None
+    elif corruption == "tampered":
+
+        def tamper_hessian(receipt):
+            receipt["initialization_state"]["H0"]["values"][0] += 1.0
+
+        _rewrite_canonical_json(initialization_path, tamper_hessian)
+        corrupted_initialization = initialization_path.read_bytes()
+    else:
+        if corruption == "replaced-ancestry":
+            replacement_x0 = initialization.x0.copy()
+            replacement_x0[0] += 0.01
+            replacement = replace(initialization, x0=replacement_x0)
+        elif corruption == "replaced-environment":
+            replacement = replace(initialization, settings_fingerprint="f" * 64)
+        else:
+            replacement = replace(
+                initialization,
+                execution_contract=replace(
+                    initialization.execution_contract,
+                    maximum_steps=initialization.execution_contract.maximum_steps + 1,
+                ),
+            )
+        initialization_receipt = json.loads(initialization_path.read_text())
+        initialization_receipt["initialization_fingerprint"] = replacement.fingerprint
+        initialization_receipt["initialization_state"] = (
+            campaign.quarry_ts._sella_irc_initialization_payload(replacement)
+        )
+        initialization_path.write_bytes(campaign._json_bytes(initialization_receipt))
+        for name in ("forward", "reverse"):
+            _rewrite_canonical_json(
+                route_root / "irc-restart" / name / "receipt.json",
+                lambda receipt: receipt.__setitem__(
+                    "initialization_fingerprint", replacement.fingerprint
+                ),
+            )
+            _rewrite_canonical_json(
+                route_root / f"irc-{name}" / "receipt.json",
+                lambda receipt: receipt.__setitem__(
+                    "initialization_fingerprint", replacement.fingerprint
+                ),
+            )
+
+        def replace_execution_initialization(receipt):
+            receipt["initialization_fingerprint"] = replacement.fingerprint
+            for direction in receipt["direction_receipts"].values():
+                direction["initialization_fingerprint"] = replacement.fingerprint
+
+        _rewrite_canonical_json(
+            published.execution_receipt_path,
+            replace_execution_initialization,
+        )
+        corrupted_initialization = initialization_path.read_bytes()
+
+    protected = {
+        path: path.read_bytes() for path in route_root.rglob("*") if path.is_file()
+    }
+    backend_calls = []
+
+    def reject_runner(*_args, **_kwargs):
+        backend_calls.append("runner")
+        pytest.fail("invalid completed initialization reached IRC runner")
+
+    def reject_calculator(*_args, **_kwargs):
+        backend_calls.append("calculator")
+        pytest.fail("invalid completed initialization reached calculator")
+
+    monkeypatch.setattr(campaign.quarry_ts, "_trace_sella_irc_resume", reject_runner)
+    monkeypatch.setattr(campaign.quarry_ts, "make_ase_calculator", reject_calculator)
+
+    with pytest.raises(ValueError, match=match):
+        campaign.run_and_publish_irc(run_root, route=route)
+
+    assert backend_calls == []
+    assert {
+        path: path.read_bytes() for path in route_root.rglob("*") if path.is_file()
+    } == protected
+    if corrupted_initialization is None:
+        assert not initialization_root.exists()
+    else:
+        assert initialization_path.read_bytes() == corrupted_initialization
+
+
+@pytest.mark.parametrize(
     "corruption", ["mixed-run", "tampered-initialization", "unexpected-artifact"]
 )
 def test_irc_restart_rejects_corrupt_checkpoint_before_recompute(
@@ -3222,7 +3358,8 @@ def test_irc_restart_validates_completed_direction_before_checkpoint(tmp_path: P
 
 def test_irc_restart_recovers_owned_interrupted_root_publication(tmp_path: Path):
     run_root = tmp_path / "run"
-    _, _, trace = _qualified_ancestry(run_root)
+    _, transition_state, trace = _qualified_ancestry(run_root)
+    _, runner = _checkpointing_trace_runner(transition_state, trace)
     route_root = run_root / "h-co-1w-cside"
     stale = route_root / ".irc-restart.123.456.tmp"
     stale.mkdir()
@@ -3231,7 +3368,7 @@ def test_irc_restart_recovers_owned_interrupted_root_publication(tmp_path: Path)
     campaign._run_and_publish_irc(
         run_root,
         route="h-co-1w-cside",
-        _runner=lambda *_args, **_kwargs: trace,
+        _runner=runner,
     )
 
     assert not stale.exists()

@@ -2437,9 +2437,24 @@ def _direction_from_irc_receipt(
 def _validate_canonical_irc_receipts(
     ancestry: _CanonicalQualificationAncestry,
 ) -> tuple[SellaIrcTrace, dict[str, str], str]:
+    (
+        _,
+        restart_contract,
+        restart_run_identity,
+        initialization,
+        completed,
+    ) = _load_irc_restart(ancestry)
     execution_receipt, execution_raw, trace, run_identity = _load_irc_execution_receipt(
         ancestry
     )
+    if (
+        initialization is None
+        or restart_contract != trace.execution_contract
+        or restart_run_identity != run_identity
+        or set(completed) != {"forward", "reverse"}
+        or initialization.fingerprint != trace.initialization_fingerprint
+    ):
+        raise ValueError("canonical IRC execution and restart checkpoints disagree")
     hashes = {
         "execution": hashlib.sha256(execution_raw).hexdigest(),
     }
@@ -2678,6 +2693,35 @@ def _irc_initialization_receipt_payload(
 ) -> dict[str, Any]:
     if state.execution_contract != contract:
         raise ValueError("Sella initialization execution contract drifted")
+    transition_state = ancestry.qualified_transition_state
+    _, settings_fingerprint = _canonical_dft_settings(ancestry.preflight)
+    expected_identity = (
+        tuple(transition_state.symbols),
+        transition_state.charge,
+        transition_state.spin,
+        tuple(sorted(transition_state.frozen_indices)),
+        hashlib.sha256(settings_fingerprint.encode()).hexdigest(),
+    )
+    observed_identity = (
+        state.symbols,
+        state.charge,
+        state.spin,
+        state.frozen_indices,
+        state.settings_fingerprint,
+    )
+    if observed_identity != expected_identity:
+        raise ValueError(
+            "IRC shared initialization identity does not match qualified TS"
+        )
+    expected_x0 = np.ascontiguousarray(transition_state.coords, dtype=float).reshape(-1)
+    if not np.array_equal(state.x0, expected_x0):
+        raise ValueError("IRC shared initialization TS geometry does not match")
+    expected_masses = np.asarray(
+        [ISOTOPIC_MASSES_AMU[symbol] for symbol in transition_state.symbols],
+        dtype=float,
+    )
+    if not np.array_equal(state.masses_amu, expected_masses):
+        raise ValueError("IRC shared initialization masses do not match qualified TS")
     return {
         "schema": "d2c-irc-initialization-v1",
         "stage": "irc_shared_sella_initialization",
@@ -2831,12 +2875,8 @@ def _load_irc_restart(
         completed[name] = direction
     if set(completed) == {"reverse"}:
         raise ValueError("IRC restart checkpoints violate direction completion order")
-    if (
-        completed
-        and set(completed) != {"forward", "reverse"}
-        and initialization is None
-    ):
-        raise ValueError("partial IRC restart lacks shared Sella initialization state")
+    if completed and initialization is None:
+        raise ValueError("IRC restart lacks shared Sella initialization state")
     return restart_root, contract, run_identity, initialization, completed
 
 
@@ -2930,16 +2970,22 @@ def _run_and_publish_irc(
                 allowed_files={"receipt.json"},
             )
         if execution_root.exists() or execution_root.is_symlink():
+            (
+                _,
+                restart_contract,
+                restart_identity,
+                initialization_state,
+                completed,
+            ) = _load_irc_restart(ancestry)
             execution_receipt, execution_raw, trace, run_identity = (
                 _load_irc_execution_receipt(ancestry)
             )
-            _, restart_contract, restart_identity, _, completed = _load_irc_restart(
-                ancestry
-            )
             if (
-                restart_identity != run_identity
+                initialization_state is None
+                or restart_identity != run_identity
                 or restart_contract != trace.execution_contract
                 or set(completed) != {"forward", "reverse"}
+                or initialization_state.fingerprint != trace.initialization_fingerprint
             ):
                 raise ValueError(
                     "canonical IRC execution and restart checkpoints disagree"
@@ -3133,11 +3179,20 @@ def _run_and_publish_irc(
                     ancestry.transition_state_vibrational_basis,
                 )
                 checkpoint_direction(direction)
-            _, _, checkpoint_identity, _, completed = _load_irc_restart(ancestry)
-            if checkpoint_identity != run_identity or set(completed) != {
-                "forward",
-                "reverse",
-            }:
+            (
+                _,
+                _,
+                checkpoint_identity,
+                checkpoint_initialization,
+                completed,
+            ) = _load_irc_restart(ancestry)
+            if (
+                checkpoint_initialization is None
+                or checkpoint_identity != run_identity
+                or set(completed) != {"forward", "reverse"}
+                or checkpoint_initialization.fingerprint
+                != trace.initialization_fingerprint
+            ):
                 raise ValueError("IRC restart checkpoints are incomplete")
             for direction in trace.directions:
                 checkpointed = completed[direction.sella_direction]
@@ -3184,7 +3239,7 @@ def _run_and_publish_irc(
                 masses_amu=masses,
                 directions=(completed["forward"], completed["reverse"]),
                 execution_contract=checkpoint_contract,
-                initialization_fingerprint=trace.initialization_fingerprint,
+                initialization_fingerprint=checkpoint_initialization.fingerprint,
             )
             execution_receipt = _irc_execution_receipt_payload(
                 ancestry, canonical_trace, run_identity
