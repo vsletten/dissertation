@@ -35,12 +35,13 @@ import time
 import types
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext, suppress
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
 _THIS_MODULE_IMPORT_CODE = sys._getframe().f_code
-_OBSERVED_MODULE_CODE: dict[str, types.CodeType] = {}
+_OBSERVED_MODULE_CODE: dict[str, types.CodeType] = dict()
 _PREVIOUS_IMPORT_PROFILE = sys.getprofile()
 
 
@@ -149,6 +150,8 @@ DEPENDENCY_VERSION_KEYS = frozenset(
 _TRUSTED_XYZ_MAXIMUM_BYTES = 64 * 1024
 _MODULE_FILE_MAXIMUM_BYTES = 64 * 1024 * 1024
 _NATIVE_PAYLOAD_MAXIMUM_BYTES = 2 * 1024 * 1024 * 1024
+_LITERAL_STATE_MAXIMUM_DEPTH = 64
+_LITERAL_STATE_MAXIMUM_ITEMS = 100_000
 REQUIRED_NATIVE_PAYLOAD_BASENAMES = frozenset(
     {
         "libao2mo.so",
@@ -1077,30 +1080,94 @@ def _renameat2_noreplace(source: Path, destination: Path) -> None:
     raise OSError(error_number, os.strerror(error_number), str(destination))
 
 
+@dataclass(frozen=True)
+class _ClaimPublication:
+    path: Path
+    identity: tuple[int, int]
+    expected_hashes: dict[str, str] | None = None
+    expected_sha256: str | None = None
+
+
+_ACTIVE_ROUTE_PUBLICATIONS: ContextVar[list[_ClaimPublication] | None] = ContextVar(
+    "d2c_active_route_publications", default=None
+)
+
+
+def _pending_claim_publication(
+    source: Path, *, source_is_directory: bool
+) -> _ClaimPublication | None:
+    """Snapshot a new output only when a route claim must be able to revoke it."""
+
+    if _ACTIVE_ROUTE_PUBLICATIONS.get() is None:
+        return None
+    status = source.stat(follow_symlinks=False)
+    identity = (status.st_dev, status.st_ino)
+    if source_is_directory:
+        if source.is_symlink() or not source.is_dir():
+            raise ValueError("directory publication source must be a real directory")
+        expected_hashes: dict[str, str] = {}
+        for child in source.iterdir():
+            if child.is_symlink() or not child.is_file():
+                raise ValueError(
+                    "claimed directory publication must contain regular files"
+                )
+            expected_hashes[child.name] = hashlib.sha256(child.read_bytes()).hexdigest()
+        return _ClaimPublication(
+            path=source,
+            identity=identity,
+            expected_hashes=expected_hashes,
+        )
+    if source.is_symlink() or not source.is_file():
+        raise ValueError("file publication source must be a regular file")
+    return _ClaimPublication(
+        path=source,
+        identity=identity,
+        expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+    )
+
+
+def _register_claim_publication(
+    destination: Path, pending: _ClaimPublication | None
+) -> None:
+    if pending is None:
+        return
+    publications = _ACTIVE_ROUTE_PUBLICATIONS.get()
+    if publications is None:
+        raise RuntimeError("route publication escaped its active claim")
+    directory = pending.expected_hashes is not None
+    if not _same_file_identity(destination, pending.identity, directory=directory):
+        raise RuntimeError("new route publication identity changed before registration")
+    publications.append(replace(pending, path=destination))
+
+
 def _publish_noreplace(
     source: Path, destination: Path, *, source_is_directory: bool
 ) -> None:
     """Publish at one no-clobber boundary, failing closed for directories."""
 
+    pending = _pending_claim_publication(
+        source, source_is_directory=source_is_directory
+    )
     try:
         _renameat2_noreplace(source, destination)
-        return
     except NotImplementedError:
         if source_is_directory:
             raise RuntimeError(
                 "atomic directory publication requires renameat2(RENAME_NOREPLACE)"
             ) from None
-    if source.is_symlink() or not source.is_file():
-        raise ValueError("file publication source must be a regular file")
-    try:
-        os.link(source, destination, follow_symlinks=False)
-    except FileExistsError:
-        raise
-    except OSError as exc:
-        raise RuntimeError(
-            "atomic file publication requires renameat2 or same-filesystem hard links"
-        ) from exc
-    source.unlink()
+        if source.is_symlink() or not source.is_file():
+            raise ValueError("file publication source must be a regular file") from None
+        try:
+            os.link(source, destination, follow_symlinks=False)
+        except FileExistsError:
+            raise
+        except OSError as exc:
+            raise RuntimeError(
+                "atomic file publication requires renameat2 or "
+                "same-filesystem hard links"
+            ) from exc
+        source.unlink()
+    _register_claim_publication(destination, pending)
 
 
 def _same_file_identity(
@@ -1192,6 +1259,25 @@ def _safe_remove_owned_file(
     quarantine.unlink()
     _fsync_directory(path.parent)
     return True
+
+
+def _revoke_claim_publications(publications: list[_ClaimPublication]) -> None:
+    """Remove exact outputs from a failed claim through its pinned route path."""
+
+    for publication in reversed(publications):
+        with suppress(OSError, RuntimeError, ValueError):
+            if publication.expected_hashes is not None:
+                _safe_remove_owned_directory(
+                    publication.path,
+                    publication.identity,
+                    publication.expected_hashes,
+                )
+            elif publication.expected_sha256 is not None:
+                _safe_remove_owned_file(
+                    publication.path,
+                    publication.identity,
+                    publication.expected_sha256,
+                )
 
 
 def _remove_owned_temporary_directories(
@@ -1327,6 +1413,8 @@ def _exclusive_route_claim(route_root: Path) -> Iterator[Path]:
     lock_descriptor = -1
     locked = False
     claim_sockets: list[socket.socket] = []
+    publications: list[_ClaimPublication] = []
+    publication_token = _ACTIVE_ROUTE_PUBLICATIONS.set(publications)
     try:
         parent_status = os.fstat(parent_descriptor)
         lexical_identity = os.path.normpath(os.path.abspath(os.fspath(route_root)))
@@ -1387,14 +1475,19 @@ def _exclusive_route_claim(route_root: Path) -> Iterator[Path]:
         try:
             yield pinned_root
         finally:
-            _validate_pinned_route(
-                parent_path,
-                route_name,
-                parent_descriptor,
-                route_descriptor,
-            )
-            _validate_pinned_route_lock(route_descriptor, lock_descriptor)
+            try:
+                _validate_pinned_route(
+                    parent_path,
+                    route_name,
+                    parent_descriptor,
+                    route_descriptor,
+                )
+                _validate_pinned_route_lock(route_descriptor, lock_descriptor)
+            except BaseException:
+                _revoke_claim_publications(publications)
+                raise
     finally:
+        _ACTIVE_ROUTE_PUBLICATIONS.reset(publication_token)
         if locked:
             fcntl.flock(lock_descriptor, fcntl.LOCK_UN)
         if lock_descriptor >= 0:
@@ -5592,7 +5685,6 @@ def _code_digest(code: types.CodeType) -> str:
             "consts": [constant(value) for value in current.co_consts],
             "names": current.co_names,
             "varnames": current.co_varnames,
-            "filename": current.co_filename,
             "name": current.co_name,
             "qualname": current.co_qualname,
             "firstlineno": current.co_firstlineno,
@@ -5656,18 +5748,64 @@ def _proven_pyscf_generated_wrapper(
 
 
 def _literal_state_payload(value: Any) -> Any:
-    """Encode source literals without coercing type-distinct resident values."""
+    """Encode bounded literal/container state without type coercion or cycles."""
 
-    if value is None or type(value) in {bool, int, float, complex, str}:
-        return {type(value).__name__: repr(value)}
-    if isinstance(value, bytes):
-        return {"bytes": value.hex()}
-    if isinstance(value, tuple):
-        return {"tuple": [_literal_state_payload(item) for item in value]}
-    if isinstance(value, frozenset):
-        items = [_literal_state_payload(item) for item in value]
-        return {"frozenset": sorted(items, key=repr)}
-    raise TypeError(type(value).__name__)
+    remaining = _LITERAL_STATE_MAXIMUM_ITEMS
+    active: set[int] = set()
+
+    def encode(current: Any, depth: int) -> Any:
+        nonlocal remaining
+        remaining -= 1
+        if remaining < 0 or depth > _LITERAL_STATE_MAXIMUM_DEPTH:
+            raise TypeError("literal state exceeds attestation bounds")
+        if current is None or current is Ellipsis or type(current) in {bool, int, str}:
+            rendered = repr(current)
+            if len(rendered.encode()) > _MODULE_FILE_MAXIMUM_BYTES:
+                raise TypeError("literal state scalar exceeds attestation bounds")
+            return {type(current).__name__: rendered}
+        if type(current) is float:
+            if not math.isfinite(current):
+                raise TypeError("non-finite float literal state")
+            return {"float": repr(current)}
+        if type(current) is complex:
+            if not math.isfinite(current.real) or not math.isfinite(current.imag):
+                raise TypeError("non-finite complex literal state")
+            return {"complex": repr(current)}
+        if type(current) is bytes:
+            if len(current) > _MODULE_FILE_MAXIMUM_BYTES:
+                raise TypeError("literal state scalar exceeds attestation bounds")
+            return {"bytes": current.hex()}
+        current_type = type(current)
+        if current_type not in {dict, list, tuple, set, frozenset}:
+            raise TypeError(current_type.__name__)
+        identity = id(current)
+        if identity in active:
+            raise TypeError("cyclic literal state")
+        active.add(identity)
+        try:
+            if current_type is dict:
+                pairs = [
+                    {"key": encode(key, depth + 1), "value": encode(item, depth + 1)}
+                    for key, item in current.items()
+                ]
+                pairs.sort(
+                    key=lambda pair: json.dumps(
+                        pair["key"], sort_keys=True, separators=(",", ":")
+                    )
+                )
+                return {"dict": pairs}
+            items = [encode(item, depth + 1) for item in current]
+            if current_type in {set, frozenset}:
+                items.sort(
+                    key=lambda item: json.dumps(
+                        item, sort_keys=True, separators=(",", ":")
+                    )
+                )
+            return {current_type.__name__: items}
+        finally:
+            active.remove(identity)
+
+    return encode(value, 0)
 
 
 def _loaded_literal_state_identity(module: Any, module_name: str, raw: bytes) -> str:
@@ -5692,16 +5830,21 @@ def _loaded_literal_state_identity(module: Any, module_name: str, raw: bytes) ->
             return unsupported
         try:
             value = ast.literal_eval(node)
-            _literal_state_payload(value)
         except (TypeError, ValueError):
             return unsupported
+        try:
+            _literal_state_payload(value)
+        except TypeError as exc:
+            raise RuntimeError(
+                f"Python source literal state cannot be attested: {module_name}"
+            ) from exc
         return value
 
     def require_equal(label: str, expected: Any, observed: Any) -> None:
         expected_payload = _literal_state_payload(expected)
         try:
             observed_payload = _literal_state_payload(observed)
-        except TypeError as exc:
+        except (TypeError, ValueError) as exc:
             raise state_mismatch(label) from exc
         if observed_payload != expected_payload:
             raise state_mismatch(label)
@@ -6060,10 +6203,36 @@ def _hash_mapped_native_payload(
             byte_count += len(chunk)
         after = os.fstat(descriptor)
         named = os.stat(path, follow_symlinks=False)
-        identity = (before.st_dev, before.st_ino, before.st_size)
+        identity = (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+            before.st_mode,
+            before.st_nlink,
+        )
         if (
-            (after.st_dev, after.st_ino, after.st_size) != identity
-            or (named.st_dev, named.st_ino, named.st_size) != identity
+            (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+                after.st_ctime_ns,
+                after.st_mode,
+                after.st_nlink,
+            )
+            != identity
+            or (
+                named.st_dev,
+                named.st_ino,
+                named.st_size,
+                named.st_mtime_ns,
+                named.st_ctime_ns,
+                named.st_mode,
+                named.st_nlink,
+            )
+            != identity
             or byte_count != before.st_size
         ):
             raise RuntimeError(f"mapped native payload changed while hashed: {path}")

@@ -3755,6 +3755,60 @@ print(json.dumps({
         )
 
 
+def test_relative_module_launch_attests_manifest_and_restores_profiler():
+    qm_root = Path(campaign.__file__).resolve().parents[1]
+    python = qm_root / ".venv" / "bin" / "python"
+    wrapper = """
+import json
+import pathlib
+import sys
+import types
+
+def prior_profile(_frame, _event, _arg):
+    return None
+
+relative_source = 'scripts/d2c_sct_campaign.py'
+raw = pathlib.Path(relative_source).read_bytes()
+module_name = 'd2c_relative_launch'
+module = types.ModuleType(module_name)
+module.__file__ = relative_source
+module.__package__ = ''
+sys.modules[module_name] = module
+sys.setprofile(prior_profile)
+exec(compile(raw, relative_source, 'exec'), module.__dict__)
+assert sys.getprofile() is prior_profile
+origin = pathlib.Path(relative_source).resolve()
+identity = module._python_source_execution_identity(
+    module,
+    module_name,
+    origin,
+    raw,
+    trusted_source_roots=(
+        origin.parents[1],
+        pathlib.Path(sys.prefix).resolve(),
+        pathlib.Path(sys.base_prefix).resolve(),
+    ),
+)
+print(json.dumps(identity, sort_keys=True))
+print('PROFILE_RESTORED')
+"""
+    completed = subprocess.run(
+        [str(python), "-c", wrapper],
+        cwd=qm_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    output = completed.stdout.splitlines()
+    identity = json.loads(output[0])
+    assert identity["kind"] == "python-source"
+    assert identity["loaded_module_code_sha256"]
+    assert identity["loaded_state_sha256"]
+    assert output[-1] == "PROFILE_RESTORED"
+
+
 @pytest.mark.parametrize(
     ("module_name", "before", "after"),
     [
@@ -3797,6 +3851,54 @@ def test_manifest_rejects_module_level_state_replacement_with_restored_timestamp
             RuntimeError, match="loaded Python (?:code|module state) disagrees"
         ):
             campaign._executable_module_manifest()
+    finally:
+        campaign._OBSERVED_MODULE_CODE.pop(module_name, None)
+        sys.modules.pop(module_name, None)
+
+
+def test_manifest_rejects_mutated_campaign_dft_settings(monkeypatch):
+    source = Path(campaign.__file__).resolve()
+    raw = source.read_bytes()
+    monkeypatch.setitem(campaign.DFT_SETTINGS, "xc", "resident-only-drift")
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            r"loaded Python module state disagrees with source: "
+            r".*global\.DFT_SETTINGS"
+        ),
+    ):
+        campaign._python_source_execution_identity(
+            campaign,
+            "scripts.d2c_sct_campaign",
+            source,
+            raw,
+            trusted_source_roots=(
+                source.parents[1],
+                Path(sys.prefix).resolve(),
+                Path(sys.base_prefix).resolve(),
+            ),
+        )
+
+
+def test_manifest_rejects_mutated_literal_list_global(monkeypatch, tmp_path: Path):
+    module_name = "d2c_loaded_list_fixture"
+    source = tmp_path / f"{module_name}.py"
+    source.write_text("VALUE = [1]\ndef value():\n    return VALUE\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(campaign.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(campaign, "EXECUTABLE_MODULES", {module_name: "third-party"})
+    imported = campaign._import_executable_module(module_name)
+
+    try:
+        first = campaign._executable_module_manifest()
+        imported.VALUE.append(2)
+        with pytest.raises(
+            RuntimeError,
+            match=r"loaded Python module state disagrees with source: .*global\.VALUE",
+        ):
+            campaign._executable_module_manifest()
+        assert first[module_name]["execution_identity"]["loaded_state_sha256"]
     finally:
         campaign._OBSERVED_MODULE_CODE.pop(module_name, None)
         sys.modules.pop(module_name, None)
@@ -3978,6 +4080,39 @@ def test_native_payload_manifest_rejects_missing_required_numerical_library():
         campaign._validated_native_payload_manifest(incomplete)
 
 
+def test_native_payload_hash_rejects_same_size_in_place_rewrite(
+    monkeypatch, tmp_path: Path
+):
+    payload = tmp_path / "mapped-native.so"
+    payload.write_bytes(b"a" * (2 * 1024 * 1024))
+    status = payload.stat(follow_symlinks=False)
+    original_read = campaign.os.read
+    rewritten = False
+
+    def rewrite_after_first_read(descriptor: int, size: int) -> bytes:
+        nonlocal rewritten
+        data = original_read(descriptor, size)
+        if data and not rewritten:
+            rewritten = True
+            payload.write_bytes(b"b" * status.st_size)
+            os.utime(
+                payload,
+                ns=(status.st_atime_ns, status.st_mtime_ns + 1_000_000_000),
+            )
+        return data
+
+    monkeypatch.setattr(campaign.os, "read", rewrite_after_first_read)
+
+    with pytest.raises(RuntimeError, match="changed while hashed"):
+        campaign._hash_mapped_native_payload(
+            payload,
+            mapped_device=status.st_dev,
+            mapped_inode=status.st_ino,
+        )
+    assert rewritten is True
+    assert payload.stat().st_size == status.st_size
+
+
 def test_production_boundary_rejects_native_payload_hash_drift(
     monkeypatch, tmp_path: Path
 ):
@@ -4100,6 +4235,9 @@ def test_route_replacement_during_native_evaluation_fails_closed(
 
     assert evaluator_calls == 1
     assert not (route_root / "ts-qualification").exists()
+    assert not (route_root / "ts-qualification" / "receipt.json").exists()
+    assert not (displaced / "ts-qualification").exists()
+    assert not (displaced / "ts-qualification" / "receipt.json").exists()
     assert (displaced / ".route.lock").is_file()
 
 
