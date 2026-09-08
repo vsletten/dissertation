@@ -3951,6 +3951,42 @@ def test_manifest_rejects_loaded_python_code_without_source_origin(
         sys.modules.pop(module_name, None)
 
 
+def test_manifest_preimports_declared_modules_before_attestation_lazy_import(
+    monkeypatch, tmp_path: Path
+):
+    first_name = "d2c_preimport_first_fixture"
+    second_name = "d2c_preimport_second_fixture"
+    for module_name in (first_name, second_name):
+        (tmp_path / f"{module_name}.py").write_text(
+            f"VALUE = {module_name!r}\ndef value():\n    return VALUE\n"
+        )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(campaign.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(
+        campaign,
+        "EXECUTABLE_MODULES",
+        {first_name: "third-party", second_name: "third-party"},
+    )
+    original_identity = campaign._python_source_execution_identity
+
+    def identity_with_lazy_import(module, module_name, origin, raw, **kwargs):
+        if module_name == first_name:
+            campaign.importlib.import_module(second_name)
+            assert second_name in campaign._OBSERVED_MODULE_CODE
+        return original_identity(module, module_name, origin, raw, **kwargs)
+
+    monkeypatch.setattr(
+        campaign, "_python_source_execution_identity", identity_with_lazy_import
+    )
+    try:
+        manifest = campaign._executable_module_manifest()
+        assert set(manifest) == {first_name, second_name}
+    finally:
+        for module_name in (first_name, second_name):
+            campaign._OBSERVED_MODULE_CODE.pop(module_name, None)
+            sys.modules.pop(module_name, None)
+
+
 def test_manifest_fails_closed_for_python_module_loaded_before_execution_capture(
     monkeypatch, tmp_path: Path
 ):

@@ -180,3 +180,13 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   calculator, 12–20 K literature benchmark, D2b gate flip, D3b table, or PR ran in
   this implementation slice. Acceptance remains red only on executing the bounded
   production campaign and adjudicating its receipt-backed scientific outputs.
+- 2026-09-08 01:26 PDT (hermes-custom-build-001; profile=workstation) —
+  REAL PREFLIGHT DEFECT CLOSED: the first live dry preflight correctly refused the
+  branch-local CPU-only environment because GPU4PySCF was absent; the retry under the
+  frozen GPU environment then exposed an import-order false refusal where attestation
+  of an earlier module lazily loaded `scipy._lib._util` after execution capture had
+  closed. The manifest now preimports the complete declared inventory before any
+  attestation can trigger lazy imports. The new regression demonstrably fails against
+  the old ordering and passes with the fix; all 180 D2c campaign tests plus focused
+  Ruff/format/diff gates pass. No calculator ran and no scientific result is claimed;
+  the real receipt will be created only from the pushed corrected head.

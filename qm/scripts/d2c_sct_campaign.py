@@ -6469,8 +6469,21 @@ def _executable_module_manifest() -> dict[str, dict[str, Any]]:
 
     qm_root = Path(__file__).resolve().parents[1]
     environment_root = Path(sys.prefix).resolve()
+    modules: dict[str, Any] = {}
+    # Import the complete declared inventory before attesting any one module.
+    # Attestation itself can trigger lazy imports; if a later declared module first
+    # loads through that path while the profiler is off, its executed top-level code
+    # has no resident witness and the otherwise-valid production preflight bricks.
+    for module_name in EXECUTABLE_MODULES:
+        modules[module_name] = (
+            sys.modules[__name__]
+            if module_name == "scripts.d2c_sct_campaign"
+            else _import_executable_module(module_name)
+        )
+
     records: dict[str, dict[str, Any]] = {}
     for module_name, trust_class in EXECUTABLE_MODULES.items():
+        module = modules[module_name]
         if module_name == "scripts.d2c_sct_campaign":
             source_path = Path(__file__)
             if source_path.is_symlink():
@@ -6478,9 +6491,7 @@ def _executable_module_manifest() -> dict[str, dict[str, Any]]:
                     "campaign executable module source cannot be a symlink"
                 )
             origin = source_path.resolve(strict=True)
-            module = sys.modules[__name__]
         else:
-            module = _import_executable_module(module_name)
             spec = getattr(module, "__spec__", None)
             origin_value = getattr(spec, "origin", None)
             file_value = getattr(module, "__file__", None)
