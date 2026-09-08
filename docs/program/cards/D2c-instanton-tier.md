@@ -226,3 +226,13 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   by a regression; whole-QM verification is `1080 passed, 1 skipped` with whole-tree
   Ruff/format/diff clean. The rejected invocation created no campaign receipt; a
   fresh run root remains required after this correction is committed and pushed.
+- 2026-09-08 01:57 PDT (hermes-custom-build-001; profile=workstation) —
+  CANONICAL ROUTE-ORDER DEFECT CLOSED: the first transient unit correctly started
+  under the 48-hour bound, but production rejected the preflight because canonical
+  JSON serialization sorts route-object keys while the driver compared insertion
+  order. The immutable dead-man receipt captured that pre-calculator failure at
+  `/mnt/data/vsletten/dissertation-data/task300-d2c-instanton-e901275/production-terminal.json`.
+  Production now validates exact route-set equality and executes the source-defined
+  canonical order; the regression intentionally supplies reversed receipt order and
+  all 184 focused D2c tests plus Ruff/format/diff pass. A fresh pushed head and fresh
+  preflight/run root remain required; no electronic-structure calculation ran.

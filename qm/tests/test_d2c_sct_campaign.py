@@ -459,7 +459,10 @@ def test_production_foundation_runs_canonical_route_stages_and_writes_terminal(
     run_root.mkdir()
     routes = list(campaign.ENDPOINT_ROUTE_STATES)
     calls = []
-    preflight = {"identity": "c" * 64, "routes": {route: {} for route in routes}}
+    preflight = {
+        "identity": "c" * 64,
+        "routes": {route: {} for route in reversed(routes)},
+    }
     monkeypatch.setattr(
         campaign, "_validated_preflight", lambda root, route: (preflight, "p" * 64)
     )

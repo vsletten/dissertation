@@ -7415,9 +7415,9 @@ def execute_production_foundation(run_root: Path) -> dict[str, Any]:
     first_route = next(iter(ENDPOINT_ROUTE_STATES))
     preflight, _ = _validated_preflight(root, first_route)
     campaign_identity = preflight["identity"]
-    route_names = list(preflight["routes"])
-    if route_names != list(ENDPOINT_ROUTE_STATES):
-        raise ValueError("production preflight route order is not canonical")
+    route_names = list(ENDPOINT_ROUTE_STATES)
+    if set(preflight["routes"]) != set(route_names):
+        raise ValueError("production preflight route inventory is not canonical")
 
     completed: dict[str, dict[str, Any]] = {}
     phase = "starting"
