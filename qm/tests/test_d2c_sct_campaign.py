@@ -577,6 +577,36 @@ def test_cli_enforces_compute_etiquette_bounds(tmp_path: Path, capsys):
     assert "--nice must be >= 10" in capsys.readouterr().err
 
 
+def test_cli_accepts_gpu_bootstrap_arguments(monkeypatch, tmp_path: Path, capsys):
+    run_root = tmp_path / "run"
+    captured = {}
+
+    def fake_preflight(bundle_root, observed_run_root, **kwargs):
+        captured["bundle_root"] = bundle_root
+        captured["run_root"] = observed_run_root
+        return {
+            "identity": "c" * 64,
+            "routes": {route: {} for route in campaign.ENDPOINT_ROUTE_STATES},
+        }
+
+    monkeypatch.setattr(campaign, "create_preflight_receipt", fake_preflight)
+    assert (
+        campaign.main(
+            [
+                "--dry-run",
+                "--gpu",
+                "--gpu-mem-gb",
+                "18",
+                "--run-root",
+                str(run_root),
+            ]
+        )
+        == 0
+    )
+    assert captured["run_root"] == run_root
+    assert json.loads(capsys.readouterr().out)["dry_run"] is True
+
+
 def test_git_identity_refuses_dirty_worktree(monkeypatch, tmp_path: Path):
     calls = []
 

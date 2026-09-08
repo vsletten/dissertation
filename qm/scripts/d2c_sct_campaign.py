@@ -7553,6 +7553,8 @@ def main(
     parser.add_argument("--threads", type=int, default=16)
     parser.add_argument("--nice", type=int, default=10)
     parser.add_argument("--log")
+    parser.add_argument("--gpu", action="store_true")
+    parser.add_argument("--gpu-mem-gb", type=float, default=18.0)
     args = parser.parse_args(argv)
 
     if not 1 <= args.threads <= 16:

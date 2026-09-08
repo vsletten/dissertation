@@ -218,3 +218,11 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   whole-tree Ruff/format/diff clean. No production calculator has run from this
   unpushed source; the fresh preflight and transient launch remain pinned to the
   committed/pushed head.
+- 2026-09-08 01:53 PDT (hermes-custom-build-001; profile=workstation) —
+  LAUNCH-ARGUMENT DEFECT CLOSED: the first executable preflight from the production
+  driver head failed before receipt creation because the complete parser rejected
+  `--gpu`/`--gpu-mem-gb` after the early etiquette bootstrap had already consumed
+  them. Both bootstrap arguments are now accepted by the complete parser and covered
+  by a regression; whole-QM verification is `1080 passed, 1 skipped` with whole-tree
+  Ruff/format/diff clean. The rejected invocation created no campaign receipt; a
+  fresh run root remains required after this correction is committed and pushed.
