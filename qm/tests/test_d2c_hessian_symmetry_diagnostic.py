@@ -67,3 +67,36 @@ def test_run_publishes_failed_case_before_reraising(tmp_path, monkeypatch):
     assert status["error"] == "RuntimeError: synthetic Hessian failure"
     assert status["finished_utc"].endswith("Z")
     assert not (output_root / "receipt.json").exists()
+    terminal = json.loads((output_root / diagnostic.TERMINAL).read_text())
+    assert terminal["state"] == "failed"
+    assert terminal["current_case"] == diagnostic.CASES[0]["name"]
+    assert terminal["detail"] == "RuntimeError: synthetic Hessian failure"
+
+
+def test_finalize_if_running_publishes_idempotent_dead_man_receipt(tmp_path):
+    output_root = tmp_path / "diagnostic"
+    output_root.mkdir()
+    (output_root / "status.json").write_text(
+        json.dumps(
+            {
+                "schema": diagnostic.SCHEMA,
+                "state": "running",
+                "route": diagnostic.ROUTE,
+                "git_sha": "a" * 40,
+                "script_sha256": "b" * 64,
+                "completed_cases": [diagnostic.CASES[0]["name"]],
+                "current_case": diagnostic.CASES[1]["name"],
+            }
+        )
+    )
+
+    first = diagnostic.finalize_if_running(output_root)
+    second = diagnostic.finalize_if_running(output_root)
+
+    assert first == second
+    assert first["state"] == "failed"
+    assert first["current_case"] == diagnostic.CASES[1]["name"]
+    assert "bounded systemd unit ended" in first["detail"]
+    status = json.loads((output_root / "status.json").read_text())
+    assert status["state"] == "failed"
+    assert status["error"] == first["detail"]

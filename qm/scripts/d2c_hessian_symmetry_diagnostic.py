@@ -67,6 +67,7 @@ from quarry.reaction_path import (  # noqa: E402
 from scripts.surface_rate_protocol import reactions  # noqa: E402
 
 SCHEMA = "d2c-hessian-symmetry-diagnostic-v1"
+TERMINAL = "terminal.json"
 ROUTE = "h-co-1w-oside"
 CASES = (
     {
@@ -118,6 +119,58 @@ def _atomic_write(path: Path, raw: bytes) -> None:
         os.fsync(directory_fd)
     finally:
         os.close(directory_fd)
+
+
+def _terminal_payload(
+    status: dict[str, Any], *, state: str, detail: str | None
+) -> dict[str, Any]:
+    return {
+        "schema": SCHEMA,
+        "state": state,
+        "route": ROUTE,
+        "git_sha": status.get("git_sha"),
+        "script_sha256": status.get("script_sha256"),
+        "preflight_receipt_sha256": status.get("preflight_receipt_sha256"),
+        "completed_cases": status.get("completed_cases", []),
+        "current_case": status.get("current_case"),
+        "detail": detail,
+        "finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+
+
+def finalize_if_running(output_root: Path) -> dict[str, Any]:
+    """Emit the dead-man terminal receipt if the bounded unit left none."""
+
+    terminal_path = output_root / TERMINAL
+    if terminal_path.is_file() and not terminal_path.is_symlink():
+        return json.loads(terminal_path.read_text())
+    status_path = output_root / "status.json"
+    status: dict[str, Any] = {}
+    if status_path.is_file() and not status_path.is_symlink():
+        loaded = json.loads(status_path.read_text())
+        if isinstance(loaded, dict):
+            status = loaded
+    terminal = _terminal_payload(
+        status,
+        state="failed",
+        detail=(
+            "DiagnosticInterrupted: bounded systemd unit ended without a "
+            "terminal receipt"
+        ),
+    )
+    output_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _atomic_write(terminal_path, _json_bytes(terminal))
+    status.update(
+        {
+            "schema": SCHEMA,
+            "state": "failed",
+            "route": ROUTE,
+            "error": terminal["detail"],
+            "finished_utc": terminal["finished_utc"],
+        }
+    )
+    _atomic_write(status_path, _json_bytes(status))
+    return terminal
 
 
 def _matrix_artifact(
@@ -401,6 +454,9 @@ def run(preflight_root: Path, output_root: Path) -> dict[str, Any]:
             "comparisons_to_reference": comparisons,
         }
         _atomic_write(output_root / "receipt.json", _json_bytes(receipt))
+        terminal = _terminal_payload(status, state="completed", detail=None)
+        terminal["receipt"] = "receipt.json"
+        _atomic_write(output_root / TERMINAL, _json_bytes(terminal))
         status.update(
             {
                 "state": "completed",
@@ -410,27 +466,37 @@ def run(preflight_root: Path, output_root: Path) -> dict[str, Any]:
         )
         _atomic_write(output_root / "status.json", _json_bytes(status))
         return receipt
-    except Exception as exc:
+    except BaseException as exc:
+        detail = f"{type(exc).__name__}: {exc}"
         status.update(
             {
                 "state": "failed",
                 "failed_case": status.get("current_case"),
-                "error": f"{type(exc).__name__}: {exc}",
+                "error": detail,
                 "finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             }
         )
         _atomic_write(output_root / "status.json", _json_bytes(status))
+        terminal = _terminal_payload(status, state="failed", detail=detail)
+        _atomic_write(output_root / TERMINAL, _json_bytes(terminal))
         raise
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--preflight-root", type=Path, required=True)
+    parser.add_argument("--preflight-root", type=Path)
     parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--finalize-if-running", action="store_true")
     parser.add_argument("--threads", type=int, default=16)
     parser.add_argument("--nice", type=int, default=10)
     parser.add_argument("--log")
     args = parser.parse_args()
+    if args.finalize_if_running:
+        terminal = finalize_if_running(args.output_root.resolve())
+        print(json.dumps(terminal, sort_keys=True))
+        return 0
+    if args.preflight_root is None:
+        parser.error("--preflight-root is required unless --finalize-if-running is set")
     receipt = run(args.preflight_root.resolve(), args.output_root.resolve())
     print(
         json.dumps(
