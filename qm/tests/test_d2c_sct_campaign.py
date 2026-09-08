@@ -24,6 +24,8 @@ from scripts import d2c_sct_campaign as campaign
 from scripts.production_energetics import load_xyz_like
 from scripts.surface_rate_protocol import reactions
 
+REAL_CURRENT_CODE_DEPENDENCY_IDENTITY = campaign._current_code_dependency_identity
+
 FIXED_GIT_SHA = "a" * 40
 FIXED_DEPENDENCIES = {
     "ase": "3.29.0",
@@ -4132,6 +4134,38 @@ def test_preflight_captures_modules_loaded_by_dependency_inventory(
             ]["kind"]
             == "python-source"
         )
+    finally:
+        campaign._OBSERVED_MODULE_CODE.pop(module_name, None)
+        sys.modules.pop(module_name, None)
+
+
+def test_production_boundary_identity_captures_dependency_imports(
+    monkeypatch, tmp_path: Path
+):
+    module_name = "d2c_production_dependency_fixture"
+    source = tmp_path / f"{module_name}.py"
+    source.write_text("VALUE = 1\ndef value():\n    return VALUE\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(campaign.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(campaign, "EXECUTABLE_MODULES", {module_name: "third-party"})
+    monkeypatch.setattr(campaign, "_git_sha", lambda root: FIXED_GIT_SHA)
+    monkeypatch.setattr(
+        campaign, "_native_payload_manifest", lambda: FIXED_NATIVE_PAYLOAD_MANIFEST
+    )
+
+    def dependency_versions():
+        campaign.importlib.import_module(module_name)
+        return FIXED_DEPENDENCIES
+
+    monkeypatch.setattr(campaign, "_dependency_versions", dependency_versions)
+    previous_profile = sys.getprofile()
+    try:
+        identity = REAL_CURRENT_CODE_DEPENDENCY_IDENTITY()
+        assert (
+            identity["executable_modules"][module_name]["execution_identity"]["kind"]
+            == "python-source"
+        )
+        assert sys.getprofile() is previous_profile
     finally:
         campaign._OBSERVED_MODULE_CODE.pop(module_name, None)
         sys.modules.pop(module_name, None)

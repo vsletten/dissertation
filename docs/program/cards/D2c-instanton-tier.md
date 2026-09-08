@@ -236,3 +236,14 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   canonical order; the regression intentionally supplies reversed receipt order and
   all 184 focused D2c tests plus Ruff/format/diff pass. A fresh pushed head and fresh
   preflight/run root remain required; no electronic-structure calculation ran.
+- 2026-09-08 02:09 PDT (hermes-custom-build-001; profile=workstation) —
+  PRODUCTION BOUNDARY CAPTURE CLOSED: the corrected route launch reached the first
+  production boundary, where a fresh process imported `scipy._lib._util` during
+  dependency inventory after the module-execution profiler had already been restored.
+  Its immutable terminal receipt is preserved under
+  `/mnt/data/vsletten/dissertation-data/task300-d2c-instanton-37e1199/` and proves the
+  calculator was never entered. Live boundary identity now captures dependency imports
+  under the same profiler as preflight and restores the prior profiler in `finally`;
+  the new isolated-process regression exercises that exact seam. Whole-QM verification
+  is `1081 passed, 1 skipped` with Ruff/format/diff clean. A fresh pushed head and
+  preflight/run root remain required before relaunch.

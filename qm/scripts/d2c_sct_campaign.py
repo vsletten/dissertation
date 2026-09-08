@@ -7072,10 +7072,17 @@ def _identity_route_inventory(routes: dict[str, Any]) -> dict[str, Any]:
 def _current_code_dependency_identity() -> dict[str, Any]:
     """Resolve the live executable identity; tests replace this private seam."""
 
+    previous_profile = sys.getprofile()
+    sys.setprofile(_capture_module_execution)
+    try:
+        dependencies = _dependency_versions()
+        executable_modules = _executable_module_manifest()
+    finally:
+        sys.setprofile(previous_profile)
     return {
         "git_sha": _git_sha(Path(__file__).resolve().parents[2]),
-        "dependencies": _dependency_versions(),
-        "executable_modules": _executable_module_manifest(),
+        "dependencies": dependencies,
+        "executable_modules": executable_modules,
         "native_payloads": _native_payload_manifest(),
         "python": platform.python_version(),
     }
