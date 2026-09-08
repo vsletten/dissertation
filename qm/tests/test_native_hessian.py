@@ -90,11 +90,9 @@ def test_hessian_symmetry_policy_zero_and_distributed_skew_edges():
     assert zero.accepted is True
     assert zero.spectral_relative_asymmetry == 0.0
 
-    canonical = np.eye(6)
+    canonical = np.eye(100)
     skew = np.nextafter(native_hessian.HESSIAN_SYMMETRY_ABSOLUTE_MAX, 0.0)
-    canonical[0, 1] = skew
-    canonical[1, 2] = skew
-    canonical[2, 3] = skew
+    canonical[np.triu_indices(100, k=1)] = skew
     metrics = native_hessian.cartesian_hessian_symmetry_metrics(canonical)
     assert (
         metrics.maximum_absolute_asymmetry
@@ -103,6 +101,26 @@ def test_hessian_symmetry_policy_zero_and_distributed_skew_edges():
     assert (
         metrics.spectral_relative_asymmetry
         > native_hessian.HESSIAN_SYMMETRY_SPECTRAL_RELATIVE_MAX
+    )
+    assert metrics.accepted is False
+
+
+def test_hessian_symmetry_policy_rejects_spectral_relative_boundary():
+    relative_limit = native_hessian.HESSIAN_SYMMETRY_SPECTRAL_RELATIVE_MAX
+    symmetric_scale = 0.1
+    asymmetry = symmetric_scale * relative_limit
+    hessian = np.eye(3) * symmetric_scale
+    hessian[0, 1] = asymmetry / 2.0
+    hessian[1, 0] = -asymmetry / 2.0
+
+    metrics = native_hessian.cartesian_hessian_symmetry_metrics(hessian)
+
+    assert (
+        metrics.maximum_absolute_asymmetry
+        < native_hessian.HESSIAN_SYMMETRY_ABSOLUTE_MAX
+    )
+    assert metrics.spectral_relative_asymmetry == pytest.approx(
+        relative_limit, abs=1.0e-20
     )
     assert metrics.accepted is False
 

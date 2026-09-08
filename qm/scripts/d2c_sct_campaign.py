@@ -134,7 +134,14 @@ DFT_SETTINGS: dict[str, Any] = {
     "density_fit": True,
     "use_gpu": True,
 }
-DEPENDENCY_DISTRIBUTIONS = ("numpy", "pyscf", "geometric", "sella", "ase")
+DEPENDENCY_DISTRIBUTIONS = (
+    "numpy",
+    "pyscf",
+    "pyscf-dispersion",
+    "geometric",
+    "sella",
+    "ase",
+)
 GPU4PYSCF_DISTRIBUTIONS = (
     "gpu4pyscf-cuda12x",
     "gpu4pyscf-cuda11x",
@@ -166,6 +173,7 @@ REQUIRED_NATIVE_PAYLOAD_BASENAMES = frozenset(
         "libcint.so",
         "libcvhf.so",
         "libdft.so",
+        "libs-dftd3.so",
         "libxc.so",
     }
 )
@@ -206,17 +214,22 @@ EXECUTABLE_MODULES: dict[str, Literal["repository", "third-party"]] = {
     "pyscf.df.df_jk": "third-party",
     "pyscf.dft.rks": "third-party",
     "pyscf.dft.uks": "third-party",
+    "pyscf.dispersion.dftd3": "third-party",
+    "pyscf.dispersion.dftd4": "third-party",
+    "pyscf.grad.dispersion": "third-party",
     "pyscf.grad.rhf": "third-party",
     "pyscf.grad.rks": "third-party",
     "pyscf.grad.uhf": "third-party",
     "pyscf.grad.uks": "third-party",
     "pyscf.gto.mole": "third-party",
     "pyscf.hessian.rhf": "third-party",
+    "pyscf.hessian.dispersion": "third-party",
     "pyscf.hessian.rks": "third-party",
     "pyscf.hessian.uhf": "third-party",
     "pyscf.hessian.uks": "third-party",
     "pyscf.lib.misc": "third-party",
     "pyscf.scf.hf": "third-party",
+    "pyscf.scf.dispersion": "third-party",
     "pyscf.scf.uhf": "third-party",
     "sella._gpu": "third-party",
     "sella.eigensolvers": "third-party",

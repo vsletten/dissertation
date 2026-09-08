@@ -28,7 +28,10 @@ from quarry.pipeline import (
 )
 
 HARTREE_TO_EV = 27.211386245988
-HESSIAN_SYMMETRY_ABSOLUTE_MAX = 1.0e-8
+# Preserve the historical 2e-9 near-zero absolute floor while adding a global
+# scale-relative gate.  The diagnostic may justify a later policy change; it must
+# not relax production acceptance before that evidence exists.
+HESSIAN_SYMMETRY_ABSOLUTE_MAX = 2.0e-9
 HESSIAN_SYMMETRY_SPECTRAL_RELATIVE_MAX = 1.0e-8
 
 

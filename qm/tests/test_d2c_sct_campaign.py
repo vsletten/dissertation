@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import inspect
 import json
 import mmap
@@ -40,6 +41,7 @@ FIXED_DEPENDENCIES = {
     "gpu_backend": "gpu4pyscf",
     "numpy": "2.3.2",
     "pyscf": "2.10.0",
+    "pyscf-dispersion": "1.5.0",
     "sella": "2.5.1",
 }
 FIXED_MODULE_MANIFEST = {
@@ -3787,9 +3789,14 @@ def test_executable_manifest_covers_direct_sella_scipy_pyscf_and_gpu_leaves():
         "scipy.integrate._vode",
         "scipy.sparse.linalg._interface",
         "pyscf.dft.rks",
+        "pyscf.dispersion.dftd3",
+        "pyscf.dispersion.dftd4",
+        "pyscf.grad.dispersion",
         "pyscf.scf.uhf",
+        "pyscf.scf.dispersion",
         "pyscf.grad.uhf",
         "pyscf.hessian.rhf",
+        "pyscf.hessian.dispersion",
         "pyscf.lib.misc",
         "sella.eigensolvers",
         "sella.hessian_update",
@@ -3802,6 +3809,103 @@ def test_executable_manifest_covers_direct_sella_scipy_pyscf_and_gpu_leaves():
     }
 
     assert required <= campaign.EXECUTABLE_MODULES.keys()
+
+
+def test_installed_d3bj_dispatch_and_native_payload_are_attested():
+    try:
+        importlib.metadata.version("pyscf-dispersion")
+    except importlib.metadata.PackageNotFoundError:
+        pytest.skip("production-only pyscf-dispersion extra is not installed")
+    modules = (
+        "pyscf.dispersion.dftd3",
+        "pyscf.dispersion.dftd4",
+        "pyscf.scf.dispersion",
+        "pyscf.grad.dispersion",
+        "pyscf.hessian.dispersion",
+    )
+    code = f"""
+import json, sys
+import numpy as np
+sys.path.insert(0, '.')
+from scripts import d2c_sct_campaign as campaign
+modules = {modules!r}
+campaign.EXECUTABLE_MODULES = {{name: 'third-party' for name in modules}}
+manifest_before = campaign._executable_module_manifest()
+from quarry.clusters import Cluster
+from quarry.pipeline import (
+    DftSettings,
+    _gradient_method,
+    _hessian_method,
+    _make_scf,
+    build_mol,
+)
+cluster = Cluster(
+    name='d3-witness',
+    symbols=['H', 'H'],
+    coords=np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.74]]),
+    charge=0,
+    spin=0,
+)
+settings = DftSettings(
+    xc='pwb6k',
+    basis='sto-3g',
+    dispersion='d3bj',
+    density_fit=False,
+    use_gpu=False,
+)
+mf = _make_scf(build_mol(cluster, settings), settings)
+gradient = _gradient_method(mf, settings)
+hessian = _hessian_method(mf, settings)
+energy_correction = float(mf.get_dispersion())
+gradient_correction = np.asarray(gradient.get_dispersion())
+hessian_correction = np.asarray(hessian.get_dispersion())
+manifest_after = campaign._executable_module_manifest()
+native_payloads = campaign._native_payload_manifest()
+print(json.dumps({{
+    'dispatch_modules': [
+        mf.get_dispersion.__module__,
+        gradient.get_dispersion.__module__,
+        hessian.get_dispersion.__module__,
+    ],
+    'energy_finite': bool(np.isfinite(energy_correction)),
+    'gradient_shape': list(gradient_correction.shape),
+    'hessian_shape': list(hessian_correction.shape),
+    'manifest_stable': manifest_before == manifest_after,
+    'manifest': manifest_after,
+    'native_payloads': native_payloads,
+}}, sort_keys=True))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(campaign.__file__).resolve().parents[1],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    result = json.loads(completed.stdout)
+    manifest = result["manifest"]
+
+    assert result["dispatch_modules"] == [
+        "pyscf.scf.dispersion",
+        "pyscf.grad.dispersion",
+        "pyscf.hessian.dispersion",
+    ]
+    assert result["energy_finite"] is True
+    assert result["gradient_shape"] == [2, 3]
+    assert result["hessian_shape"] == [2, 2, 3, 3]
+    assert result["manifest_stable"] is True
+    assert manifest.keys() == set(modules)
+    for module_name in modules:
+        record = manifest[module_name]
+        assert record["execution_identity"]["kind"] == "python-source"
+        assert Path(record["origin"]).is_relative_to(Path(sys.prefix))
+    d3_payloads = [
+        record
+        for name, record in result["native_payloads"].items()
+        if Path(name).name == "libs-dftd3.so"
+    ]
+    assert len(d3_payloads) == 1
+    assert Path(d3_payloads[0]["origin"]).is_relative_to(Path(sys.prefix))
 
 
 def test_actual_nested_venv_manifest_attests_source_and_loaded_native_image():
@@ -3821,6 +3925,10 @@ campaign.EXECUTABLE_MODULES = {
     'pyscf.lib.misc': 'third-party',
     'pyscf.scf.hf': 'third-party',
 }
+campaign.REQUIRED_NATIVE_PAYLOAD_BASENAMES = frozenset(
+    name for name in campaign.REQUIRED_NATIVE_PAYLOAD_BASENAMES
+    if name != 'libs-dftd3.so'
+)
 print(json.dumps({
     'modules': campaign._executable_module_manifest(),
     'native_payloads': campaign._native_payload_manifest(),
@@ -3857,8 +3965,9 @@ print(json.dumps({
         for record in native_payloads.values()
     )
     present = {Path(name).name for name in native_payloads}
-    assert present >= campaign.REQUIRED_NATIVE_PAYLOAD_BASENAMES
-    for required_name in campaign.REQUIRED_NATIVE_PAYLOAD_BASENAMES:
+    nested_required = campaign.REQUIRED_NATIVE_PAYLOAD_BASENAMES - {"libs-dftd3.so"}
+    assert present >= nested_required
+    for required_name in nested_required:
         record = next(
             record
             for name, record in native_payloads.items()

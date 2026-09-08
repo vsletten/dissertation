@@ -9,6 +9,9 @@ verdict for a fixed baseline/response/grid/reference matrix.
 
 from __future__ import annotations
 
+# Import order is part of the provenance witness bootstrap below.
+# ruff: noqa: E402, I001
+
 import argparse
 import hashlib
 import json
@@ -21,11 +24,31 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
 _QM_ROOT = Path(__file__).resolve().parent.parent
 if str(_QM_ROOT) not in sys.path:
     sys.path.insert(0, str(_QM_ROOT))
+
+if __name__ == "__main__":
+    from quarry.etiquette import bootstrap_cli
+
+    _guard = argparse.ArgumentParser(add_help=False)
+    _guard.add_argument("--threads", type=int, default=16)
+    _guard.add_argument("--nice", type=int, default=10)
+    _guard_args, _ = _guard.parse_known_args()
+    if not 1 <= _guard_args.threads <= 16:
+        _guard.error("--threads must be <= 16 and at least 1")
+    if _guard_args.nice < 10:
+        _guard.error("--nice must be >= 10")
+    _ETIQUETTE = bootstrap_cli(
+        "d2c_hessian_symmetry_diagnostic",
+        default_run_root=Path("/mnt/data/vsletten/dissertation-data"),
+    )
+
+# Import the campaign first: it installs the execution witness while loading every
+# module covered by the production-boundary manifest.
+from scripts import d2c_sct_campaign as campaign  # noqa: E402
+
+import numpy as np  # noqa: E402
 
 from quarry import native_hessian  # noqa: E402
 from quarry.native_hessian import HARTREE_TO_EV, NativeHessianResult  # noqa: E402
@@ -41,7 +64,6 @@ from quarry.reaction_path import (  # noqa: E402
     hessian_eigenvalues_to_wavenumbers_cm,
     project_vibrational_hessian,
 )
-from scripts import d2c_sct_campaign as campaign  # noqa: E402
 from scripts.surface_rate_protocol import reactions  # noqa: E402
 
 SCHEMA = "d2c-hessian-symmetry-diagnostic-v1"
@@ -111,6 +133,7 @@ def _matrix_artifact(
         "path": str(relative),
         "dtype": "little-endian float64",
         "shape": list(array.shape),
+        "units": "hartree / bohr^2",
         "sha256": hashlib.sha256(raw).hexdigest(),
     }
 
@@ -294,93 +317,119 @@ def run(preflight_root: Path, output_root: Path) -> dict[str, Any]:
         raise FileExistsError(f"diagnostic output root already exists: {output_root}")
     output_root.mkdir(mode=0o700, parents=True)
     identity = _git_identity()
-    preflight, preflight_sha = campaign._validate_production_boundary(
-        preflight_root, ROUTE
-    )
-    base_settings, _ = campaign._canonical_dft_settings(preflight)
-    template = reactions(gpu=True, basis="def2-svp")[ROUTE].cluster
-    fingerprints = campaign._trusted_input_fingerprints_from_route_record(
-        preflight["routes"][ROUTE]
-    )
-    inputs = campaign._trusted_route_input_snapshots(
-        campaign.DEFAULT_BUNDLE_ROOT, ROUTE, template, fingerprints
-    )
-    transition_state = inputs["transition_state"]
-    masses = np.asarray(preflight["routes"][ROUTE]["masses_amu"], dtype=float)
-
     status = {
         "schema": SCHEMA,
         "state": "running",
         "route": ROUTE,
-        "preflight_receipt_sha256": preflight_sha,
         **identity,
         "completed_cases": [],
+        "current_case": None,
     }
     _atomic_write(output_root / "status.json", _json_bytes(status))
-    cases: list[dict[str, Any]] = []
-    symmetric_matrices: dict[str, np.ndarray] = {}
-    mode_sets: dict[str, Any] = {}
-    for definition in CASES:
-        record, symmetric, modes = _evaluate_case(
-            output_root,
-            definition,
-            transition_state,
-            inputs["reactant"].coords,
-            inputs["product"].coords,
-            masses,
-            base_settings,
+    try:
+        preflight, preflight_sha = campaign._validate_production_boundary(
+            preflight_root, ROUTE
         )
-        cases.append(record)
-        symmetric_matrices[definition["name"]] = symmetric
-        mode_sets[definition["name"]] = modes
-        status["completed_cases"] = [case["name"] for case in cases]
-        status["current_case"] = definition["name"]
+        status["preflight_receipt_sha256"] = preflight_sha
         _atomic_write(output_root / "status.json", _json_bytes(status))
+        base_settings, _ = campaign._canonical_dft_settings(preflight)
+        template = reactions(gpu=True, basis="def2-svp")[ROUTE].cluster
+        fingerprints = campaign._trusted_input_fingerprints_from_route_record(
+            preflight["routes"][ROUTE]
+        )
+        inputs = campaign._trusted_route_input_snapshots(
+            campaign.DEFAULT_BUNDLE_ROOT, ROUTE, template, fingerprints
+        )
+        transition_state = inputs["transition_state"]
+        masses = np.asarray(preflight["routes"][ROUTE]["masses_amu"], dtype=float)
 
-    reference_name = CASES[-1]["name"]
-    reference_matrix = symmetric_matrices[reference_name]
-    reference_modes = mode_sets[reference_name]
-    comparisons = {}
-    for definition in CASES[:-1]:
-        name = definition["name"]
-        matrix_delta = symmetric_matrices[name] - reference_matrix
-        eigenvalue_delta = mode_sets[name].eigenvalues - reference_modes.eigenvalues
-        comparisons[name] = {
-            "reference": reference_name,
-            "symmetric_matrix_delta_spectral_norm": float(
-                np.linalg.norm(matrix_delta, ord=2)
-            ),
-            "projected_eigenvalue_maximum_absolute_delta": float(
-                np.max(np.abs(eigenvalue_delta))
-            ),
-            "same_negative_mode_count": bool(
-                np.count_nonzero(mode_sets[name].eigenvalues < -1.0e-8)
-                == np.count_nonzero(reference_modes.eigenvalues < -1.0e-8)
-            ),
+        cases: list[dict[str, Any]] = []
+        symmetric_matrices: dict[str, np.ndarray] = {}
+        mode_sets: dict[str, Any] = {}
+        for definition in CASES:
+            status["current_case"] = definition["name"]
+            _atomic_write(output_root / "status.json", _json_bytes(status))
+            record, symmetric, modes = _evaluate_case(
+                output_root,
+                definition,
+                transition_state,
+                inputs["reactant"].coords,
+                inputs["product"].coords,
+                masses,
+                base_settings,
+            )
+            cases.append(record)
+            symmetric_matrices[definition["name"]] = symmetric
+            mode_sets[definition["name"]] = modes
+            status["completed_cases"] = [case["name"] for case in cases]
+            _atomic_write(output_root / "status.json", _json_bytes(status))
+
+        status["current_case"] = None
+        _atomic_write(output_root / "status.json", _json_bytes(status))
+        reference_name = CASES[-1]["name"]
+        reference_matrix = symmetric_matrices[reference_name]
+        reference_modes = mode_sets[reference_name]
+        comparisons = {}
+        for definition in CASES[:-1]:
+            name = definition["name"]
+            matrix_delta = symmetric_matrices[name] - reference_matrix
+            eigenvalue_delta = mode_sets[name].eigenvalues - reference_modes.eigenvalues
+            comparisons[name] = {
+                "reference": reference_name,
+                "symmetric_matrix_delta_spectral_norm": float(
+                    np.linalg.norm(matrix_delta, ord=2)
+                ),
+                "projected_eigenvalue_maximum_absolute_delta": float(
+                    np.max(np.abs(eigenvalue_delta))
+                ),
+                "same_negative_mode_count": bool(
+                    np.count_nonzero(mode_sets[name].eigenvalues < -1.0e-8)
+                    == np.count_nonzero(reference_modes.eigenvalues < -1.0e-8)
+                ),
+            }
+        receipt = {
+            "schema": SCHEMA,
+            "state": "completed",
+            "accepted_campaign_result": False,
+            "purpose": "numerical diagnostic only; no TS qualification or SCT result",
+            "route": ROUTE,
+            "preflight_receipt_sha256": preflight_sha,
+            "campaign_identity": preflight["identity"],
+            **identity,
+            "finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "cases": cases,
+            "comparisons_to_reference": comparisons,
         }
-    receipt = {
-        "schema": SCHEMA,
-        "state": "completed",
-        "accepted_campaign_result": False,
-        "purpose": "numerical diagnostic only; no TS qualification or SCT result",
-        "route": ROUTE,
-        "preflight_receipt_sha256": preflight_sha,
-        "campaign_identity": preflight["identity"],
-        **identity,
-        "finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "cases": cases,
-        "comparisons_to_reference": comparisons,
-    }
-    _atomic_write(output_root / "receipt.json", _json_bytes(receipt))
-    status.update({"state": "completed", "receipt": "receipt.json"})
-    _atomic_write(output_root / "status.json", _json_bytes(status))
-    return receipt
+        _atomic_write(output_root / "receipt.json", _json_bytes(receipt))
+        status.update(
+            {
+                "state": "completed",
+                "receipt": "receipt.json",
+                "finished_utc": receipt["finished_utc"],
+            }
+        )
+        _atomic_write(output_root / "status.json", _json_bytes(status))
+        return receipt
+    except Exception as exc:
+        status.update(
+            {
+                "state": "failed",
+                "failed_case": status.get("current_case"),
+                "error": f"{type(exc).__name__}: {exc}",
+                "finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+        )
+        _atomic_write(output_root / "status.json", _json_bytes(status))
+        raise
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--preflight-root", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--threads", type=int, default=16)
+    parser.add_argument("--nice", type=int, default=10)
+    parser.add_argument("--log")
     args = parser.parse_args()
     receipt = run(args.preflight_root.resolve(), args.output_root.resolve())
     print(
