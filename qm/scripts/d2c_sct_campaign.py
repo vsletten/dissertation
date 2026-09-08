@@ -7187,9 +7187,16 @@ def create_preflight_receipt(
         length=40,
         label="Git SHA",
     )
-    dependencies = dict(
-        _dependency_versions() if dependency_versions is None else dependency_versions
-    )
+    previous_profile = sys.getprofile()
+    sys.setprofile(_capture_module_execution)
+    try:
+        dependencies = dict(
+            _dependency_versions()
+            if dependency_versions is None
+            else dependency_versions
+        )
+    finally:
+        sys.setprofile(previous_profile)
     if set(dependencies) != DEPENDENCY_VERSION_KEYS:
         raise ValueError("dependency version inventory must be exact and complete")
     if any(not isinstance(value, str) or not value for value in dependencies.values()):

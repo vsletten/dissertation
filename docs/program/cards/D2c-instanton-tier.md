@@ -190,3 +190,11 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   the old ordering and passes with the fix; all 180 D2c campaign tests plus focused
   Ruff/format/diff gates pass. No calculator ran and no scientific result is claimed;
   the real receipt will be created only from the pushed corrected head.
+- 2026-09-08 01:30 PDT (hermes-custom-build-001; profile=workstation) —
+  PREFLIGHT CAPTURE ORDER HARDENED: the first import-order fix exposed the earlier
+  trigger: GPU dependency inventory itself imports SciPy before manifest capture.
+  Dependency discovery now runs under the same module-execution witness and restores
+  the prior profiler in `finally`, while the full inventory remains preimported before
+  attestation. A second regression demonstrably fails without this capture scope; all
+  181 D2c tests and focused Ruff/format/diff gates pass. No calculator ran; the next
+  live dry preflight is pinned to the corrected pushed head.

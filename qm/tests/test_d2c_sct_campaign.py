@@ -3987,6 +3987,40 @@ def test_manifest_preimports_declared_modules_before_attestation_lazy_import(
             sys.modules.pop(module_name, None)
 
 
+def test_preflight_captures_modules_loaded_by_dependency_inventory(
+    monkeypatch, tmp_path: Path
+):
+    module_name = "d2c_dependency_loaded_fixture"
+    source = tmp_path / f"{module_name}.py"
+    source.write_text("VALUE = 1\ndef value():\n    return VALUE\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(campaign.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(campaign, "EXECUTABLE_MODULES", {module_name: "third-party"})
+
+    def dependency_versions():
+        campaign.importlib.import_module(module_name)
+        return FIXED_DEPENDENCIES
+
+    monkeypatch.setattr(campaign, "_dependency_versions", dependency_versions)
+    try:
+        receipt = campaign.create_preflight_receipt(
+            BUNDLE_ROOT,
+            tmp_path / "run",
+            git_sha=FIXED_GIT_SHA,
+            native_payload_manifest=FIXED_NATIVE_PAYLOAD_MANIFEST,
+            created_utc="2026-09-08T08:00:00Z",
+        )
+        assert (
+            receipt["campaign"]["executable_modules"][module_name][
+                "execution_identity"
+            ]["kind"]
+            == "python-source"
+        )
+    finally:
+        campaign._OBSERVED_MODULE_CODE.pop(module_name, None)
+        sys.modules.pop(module_name, None)
+
+
 def test_manifest_fails_closed_for_python_module_loaded_before_execution_capture(
     monkeypatch, tmp_path: Path
 ):

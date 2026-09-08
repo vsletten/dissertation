@@ -4,6 +4,8 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-08 01:30 PDT — (hermes-custom-build-001; profile=workstation) — D2c ACTIVE/PREFLIGHT CAPTURE: the corrected preflight now captures modules imported by GPU dependency discovery before preimporting and attesting the complete executable inventory. The new sabotage regression fails without that scope; all 181 D2c tests plus focused Ruff/format/diff pass. No calculator ran; the live receipt remains pending the corrected pushed head.
+
 - 2026-09-08 01:26 PDT — (hermes-custom-build-001; profile=workstation) — D2c ACTIVE/PREFLIGHT FIX: the live GPU-environment dry preflight exposed an import-order false refusal (`scipy._lib._util` loaded lazily after capture). The manifest now preimports every declared executable module before attestation; the regression fails against the old ordering and all 180 D2c tests plus focused Ruff/format/diff pass. No calculator or scientific result ran; receipt generation follows from the corrected pushed head.
 
 - 2026-09-08 00:41 PDT — (hermes-custom-build-001; profile=workstation) — D2c ACTIVE/PRODUCTION-HARDENING APPROVED: exact implementation head `cab53c44564fd50c2d05f45d153b5975c26759dc` closes strict PES-cache/kick/restart, trusted-input, resident Python/native payload, and replacement-resistant route-publication gates. Independent cold review approved the final adversarial regressions; whole-QM is `1075 passed, 1 skipped` with Ruff/format/diff clean. No production compute, 12–20 K benchmark, D2b gate flip, D3b table, or PR ran; those receipt-backed scientific gates remain.
