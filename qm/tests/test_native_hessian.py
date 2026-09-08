@@ -42,7 +42,7 @@ def test_native_pyscf_hessian_rejects_shape_nonfinite_and_material_asymmetry():
         native_hessian.canonicalize_pyscf_hessian(native, 2)
     native = np.zeros((2, 2, 3, 3))
     native[0, 1, 0, 1] = 1.0
-    with pytest.raises(ValueError, match="not symmetric"):
+    with pytest.raises(ValueError, match="max_abs_asymmetry=1"):
         native_hessian.canonicalize_pyscf_hessian(native, 2)
 
 

@@ -139,7 +139,14 @@ def canonicalize_pyscf_hessian(hessian: Any, atom_count: int) -> np.ndarray:
         rtol=_HESSIAN_SYMMETRY_RTOL,
         atol=_HESSIAN_SYMMETRY_ATOL_SCALE * scale,
     ):
-        raise ValueError("PySCF Hessian is not symmetric in canonical Cartesian layout")
+        asymmetry = np.abs(canonical - canonical.T)
+        raise ValueError(
+            "PySCF Hessian is not symmetric in canonical Cartesian layout: "
+            f"max_abs_asymmetry={float(np.max(asymmetry)):.12g}, "
+            f"matrix_abs_max={float(np.max(np.abs(canonical))):.12g}, "
+            f"rtol={_HESSIAN_SYMMETRY_RTOL:.12g}, "
+            f"atol={_HESSIAN_SYMMETRY_ATOL_SCALE * scale:.12g}"
+        )
     return 0.5 * (canonical + canonical.T)
 
 
