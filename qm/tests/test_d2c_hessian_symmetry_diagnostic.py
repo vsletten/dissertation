@@ -1687,3 +1687,796 @@ def test_held_legacy_claim_blocks_before_identity_or_expensive_work(
     assert calls == []
     assert not (output / "status.json").exists()
     assert not (output / diagnostic.TERMINAL).exists()
+
+
+def test_half_step_contract_is_distinct_and_exactly_36_new_gradients():
+    assert diagnostic.HALF_STEP_SCHEMA == "d2c-hessian-fd-half-step-extension-v1"
+    assert diagnostic.HALF_STEP_SCHEMA != diagnostic.FINITE_DIFFERENCE_SCHEMA
+    assert (
+        diagnostic.HALF_STEP_CONTRACT["thresholds"]
+        == (diagnostic.FINITE_DIFFERENCE_CONTRACT["thresholds"])
+    )
+    assert {
+        key: value
+        for key, value in diagnostic.HALF_STEP_CONTRACT["method"].items()
+        if key != "density_initial_guess"
+    } == {
+        key: value
+        for key, value in diagnostic.FINITE_DIFFERENCE_CONTRACT["method"].items()
+        if key != "density_initial_guess"
+    }
+    assert diagnostic.HALF_STEP_CONTRACT["stencil"] == {
+        "coordinate_order": "atom-major Cartesian x,y,z",
+        "orientation": "rows are gradient components; columns are displacements",
+        "inner_step_bohr": 0.005,
+        "outer_step_bohr": 0.01,
+        "new_displacements_per_coordinate": [-1, 1],
+        "reused_prior_displacements_per_coordinate": [-1, 1],
+        "new_displaced_gradient_count": 36,
+        "reused_displaced_gradient_count": 36,
+        "maximum_new_scf_gradient_evaluations": 36,
+        "scf_retry_count": 0,
+        "h_inner": "(g(+0.005)-g(-0.005))/0.01",
+        "h_outer": "(g(+0.01)-g(-0.01))/0.02",
+        "richardson": "(4*H_0.005-H_0.01)/3",
+    }
+    plan = diagnostic._half_step_plan(6)
+    assert len(plan) == 36
+    assert [item["displacement_bohr"] for item in plan[:2]] == [-0.005, 0.005]
+    assert plan[-1]["key"] == "coordinate-017-p1"
+
+
+def _fake_half_step_source(transition_state, density):
+    density_sha = hashlib.sha256(density.astype("<f8").tobytes()).hexdigest()
+    center = _point_record(density_sha=density_sha, fmax=0.0)
+    center.update(
+        {
+            "reference_electronic_hartree": -10.0,
+            "electronic_energy_absolute_delta_hartree": 0.0,
+            "reference_s2": 0.76,
+            "s2_absolute_delta": 0.0,
+        }
+    )
+    center["geometry_fingerprint"] = diagnostic.frequency_geometry_fingerprint(
+        transition_state
+    )
+    reused_gradients = {}
+    reused_points = []
+    for definition in diagnostic._half_step_plan(6):
+        coordinate = definition["coordinate_index"]
+        sign = definition["step_multiplier"]
+        gradient = np.zeros(18)
+        gradient[coordinate] = 0.01 * sign
+        reused_gradients[(coordinate, sign)] = gradient
+        reused_points.append(
+            {
+                "point_key": definition["key"],
+                "receipt_sha256": f"{len(reused_points) + 1:064x}",
+                "gradient_sha256": hashlib.sha256(
+                    gradient.astype("<f8").tobytes()
+                ).hexdigest(),
+            }
+        )
+    binding = {
+        "campaign_identity": "c" * 64,
+        "route": diagnostic.ROUTE,
+        "transition_state_geometry_fingerprint": (
+            diagnostic.frequency_geometry_fingerprint(transition_state)
+        ),
+        "fd_method": diagnostic.FINITE_DIFFERENCE_CONTRACT["method"],
+    }
+    base = DftSettings(
+        xc="pwb6k",
+        basis="def2-svp",
+        dispersion="d3bj",
+        density_fit=True,
+        use_gpu=True,
+    )
+    return {
+        "prior_receipt": {
+            "git_sha": diagnostic.PRIOR_FD_GIT_SHA,
+            "script_sha256": diagnostic.PRIOR_FD_SCRIPT_SHA256,
+            "campaign_identity": "c" * 64,
+            "preflight_receipt_sha256": "d" * 64,
+            "reference_receipt_sha256": diagnostic.REFERENCE_RECEIPT_SHA256,
+            "reference_matrix_sha256": diagnostic.REFERENCE_MATRIX_SHA256,
+            "reference_binding": binding,
+            "reference_binding_sha256": diagnostic.campaign._canonical_hash(binding),
+        },
+        "prior_receipt_sha256": diagnostic.PRIOR_FD_RECEIPT_SHA256,
+        "prior_terminal_sha256": diagnostic.PRIOR_FD_TERMINAL_SHA256,
+        "preflight": {"identity": "c" * 64},
+        "preflight_root": Path("/test/preflight"),
+        "preflight_receipt_sha256": "d" * 64,
+        "reference_root": Path("/test/reference"),
+        "reference_receipt": {
+            "git_sha": "e" * 40,
+            "script_sha256": "f" * 64,
+        },
+        "reference_binding": binding,
+        "reference_matrix": np.eye(18),
+        "reference_case": {"electronic_hartree": -10.0, "spin_square": [0.76, 2.0]},
+        "transition_state": transition_state,
+        "reactant": diagnostic.replace(
+            transition_state, coords=transition_state.coords - 0.01
+        ),
+        "product": diagnostic.replace(
+            transition_state, coords=transition_state.coords + 0.01
+        ),
+        "masses": np.array([12.0, 16.0, 1.0, 16.0, 1.0, 1.0]),
+        "settings": diagnostic._fd_settings(base),
+        "center_record": center,
+        "center_density": density,
+        "center_receipt": {
+            "point_key": "center",
+            "receipt_sha256": "1" * 64,
+            "density_sha256": density_sha,
+        },
+        "reused_points": reused_points,
+        "reused_gradients": reused_gradients,
+    }
+
+
+def _patch_fake_half_step_environment(tmp_path, monkeypatch, *, passed=True):
+    transition_state = Cluster(
+        "frozen-ts",
+        ["C", "O", "H", "O", "H", "H"],
+        np.arange(18, dtype=float).reshape(6, 3) / 10.0,
+        spin=1,
+    )
+    density = np.arange(8, dtype=float).reshape(2, 2, 2)
+    source = _fake_half_step_source(transition_state, density)
+    identity = _identity()
+    monkeypatch.setattr(diagnostic, "PRIOR_FD_ROOT", str(tmp_path / "prior"))
+    monkeypatch.setattr(diagnostic, "PRIOR_FD_PREFLIGHT_SHA256", "d" * 64)
+    monkeypatch.setattr(diagnostic, "_fd_execution_identity", lambda: identity)
+    monkeypatch.setattr(diagnostic, "_load_half_step_source", lambda _root: source)
+    analysis = {
+        "confirmation_passed": passed,
+        "gates": [{"name": "synthetic", "passed": passed}],
+        "raw_fd_symmetry": {"maximum_absolute_asymmetry": 0.0},
+        "symmetric_richardson_vs_h_inner": {"maximum_absolute_delta": 0.0},
+        "fd_vs_analytic_symmetric": {"maximum_absolute_delta": 0.0},
+        "spectra": {"synthetic": {}},
+        "comparisons_to_analytic_reference": {"synthetic": {}},
+        "h_inner_vs_fd_modes": {"ordered_overlaps": [1.0]},
+        "h_outer_vs_fd_modes": {"ordered_overlaps": [1.0]},
+        "mapped_reaction_overlap": {"fd": 1.0},
+    }
+    monkeypatch.setattr(
+        diagnostic,
+        "_complete_half_step_analysis",
+        lambda *_args, **_kwargs: analysis,
+    )
+    monkeypatch.setattr(
+        diagnostic.campaign, "_mapped_route_vector", lambda *_args: np.ones(18)
+    )
+    calls = []
+
+    def evaluate(cluster, _settings, *, central_density):
+        calls.append((cluster.coords.copy(), central_density))
+        record = _point_record(
+            density_sha=hashlib.sha256(density.astype("<f8").tobytes()).hexdigest()
+        )
+        record["geometry_fingerprint"] = diagnostic.frequency_geometry_fingerprint(
+            cluster
+        )
+        coordinate = np.flatnonzero(
+            np.abs(cluster.coords.reshape(-1) - transition_state.coords.reshape(-1))
+            > 0.0
+        )[0]
+        gradient = np.zeros((6, 3))
+        gradient.reshape(-1)[coordinate] = (
+            cluster.coords.reshape(-1)[coordinate]
+            - transition_state.coords.reshape(-1)[coordinate]
+        ) / diagnostic.BOHR_TO_ANGSTROM
+        return record, gradient, density
+
+    monkeypatch.setattr(diagnostic, "_evaluate_fd_gradient", evaluate)
+    return source, calls
+
+
+def test_half_step_run_reuses_prior_points_and_has_exact_36_call_bound(
+    tmp_path, monkeypatch
+):
+    source, calls = _patch_fake_half_step_environment(tmp_path, monkeypatch)
+    output = tmp_path / "half-step"
+
+    receipt = diagnostic.run_half_step_extension(tmp_path / "prior", output)
+
+    assert len(calls) == 36
+    assert all(call_density is source["center_density"] for _, call_density in calls)
+    assert len(receipt["new_point_receipts"]) == 36
+    assert receipt["reused_prior_point_receipts"] == source["reused_points"]
+    assert receipt["accepted_campaign_result"] is False
+    assert receipt["confirmation_passed"] is True
+    assert receipt["prior_fd_root"] == str(tmp_path / "prior")
+    assert (output / "matrices/H_0.005-raw.f64").is_file()
+    assert (output / "matrices/H_0.01-raw.f64").is_file()
+    terminal = json.loads((output / diagnostic.TERMINAL).read_text())
+    assert terminal["schema"] == diagnostic.HALF_STEP_SCHEMA
+    assert terminal["state"] == "completed"
+    assert terminal["accepted_campaign_result"] is False
+    status = json.loads((output / "status.json").read_text())
+    assert status["accepted_campaign_result"] is False
+
+
+def test_half_step_resume_skips_durable_new_point_and_all_reused_points(
+    tmp_path, monkeypatch
+):
+    source, calls = _patch_fake_half_step_environment(tmp_path, monkeypatch)
+    output = tmp_path / "resume"
+    diagnostic.run_half_step_extension(tmp_path / "prior", output)
+    first_key = diagnostic._half_step_plan(6)[0]["key"]
+    first_receipt = json.loads(
+        (output / "points" / first_key / "receipt.json").read_text()
+    )
+    first_sha = hashlib.sha256(
+        (output / "points" / first_key / "receipt.json").read_bytes()
+    ).hexdigest()
+    for path in (output / "matrices",):
+        shutil.rmtree(path)
+    for path in (output / "receipt.json", output / diagnostic.TERMINAL):
+        path.unlink()
+    plan = diagnostic._half_step_plan(6)
+    for definition in plan[1:]:
+        shutil.rmtree(output / "points" / definition["key"])
+    status = diagnostic._initial_half_step_status(
+        _identity(), tmp_path / "prior", source
+    )
+    status["completed_points"] = [{"point_key": first_key, "receipt_sha256": first_sha}]
+    (output / "status.json").write_bytes(diagnostic._json_bytes(status))
+    calls.clear()
+
+    receipt = diagnostic.run_half_step_extension(tmp_path / "prior", output)
+
+    assert len(calls) == 35
+    assert json.loads((output / "points" / first_key / "receipt.json").read_text()) == (
+        first_receipt
+    )
+    assert len(receipt["new_point_receipts"]) == 36
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["wrong-schema", "tampered-contract", "missing-verdict", "wrong-verdict"],
+)
+def test_half_step_resume_rejects_unvalidated_status_before_calculator(
+    tmp_path, monkeypatch, mutation
+):
+    source, calls = _patch_fake_half_step_environment(tmp_path, monkeypatch)
+    output = tmp_path / mutation
+    output.mkdir()
+    status = diagnostic._initial_half_step_status(
+        _identity(), tmp_path / "prior", source
+    )
+    if mutation == "wrong-schema":
+        status["schema"] = diagnostic.FINITE_DIFFERENCE_SCHEMA
+    elif mutation == "tampered-contract":
+        status["contract_sha256"] = "0" * 64
+    elif mutation == "missing-verdict":
+        status.pop("accepted_campaign_result")
+    else:
+        status["accepted_campaign_result"] = True
+    (output / "status.json").write_bytes(diagnostic._json_bytes(status))
+
+    with pytest.raises(ValueError, match="half-step resume status"):
+        diagnostic.run_half_step_extension(tmp_path / "prior", output)
+
+    assert calls == []
+    failed_status = json.loads((output / "status.json").read_text())
+    terminal = diagnostic._validated_terminal(output / diagnostic.TERMINAL)
+    assert failed_status["schema"] == diagnostic.HALF_STEP_SCHEMA
+    assert failed_status["state"] == "failed"
+    assert failed_status["accepted_campaign_result"] is False
+    assert terminal["schema"] == diagnostic.HALF_STEP_SCHEMA
+    assert terminal["state"] == "failed"
+    assert terminal["confirmation_passed"] is False
+    assert terminal["accepted_campaign_result"] is False
+
+
+def test_half_step_output_root_race_blocks_before_source_or_calculator(
+    tmp_path, monkeypatch
+):
+    output = tmp_path / "race"
+    calls = []
+    monkeypatch.setattr(
+        diagnostic, "_load_half_step_source", lambda *_: calls.append("source")
+    )
+    monkeypatch.setattr(
+        diagnostic,
+        "_evaluate_fd_gradient",
+        lambda *_args, **_kwargs: calls.append("calc"),
+    )
+    monkeypatch.setattr(diagnostic, "PRIOR_FD_ROOT", str(tmp_path / "prior"))
+    with (
+        diagnostic._exclusive_output_claim(output),
+        pytest.raises(RuntimeError, match="already claimed"),
+    ):
+        diagnostic.run_half_step_extension(tmp_path / "prior", output)
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("mutation", "match"),
+    [
+        ("receipt", "receipt SHA-256"),
+        ("step", "receipt SHA-256"),
+        ("method", "receipt SHA-256"),
+        ("center", "hash mismatch"),
+        ("preflight", "receipt SHA-256"),
+        ("reference", "receipt SHA-256"),
+        ("terminal", "terminal SHA-256"),
+        ("status", "status SHA-256"),
+        ("payload", "must be a regular file"),
+    ],
+)
+def test_half_step_prior_chain_tamper_fails_before_calculator(
+    tmp_path, monkeypatch, mutation, match
+):
+    original = Path(diagnostic.PRIOR_FD_ROOT)
+    copied = tmp_path / "prior"
+    shutil.copytree(original, copied)
+    monkeypatch.setattr(diagnostic, "PRIOR_FD_ROOT", str(copied))
+    receipt_path = copied / "receipt.json"
+    receipt = json.loads(receipt_path.read_text())
+    if mutation == "receipt":
+        receipt["analysis"]["rejection"] = "forged"
+        receipt_path.write_bytes(diagnostic._json_bytes(receipt))
+    elif mutation == "step":
+        point = copied / "points/coordinate-000-m1/receipt.json"
+        payload = json.loads(point.read_text())
+        payload["displacement_bohr"] = -0.005
+        point.write_bytes(diagnostic._json_bytes(payload))
+    elif mutation == "method":
+        receipt["contract"]["method"]["basis"] = "wrong"
+        receipt_path.write_bytes(diagnostic._json_bytes(receipt))
+    elif mutation == "center":
+        center = copied / "points/center/density.f64"
+        raw = center.read_bytes()
+        center.write_bytes(raw[:-1] + bytes([raw[-1] ^ 1]))
+    elif mutation == "preflight":
+        receipt["preflight_root"] = str(tmp_path / "wrong-preflight")
+        receipt_path.write_bytes(diagnostic._json_bytes(receipt))
+    elif mutation == "reference":
+        receipt["reference_root"] = str(tmp_path / "wrong-reference")
+        receipt_path.write_bytes(diagnostic._json_bytes(receipt))
+    elif mutation == "terminal":
+        terminal_path = copied / diagnostic.TERMINAL
+        terminal = json.loads(terminal_path.read_text())
+        terminal["detail"] = "forged"
+        terminal_path.write_bytes(diagnostic._json_bytes(terminal))
+    elif mutation == "status":
+        status_path = copied / "status.json"
+        status = json.loads(status_path.read_text())
+        status["error"] = "forged"
+        status_path.write_bytes(diagnostic._json_bytes(status))
+    else:
+        (copied / "points/coordinate-000-m1/gradient.f64").unlink()
+    calls = []
+    preflight = json.loads(
+        (Path(diagnostic.PRIOR_FD_PREFLIGHT_ROOT) / "preflight.json").read_text()
+    )
+    base = DftSettings(
+        xc="pwb6k",
+        basis="def2-svp",
+        dispersion="d3bj",
+        density_fit=True,
+        use_gpu=True,
+    )
+    monkeypatch.setattr(
+        diagnostic.campaign,
+        "_validate_production_boundary",
+        lambda *_args: (preflight, diagnostic.PRIOR_FD_PREFLIGHT_SHA256),
+    )
+    monkeypatch.setattr(
+        diagnostic.campaign,
+        "_canonical_dft_settings",
+        lambda _receipt: (base, {}),
+    )
+    monkeypatch.setattr(
+        diagnostic,
+        "_evaluate_fd_gradient",
+        lambda *_args, **_kwargs: calls.append("calc"),
+    )
+
+    with pytest.raises(ValueError, match=match):
+        diagnostic.run_half_step_extension(copied, tmp_path / "output")
+    assert calls == []
+
+
+def test_half_step_rejects_any_prior_root_other_than_exact_pinned_root(
+    tmp_path, monkeypatch
+):
+    calls = []
+    monkeypatch.setattr(
+        diagnostic, "_load_half_step_source", lambda *_: calls.append("source")
+    )
+    with pytest.raises(ValueError, match="exact prior FD receipt root"):
+        diagnostic.run_half_step_extension(tmp_path / "wrong", tmp_path / "output")
+    assert calls == []
+
+
+def test_half_step_requires_fresh_separate_output_root(tmp_path, monkeypatch):
+    _source, calls = _patch_fake_half_step_environment(tmp_path, monkeypatch)
+    prior = tmp_path / "prior"
+    output = tmp_path / "existing-output"
+    output.mkdir()
+
+    with pytest.raises(FileExistsError, match="fresh output root"):
+        diagnostic.run_half_step_extension(prior, output)
+    with pytest.raises(ValueError, match="separate fresh output root"):
+        diagnostic.run_half_step_extension(prior, prior)
+    assert calls == []
+    assert list(output.iterdir()) == []
+
+
+def test_half_step_uncertain_unreceipted_attempt_never_retries(tmp_path, monkeypatch):
+    source, calls = _patch_fake_half_step_environment(tmp_path, monkeypatch)
+    output = tmp_path / "uncertain"
+    output.mkdir()
+    status = diagnostic._initial_half_step_status(
+        _identity(), tmp_path / "prior", source
+    )
+    status["current_point"] = diagnostic._half_step_plan(6)[0]["key"]
+    (output / "status.json").write_bytes(diagnostic._json_bytes(status))
+
+    with pytest.raises(RuntimeError, match="uncertain unreceipted attempt"):
+        diagnostic.run_half_step_extension(tmp_path / "prior", output)
+    assert calls == []
+    terminal = json.loads((output / diagnostic.TERMINAL).read_text())
+    assert terminal["state"] == "failed"
+    assert terminal["confirmation_passed"] is False
+    assert terminal["accepted_campaign_result"] is False
+
+
+def test_complete_half_step_analysis_keeps_all_metrics_when_strict_gate_fails(
+    monkeypatch,
+):
+    eigenvalues = np.array([-0.02, 1.0e-4])
+    modes = SimpleNamespace(
+        eigenvalues=eigenvalues,
+        mass_weighted_eigenvectors=np.eye(2).reshape(2, 1, 2),
+    )
+    monkeypatch.setattr(diagnostic, "project_vibrational_hessian", lambda *_: modes)
+    monkeypatch.setitem(
+        diagnostic.HALF_STEP_CONTRACT["thresholds"],
+        "raw_fd_maximum_absolute_asymmetry_exclusive_maximum",
+        0.125,
+    )
+    monkeypatch.setitem(
+        diagnostic.HALF_STEP_CONTRACT["thresholds"],
+        "raw_fd_spectral_relative_asymmetry_exclusive_maximum",
+        10.0,
+    )
+    raw_fd = np.array([[1.0, 0.0625], [-0.0625, 1.0]])
+
+    analysis = diagnostic._complete_half_step_analysis(
+        SimpleNamespace(coords=np.zeros((1, 3))),
+        np.ones(1),
+        np.array([1.0, 0.0]),
+        np.eye(2),
+        np.eye(2),
+        raw_fd,
+        np.eye(2),
+        point_gate_failures=[],
+    )
+
+    assert analysis["confirmation_passed"] is False
+    assert set(analysis) >= {
+        "gates",
+        "raw_fd_symmetry",
+        "symmetric_richardson_vs_h_inner",
+        "fd_vs_analytic_symmetric",
+        "spectra",
+        "comparisons_to_analytic_reference",
+        "h_inner_vs_fd_modes",
+        "h_outer_vs_fd_modes",
+        "mapped_reaction_overlap",
+    }
+    boundary = next(
+        gate for gate in analysis["gates"] if gate["name"] == "raw_fd_maximum_asymmetry"
+    )
+    assert boundary["value"] == pytest.approx(0.125)
+    assert boundary["comparison"] == "strictly_less_than"
+    assert boundary["passed"] is False
+    assert "negative_mode_indices" in analysis["spectra"]["FD"]
+    assert "signed_wavenumbers_cm" in analysis["spectra"]["FD"]
+    assert "frequency_absolute_deltas_cm" in analysis["h_outer_vs_fd_modes"]
+
+
+@pytest.mark.parametrize(
+    ("comparison", "value", "limit"),
+    [
+        ("strictly_less_than", 1.0, 1.0),
+        ("strictly_greater_than", 1.0, 1.0),
+        ("strictly_greater_than", None, 1.0),
+        ("all_strictly_less_than", [1.0], [1.0]),
+        ("all_strictly_greater_than", [1.0], 1.0),
+    ],
+)
+def test_half_step_strict_gate_boundaries_fail_closed(comparison, value, limit):
+    gates = []
+    diagnostic._analysis_gate(gates, "boundary", value, limit, comparison)
+    assert gates == [
+        {
+            "name": "boundary",
+            "value": value,
+            "limit": limit,
+            "comparison": comparison,
+            "passed": False,
+        }
+    ]
+
+
+@pytest.mark.parametrize("passed", [True, False])
+def test_half_step_scientific_verdict_has_completed_fail_closed_terminal(
+    tmp_path, monkeypatch, passed
+):
+    _source, _calls = _patch_fake_half_step_environment(
+        tmp_path, monkeypatch, passed=passed
+    )
+    output = tmp_path / f"verdict-{passed}"
+
+    receipt = diagnostic.run_half_step_extension(tmp_path / "prior", output)
+    terminal = json.loads((output / diagnostic.TERMINAL).read_text())
+
+    assert receipt["confirmation_passed"] is passed
+    assert receipt["accepted_campaign_result"] is False
+    assert terminal["state"] == "completed"
+    assert terminal["confirmation_passed"] is passed
+    assert terminal["accepted_campaign_result"] is False
+
+
+def test_half_step_calculator_exception_writes_failed_terminal(tmp_path, monkeypatch):
+    _source, calls = _patch_fake_half_step_environment(tmp_path, monkeypatch)
+
+    def fail(*_args, **_kwargs):
+        calls.append("failed-call")
+        raise RuntimeError("synthetic calculator failure")
+
+    monkeypatch.setattr(diagnostic, "_evaluate_fd_gradient", fail)
+    output = tmp_path / "failed"
+    with pytest.raises(RuntimeError, match="synthetic calculator failure"):
+        diagnostic.run_half_step_extension(tmp_path / "prior", output)
+
+    assert calls == ["failed-call"]
+    terminal = diagnostic._validated_terminal(output / diagnostic.TERMINAL)
+    assert terminal["state"] == "failed"
+    assert terminal["confirmation_passed"] is False
+    assert terminal["accepted_campaign_result"] is False
+    assert terminal["current_point"] == "coordinate-000-m1"
+    status = json.loads((output / "status.json").read_text())
+    assert status["accepted_campaign_result"] is False
+
+
+def test_half_step_dead_man_finalizer_is_idempotent_and_never_computes(
+    tmp_path, monkeypatch
+):
+    source, calls = _patch_fake_half_step_environment(tmp_path, monkeypatch)
+    output = tmp_path / "dead-man"
+    output.mkdir()
+    status = diagnostic._initial_half_step_status(
+        _identity(), tmp_path / "prior", source
+    )
+    (output / "status.json").write_bytes(diagnostic._json_bytes(status))
+
+    first = diagnostic.finalize_if_running(output, half_step=True)
+    second = diagnostic.finalize_if_running(output, half_step=True)
+
+    assert first == second
+    assert first["schema"] == diagnostic.HALF_STEP_SCHEMA
+    assert first["state"] == "failed"
+    assert first["confirmation_passed"] is False
+    assert first["accepted_campaign_result"] is False
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "wrong_schema", [diagnostic.SCHEMA, diagnostic.FINITE_DIFFERENCE_SCHEMA]
+)
+def test_half_step_finalizer_rejects_wrong_mode_terminal_without_rewriting_status(
+    tmp_path, monkeypatch, wrong_schema
+):
+    source, calls = _patch_fake_half_step_environment(tmp_path, monkeypatch)
+    output = tmp_path / "wrong-mode-terminal"
+    output.mkdir()
+    status = diagnostic._initial_half_step_status(
+        _identity(), tmp_path / "prior", source
+    )
+    status_raw = diagnostic._json_bytes(status)
+    (output / "status.json").write_bytes(status_raw)
+    wrong_mode = diagnostic._terminal_payload(
+        {
+            "schema": wrong_schema,
+            "git_sha": "a" * 40,
+            "script_sha256": "b" * 64,
+        },
+        state="failed",
+        detail="synthetic generic failure",
+    )
+    terminal_raw = diagnostic._json_bytes(wrong_mode)
+    (output / diagnostic.TERMINAL).write_bytes(terminal_raw)
+
+    with pytest.raises(ValueError, match="half-step terminal schema"):
+        diagnostic.finalize_if_running(output, half_step=True)
+
+    assert calls == []
+    assert (output / "status.json").read_bytes() == status_raw
+    assert (output / diagnostic.TERMINAL).read_bytes() == terminal_raw
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "contract",
+        "prior-receipt",
+        "prior-terminal",
+        "prior-status",
+        "preflight",
+        "reference-receipt",
+        "reference-matrix",
+        "git",
+        "script",
+        "execution-identity",
+        "point-count",
+        "current-point",
+    ],
+)
+def test_half_step_finalizer_rejects_forged_failed_terminal(
+    tmp_path, monkeypatch, mutation
+):
+    source, _calls = _patch_fake_half_step_environment(tmp_path, monkeypatch)
+    output = tmp_path / f"forged-failed-{mutation}"
+    output.mkdir()
+    status = diagnostic._initial_half_step_status(
+        _identity(), tmp_path / "prior", source
+    )
+    status["state"] = "failed"
+    status["error"] = "synthetic failure"
+    status["finished_utc"] = "2026-09-08T00:00:00Z"
+    status_raw = diagnostic._json_bytes(status)
+    (output / "status.json").write_bytes(status_raw)
+    terminal = diagnostic._terminal_payload(
+        status, state="failed", detail="synthetic failure"
+    )
+    fields = {
+        "contract": "contract_sha256",
+        "prior-receipt": "prior_fd_receipt_sha256",
+        "prior-terminal": "prior_fd_terminal_sha256",
+        "prior-status": "prior_fd_status_sha256",
+        "preflight": "preflight_receipt_sha256",
+        "reference-receipt": "reference_receipt_sha256",
+        "reference-matrix": "reference_matrix_sha256",
+        "git": "git_sha",
+        "script": "script_sha256",
+        "execution-identity": "diagnostic_execution_identity_sha256",
+    }
+    if mutation in fields:
+        terminal[fields[mutation]] = "0" * (40 if mutation == "git" else 64)
+    elif mutation == "point-count":
+        terminal["completed_point_count"] = 1
+    else:
+        terminal["current_point"] = diagnostic._half_step_plan(6)[0]["key"]
+    terminal_raw = diagnostic._json_bytes(terminal)
+    (output / diagnostic.TERMINAL).write_bytes(terminal_raw)
+
+    with pytest.raises(ValueError, match="failed half-step terminal"):
+        diagnostic.finalize_if_running(output, half_step=True)
+
+    assert (output / "status.json").read_bytes() == status_raw
+    assert (output / diagnostic.TERMINAL).read_bytes() == terminal_raw
+
+
+def test_half_step_finalizer_adopts_receipt_published_before_terminal(
+    tmp_path, monkeypatch
+):
+    _source, calls = _patch_fake_half_step_environment(tmp_path, monkeypatch)
+    output = tmp_path / "receipt-before-terminal"
+    receipt = diagnostic.run_half_step_extension(tmp_path / "prior", output)
+    receipt_sha = hashlib.sha256((output / "receipt.json").read_bytes()).hexdigest()
+    (output / diagnostic.TERMINAL).unlink()
+    (output / "status.json").write_bytes(
+        diagnostic._json_bytes(
+            {"schema": diagnostic.HALF_STEP_SCHEMA, "state": "running"}
+        )
+    )
+    calls.clear()
+
+    terminal = diagnostic.finalize_if_running(output, half_step=True)
+
+    assert calls == []
+    assert terminal["state"] == "completed"
+    assert terminal["receipt_sha256"] == receipt_sha
+    assert json.loads((output / "status.json").read_text()) == (
+        diagnostic._completed_half_step_status(receipt, receipt_sha)
+    )
+
+
+def test_half_step_finalizer_reconciles_terminal_published_before_status(
+    tmp_path, monkeypatch
+):
+    _source, calls = _patch_fake_half_step_environment(tmp_path, monkeypatch)
+    output = tmp_path / "terminal-before-status"
+    receipt = diagnostic.run_half_step_extension(tmp_path / "prior", output)
+    receipt_sha = hashlib.sha256((output / "receipt.json").read_bytes()).hexdigest()
+    terminal_before = (output / diagnostic.TERMINAL).read_bytes()
+    (output / "status.json").write_bytes(
+        diagnostic._json_bytes(
+            {"schema": diagnostic.HALF_STEP_SCHEMA, "state": "running"}
+        )
+    )
+    calls.clear()
+
+    terminal = diagnostic.finalize_if_running(output, half_step=True)
+
+    assert calls == []
+    assert diagnostic._json_bytes(terminal) == terminal_before
+    assert json.loads((output / "status.json").read_text()) == (
+        diagnostic._completed_half_step_status(receipt, receipt_sha)
+    )
+
+
+def test_half_step_finalizer_rejects_tampered_completed_terminal(tmp_path, monkeypatch):
+    _source, _calls = _patch_fake_half_step_environment(tmp_path, monkeypatch)
+    output = tmp_path / "tampered-completed-terminal"
+    diagnostic.run_half_step_extension(tmp_path / "prior", output)
+    terminal_path = output / diagnostic.TERMINAL
+    terminal = json.loads(terminal_path.read_text())
+    terminal["completed_point_count"] -= 1
+    original = diagnostic._json_bytes(terminal)
+    terminal_path.write_bytes(original)
+
+    with pytest.raises(ValueError, match="authoritative completed half-step terminal"):
+        diagnostic.finalize_if_running(output, half_step=True)
+
+    assert terminal_path.read_bytes() == original
+
+
+def test_half_step_cli_is_explicit_and_requires_prior_root(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(diagnostic, "PRIOR_FD_ROOT", str(tmp_path / "prior"))
+    monkeypatch.setattr(
+        diagnostic,
+        "run_half_step_extension",
+        lambda *_args: {
+            "schema": diagnostic.HALF_STEP_SCHEMA,
+            "state": "completed",
+            "confirmation_passed": False,
+            "accepted_campaign_result": False,
+        },
+    )
+    monkeypatch.setattr(
+        diagnostic.sys,
+        "argv",
+        [
+            "diagnostic",
+            "--half-step-extension",
+            "--prior-fd-root",
+            str(tmp_path / "prior"),
+            "--output-root",
+            str(tmp_path / "output"),
+        ],
+    )
+
+    assert diagnostic.main() == 0
+    stdout = json.loads(capsys.readouterr().out)
+    assert stdout["confirmation_passed"] is False
+    assert stdout["accepted_campaign_result"] is False
+
+
+def test_half_step_cli_rejects_missing_prior_root(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        diagnostic.sys,
+        "argv",
+        [
+            "diagnostic",
+            "--half-step-extension",
+            "--output-root",
+            str(tmp_path / "output"),
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        diagnostic.main()

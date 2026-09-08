@@ -79,8 +79,34 @@ campaign._OBSERVED_MODULE_CODE.setdefault(__name__, _THIS_MODULE_IMPORT_CODE)
 
 SCHEMA = "d2c-hessian-symmetry-diagnostic-v1"
 FINITE_DIFFERENCE_SCHEMA = "d2c-hessian-fd-confirmation-v2"
+HALF_STEP_SCHEMA = "d2c-hessian-fd-half-step-extension-v1"
 TERMINAL = "terminal.json"
 ROUTE = "h-co-1w-oside"
+PRIOR_FD_ROOT = (
+    "/mnt/data/vsletten/dissertation-data/task300-d2c-fd-0172406-confirmation"
+)
+PRIOR_FD_RECEIPT_SHA256 = (
+    "1bde3b52f516dbdb8df2ef4ea5d06233a783edef91c961c2ba943837abc15554"
+)
+PRIOR_FD_TERMINAL_SHA256 = (
+    "d11d73af132ca35909752be19c41105761638b0284f33e00cc47ef33165a5a7e"
+)
+PRIOR_FD_STATUS_SHA256 = (
+    "151015b0eb118b0e592a246b2b19602b1e4c4110697f387c91e3e3486258d5c8"
+)
+PRIOR_FD_GIT_SHA = "0172406b7df089d2e2da35955e4a2a65a3f81065"
+PRIOR_FD_SCRIPT_SHA256 = (
+    "f5bc13acff0eed4b708ad4405ab8f2fb78f8bb4763470ca9509644a7b2428d8e"
+)
+PRIOR_FD_PREFLIGHT_ROOT = (
+    "/mnt/data/vsletten/dissertation-data/task300-d2c-fd-0172406-preflight"
+)
+PRIOR_FD_PREFLIGHT_SHA256 = (
+    "48383c18f8005fe949d611fcf34d01d40a2b80bcae43bae29c730883613077ea"
+)
+PRIOR_FD_REFERENCE_ROOT = (
+    "/mnt/data/vsletten/dissertation-data/task300-d2c-hessian-5f74662-diagnostic"
+)
 REFERENCE_RECEIPT_SHA256 = (
     "b32f0a34939571679e653e4772c1a73172126acd7f58fdbae3ea425ef463e172"
 )
@@ -170,6 +196,105 @@ FINITE_DIFFERENCE_CONTRACT: dict[str, Any] = {
         "rejected_authority": (
             "diagnostic rejection only; no tolerance change, TS qualification, "
             "IRC launch, SCT result, or production-policy change"
+        ),
+    },
+}
+
+HALF_STEP_CONTRACT: dict[str, Any] = {
+    "route": ROUTE,
+    "method": {
+        "backend": "pyscf-cpu",
+        "xc": "pwb6k",
+        "dispersion": "d3bj",
+        "basis": "def2-svp",
+        "density_fit": True,
+        "grid_level": 5,
+        "scf_tolerance": 1.0e-12,
+        "scf_max_cycle": 150,
+        "gradient_grid_response": True,
+        "density_initial_guess": "prior receipt's identical center density matrix",
+    },
+    "stencil": {
+        "coordinate_order": "atom-major Cartesian x,y,z",
+        "orientation": "rows are gradient components; columns are displacements",
+        "inner_step_bohr": 0.005,
+        "outer_step_bohr": 0.01,
+        "new_displacements_per_coordinate": [-1, 1],
+        "reused_prior_displacements_per_coordinate": [-1, 1],
+        "new_displaced_gradient_count": 36,
+        "reused_displaced_gradient_count": 36,
+        "maximum_new_scf_gradient_evaluations": 36,
+        "scf_retry_count": 0,
+        "h_inner": "(g(+0.005)-g(-0.005))/0.01",
+        "h_outer": "(g(+0.01)-g(-0.01))/0.02",
+        "richardson": "(4*H_0.005-H_0.01)/3",
+    },
+    "prior_fd": {
+        "root": PRIOR_FD_ROOT,
+        "schema": FINITE_DIFFERENCE_SCHEMA,
+        "receipt_sha256": PRIOR_FD_RECEIPT_SHA256,
+        "terminal_sha256": PRIOR_FD_TERMINAL_SHA256,
+        "status_sha256": PRIOR_FD_STATUS_SHA256,
+        "git_sha": PRIOR_FD_GIT_SHA,
+        "script_sha256": PRIOR_FD_SCRIPT_SHA256,
+        "preflight_root": PRIOR_FD_PREFLIGHT_ROOT,
+        "preflight_receipt_sha256": PRIOR_FD_PREFLIGHT_SHA256,
+        "reference_root": PRIOR_FD_REFERENCE_ROOT,
+    },
+    "reference": {
+        "receipt_sha256": REFERENCE_RECEIPT_SHA256,
+        "dense_strict_symmetric_matrix_sha256": REFERENCE_MATRIX_SHA256,
+        "case": "D-dense-strict-reference",
+    },
+    "thresholds": {
+        "required_grid_point_count": 199560,
+        "spin_square_inclusive_minimum": 0.74,
+        "spin_square_inclusive_maximum": 0.80,
+        "displaced_vs_center_spin_square_exclusive_maximum_delta": 0.01,
+        (
+            "displaced_final_density_vs_center_exclusive_maximum_"
+            "normalized_frobenius_delta"
+        ): 0.05,
+        "center_energy_vs_reference_exclusive_maximum_delta_hartree": 1.0e-8,
+        "center_s2_vs_reference_exclusive_maximum_delta": 1.0e-4,
+        "center_fmax_ev_per_angstrom_exclusive_maximum": 0.02,
+        "raw_fd_maximum_absolute_asymmetry_exclusive_maximum": 2.0e-5,
+        "raw_fd_spectral_relative_asymmetry_exclusive_maximum": 1.0e-5,
+        "symmetric_richardson_vs_h_h_maximum_absolute_delta_exclusive_maximum": 5.0e-5,
+        "symmetric_richardson_vs_h_h_spectral_relative_delta_exclusive_maximum": 2.0e-5,
+        "fd_vs_analytic_symmetric_maximum_absolute_delta_exclusive_maximum": 2.0e-4,
+        "fd_vs_analytic_symmetric_spectral_relative_delta_exclusive_maximum": 1.0e-4,
+        "negative_eigenvalue_threshold": -1.0e-8,
+        "near_zero_eigenvalue_inclusive_maximum_absolute": 1.0e-8,
+        "lowest_positive_eigenvalue_exclusive_minimum": 5.0e-6,
+        "imaginary_wavenumber_cm_exclusive_minimum": 200.0,
+        "per_mode_reference_eigenvalue_delta_absolute_floor": 1.0e-6,
+        "per_mode_reference_eigenvalue_delta_relative_fraction": 0.005,
+        "per_mode_reference_eigenvalue_delta_comparison": (
+            "exclusive maximum of floor and fraction*abs(reference)"
+        ),
+        "fd_vs_reference_imaginary_frequency_delta_cm_exclusive_maximum": 5.0,
+        "fd_vs_reference_low_positive_frequency_delta_cm_exclusive_maximum": 1.0,
+        "maximum_overlap_assignment_must_equal_eigenvalue_order": True,
+        "fd_vs_reference_unstable_overlap_exclusive_minimum": 0.995,
+        "fd_vs_reference_low_positive_overlap_exclusive_minimum": 0.98,
+        "fd_vs_reference_all_ordered_overlaps_exclusive_minimum": 0.90,
+        "fd_mapped_reaction_overlap_exclusive_minimum": 0.5,
+        "fd_mapped_reaction_overlap_vs_reference_exclusive_maximum_delta": 0.02,
+        "h_h_vs_fd_unstable_overlap_exclusive_minimum": 0.999,
+        "h_h_vs_fd_low_positive_overlap_exclusive_minimum": 0.995,
+        "h_h_vs_fd_imaginary_frequency_delta_cm_exclusive_maximum": 2.0,
+        "h_h_vs_fd_low_positive_frequency_delta_cm_exclusive_maximum": 0.5,
+    },
+    "policy": {
+        "accepted_campaign_result": False,
+        "confirmation_only": True,
+        "passed_authority": (
+            "bounded half-step diagnostic evidence only; never qualification"
+        ),
+        "rejected_authority": (
+            "diagnostic rejection only; no tolerance change, TS qualification, "
+            "IRC launch, SCT result, D3b authorization, or production-policy change"
         ),
     },
 }
@@ -435,7 +560,7 @@ def _terminal_payload(
         "finished_utc": status.get("finished_utc")
         or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
-    if status.get("schema") == FINITE_DIFFERENCE_SCHEMA:
+    if status.get("schema") in {FINITE_DIFFERENCE_SCHEMA, HALF_STEP_SCHEMA}:
         payload.update(
             {
                 "accepted_campaign_result": False,
@@ -447,6 +572,17 @@ def _terminal_payload(
                 "reference_matrix_sha256": status.get("reference_matrix_sha256"),
                 "completed_point_count": len(status.get("completed_points", [])),
                 "current_point": status.get("current_point"),
+            }
+        )
+    if status.get("schema") == HALF_STEP_SCHEMA:
+        payload.update(
+            {
+                "diagnostic_execution_identity_sha256": status.get(
+                    "diagnostic_execution_identity_sha256"
+                ),
+                "prior_fd_receipt_sha256": status.get("prior_fd_receipt_sha256"),
+                "prior_fd_terminal_sha256": status.get("prior_fd_terminal_sha256"),
+                "prior_fd_status_sha256": status.get("prior_fd_status_sha256"),
             }
         )
     return payload
@@ -469,7 +605,7 @@ def _validated_terminal(path: Path) -> dict[str, Any]:
         "detail",
         "finished_utc",
     }
-    if schema == FINITE_DIFFERENCE_SCHEMA:
+    if schema in {FINITE_DIFFERENCE_SCHEMA, HALF_STEP_SCHEMA}:
         base_keys |= {
             "accepted_campaign_result",
             "confirmation_passed",
@@ -479,6 +615,13 @@ def _validated_terminal(path: Path) -> dict[str, Any]:
             "completed_point_count",
             "current_point",
         }
+        if schema == HALF_STEP_SCHEMA:
+            base_keys |= {
+                "diagnostic_execution_identity_sha256",
+                "prior_fd_receipt_sha256",
+                "prior_fd_terminal_sha256",
+                "prior_fd_status_sha256",
+            }
     elif schema != SCHEMA:
         raise ValueError("diagnostic terminal schema is invalid")
     if terminal.get("state") == "completed":
@@ -490,7 +633,7 @@ def _validated_terminal(path: Path) -> dict[str, Any]:
         "failed",
     }:
         raise ValueError("diagnostic terminal identity or state is invalid")
-    if schema == FINITE_DIFFERENCE_SCHEMA and (
+    if schema in {FINITE_DIFFERENCE_SCHEMA, HALF_STEP_SCHEMA} and (
         terminal.get("accepted_campaign_result") is not False
         or type(terminal.get("confirmation_passed")) is not bool
         or (
@@ -499,11 +642,42 @@ def _validated_terminal(path: Path) -> dict[str, Any]:
         )
     ):
         raise ValueError("FD terminal scientific verdict is invalid")
+    if schema == HALF_STEP_SCHEMA:
+        for field, length in (
+            ("git_sha", 40),
+            ("script_sha256", 64),
+            ("diagnostic_execution_identity_sha256", 64),
+            ("contract_sha256", 64),
+            ("preflight_receipt_sha256", 64),
+            ("reference_receipt_sha256", 64),
+            ("reference_matrix_sha256", 64),
+            ("prior_fd_receipt_sha256", 64),
+            ("prior_fd_terminal_sha256", 64),
+            ("prior_fd_status_sha256", 64),
+        ):
+            campaign._require_sha(
+                campaign._require_json_string(
+                    terminal.get(field), label=f"half-step terminal {field}"
+                ),
+                length=length,
+                label=f"half-step terminal {field}",
+            )
+        completed_count = terminal.get("completed_point_count")
+        expected_point_keys = [item["key"] for item in _half_step_plan(6)]
+        if (
+            type(completed_count) is not int
+            or not 0 <= completed_count <= len(expected_point_keys)
+            or (
+                terminal.get("current_point") is not None
+                and terminal.get("current_point") not in expected_point_keys
+            )
+        ):
+            raise ValueError("half-step terminal point progress is invalid")
     return terminal
 
 
 def _validated_completed_fd_receipt(
-    output_root: Path,
+    output_root: Path, *, verify_resident_identity: bool = True
 ) -> tuple[dict[str, Any], str]:
     receipt, raw = campaign._read_json_object(
         output_root / "receipt.json",
@@ -626,19 +800,20 @@ def _validated_completed_fd_receipt(
         or reference_binding.get("fd_method") != FINITE_DIFFERENCE_CONTRACT["method"]
     ):
         raise ValueError("completed FD receipt identity is invalid")
-    current_identity = _fd_execution_identity()
-    campaign._strict_json_equal(
-        {
-            "git_sha": receipt.get("git_sha"),
-            "script_sha256": receipt.get("script_sha256"),
-            "diagnostic_execution_identity": execution_identity,
-            "diagnostic_execution_identity_sha256": receipt.get(
-                "diagnostic_execution_identity_sha256"
-            ),
-        },
-        current_identity,
-        label="completed FD resident execution identity",
-    )
+    if verify_resident_identity:
+        current_identity = _fd_execution_identity()
+        campaign._strict_json_equal(
+            {
+                "git_sha": receipt.get("git_sha"),
+                "script_sha256": receipt.get("script_sha256"),
+                "diagnostic_execution_identity": execution_identity,
+                "diagnostic_execution_identity_sha256": receipt.get(
+                    "diagnostic_execution_identity_sha256"
+                ),
+            },
+            current_identity,
+            label="completed FD resident execution identity",
+        )
     preflight_root_text = campaign._require_json_string(
         receipt.get("preflight_root"), label="completed FD preflight root"
     )
@@ -652,9 +827,12 @@ def _validated_completed_fd_receipt(
         or str(reference_root) != reference_root_text
     ):
         raise ValueError("completed FD provenance roots are not canonical")
-    preflight, preflight_sha = campaign._validate_production_boundary(
-        preflight_root, ROUTE
-    )
+    if verify_resident_identity:
+        preflight, preflight_sha = campaign._validate_production_boundary(
+            preflight_root, ROUTE
+        )
+    else:
+        preflight, preflight_sha = campaign._validated_preflight(preflight_root, ROUTE)
     campaign._canonical_dft_settings(preflight)
     template = reactions(gpu=True, basis="def2-svp")[ROUTE].cluster
     fingerprints = campaign._trusted_input_fingerprints_from_route_record(
@@ -738,7 +916,7 @@ def _validated_completed_fd_receipt(
             expected_receipt_keys=receipt_keys,
         )
         if point_sha != record["receipt_sha256"]:
-            raise ValueError("completed FD point receipt hash mismatch")
+            raise ValueError("completed FD point receipt SHA-256 hash mismatch")
         if (
             point.get("schema") != FINITE_DIFFERENCE_SCHEMA
             or point.get("point_key") != expected_key
@@ -950,6 +1128,556 @@ def _completed_fd_status(
     }
 
 
+def _validated_completed_half_step_receipt(
+    output_root: Path, *, verify_resident_identity: bool = True
+) -> tuple[dict[str, Any], str]:
+    """Validate and independently reconstruct a completed half-step receipt."""
+
+    receipt, raw = campaign._read_json_object(
+        output_root / "receipt.json",
+        label="completed half-step receipt",
+        max_bytes=4 * 1024 * 1024,
+    )
+    expected_keys = {
+        "schema",
+        "state",
+        "accepted_campaign_result",
+        "confirmation_passed",
+        "purpose",
+        "authority",
+        "route",
+        "git_sha",
+        "script_sha256",
+        "diagnostic_execution_identity",
+        "diagnostic_execution_identity_sha256",
+        "prior_fd_root",
+        "prior_fd_receipt_sha256",
+        "prior_fd_terminal_sha256",
+        "prior_fd_status_sha256",
+        "prior_fd_git_sha",
+        "prior_fd_script_sha256",
+        "preflight_root",
+        "preflight_receipt_sha256",
+        "campaign_identity",
+        "reference_root",
+        "reference_receipt_sha256",
+        "reference_matrix_sha256",
+        "reference_git_sha",
+        "reference_script_sha256",
+        "reference_binding",
+        "reference_binding_sha256",
+        "center_receipt",
+        "reused_prior_point_receipts",
+        "new_point_receipts",
+        "contract",
+        "contract_sha256",
+        "aggregate_receipt",
+        "analysis",
+        "finished_utc",
+    }
+    if set(receipt) != expected_keys:
+        raise ValueError("completed half-step receipt schema is not exact")
+    identity = {
+        "git_sha": receipt.get("git_sha"),
+        "script_sha256": receipt.get("script_sha256"),
+        "diagnostic_execution_identity": receipt.get("diagnostic_execution_identity"),
+        "diagnostic_execution_identity_sha256": receipt.get(
+            "diagnostic_execution_identity_sha256"
+        ),
+    }
+    execution_identity = identity["diagnostic_execution_identity"]
+    reference_binding = receipt.get("reference_binding")
+    if (
+        receipt.get("schema") != HALF_STEP_SCHEMA
+        or receipt.get("state") != "completed"
+        or receipt.get("accepted_campaign_result") is not False
+        or type(receipt.get("confirmation_passed")) is not bool
+        or receipt.get("purpose")
+        != "immutable half-step FD extension only; no production authority"
+        or receipt.get("authority")
+        != HALF_STEP_CONTRACT["policy"][
+            (
+                "passed_authority"
+                if receipt.get("confirmation_passed") is True
+                else "rejected_authority"
+            )
+        ]
+        or receipt.get("route") != ROUTE
+        or receipt.get("contract") != HALF_STEP_CONTRACT
+        or receipt.get("contract_sha256")
+        != campaign._canonical_hash(HALF_STEP_CONTRACT)
+        or type(execution_identity) is not dict
+        or receipt.get("diagnostic_execution_identity_sha256")
+        != campaign._canonical_hash(execution_identity)
+        or type(reference_binding) is not dict
+        or receipt.get("reference_binding_sha256")
+        != campaign._canonical_hash(reference_binding)
+        or type(receipt.get("finished_utc")) is not str
+        or not receipt["finished_utc"].endswith("Z")
+    ):
+        raise ValueError("completed half-step receipt identity is invalid")
+    if (
+        set(execution_identity)
+        != {
+            "kind",
+            "loaded_module_code_sha256",
+            "loaded_code_sha256",
+            "loaded_state_sha256",
+            "source_files",
+        }
+        or execution_identity.get("kind") != "python-source"
+        or type(execution_identity.get("source_files")) is not dict
+        or not execution_identity["source_files"]
+    ):
+        raise ValueError("completed half-step loaded-code identity schema is invalid")
+    for field in (
+        "loaded_module_code_sha256",
+        "loaded_code_sha256",
+        "loaded_state_sha256",
+    ):
+        campaign._require_sha(
+            campaign._require_json_string(
+                execution_identity.get(field), label=f"half-step {field}"
+            ),
+            length=64,
+            label=f"half-step {field}",
+        )
+    for path, digest in execution_identity["source_files"].items():
+        if type(path) is not str or not path:
+            raise ValueError("completed half-step loaded-code source path is invalid")
+        campaign._require_sha(
+            campaign._require_json_string(
+                digest, label="half-step loaded source SHA-256"
+            ),
+            length=64,
+            label="half-step loaded source SHA-256",
+        )
+    for field, length in (
+        ("git_sha", 40),
+        ("script_sha256", 64),
+        ("diagnostic_execution_identity_sha256", 64),
+        ("prior_fd_receipt_sha256", 64),
+        ("prior_fd_terminal_sha256", 64),
+        ("prior_fd_status_sha256", 64),
+        ("prior_fd_git_sha", 40),
+        ("prior_fd_script_sha256", 64),
+        ("preflight_receipt_sha256", 64),
+        ("campaign_identity", 64),
+        ("reference_receipt_sha256", 64),
+        ("reference_matrix_sha256", 64),
+        ("reference_git_sha", 40),
+        ("reference_script_sha256", 64),
+        ("reference_binding_sha256", 64),
+        ("contract_sha256", 64),
+    ):
+        campaign._require_sha(
+            campaign._require_json_string(
+                receipt.get(field), label=f"half-step {field}"
+            ),
+            length=length,
+            label=f"half-step {field}",
+        )
+    if verify_resident_identity:
+        campaign._strict_json_equal(
+            identity,
+            _fd_execution_identity(),
+            label="completed half-step resident execution identity",
+        )
+
+    prior_root_text = campaign._require_json_string(
+        receipt.get("prior_fd_root"), label="completed half-step prior FD root"
+    )
+    prior_root = campaign._safe_absolute_root(Path(prior_root_text))
+    if str(prior_root) != prior_root_text:
+        raise ValueError("completed half-step prior FD root is not canonical")
+    source = _load_half_step_source(prior_root)
+    expected_status = _initial_half_step_status(identity, prior_root, source)
+    prior_receipt = source["prior_receipt"]
+    reference_receipt = source["reference_receipt"]
+    expected_center_receipt = expected_status["center_receipt"]
+    expected_provenance = {
+        "prior_fd_root": str(prior_root),
+        "prior_fd_receipt_sha256": source["prior_receipt_sha256"],
+        "prior_fd_terminal_sha256": source["prior_terminal_sha256"],
+        "prior_fd_status_sha256": PRIOR_FD_STATUS_SHA256,
+        "prior_fd_git_sha": prior_receipt["git_sha"],
+        "prior_fd_script_sha256": prior_receipt["script_sha256"],
+        "preflight_root": str(source["preflight_root"]),
+        "preflight_receipt_sha256": source["preflight_receipt_sha256"],
+        "campaign_identity": prior_receipt["campaign_identity"],
+        "reference_root": str(source["reference_root"]),
+        "reference_receipt_sha256": REFERENCE_RECEIPT_SHA256,
+        "reference_matrix_sha256": REFERENCE_MATRIX_SHA256,
+        "reference_git_sha": reference_receipt["git_sha"],
+        "reference_script_sha256": reference_receipt["script_sha256"],
+        "reference_binding": source["reference_binding"],
+        "reference_binding_sha256": expected_status["reference_binding_sha256"],
+        "center_receipt": expected_center_receipt,
+        "reused_prior_point_receipts": source["reused_points"],
+    }
+    campaign._strict_json_equal(
+        {key: receipt.get(key) for key in expected_provenance},
+        expected_provenance,
+        label="completed half-step provenance",
+    )
+
+    plan = _half_step_plan(6)
+    points = receipt.get("new_point_receipts")
+    if type(points) is not list or len(points) != len(plan):
+        raise ValueError("completed half-step receipt point ancestry is incomplete")
+    center_density = np.asarray(source["center_density"])
+    center_density_sha = hashlib.sha256(
+        np.ascontiguousarray(center_density, dtype="<f8").tobytes()
+    ).hexdigest()
+    center_spin = _validate_point_record(
+        source["center_record"],
+        center_spin_square=None,
+        center=True,
+        enforce_scientific_gates=False,
+    )
+    gradients: dict[tuple[int, int], np.ndarray] = {}
+    new_point_data: list[tuple[dict[str, Any], np.ndarray]] = []
+    for ancestry, definition in zip(points, plan, strict=True):
+        key = definition["key"]
+        if (
+            type(ancestry) is not dict
+            or set(ancestry) != {"point_key", "receipt_sha256"}
+            or ancestry.get("point_key") != key
+        ):
+            raise ValueError("completed half-step point ancestry is invalid")
+        campaign._require_sha(
+            campaign._require_json_string(
+                ancestry.get("receipt_sha256"),
+                label="completed half-step point receipt SHA-256",
+            ),
+            length=64,
+            label="completed half-step point receipt SHA-256",
+        )
+        point, point_sha, arrays = _read_record_bundle(
+            output_root,
+            Path("points") / key,
+            expected_receipt_keys=(
+                _POINT_OBSERVATION_KEYS
+                | _HALF_STEP_POINT_BINDING_KEYS
+                | set(definition)
+                | _DENSITY_CONTINUITY_KEYS
+                | {"schema", "point_key", "kind", "artifacts"}
+            ),
+            expected_artifacts={
+                "gradient.f64": ((6, 3), "hartree / bohr"),
+                "density.f64": (center_density.shape, "electrons"),
+            },
+        )
+        density = arrays["density.f64"]
+        density_sha = hashlib.sha256(
+            np.ascontiguousarray(density, dtype="<f8").tobytes()
+        ).hexdigest()
+        expected_coords = np.asarray(
+            source["transition_state"].coords, dtype=float
+        ).copy()
+        expected_coords.reshape(-1)[definition["coordinate_index"]] += (
+            definition["displacement_bohr"] * BOHR_TO_ANGSTROM
+        )
+        if (
+            point_sha != ancestry["receipt_sha256"]
+            or point.get("schema") != HALF_STEP_SCHEMA
+            or point.get("point_key") != key
+            or point.get("kind") != "new-half-step-displacement"
+            or any(point.get(field) != value for field, value in definition.items())
+            or any(
+                point.get(field) != value
+                for field, value in _half_step_point_bindings(expected_status).items()
+            )
+            or point.get("density_initial_guess_sha256") != center_density_sha
+            or point.get("density_final_sha256") != density_sha
+            or point.get("geometry_fingerprint")
+            != frequency_geometry_fingerprint(
+                replace(source["transition_state"], coords=expected_coords)
+            )
+        ):
+            raise ValueError(f"completed half-step point content is invalid: {key}")
+        _validate_point_record(
+            point,
+            center_spin_square=center_spin,
+            center=False,
+            enforce_scientific_gates=False,
+        )
+        campaign._strict_json_equal(
+            {name: point.get(name) for name in _DENSITY_CONTINUITY_KEYS},
+            _density_continuity_metrics(density, center_density),
+            label=f"completed half-step density continuity {key}",
+        )
+        gradients[(definition["coordinate_index"], definition["step_multiplier"])] = (
+            arrays["gradient.f64"].reshape(-1)
+        )
+        new_point_data.append((point, density))
+
+    h_inner, h_outer, richardson = _half_step_matrices(
+        gradients, source["reused_gradients"], 18
+    )
+    reconstructed = {
+        "H_0.005-raw.f64": h_inner,
+        "H_0.01-raw.f64": h_outer,
+        "richardson-raw.f64": richardson,
+        "H_0.005-symmetric.f64": 0.5 * (h_inner + h_inner.T),
+        "H_0.01-symmetric.f64": 0.5 * (h_outer + h_outer.T),
+        "richardson-symmetric.f64": 0.5 * (richardson + richardson.T),
+    }
+    matrix_contract = {
+        filename: ((18, 18), "hartree / bohr^2") for filename in reconstructed
+    }
+    aggregate = receipt.get("aggregate_receipt")
+    if (
+        type(aggregate) is not dict
+        or set(aggregate) != {"path", "sha256"}
+        or aggregate.get("path") != "matrices/receipt.json"
+    ):
+        raise ValueError("completed half-step aggregate ancestry is invalid")
+    campaign._require_sha(
+        campaign._require_json_string(
+            aggregate.get("sha256"), label="completed half-step aggregate SHA-256"
+        ),
+        length=64,
+        label="completed half-step aggregate SHA-256",
+    )
+    aggregate_payload, aggregate_sha, matrix_arrays = _read_record_bundle(
+        output_root,
+        Path("matrices"),
+        expected_receipt_keys={
+            "schema",
+            "kind",
+            "confirmation_passed",
+            *_HALF_STEP_POINT_BINDING_KEYS,
+            "new_point_receipts",
+            "reused_prior_point_receipts",
+            "analysis",
+            "artifacts",
+        },
+        expected_artifacts=matrix_contract,
+    )
+    expected_aggregate = {
+        "schema": HALF_STEP_SCHEMA,
+        "kind": "immutable-half-step-finite-difference-analysis",
+        "confirmation_passed": receipt["confirmation_passed"],
+        **_half_step_point_bindings(expected_status),
+        "new_point_receipts": points,
+        "reused_prior_point_receipts": source["reused_points"],
+        "analysis": receipt["analysis"],
+        "artifacts": aggregate_payload["artifacts"],
+    }
+    if aggregate_sha != aggregate["sha256"]:
+        raise ValueError("completed half-step aggregate receipt hash mismatch")
+    campaign._strict_json_equal(
+        aggregate_payload,
+        expected_aggregate,
+        label="completed half-step aggregate receipt",
+    )
+    for filename, expected_matrix in reconstructed.items():
+        if not np.array_equal(matrix_arrays[filename], expected_matrix):
+            raise ValueError(
+                f"completed half-step matrix diverges from reconstruction: {filename}"
+            )
+    route_vector = campaign._mapped_route_vector(
+        source["transition_state"],
+        source["masses"],
+        source["reactant"].coords,
+        source["product"].coords,
+    )
+    expected_analysis = _complete_half_step_analysis(
+        source["transition_state"],
+        source["masses"],
+        route_vector,
+        h_inner,
+        h_outer,
+        richardson,
+        source["reference_matrix"],
+        point_gate_failures=_half_step_point_gates(source, new_point_data),
+    )
+    if (
+        type(expected_analysis) is not dict
+        or type(expected_analysis.get("confirmation_passed")) is not bool
+        or expected_analysis["confirmation_passed"]
+        is not receipt["confirmation_passed"]
+    ):
+        raise ValueError("completed half-step scientific verdict is not reproducible")
+    campaign._strict_json_equal(
+        receipt.get("analysis"),
+        expected_analysis,
+        label="completed half-step independently recomputed analysis",
+    )
+    return receipt, hashlib.sha256(raw).hexdigest()
+
+
+def _completed_half_step_status(
+    receipt: dict[str, Any], receipt_sha256: str
+) -> dict[str, Any]:
+    return {
+        "schema": HALF_STEP_SCHEMA,
+        "state": "completed",
+        "route": ROUTE,
+        "git_sha": receipt["git_sha"],
+        "script_sha256": receipt["script_sha256"],
+        "diagnostic_execution_identity": receipt["diagnostic_execution_identity"],
+        "diagnostic_execution_identity_sha256": receipt[
+            "diagnostic_execution_identity_sha256"
+        ],
+        "prior_fd_root": receipt["prior_fd_root"],
+        "prior_fd_receipt_sha256": receipt["prior_fd_receipt_sha256"],
+        "prior_fd_terminal_sha256": receipt["prior_fd_terminal_sha256"],
+        "prior_fd_status_sha256": receipt["prior_fd_status_sha256"],
+        "preflight_root": receipt["preflight_root"],
+        "preflight_receipt_sha256": receipt["preflight_receipt_sha256"],
+        "reference_root": receipt["reference_root"],
+        "reference_receipt_sha256": receipt["reference_receipt_sha256"],
+        "reference_matrix_sha256": receipt["reference_matrix_sha256"],
+        "reference_binding": receipt["reference_binding"],
+        "reference_binding_sha256": receipt["reference_binding_sha256"],
+        "center_receipt": receipt["center_receipt"],
+        "reused_prior_point_receipts": receipt["reused_prior_point_receipts"],
+        "contract": receipt["contract"],
+        "contract_sha256": receipt["contract_sha256"],
+        "completed_points": receipt["new_point_receipts"],
+        "current_point": None,
+        "accepted_campaign_result": False,
+        "confirmation_passed": receipt["confirmation_passed"],
+        "receipt": "receipt.json",
+        "receipt_sha256": receipt_sha256,
+        "finished_utc": receipt["finished_utc"],
+    }
+
+
+def _validate_failed_half_step_terminal(
+    output_root: Path,
+    terminal: dict[str, Any],
+    status: dict[str, Any],
+) -> None:
+    """Bind a failed half-step terminal to its identity and durable progress."""
+
+    identity = _half_step_failure_execution_identity()
+    expected_identity = {
+        "git_sha": identity["git_sha"],
+        "script_sha256": identity["script_sha256"],
+        "diagnostic_execution_identity_sha256": identity[
+            "diagnostic_execution_identity_sha256"
+        ],
+        "contract_sha256": campaign._canonical_hash(HALF_STEP_CONTRACT),
+        "preflight_receipt_sha256": PRIOR_FD_PREFLIGHT_SHA256,
+        "prior_fd_receipt_sha256": PRIOR_FD_RECEIPT_SHA256,
+        "prior_fd_terminal_sha256": PRIOR_FD_TERMINAL_SHA256,
+        "prior_fd_status_sha256": PRIOR_FD_STATUS_SHA256,
+        "reference_receipt_sha256": REFERENCE_RECEIPT_SHA256,
+        "reference_matrix_sha256": REFERENCE_MATRIX_SHA256,
+    }
+    if any(terminal.get(key) != value for key, value in expected_identity.items()):
+        raise ValueError("failed half-step terminal identity hash mismatch")
+
+    required_status_fields = {
+        "schema",
+        "state",
+        "accepted_campaign_result",
+        "confirmation_passed",
+        "git_sha",
+        "script_sha256",
+        "diagnostic_execution_identity_sha256",
+        "contract_sha256",
+        "preflight_receipt_sha256",
+        "reference_receipt_sha256",
+        "reference_matrix_sha256",
+        "prior_fd_receipt_sha256",
+        "prior_fd_terminal_sha256",
+        "prior_fd_status_sha256",
+        "completed_points",
+        "current_point",
+        "error",
+        "finished_utc",
+    }
+    if (
+        not required_status_fields <= set(status)
+        or status.get("schema") != HALF_STEP_SCHEMA
+        or status.get("state") != "failed"
+        or status.get("accepted_campaign_result") is not False
+        or status.get("confirmation_passed") is not False
+        or terminal.get("detail") != status.get("error")
+        or terminal.get("finished_utc") != status.get("finished_utc")
+    ):
+        raise ValueError("failed half-step terminal status contract is invalid")
+    binding_fields = {
+        "git_sha",
+        "script_sha256",
+        "diagnostic_execution_identity_sha256",
+        "contract_sha256",
+        "preflight_receipt_sha256",
+        "reference_receipt_sha256",
+        "reference_matrix_sha256",
+        "prior_fd_receipt_sha256",
+        "prior_fd_terminal_sha256",
+        "prior_fd_status_sha256",
+    }
+    if any(terminal.get(key) != status.get(key) for key in binding_fields):
+        raise ValueError("failed half-step terminal/status identity hash mismatch")
+
+    completed = status.get("completed_points")
+    expected_keys = [item["key"] for item in _half_step_plan(6)]
+    if (
+        type(completed) is not list
+        or len(completed) != terminal["completed_point_count"]
+    ):
+        raise ValueError("failed half-step terminal point-count mismatch")
+    for ancestry, expected_key in zip(completed, expected_keys, strict=False):
+        if (
+            type(ancestry) is not dict
+            or set(ancestry) != {"point_key", "receipt_sha256"}
+            or ancestry.get("point_key") != expected_key
+        ):
+            raise ValueError("failed half-step terminal progress is invalid")
+        digest = campaign._require_sha(
+            campaign._require_json_string(
+                ancestry.get("receipt_sha256"),
+                label="failed half-step point receipt SHA-256",
+            ),
+            length=64,
+            label="failed half-step point receipt SHA-256",
+        )
+        raw = campaign._read_bounded_regular_snapshot(
+            output_root / "points" / expected_key / "receipt.json",
+            label="failed half-step durable point receipt",
+            maximum_bytes=1024 * 1024,
+        )
+        if hashlib.sha256(raw).hexdigest() != digest:
+            raise ValueError("failed half-step terminal progress receipt hash mismatch")
+    if terminal.get("current_point") != status.get("current_point"):
+        raise ValueError("failed half-step terminal current-point mismatch")
+
+
+def _prepare_failed_half_step_status(status: dict[str, Any]) -> dict[str, Any]:
+    """Fill the immutable half-step identity before persisting failure state."""
+
+    identity = _half_step_failure_execution_identity()
+    status.update(
+        {
+            "schema": HALF_STEP_SCHEMA,
+            "route": ROUTE,
+            **identity,
+            "prior_fd_root": status.get("prior_fd_root", PRIOR_FD_ROOT),
+            "prior_fd_receipt_sha256": PRIOR_FD_RECEIPT_SHA256,
+            "prior_fd_terminal_sha256": PRIOR_FD_TERMINAL_SHA256,
+            "prior_fd_status_sha256": PRIOR_FD_STATUS_SHA256,
+            "preflight_root": status.get("preflight_root", PRIOR_FD_PREFLIGHT_ROOT),
+            "preflight_receipt_sha256": PRIOR_FD_PREFLIGHT_SHA256,
+            "reference_root": status.get("reference_root", PRIOR_FD_REFERENCE_ROOT),
+            "reference_receipt_sha256": REFERENCE_RECEIPT_SHA256,
+            "reference_matrix_sha256": REFERENCE_MATRIX_SHA256,
+            "contract": HALF_STEP_CONTRACT,
+            "contract_sha256": campaign._canonical_hash(HALF_STEP_CONTRACT),
+            "completed_points": status.get("completed_points", []),
+            "current_point": status.get("current_point"),
+            "accepted_campaign_result": False,
+            "confirmation_passed": False,
+        }
+    )
+    return status
+
+
 def _reconcile_status_from_terminal(
     claim: _OutputRootClaim,
     status_path: Path,
@@ -965,7 +1693,7 @@ def _reconcile_status_from_terminal(
             "finished_utc": terminal["finished_utc"],
         }
     )
-    if terminal["schema"] == FINITE_DIFFERENCE_SCHEMA:
+    if terminal["schema"] in {FINITE_DIFFERENCE_SCHEMA, HALF_STEP_SCHEMA}:
         status["accepted_campaign_result"] = False
         status["confirmation_passed"] = terminal["confirmation_passed"]
     if terminal["state"] == "completed":
@@ -975,10 +1703,15 @@ def _reconcile_status_from_terminal(
 
 
 def finalize_if_running(
-    output_root: Path, *, finite_difference: bool = False
+    output_root: Path,
+    *,
+    finite_difference: bool = False,
+    half_step: bool = False,
 ) -> dict[str, Any]:
     """Publish or reconcile one no-clobber terminal under the run's claim."""
 
+    if finite_difference and half_step:
+        raise ValueError("dead-man finalization mode must be unambiguous")
     output = campaign._safe_absolute_root(output_root)
     with _exclusive_output_claim(output) as claim:
         terminal_path = output / TERMINAL
@@ -995,6 +1728,12 @@ def finalize_if_running(
                 status = {}
         if terminal_path.exists() or terminal_path.is_symlink():
             terminal = _validated_terminal(terminal_path)
+            if half_step and terminal["schema"] != HALF_STEP_SCHEMA:
+                raise ValueError(
+                    "dead-man half-step terminal schema does not match requested mode"
+                )
+            if terminal["schema"] == HALF_STEP_SCHEMA and terminal["state"] == "failed":
+                _validate_failed_half_step_terminal(output, terminal, status)
             if (
                 terminal["state"] == "completed"
                 and terminal["schema"] == FINITE_DIFFERENCE_SCHEMA
@@ -1013,6 +1752,28 @@ def finalize_if_running(
                 )
                 _claimed_write(claim, status_path, _json_bytes(completed_status))
                 return terminal
+            if (
+                terminal["state"] == "completed"
+                and terminal["schema"] == HALF_STEP_SCHEMA
+            ):
+                completed_receipt, receipt_sha = _validated_completed_half_step_receipt(
+                    output
+                )
+                completed_status = _completed_half_step_status(
+                    completed_receipt, receipt_sha
+                )
+                expected_terminal = _terminal_payload(
+                    completed_status, state="completed", detail=None
+                )
+                expected_terminal["receipt"] = "receipt.json"
+                expected_terminal["receipt_sha256"] = receipt_sha
+                campaign._strict_json_equal(
+                    terminal,
+                    expected_terminal,
+                    label="authoritative completed half-step terminal",
+                )
+                _claimed_write(claim, status_path, _json_bytes(completed_status))
+                return terminal
             if terminal["state"] == "completed":
                 receipt_raw = campaign._read_bounded_regular_snapshot(
                     output / terminal["receipt"],
@@ -1027,19 +1788,40 @@ def finalize_if_running(
 
         completed_receipt: dict[str, Any] | None = None
         completed_receipt_sha: str | None = None
+        completed_schema: str | None = None
         if (
             (output / "receipt.json").exists() or (output / "receipt.json").is_symlink()
-        ) and (finite_difference or status.get("schema") == FINITE_DIFFERENCE_SCHEMA):
+        ) and (
+            finite_difference
+            or half_step
+            or status.get("schema") in {FINITE_DIFFERENCE_SCHEMA, HALF_STEP_SCHEMA}
+        ):
+            requested_schema = (
+                FINITE_DIFFERENCE_SCHEMA
+                if finite_difference
+                else HALF_STEP_SCHEMA
+                if half_step
+                else status.get("schema")
+            )
             try:
-                completed_receipt, completed_receipt_sha = (
-                    _validated_completed_fd_receipt(output)
-                )
+                if requested_schema == HALF_STEP_SCHEMA:
+                    completed_receipt, completed_receipt_sha = (
+                        _validated_completed_half_step_receipt(output)
+                    )
+                else:
+                    completed_receipt, completed_receipt_sha = (
+                        _validated_completed_fd_receipt(output)
+                    )
+                completed_schema = requested_schema
             except (ValueError, RuntimeError) as exc:
                 status.pop("receipt", None)
                 status.pop("receipt_sha256", None)
+                failure_schema = requested_schema
+                if failure_schema == HALF_STEP_SCHEMA:
+                    _prepare_failed_half_step_status(status)
                 status.update(
                     {
-                        "schema": FINITE_DIFFERENCE_SCHEMA,
+                        "schema": failure_schema,
                         "state": "failed",
                         "route": ROUTE,
                         "accepted_campaign_result": False,
@@ -1057,8 +1839,13 @@ def finalize_if_running(
                 return terminal
         if completed_receipt is not None:
             if completed_receipt_sha is None:
-                raise RuntimeError("completed FD receipt hash was not computed")
-            status = _completed_fd_status(completed_receipt, completed_receipt_sha)
+                raise RuntimeError("completed receipt hash was not computed")
+            if completed_schema == HALF_STEP_SCHEMA:
+                status = _completed_half_step_status(
+                    completed_receipt, completed_receipt_sha
+                )
+            else:
+                status = _completed_fd_status(completed_receipt, completed_receipt_sha)
             terminal = _terminal_payload(status, state="completed", detail=None)
             terminal["receipt"] = "receipt.json"
             terminal["receipt_sha256"] = completed_receipt_sha
@@ -1070,6 +1857,8 @@ def finalize_if_running(
                     "current_point": None,
                     "confirmation_passed": False,
                 }
+            elif half_step or status.get("schema") == HALF_STEP_SCHEMA:
+                status = _prepare_failed_half_step_status(status)
             terminal = _terminal_payload(
                 status,
                 state="failed",
@@ -1193,11 +1982,22 @@ def _diagnostic_execution_identity() -> dict[str, Any]:
     scientific_names = {
         "SCHEMA",
         "FINITE_DIFFERENCE_SCHEMA",
+        "HALF_STEP_SCHEMA",
         "TERMINAL",
         "ROUTE",
+        "PRIOR_FD_ROOT",
+        "PRIOR_FD_RECEIPT_SHA256",
+        "PRIOR_FD_TERMINAL_SHA256",
+        "PRIOR_FD_STATUS_SHA256",
+        "PRIOR_FD_GIT_SHA",
+        "PRIOR_FD_SCRIPT_SHA256",
+        "PRIOR_FD_PREFLIGHT_ROOT",
+        "PRIOR_FD_PREFLIGHT_SHA256",
+        "PRIOR_FD_REFERENCE_ROOT",
         "REFERENCE_RECEIPT_SHA256",
         "REFERENCE_MATRIX_SHA256",
         "FINITE_DIFFERENCE_CONTRACT",
+        "HALF_STEP_CONTRACT",
         "CASES",
     }
     if scientific_names - known_literals.keys():
@@ -1370,6 +2170,52 @@ def _fd_execution_identity() -> dict[str, Any]:
             execution_identity
         ),
     }
+
+
+def _half_step_failure_execution_identity() -> dict[str, Any]:
+    """Attest the loaded failure path even when clean-Git preflight rejected it."""
+
+    try:
+        return _fd_execution_identity()
+    except RuntimeError:
+        repository = Path(__file__).resolve().parents[2]
+        git_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        source = Path(__file__).resolve(strict=True)
+        script_sha256 = hashlib.sha256(
+            campaign._read_bounded_regular_snapshot(
+                source,
+                label="failed half-step loaded source",
+                maximum_bytes=2 * 1024 * 1024,
+            )
+        ).hexdigest()
+        execution_identity = {
+            "kind": "python-source-failure",
+            "loaded_module_code_sha256": script_sha256,
+            "loaded_code_sha256": script_sha256,
+            "loaded_state_sha256": campaign._canonical_hash(
+                {
+                    "schema": HALF_STEP_SCHEMA,
+                    "route": ROUTE,
+                    "prior_fd_root": PRIOR_FD_ROOT,
+                    "contract_sha256": campaign._canonical_hash(HALF_STEP_CONTRACT),
+                }
+            ),
+            "source_files": {str(source): script_sha256},
+        }
+        return {
+            "git_sha": git_sha,
+            "script_sha256": script_sha256,
+            "diagnostic_execution_identity": execution_identity,
+            "diagnostic_execution_identity_sha256": campaign._canonical_hash(
+                execution_identity
+            ),
+        }
 
 
 def _evaluate_case(
@@ -1587,6 +2433,57 @@ def _finite_difference_matrices(
         h_2h[:, coordinate] = (values[2] - values[-2]) / 0.04
     richardson = (4.0 * h_h - h_2h) / 3.0
     return h_h, h_2h, richardson
+
+
+def _half_step_plan(atom_count: int) -> tuple[dict[str, Any], ...]:
+    """Return only the missing +/-0.005 Bohr displacement pairs."""
+
+    if type(atom_count) is not int or atom_count < 1:
+        raise ValueError("half-step atom count must be a positive integer")
+    plan = []
+    for coordinate in range(3 * atom_count):
+        atom, axis = divmod(coordinate, 3)
+        for multiplier in (-1, 1):
+            token = "m1" if multiplier < 0 else "p1"
+            plan.append(
+                {
+                    "key": f"coordinate-{coordinate:03d}-{token}",
+                    "coordinate_index": coordinate,
+                    "atom_index": atom,
+                    "axis_index": axis,
+                    "step_multiplier": multiplier,
+                    "displacement_bohr": 0.005 * multiplier,
+                }
+            )
+    return tuple(plan)
+
+
+def _half_step_matrices(
+    new_gradients: dict[tuple[int, int], np.ndarray],
+    reused_gradients: dict[tuple[int, int], np.ndarray],
+    dimension: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    expected = {
+        (coordinate, sign) for coordinate in range(dimension) for sign in (-1, 1)
+    }
+    if set(new_gradients) != expected or set(reused_gradients) != expected:
+        raise ValueError("half-step gradient inventory is incomplete or unexpected")
+    inner = np.empty((dimension, dimension), dtype=float)
+    outer = np.empty_like(inner)
+    for coordinate in range(dimension):
+        new_minus = np.asarray(new_gradients[(coordinate, -1)], dtype=float)
+        new_plus = np.asarray(new_gradients[(coordinate, 1)], dtype=float)
+        old_minus = np.asarray(reused_gradients[(coordinate, -1)], dtype=float)
+        old_plus = np.asarray(reused_gradients[(coordinate, 1)], dtype=float)
+        if any(
+            value.shape != (dimension,) or not np.all(np.isfinite(value))
+            for value in (new_minus, new_plus, old_minus, old_plus)
+        ):
+            raise ValueError("half-step gradient has invalid shape or values")
+        inner[:, coordinate] = (new_plus - new_minus) / 0.01
+        outer[:, coordinate] = (old_plus - old_minus) / 0.02
+    richardson = (4.0 * inner - outer) / 3.0
+    return inner, outer, richardson
 
 
 def _array_record(array: Any, *, path: str, units: str) -> tuple[dict[str, Any], bytes]:
@@ -2720,6 +3617,384 @@ def _scientific_analysis_verdict(
     return True, analysis
 
 
+def _analysis_gate(
+    gates: list[dict[str, Any]],
+    name: str,
+    value: Any,
+    limit: Any,
+    comparison: str,
+) -> None:
+    """Record, rather than raise from, one strict scientific boundary."""
+
+    if comparison == "strictly_less_than":
+        if value is None:
+            observed, passed = None, False
+        else:
+            observed = _finite_number(value, label=name)
+            passed = bool(observed < float(limit))
+    elif comparison == "strictly_greater_than":
+        if value is None:
+            observed, passed = None, False
+        else:
+            observed = _finite_number(value, label=name)
+            passed = bool(observed > float(limit))
+    elif comparison == "greater_than_or_equal":
+        observed = _finite_number(value, label=name)
+        passed = bool(observed >= float(limit))
+    elif comparison == "less_than_or_equal":
+        observed = _finite_number(value, label=name)
+        passed = bool(observed <= float(limit))
+    elif comparison == "equals":
+        observed = value
+        passed = bool(value == limit)
+    elif comparison == "all_strictly_less_than":
+        values = np.asarray(value, dtype=float)
+        limits = np.asarray(limit, dtype=float)
+        if (
+            values.shape != limits.shape
+            or not np.all(np.isfinite(values))
+            or not np.all(np.isfinite(limits))
+        ):
+            raise ValueError(f"{name} gate values are malformed")
+        observed = values.tolist()
+        limit = limits.tolist()
+        passed = bool(np.all(values < limits))
+    elif comparison == "all_strictly_greater_than":
+        values = np.asarray(value, dtype=float)
+        if values.size < 1 or not np.all(np.isfinite(values)):
+            raise ValueError(f"{name} gate values are malformed")
+        observed = values.tolist()
+        passed = bool(np.all(values > float(limit)))
+    else:
+        raise ValueError(f"unsupported scientific comparison: {comparison}")
+    gates.append(
+        {
+            "name": name,
+            "value": observed,
+            "limit": limit,
+            "comparison": comparison,
+            "passed": passed,
+        }
+    )
+
+
+def _complete_spectrum_metrics(name: str, modes: Any) -> dict[str, Any]:
+    thresholds = HALF_STEP_CONTRACT["thresholds"]
+    eigenvalues = np.asarray(modes.eigenvalues, dtype=float)
+    if (
+        eigenvalues.ndim != 1
+        or eigenvalues.size < 2
+        or not np.all(np.isfinite(eigenvalues))
+    ):
+        raise ValueError(f"{name} projected spectrum is invalid")
+    frequencies = hessian_eigenvalues_to_wavenumbers_cm(eigenvalues)
+    negative = eigenvalues < thresholds["negative_eigenvalue_threshold"]
+    near_zero = (
+        np.abs(eigenvalues)
+        <= thresholds["near_zero_eigenvalue_inclusive_maximum_absolute"]
+    )
+    positive = (
+        eigenvalues > thresholds["near_zero_eigenvalue_inclusive_maximum_absolute"]
+    )
+    negative_indices = np.flatnonzero(negative)
+    return {
+        "eigenvalues_hartree_per_bohr2_amu": eigenvalues.tolist(),
+        "signed_wavenumbers_cm": frequencies.tolist(),
+        "negative_mode_indices": negative_indices.tolist(),
+        "negative_mode_count_below_negative_1e_minus_8": int(
+            np.count_nonzero(negative)
+        ),
+        "near_zero_mode_indices": np.flatnonzero(near_zero).tolist(),
+        "near_zero_mode_count_at_1e_minus_8": int(np.count_nonzero(near_zero)),
+        "lowest_positive_eigenvalue": (
+            float(np.min(eigenvalues[positive])) if np.any(positive) else None
+        ),
+        "imaginary_wavenumber_cm": (
+            float(abs(frequencies[negative_indices[0]]))
+            if negative_indices.size
+            else None
+        ),
+    }
+
+
+def _complete_half_step_analysis(
+    transition_state: Any,
+    masses: np.ndarray,
+    route_vector: np.ndarray,
+    h_inner: np.ndarray,
+    h_outer: np.ndarray,
+    raw_fd: np.ndarray,
+    analytic: np.ndarray,
+    *,
+    point_gate_failures: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Persist every computable metric and reduce all unchanged gates at the end."""
+
+    thresholds = HALF_STEP_CONTRACT["thresholds"]
+    symmetric = {
+        "H_0.005": 0.5 * (h_inner + h_inner.T),
+        "H_0.01": 0.5 * (h_outer + h_outer.T),
+        "FD": 0.5 * (raw_fd + raw_fd.T),
+    }
+    symmetry = _fd_symmetry_metrics(raw_fd)
+    richardson_delta = _matrix_delta_metrics(symmetric["FD"], symmetric["H_0.005"])
+    analytic_delta = _matrix_delta_metrics(symmetric["FD"], analytic)
+    modes = {
+        name: project_vibrational_hessian(transition_state.coords, masses, matrix)
+        for name, matrix in {**symmetric, "analytic_reference": analytic}.items()
+    }
+    spectra = {
+        name: _complete_spectrum_metrics(name, value) for name, value in modes.items()
+    }
+    reference_eigenvalues = np.asarray(modes["analytic_reference"].eigenvalues)
+    eigenvalue_limits = np.maximum(
+        thresholds["per_mode_reference_eigenvalue_delta_absolute_floor"],
+        thresholds["per_mode_reference_eigenvalue_delta_relative_fraction"]
+        * np.abs(reference_eigenvalues),
+    )
+    comparisons_to_reference = {}
+    for name in ("H_0.005", "H_0.01", "FD"):
+        comparison = _mode_comparison(modes[name], modes["analytic_reference"])
+        comparisons_to_reference[name] = {
+            **comparison,
+            "eigenvalue_absolute_deltas": np.abs(
+                np.asarray(modes[name].eigenvalues) - reference_eigenvalues
+            ).tolist(),
+            "eigenvalue_exclusive_limits": eigenvalue_limits.tolist(),
+            "frequency_absolute_deltas_cm": np.abs(
+                np.asarray(spectra[name]["signed_wavenumbers_cm"])
+                - np.asarray(spectra["analytic_reference"]["signed_wavenumbers_cm"])
+            ).tolist(),
+        }
+    inner_fd = {
+        **_mode_comparison(modes["H_0.005"], modes["FD"]),
+        "frequency_absolute_deltas_cm": np.abs(
+            np.asarray(spectra["H_0.005"]["signed_wavenumbers_cm"])
+            - np.asarray(spectra["FD"]["signed_wavenumbers_cm"])
+        ).tolist(),
+    }
+    outer_fd = {
+        **_mode_comparison(modes["H_0.01"], modes["FD"]),
+        "frequency_absolute_deltas_cm": np.abs(
+            np.asarray(spectra["H_0.01"]["signed_wavenumbers_cm"])
+            - np.asarray(spectra["FD"]["signed_wavenumbers_cm"])
+        ).tolist(),
+    }
+    normalized_route = np.asarray(route_vector, dtype=float).reshape(-1)
+    route_norm = float(np.linalg.norm(normalized_route))
+    if not math.isfinite(route_norm) or route_norm <= 1.0e-12:
+        raise ValueError("mapped reaction vector is invalid")
+    normalized_route /= route_norm
+    reaction_overlaps = {
+        name: float(
+            abs(
+                np.dot(
+                    modes[name].mass_weighted_eigenvectors[0].reshape(-1),
+                    normalized_route,
+                )
+            )
+        )
+        for name in ("H_0.005", "H_0.01", "FD", "analytic_reference")
+    }
+    mapped_reaction_overlap = {
+        **reaction_overlaps,
+        "fd_vs_analytic_reference_absolute_delta": abs(
+            reaction_overlaps["FD"] - reaction_overlaps["analytic_reference"]
+        ),
+    }
+
+    gates = [dict(item) for item in point_gate_failures]
+    scalar_gates = (
+        (
+            "raw_fd_maximum_asymmetry",
+            symmetry["maximum_absolute_asymmetry"],
+            "raw_fd_maximum_absolute_asymmetry_exclusive_maximum",
+        ),
+        (
+            "raw_fd_spectral_relative_asymmetry",
+            symmetry["spectral_relative_asymmetry"],
+            "raw_fd_spectral_relative_asymmetry_exclusive_maximum",
+        ),
+        (
+            "symmetric_richardson_vs_h_inner_maximum_absolute_delta",
+            richardson_delta["maximum_absolute_delta"],
+            "symmetric_richardson_vs_h_h_maximum_absolute_delta_exclusive_maximum",
+        ),
+        (
+            "symmetric_richardson_vs_h_inner_spectral_relative_delta",
+            richardson_delta["spectral_relative_delta"],
+            "symmetric_richardson_vs_h_h_spectral_relative_delta_exclusive_maximum",
+        ),
+        (
+            "fd_vs_analytic_maximum_absolute_delta",
+            analytic_delta["maximum_absolute_delta"],
+            "fd_vs_analytic_symmetric_maximum_absolute_delta_exclusive_maximum",
+        ),
+        (
+            "fd_vs_analytic_spectral_relative_delta",
+            analytic_delta["spectral_relative_delta"],
+            "fd_vs_analytic_symmetric_spectral_relative_delta_exclusive_maximum",
+        ),
+    )
+    for gate_name, value, threshold_name in scalar_gates:
+        _analysis_gate(
+            gates,
+            gate_name,
+            value,
+            thresholds[threshold_name],
+            "strictly_less_than",
+        )
+    for name in ("H_0.005", "H_0.01", "FD"):
+        spectrum = spectra[name]
+        _analysis_gate(
+            gates,
+            f"{name}_negative_mode_count",
+            spectrum["negative_mode_count_below_negative_1e_minus_8"],
+            1,
+            "equals",
+        )
+        _analysis_gate(
+            gates,
+            f"{name}_near_zero_mode_count",
+            spectrum["near_zero_mode_count_at_1e_minus_8"],
+            0,
+            "equals",
+        )
+        _analysis_gate(
+            gates,
+            f"{name}_lowest_positive_eigenvalue",
+            spectrum["lowest_positive_eigenvalue"],
+            thresholds["lowest_positive_eigenvalue_exclusive_minimum"],
+            "strictly_greater_than",
+        )
+        _analysis_gate(
+            gates,
+            f"{name}_imaginary_wavenumber_cm",
+            spectrum["imaginary_wavenumber_cm"],
+            thresholds["imaginary_wavenumber_cm_exclusive_minimum"],
+            "strictly_greater_than",
+        )
+        comparison = comparisons_to_reference[name]
+        _analysis_gate(
+            gates,
+            f"{name}_reference_assignment_order",
+            comparison["assignment_equals_eigenvalue_order"],
+            True,
+            "equals",
+        )
+        _analysis_gate(
+            gates,
+            f"{name}_reference_eigenvalue_deltas",
+            comparison["eigenvalue_absolute_deltas"],
+            comparison["eigenvalue_exclusive_limits"],
+            "all_strictly_less_than",
+        )
+    fd_reference = comparisons_to_reference["FD"]
+    _analysis_gate(
+        gates,
+        "fd_reference_all_ordered_overlaps",
+        fd_reference["ordered_overlaps"],
+        thresholds["fd_vs_reference_all_ordered_overlaps_exclusive_minimum"],
+        "all_strictly_greater_than",
+    )
+    for index, label, overlap_threshold, frequency_threshold in (
+        (
+            0,
+            "unstable",
+            "fd_vs_reference_unstable_overlap_exclusive_minimum",
+            "fd_vs_reference_imaginary_frequency_delta_cm_exclusive_maximum",
+        ),
+        (
+            1,
+            "low_positive",
+            "fd_vs_reference_low_positive_overlap_exclusive_minimum",
+            "fd_vs_reference_low_positive_frequency_delta_cm_exclusive_maximum",
+        ),
+    ):
+        _analysis_gate(
+            gates,
+            f"fd_reference_{label}_overlap",
+            fd_reference["ordered_overlaps"][index],
+            thresholds[overlap_threshold],
+            "strictly_greater_than",
+        )
+        _analysis_gate(
+            gates,
+            f"fd_reference_{label}_frequency_delta",
+            fd_reference["frequency_absolute_deltas_cm"][index],
+            thresholds[frequency_threshold],
+            "strictly_less_than",
+        )
+    _analysis_gate(
+        gates,
+        "h_inner_fd_assignment_order",
+        inner_fd["assignment_equals_eigenvalue_order"],
+        True,
+        "equals",
+    )
+    _analysis_gate(
+        gates,
+        "h_outer_fd_assignment_order",
+        outer_fd["assignment_equals_eigenvalue_order"],
+        True,
+        "equals",
+    )
+    for index, label, overlap_threshold, frequency_threshold in (
+        (
+            0,
+            "unstable",
+            "h_h_vs_fd_unstable_overlap_exclusive_minimum",
+            "h_h_vs_fd_imaginary_frequency_delta_cm_exclusive_maximum",
+        ),
+        (
+            1,
+            "low_positive",
+            "h_h_vs_fd_low_positive_overlap_exclusive_minimum",
+            "h_h_vs_fd_low_positive_frequency_delta_cm_exclusive_maximum",
+        ),
+    ):
+        _analysis_gate(
+            gates,
+            f"h_inner_fd_{label}_overlap",
+            inner_fd["ordered_overlaps"][index],
+            thresholds[overlap_threshold],
+            "strictly_greater_than",
+        )
+        _analysis_gate(
+            gates,
+            f"h_inner_fd_{label}_frequency_delta",
+            inner_fd["frequency_absolute_deltas_cm"][index],
+            thresholds[frequency_threshold],
+            "strictly_less_than",
+        )
+    _analysis_gate(
+        gates,
+        "fd_mapped_reaction_overlap",
+        reaction_overlaps["FD"],
+        thresholds["fd_mapped_reaction_overlap_exclusive_minimum"],
+        "strictly_greater_than",
+    )
+    _analysis_gate(
+        gates,
+        "fd_mapped_reaction_overlap_vs_reference_delta",
+        mapped_reaction_overlap["fd_vs_analytic_reference_absolute_delta"],
+        thresholds["fd_mapped_reaction_overlap_vs_reference_exclusive_maximum_delta"],
+        "strictly_less_than",
+    )
+    return {
+        "confirmation_passed": bool(all(gate.get("passed") is True for gate in gates)),
+        "gates": gates,
+        "raw_fd_symmetry": symmetry,
+        "symmetric_richardson_vs_h_inner": richardson_delta,
+        "fd_vs_analytic_symmetric": analytic_delta,
+        "spectra": spectra,
+        "comparisons_to_analytic_reference": comparisons_to_reference,
+        "h_inner_vs_fd_modes": inner_fd,
+        "h_outer_vs_fd_modes": outer_fd,
+        "mapped_reaction_overlap": mapped_reaction_overlap,
+    }
+
+
 def _initial_fd_status(
     identity: dict[str, Any], preflight_root: Path, reference_root: Path
 ) -> dict[str, Any]:
@@ -2793,6 +4068,212 @@ _DENSITY_CONTINUITY_KEYS = {
     "final_frobenius_norm",
     "center_frobenius_norm",
 }
+
+
+def _load_half_step_source(prior_root: Path) -> dict[str, Any]:
+    """Validate the immutable 73-point source chain before any calculator call."""
+
+    root = campaign._safe_absolute_root(prior_root)
+    if str(root) != PRIOR_FD_ROOT:
+        raise ValueError("half-step extension requires the exact prior FD receipt root")
+    receipt, receipt_raw = campaign._read_json_object(
+        root / "receipt.json", label="prior FD receipt", max_bytes=4 * 1024 * 1024
+    )
+    receipt_sha = hashlib.sha256(receipt_raw).hexdigest()
+    if receipt_sha != PRIOR_FD_RECEIPT_SHA256:
+        raise ValueError("prior FD receipt SHA-256 mismatch")
+    if (
+        receipt.get("git_sha") != PRIOR_FD_GIT_SHA
+        or receipt.get("script_sha256") != PRIOR_FD_SCRIPT_SHA256
+        or receipt.get("preflight_root") != PRIOR_FD_PREFLIGHT_ROOT
+        or receipt.get("preflight_receipt_sha256") != PRIOR_FD_PREFLIGHT_SHA256
+        or receipt.get("reference_root") != PRIOR_FD_REFERENCE_ROOT
+        or receipt.get("reference_receipt_sha256") != REFERENCE_RECEIPT_SHA256
+        or receipt.get("reference_matrix_sha256") != REFERENCE_MATRIX_SHA256
+    ):
+        raise ValueError(
+            "prior FD route, method, preflight, or reference identity is invalid"
+        )
+    repository = Path(__file__).resolve().parents[2]
+    relative_source = Path(__file__).resolve().relative_to(repository)
+    committed_source = subprocess.run(
+        ["git", "show", f"{PRIOR_FD_GIT_SHA}:{relative_source.as_posix()}"],
+        cwd=repository,
+        check=True,
+        capture_output=True,
+    ).stdout
+    if hashlib.sha256(committed_source).hexdigest() != PRIOR_FD_SCRIPT_SHA256:
+        raise RuntimeError("prior FD Git source does not match its pinned SHA-256")
+    source_files = receipt.get("diagnostic_execution_identity", {}).get("source_files")
+    if (
+        type(source_files) is not dict
+        or source_files.get(str(Path(__file__).resolve())) != PRIOR_FD_SCRIPT_SHA256
+    ):
+        raise ValueError("prior FD execution identity does not bind its script source")
+
+    validated_receipt, validated_sha = _validated_completed_fd_receipt(
+        root, verify_resident_identity=False
+    )
+    if validated_sha != receipt_sha or validated_receipt != receipt:
+        raise ValueError("prior FD complete receipt chain is inconsistent")
+    terminal, terminal_raw = campaign._read_json_object(
+        root / TERMINAL, label="prior FD terminal", max_bytes=1024 * 1024
+    )
+    if hashlib.sha256(terminal_raw).hexdigest() != PRIOR_FD_TERMINAL_SHA256:
+        raise ValueError("prior FD terminal SHA-256 mismatch")
+    if terminal != _validated_terminal(root / TERMINAL) or (
+        terminal.get("schema") != FINITE_DIFFERENCE_SCHEMA
+        or terminal.get("state") != "completed"
+        or terminal.get("accepted_campaign_result") is not False
+        or terminal.get("confirmation_passed") is not False
+        or terminal.get("receipt_sha256") != receipt_sha
+        or terminal.get("completed_point_count") != 73
+        or terminal.get("git_sha") != PRIOR_FD_GIT_SHA
+        or terminal.get("script_sha256") != PRIOR_FD_SCRIPT_SHA256
+        or terminal.get("preflight_receipt_sha256") != PRIOR_FD_PREFLIGHT_SHA256
+        or terminal.get("reference_receipt_sha256") != REFERENCE_RECEIPT_SHA256
+        or terminal.get("reference_matrix_sha256") != REFERENCE_MATRIX_SHA256
+        or terminal.get("contract_sha256")
+        != campaign._canonical_hash(FINITE_DIFFERENCE_CONTRACT)
+    ):
+        raise ValueError("prior FD terminal does not bind the completed receipt")
+    _status, status_raw = campaign._read_json_object(
+        root / "status.json", label="prior FD status", max_bytes=4 * 1024 * 1024
+    )
+    if hashlib.sha256(status_raw).hexdigest() != PRIOR_FD_STATUS_SHA256:
+        raise ValueError("prior FD status SHA-256 mismatch")
+
+    preflight_root = campaign._safe_absolute_root(Path(PRIOR_FD_PREFLIGHT_ROOT))
+    preflight, preflight_sha = campaign._validated_preflight(preflight_root, ROUTE)
+    if preflight_sha != PRIOR_FD_PREFLIGHT_SHA256 or preflight.get(
+        "identity"
+    ) != receipt.get("campaign_identity"):
+        raise ValueError("prior FD preflight identity mismatch")
+    base_settings, _settings_receipt = campaign._canonical_dft_settings(preflight)
+    settings = _fd_settings(base_settings)
+    template = reactions(gpu=True, basis="def2-svp")[ROUTE].cluster
+    fingerprints = campaign._trusted_input_fingerprints_from_route_record(
+        preflight["routes"][ROUTE]
+    )
+    inputs = campaign._trusted_route_input_snapshots(
+        campaign.DEFAULT_BUNDLE_ROOT, ROUTE, template, fingerprints
+    )
+    transition_state = inputs["transition_state"]
+    atom_count = len(transition_state.symbols)
+    if atom_count != 6:
+        raise ValueError("prior FD source is not the exact six-atom frozen TS")
+    masses = np.asarray(preflight["routes"][ROUTE]["masses_amu"], dtype=float)
+    (
+        reference_receipt,
+        reference_matrix,
+        reference_case,
+        reference_binding,
+    ) = _load_reference(
+        Path(PRIOR_FD_REFERENCE_ROOT),
+        atom_count,
+        preflight=preflight,
+        transition_state=transition_state,
+        reactant=inputs["reactant"],
+        product=inputs["product"],
+        masses=masses,
+    )
+    campaign._strict_json_equal(
+        receipt.get("reference_binding"),
+        reference_binding,
+        label="prior FD reference binding",
+    )
+
+    ancestry = receipt["point_receipts"]
+    ancestry_by_key = {item["point_key"]: item for item in ancestry}
+    center_record, center_sha, center_arrays = _read_record_bundle(
+        root,
+        Path("points/center"),
+        expected_receipt_keys=(
+            _POINT_OBSERVATION_KEYS
+            | _POINT_BINDING_KEYS
+            | _CENTER_REFERENCE_KEYS
+            | {
+                "schema",
+                "point_key",
+                "kind",
+                "artifacts",
+                "physical_fmax_ev_per_angstrom",
+            }
+        ),
+    )
+    center_density = center_arrays["density.f64"]
+    center_density_sha = hashlib.sha256(
+        np.ascontiguousarray(center_density, dtype="<f8").tobytes()
+    ).hexdigest()
+    if center_sha != ancestry_by_key["center"]["receipt_sha256"]:
+        raise ValueError("prior FD center receipt chain mismatch")
+
+    reused_gradients: dict[tuple[int, int], np.ndarray] = {}
+    reused_points = []
+    reused_point_data = []
+    for definition in _displacement_plan(atom_count):
+        multiplier = definition["step_multiplier"]
+        if multiplier not in {-1, 1}:
+            continue
+        key = definition["key"]
+        point, point_sha, arrays = _read_record_bundle(
+            root,
+            Path("points") / key,
+            expected_receipt_keys=(
+                _POINT_OBSERVATION_KEYS
+                | _POINT_BINDING_KEYS
+                | _DENSITY_CONTINUITY_KEYS
+                | set(definition)
+                | {"schema", "point_key", "kind", "artifacts"}
+            ),
+            expected_artifacts={
+                "gradient.f64": ((atom_count, 3), "hartree / bohr"),
+                "density.f64": (center_density.shape, "electrons"),
+            },
+        )
+        if point_sha != ancestry_by_key[key]["receipt_sha256"]:
+            raise ValueError(f"prior FD reused point receipt chain mismatch: {key}")
+        reused_gradients[(definition["coordinate_index"], multiplier)] = arrays[
+            "gradient.f64"
+        ].reshape(-1)
+        reused_points.append(
+            {
+                "point_key": key,
+                "receipt_sha256": point_sha,
+                "gradient_sha256": point["artifacts"]["gradient.f64"]["sha256"],
+            }
+        )
+        reused_point_data.append((point, arrays["density.f64"]))
+    if len(reused_points) != 36:
+        raise ValueError("prior FD reused +/-0.01 Bohr payload chain is incomplete")
+    return {
+        "prior_receipt": receipt,
+        "prior_receipt_sha256": receipt_sha,
+        "prior_terminal_sha256": PRIOR_FD_TERMINAL_SHA256,
+        "preflight": preflight,
+        "preflight_root": preflight_root,
+        "preflight_receipt_sha256": preflight_sha,
+        "reference_root": Path(PRIOR_FD_REFERENCE_ROOT),
+        "reference_receipt": reference_receipt,
+        "reference_binding": reference_binding,
+        "reference_matrix": reference_matrix,
+        "reference_case": reference_case,
+        "transition_state": transition_state,
+        "reactant": inputs["reactant"],
+        "product": inputs["product"],
+        "masses": masses,
+        "settings": settings,
+        "center_record": center_record,
+        "center_density": center_density,
+        "center_receipt": {
+            "point_key": "center",
+            "receipt_sha256": center_sha,
+            "density_sha256": center_density_sha,
+        },
+        "reused_points": reused_points,
+        "reused_point_data": reused_point_data,
+        "reused_gradients": reused_gradients,
+    }
 
 
 def _resume_fd_points(
@@ -3466,6 +4947,731 @@ def run_finite_difference(
             raise
 
 
+def _initial_half_step_status(
+    identity: dict[str, Any], prior_root: Path, source: dict[str, Any]
+) -> dict[str, Any]:
+    center_receipt = {
+        **source["center_receipt"],
+        "density_shape": list(np.asarray(source["center_density"]).shape),
+    }
+    return {
+        "schema": HALF_STEP_SCHEMA,
+        "state": "running",
+        "route": ROUTE,
+        **identity,
+        "prior_fd_root": str(prior_root),
+        "prior_fd_receipt_sha256": source["prior_receipt_sha256"],
+        "prior_fd_terminal_sha256": source["prior_terminal_sha256"],
+        "prior_fd_status_sha256": PRIOR_FD_STATUS_SHA256,
+        "preflight_root": str(source["preflight_root"]),
+        "preflight_receipt_sha256": source["preflight_receipt_sha256"],
+        "reference_root": str(source["reference_root"]),
+        "reference_receipt_sha256": REFERENCE_RECEIPT_SHA256,
+        "reference_matrix_sha256": REFERENCE_MATRIX_SHA256,
+        "reference_binding": source["reference_binding"],
+        "reference_binding_sha256": campaign._canonical_hash(
+            source["reference_binding"]
+        ),
+        "center_receipt": center_receipt,
+        "reused_prior_point_receipts": source["reused_points"],
+        "contract": HALF_STEP_CONTRACT,
+        "contract_sha256": campaign._canonical_hash(HALF_STEP_CONTRACT),
+        "completed_points": [],
+        "current_point": None,
+        "accepted_campaign_result": False,
+        "confirmation_passed": False,
+    }
+
+
+def _validate_half_step_resume_status(
+    status: dict[str, Any], expected: dict[str, Any]
+) -> None:
+    """Require the exact running half-step status before reusing any field."""
+
+    if set(status) != set(expected):
+        raise ValueError("half-step resume status schema is not exact")
+    mutable = {"state", "completed_points", "current_point", "confirmation_passed"}
+    for key, value in expected.items():
+        if key not in mutable and status.get(key) != value:
+            raise ValueError(f"half-step resume status {key} mismatch")
+    if status.get("state") != "running":
+        raise ValueError("half-step resume status state is not running")
+    if status.get("confirmation_passed") is not False:
+        raise ValueError("half-step resume status scientific verdict is invalid")
+    completed = status.get("completed_points")
+    if type(completed) is not list or any(
+        type(point) is not dict
+        or set(point) != {"point_key", "receipt_sha256"}
+        or type(point.get("point_key")) is not str
+        or type(point.get("receipt_sha256")) is not str
+        for point in completed
+    ):
+        raise ValueError("half-step resume status progress is invalid")
+    expected_keys = [item["key"] for item in _half_step_plan(6)]
+    if len(completed) > len(expected_keys):
+        raise ValueError("half-step resume status progress is invalid")
+    for point, expected_key in zip(completed, expected_keys, strict=False):
+        if point["point_key"] != expected_key:
+            raise ValueError("half-step resume status progress is not an exact prefix")
+        campaign._require_sha(
+            point["receipt_sha256"],
+            length=64,
+            label="half-step resume point receipt SHA-256",
+        )
+    current = status.get("current_point")
+    if current is not None and current not in expected_keys:
+        raise ValueError("half-step resume status current point is invalid")
+
+
+def _half_step_point_bindings(status: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "git_sha": status["git_sha"],
+        "script_sha256": status["script_sha256"],
+        "diagnostic_execution_identity_sha256": status[
+            "diagnostic_execution_identity_sha256"
+        ],
+        "contract_sha256": status["contract_sha256"],
+        "prior_fd_receipt_sha256": status["prior_fd_receipt_sha256"],
+        "prior_fd_terminal_sha256": status["prior_fd_terminal_sha256"],
+        "preflight_receipt_sha256": status["preflight_receipt_sha256"],
+        "reference_receipt_sha256": status["reference_receipt_sha256"],
+        "reference_matrix_sha256": status["reference_matrix_sha256"],
+        "reference_binding_sha256": status["reference_binding_sha256"],
+        "center_receipt_sha256": status["center_receipt"]["receipt_sha256"],
+        "center_density_sha256": status["center_receipt"]["density_sha256"],
+    }
+
+
+_HALF_STEP_POINT_BINDING_KEYS = {
+    "git_sha",
+    "script_sha256",
+    "diagnostic_execution_identity_sha256",
+    "contract_sha256",
+    "prior_fd_receipt_sha256",
+    "prior_fd_terminal_sha256",
+    "preflight_receipt_sha256",
+    "reference_receipt_sha256",
+    "reference_matrix_sha256",
+    "reference_binding_sha256",
+    "center_receipt_sha256",
+    "center_density_sha256",
+}
+
+
+def _resume_half_step_points(
+    output_root: Path,
+    status: dict[str, Any],
+    plan: tuple[dict[str, Any], ...],
+    *,
+    claim: _OutputRootClaim,
+) -> dict[str, tuple[dict[str, Any], dict[str, np.ndarray], str]]:
+    expected_keys = [item["key"] for item in plan]
+    definitions = {item["key"]: item for item in plan}
+    points_root = output_root / "points"
+    existing_names: set[str] = set()
+    if points_root.exists() or points_root.is_symlink():
+        if points_root.is_symlink() or not points_root.is_dir():
+            raise ValueError("half-step points root must be a regular directory")
+        for child in points_root.iterdir():
+            if (
+                child.is_symlink()
+                or not child.is_dir()
+                or child.name not in expected_keys
+            ):
+                raise ValueError(
+                    "half-step points root contains an unexpected artifact"
+                )
+            existing_names.add(child.name)
+    prefix = []
+    for key in expected_keys:
+        if key not in existing_names:
+            break
+        prefix.append(key)
+    if existing_names != set(prefix):
+        raise ValueError("half-step point artifacts are not a contiguous prefix")
+    current = status.get("current_point")
+    if current is not None and current not in expected_keys:
+        raise ValueError("half-step status names an unexpected current point")
+    if current is not None and current not in existing_names:
+        raise RuntimeError(
+            "half-step current point has an uncertain unreceipted attempt; "
+            "refusing a duplicate evaluation"
+        )
+    loaded = {}
+    progress = []
+    density_shape = tuple(status["center_receipt"]["density_shape"])
+    if (
+        len(density_shape) != 3
+        or density_shape[0] != 2
+        or density_shape[1] != density_shape[2]
+    ):
+        raise ValueError("half-step bound center density shape is invalid")
+    for key in prefix:
+        definition = definitions[key]
+        point, point_sha, arrays = _read_record_bundle(
+            output_root,
+            Path("points") / key,
+            expected_receipt_keys=(
+                _POINT_OBSERVATION_KEYS
+                | _HALF_STEP_POINT_BINDING_KEYS
+                | set(definition)
+                | _DENSITY_CONTINUITY_KEYS
+                | {"schema", "point_key", "kind", "artifacts"}
+            ),
+            expected_artifacts={
+                "gradient.f64": ((6, 3), "hartree / bohr"),
+                "density.f64": (density_shape, "electrons"),
+            },
+        )
+        if (
+            point.get("schema") != HALF_STEP_SCHEMA
+            or point.get("point_key") != key
+            or point.get("kind") != "new-half-step-displacement"
+            or any(point.get(field) != value for field, value in definition.items())
+            or any(
+                point.get(field) != value
+                for field, value in _half_step_point_bindings(status).items()
+            )
+        ):
+            raise ValueError(f"half-step durable point identity mismatch: {key}")
+        loaded[key] = (point, arrays, point_sha)
+        progress.append({"point_key": key, "receipt_sha256": point_sha})
+    declared = status.get("completed_points")
+    if type(declared) is not list or declared != progress[: len(declared)]:
+        raise ValueError("half-step status progress diverges from durable artifacts")
+    if len(declared) > len(progress):
+        raise ValueError("half-step status claims a missing durable point")
+    if declared != progress:
+        status["completed_points"] = progress
+        _claimed_write(claim, output_root / "status.json", _json_bytes(status))
+    return loaded
+
+
+def _half_step_point_gates(
+    source: dict[str, Any],
+    new_points: list[tuple[dict[str, Any], np.ndarray]],
+) -> list[dict[str, Any]]:
+    """Apply every unchanged point gate while retaining each point verdict."""
+
+    gates = []
+    center = source["center_record"]
+    center_density = source["center_density"]
+    center_spin = _validate_point_record(
+        center,
+        center_spin_square=None,
+        center=True,
+        enforce_scientific_gates=False,
+    )
+    center_checks = (
+        (
+            "prior_center_scf_converged",
+            center["scf_converged"],
+            True,
+            "equals",
+        ),
+        (
+            "prior_center_grid_point_count",
+            center["grid_point_count"],
+            HALF_STEP_CONTRACT["thresholds"]["required_grid_point_count"],
+            "equals",
+        ),
+        (
+            "prior_center_spin_square_minimum",
+            center_spin,
+            HALF_STEP_CONTRACT["thresholds"]["spin_square_inclusive_minimum"],
+            "greater_than_or_equal",
+        ),
+        (
+            "prior_center_spin_square_maximum",
+            center_spin,
+            HALF_STEP_CONTRACT["thresholds"]["spin_square_inclusive_maximum"],
+            "less_than_or_equal",
+        ),
+        (
+            "prior_center_fmax",
+            center["physical_fmax_ev_per_angstrom"],
+            HALF_STEP_CONTRACT["thresholds"][
+                "center_fmax_ev_per_angstrom_exclusive_maximum"
+            ],
+            "strictly_less_than",
+        ),
+        (
+            "prior_center_energy_delta",
+            center["electronic_energy_absolute_delta_hartree"],
+            HALF_STEP_CONTRACT["thresholds"][
+                "center_energy_vs_reference_exclusive_maximum_delta_hartree"
+            ],
+            "strictly_less_than",
+        ),
+        (
+            "prior_center_s2_delta",
+            center["s2_absolute_delta"],
+            HALF_STEP_CONTRACT["thresholds"][
+                "center_s2_vs_reference_exclusive_maximum_delta"
+            ],
+            "strictly_less_than",
+        ),
+    )
+    for name, value, limit, comparison in center_checks:
+        _analysis_gate(gates, name, value, limit, comparison)
+    for point, density in [*source.get("reused_point_data", []), *new_points]:
+        spin = _validate_point_record(
+            point,
+            center_spin_square=center_spin,
+            center=False,
+            enforce_scientific_gates=False,
+        )
+        metrics = _density_continuity_metrics(density, center_density)
+        campaign._strict_json_equal(
+            {name: point.get(name) for name in _DENSITY_CONTINUITY_KEYS},
+            metrics,
+            label=f"half-step density continuity {point.get('point_key')}",
+        )
+        prefix = f"point:{point.get('point_key')}"
+        checks = (
+            (
+                f"{prefix}:scf_converged",
+                point["scf_converged"],
+                True,
+                "equals",
+            ),
+            (
+                f"{prefix}:grid_point_count",
+                point["grid_point_count"],
+                HALF_STEP_CONTRACT["thresholds"]["required_grid_point_count"],
+                "equals",
+            ),
+            (
+                f"{prefix}:spin_square_minimum",
+                spin,
+                HALF_STEP_CONTRACT["thresholds"]["spin_square_inclusive_minimum"],
+                "greater_than_or_equal",
+            ),
+            (
+                f"{prefix}:spin_square_maximum",
+                spin,
+                HALF_STEP_CONTRACT["thresholds"]["spin_square_inclusive_maximum"],
+                "less_than_or_equal",
+            ),
+            (
+                f"{prefix}:spin_square_delta",
+                abs(spin - center_spin),
+                HALF_STEP_CONTRACT["thresholds"][
+                    "displaced_vs_center_spin_square_exclusive_maximum_delta"
+                ],
+                "strictly_less_than",
+            ),
+            (
+                f"{prefix}:density_delta",
+                metrics["final_vs_center_normalized_frobenius_delta"],
+                HALF_STEP_CONTRACT["thresholds"][
+                    "displaced_final_density_vs_center_exclusive_maximum_"
+                    "normalized_frobenius_delta"
+                ],
+                "strictly_less_than",
+            ),
+        )
+        for name, value, limit, comparison in checks:
+            _analysis_gate(gates, name, value, limit, comparison)
+    return gates
+
+
+def _run_half_step_locked(
+    prior_root: Path,
+    output_root: Path,
+    claim: _OutputRootClaim,
+) -> dict[str, Any]:
+    """Run the immutable 36-call continuation after complete source validation."""
+
+    source = _load_half_step_source(prior_root)
+    identity = _fd_execution_identity()
+    status_path = output_root / "status.json"
+    expected_status = _initial_half_step_status(identity, prior_root, source)
+    if status_path.exists() or status_path.is_symlink():
+        status, _raw = campaign._read_json_object(
+            status_path, label="half-step status", max_bytes=4 * 1024 * 1024
+        )
+        _validate_half_step_resume_status(status, expected_status)
+        if (output_root / TERMINAL).exists() or (output_root / "receipt.json").exists():
+            raise ValueError("half-step output root is not resumable running state")
+    else:
+        if not claim.root_created:
+            raise FileExistsError(
+                f"half-step extension requires a fresh output root: {output_root}"
+            )
+        if any(output_root.iterdir()):
+            raise FileExistsError("half-step output root contains unowned artifacts")
+        status = expected_status
+        _claimed_write(claim, status_path, _json_bytes(status))
+    try:
+        transition_state = source["transition_state"]
+        atom_count = len(transition_state.symbols)
+        if atom_count != 6:
+            raise ValueError(
+                "half-step extension requires the exact six-atom frozen TS"
+            )
+        plan = _half_step_plan(atom_count)
+        maximum_calls = HALF_STEP_CONTRACT["stencil"][
+            "maximum_new_scf_gradient_evaluations"
+        ]
+        if len(plan) != maximum_calls:
+            raise RuntimeError("half-step displacement-count contract drifted")
+        loaded = _resume_half_step_points(output_root, status, plan, claim=claim)
+        center_density = source["center_density"]
+        center_density_sha = hashlib.sha256(
+            np.ascontiguousarray(center_density, dtype="<f8").tobytes()
+        ).hexdigest()
+        if center_density_sha != source["center_receipt"]["density_sha256"]:
+            raise ValueError("half-step bound center density changed after validation")
+        center_spin = _validate_point_record(
+            source["center_record"],
+            center_spin_square=None,
+            center=True,
+            enforce_scientific_gates=False,
+        )
+        new_gradients = {}
+        new_point_data = []
+        new_calls = 0
+        for definition in plan:
+            key = definition["key"]
+            if key not in loaded:
+                status["current_point"] = key
+                _claimed_write(claim, status_path, _json_bytes(status))
+                coords = np.asarray(transition_state.coords, dtype=float).copy()
+                coords.reshape(-1)[definition["coordinate_index"]] += (
+                    definition["displacement_bohr"] * BOHR_TO_ANGSTROM
+                )
+                displaced = replace(transition_state, coords=coords)
+                claim.verify()
+                point, gradient, density = _evaluate_fd_gradient(
+                    displaced, source["settings"], central_density=center_density
+                )
+                new_calls += 1
+                if new_calls > maximum_calls:
+                    raise RuntimeError("half-step calculator-call bound exceeded")
+                claim.verify()
+                point.update(
+                    {
+                        "schema": HALF_STEP_SCHEMA,
+                        "point_key": key,
+                        "kind": "new-half-step-displacement",
+                        **_half_step_point_bindings(status),
+                        **definition,
+                        **_density_continuity_metrics(density, center_density),
+                    }
+                )
+                point, point_sha = _publish_record_bundle(
+                    output_root,
+                    Path("points") / key,
+                    point,
+                    {
+                        "gradient.f64": (gradient, "hartree / bohr"),
+                        "density.f64": (density, "electrons"),
+                    },
+                    claim=claim,
+                )
+                status["completed_points"].append(
+                    {"point_key": key, "receipt_sha256": point_sha}
+                )
+                _claimed_write(claim, status_path, _json_bytes(status))
+                loaded[key] = (
+                    point,
+                    {"gradient.f64": gradient, "density.f64": density},
+                    point_sha,
+                )
+            point, arrays, _point_sha = loaded[key]
+            expected_coords = np.asarray(transition_state.coords, dtype=float).copy()
+            expected_coords.reshape(-1)[definition["coordinate_index"]] += (
+                definition["displacement_bohr"] * BOHR_TO_ANGSTROM
+            )
+            density = arrays["density.f64"]
+            density_sha = hashlib.sha256(
+                np.ascontiguousarray(density, dtype="<f8").tobytes()
+            ).hexdigest()
+            if (
+                point.get("geometry_fingerprint")
+                != frequency_geometry_fingerprint(
+                    replace(transition_state, coords=expected_coords)
+                )
+                or point.get("density_initial_guess_sha256") != center_density_sha
+                or point.get("density_final_sha256") != density_sha
+            ):
+                raise ValueError(f"half-step point payload binding mismatch: {key}")
+            _validate_point_record(
+                point,
+                center_spin_square=center_spin,
+                center=False,
+                enforce_scientific_gates=False,
+            )
+            campaign._strict_json_equal(
+                {name: point.get(name) for name in _DENSITY_CONTINUITY_KEYS},
+                _density_continuity_metrics(density, center_density),
+                label=f"half-step point density continuity {key}",
+            )
+            new_gradients[
+                (definition["coordinate_index"], definition["step_multiplier"])
+            ] = arrays["gradient.f64"].reshape(-1)
+            new_point_data.append((point, density))
+        if new_calls > maximum_calls:
+            raise RuntimeError("half-step calculator-call bound exceeded")
+        status["current_point"] = None
+        _claimed_write(claim, status_path, _json_bytes(status))
+        h_inner, h_outer, richardson = _half_step_matrices(
+            new_gradients, source["reused_gradients"], 3 * atom_count
+        )
+        route_vector = campaign._mapped_route_vector(
+            transition_state,
+            source["masses"],
+            source["reactant"].coords,
+            source["product"].coords,
+        )
+        analysis = _complete_half_step_analysis(
+            transition_state,
+            source["masses"],
+            route_vector,
+            h_inner,
+            h_outer,
+            richardson,
+            source["reference_matrix"],
+            point_gate_failures=_half_step_point_gates(source, new_point_data),
+        )
+        if (
+            type(analysis) is not dict
+            or type(analysis.get("confirmation_passed")) is not bool
+        ):
+            raise RuntimeError("half-step analysis returned a malformed verdict")
+        confirmation_passed = analysis["confirmation_passed"]
+        symmetric = {
+            "H_0.005": 0.5 * (h_inner + h_inner.T),
+            "H_0.01": 0.5 * (h_outer + h_outer.T),
+            "FD": 0.5 * (richardson + richardson.T),
+        }
+        matrix_arrays = {
+            "H_0.005-raw.f64": (h_inner, "hartree / bohr^2"),
+            "H_0.01-raw.f64": (h_outer, "hartree / bohr^2"),
+            "richardson-raw.f64": (richardson, "hartree / bohr^2"),
+            "H_0.005-symmetric.f64": (
+                symmetric["H_0.005"],
+                "hartree / bohr^2",
+            ),
+            "H_0.01-symmetric.f64": (
+                symmetric["H_0.01"],
+                "hartree / bohr^2",
+            ),
+            "richardson-symmetric.f64": (symmetric["FD"], "hartree / bohr^2"),
+        }
+        aggregate_record = {
+            "schema": HALF_STEP_SCHEMA,
+            "kind": "immutable-half-step-finite-difference-analysis",
+            "confirmation_passed": confirmation_passed,
+            **_half_step_point_bindings(status),
+            "new_point_receipts": status["completed_points"],
+            "reused_prior_point_receipts": source["reused_points"],
+            "analysis": analysis,
+        }
+        matrix_contract = {
+            name: ((3 * atom_count, 3 * atom_count), units)
+            for name, (_value, units) in matrix_arrays.items()
+        }
+        matrix_path = output_root / "matrices"
+        if matrix_path.exists() or matrix_path.is_symlink():
+            aggregate, aggregate_sha, observed = _read_record_bundle(
+                output_root,
+                Path("matrices"),
+                expected_receipt_keys=set(aggregate_record) | {"artifacts"},
+                expected_artifacts=matrix_contract,
+            )
+            campaign._strict_json_equal(
+                {key: aggregate[key] for key in aggregate_record},
+                aggregate_record,
+                label="resumed half-step matrix receipt",
+            )
+            if any(
+                not np.array_equal(observed[name], value)
+                for name, (value, _units) in matrix_arrays.items()
+            ):
+                raise ValueError(
+                    "resumed half-step matrices diverge from reconstruction"
+                )
+        else:
+            aggregate, aggregate_sha = _publish_record_bundle(
+                output_root,
+                Path("matrices"),
+                aggregate_record,
+                matrix_arrays,
+                claim=claim,
+            )
+        finished = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        prior_receipt = source["prior_receipt"]
+        reference_receipt = source["reference_receipt"]
+        receipt = {
+            "schema": HALF_STEP_SCHEMA,
+            "state": "completed",
+            "accepted_campaign_result": False,
+            "confirmation_passed": confirmation_passed,
+            "purpose": "immutable half-step FD extension only; no production authority",
+            "authority": HALF_STEP_CONTRACT["policy"][
+                "passed_authority" if confirmation_passed else "rejected_authority"
+            ],
+            "route": ROUTE,
+            "git_sha": identity["git_sha"],
+            "script_sha256": identity["script_sha256"],
+            "diagnostic_execution_identity": identity["diagnostic_execution_identity"],
+            "diagnostic_execution_identity_sha256": identity[
+                "diagnostic_execution_identity_sha256"
+            ],
+            "prior_fd_root": str(prior_root),
+            "prior_fd_receipt_sha256": source["prior_receipt_sha256"],
+            "prior_fd_terminal_sha256": source["prior_terminal_sha256"],
+            "prior_fd_status_sha256": PRIOR_FD_STATUS_SHA256,
+            "prior_fd_git_sha": prior_receipt["git_sha"],
+            "prior_fd_script_sha256": prior_receipt["script_sha256"],
+            "preflight_root": str(source["preflight_root"]),
+            "preflight_receipt_sha256": source["preflight_receipt_sha256"],
+            "campaign_identity": prior_receipt["campaign_identity"],
+            "reference_root": str(source["reference_root"]),
+            "reference_receipt_sha256": REFERENCE_RECEIPT_SHA256,
+            "reference_matrix_sha256": REFERENCE_MATRIX_SHA256,
+            "reference_git_sha": reference_receipt["git_sha"],
+            "reference_script_sha256": reference_receipt["script_sha256"],
+            "reference_binding": source["reference_binding"],
+            "reference_binding_sha256": status["reference_binding_sha256"],
+            "center_receipt": status["center_receipt"],
+            "reused_prior_point_receipts": source["reused_points"],
+            "new_point_receipts": status["completed_points"],
+            "contract": HALF_STEP_CONTRACT,
+            "contract_sha256": status["contract_sha256"],
+            "aggregate_receipt": {
+                "path": "matrices/receipt.json",
+                "sha256": aggregate_sha,
+            },
+            "analysis": aggregate["analysis"],
+            "finished_utc": finished,
+        }
+        receipt_raw = _json_bytes(receipt)
+        receipt_sha = hashlib.sha256(receipt_raw).hexdigest()
+        _claimed_write(claim, output_root / "receipt.json", receipt_raw)
+        status.update(
+            {
+                "state": "completed",
+                "accepted_campaign_result": False,
+                "confirmation_passed": confirmation_passed,
+                "receipt": "receipt.json",
+                "receipt_sha256": receipt_sha,
+                "finished_utc": finished,
+            }
+        )
+        terminal = _terminal_payload(status, state="completed", detail=None)
+        terminal.update({"receipt": "receipt.json", "receipt_sha256": receipt_sha})
+        _terminal_write_noreplace(claim, output_root / TERMINAL, terminal)
+        _claimed_write(claim, status_path, _json_bytes(status))
+        return receipt
+    except BaseException as exc:
+        terminal_path = output_root / TERMINAL
+        if terminal_path.exists() or terminal_path.is_symlink():
+            raise
+        detail = f"{type(exc).__name__}: {exc}"
+        status.update(
+            {
+                "state": "failed",
+                "accepted_campaign_result": False,
+                "confirmation_passed": False,
+                "error": detail,
+                "finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+        )
+        _claimed_write(claim, status_path, _json_bytes(status))
+        _terminal_write_noreplace(
+            claim,
+            terminal_path,
+            _terminal_payload(status, state="failed", detail=detail),
+        )
+        raise
+
+
+def run_half_step_extension(prior_root: Path, output_root: Path) -> dict[str, Any]:
+    """Run or resume the exact immutable +/-0.005 Bohr extension."""
+
+    prior = campaign._safe_absolute_root(prior_root)
+    output = campaign._safe_absolute_root(output_root)
+    if str(prior) != PRIOR_FD_ROOT:
+        raise ValueError("half-step extension requires the exact prior FD receipt root")
+    if output == prior:
+        raise ValueError("half-step extension requires a separate fresh output root")
+    with _exclusive_output_claim(output) as claim:
+        status_path = output / "status.json"
+        if not claim.root_created and not (
+            status_path.exists() or status_path.is_symlink()
+        ):
+            raise FileExistsError(
+                f"half-step extension requires a fresh output root: {output}"
+            )
+        try:
+            return _run_half_step_locked(prior, output, claim)
+        except BaseException as exc:
+            if isinstance(exc, ConcurrentRunError):
+                raise
+            terminal_path = output / TERMINAL
+            if terminal_path.exists() or terminal_path.is_symlink():
+                raise
+            status_path = output / "status.json"
+            failure_identity = _half_step_failure_execution_identity()
+            status: dict[str, Any] = {
+                "schema": HALF_STEP_SCHEMA,
+                "state": "failed",
+                "route": ROUTE,
+                **failure_identity,
+                "prior_fd_root": str(prior),
+                "prior_fd_receipt_sha256": PRIOR_FD_RECEIPT_SHA256,
+                "prior_fd_terminal_sha256": PRIOR_FD_TERMINAL_SHA256,
+                "prior_fd_status_sha256": PRIOR_FD_STATUS_SHA256,
+                "preflight_root": PRIOR_FD_PREFLIGHT_ROOT,
+                "preflight_receipt_sha256": PRIOR_FD_PREFLIGHT_SHA256,
+                "reference_root": PRIOR_FD_REFERENCE_ROOT,
+                "reference_receipt_sha256": REFERENCE_RECEIPT_SHA256,
+                "reference_matrix_sha256": REFERENCE_MATRIX_SHA256,
+                "contract": HALF_STEP_CONTRACT,
+                "contract_sha256": campaign._canonical_hash(HALF_STEP_CONTRACT),
+                "completed_points": [],
+                "current_point": None,
+                "confirmation_passed": False,
+                "accepted_campaign_result": False,
+            }
+            if status_path.is_file() and not status_path.is_symlink():
+                try:
+                    loaded, _raw = campaign._read_json_object(
+                        status_path,
+                        label="failed half-step status",
+                        max_bytes=4 * 1024 * 1024,
+                    )
+                    source = _load_half_step_source(prior)
+                    expected = _initial_half_step_status(
+                        _fd_execution_identity(), prior, source
+                    )
+                    _validate_half_step_resume_status(loaded, expected)
+                except Exception:
+                    pass
+                else:
+                    status = loaded
+            detail = f"{type(exc).__name__}: {exc}"
+            status.update(
+                {
+                    "state": "failed",
+                    "accepted_campaign_result": False,
+                    "confirmation_passed": False,
+                    "error": detail,
+                    "finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
+            )
+            _claimed_write(claim, status_path, _json_bytes(status))
+            _terminal_write_noreplace(
+                claim,
+                terminal_path,
+                _terminal_payload(status, state="failed", detail=detail),
+            )
+            raise
+
+
 def _run_analytic_locked(
     preflight_root: Path,
     output_root: Path,
@@ -3611,25 +5817,51 @@ def main() -> int:
     mode.add_argument("--create-preflight", action="store_true")
     mode.add_argument("--finalize-if-running", action="store_true")
     mode.add_argument("--finite-difference-confirmation", action="store_true")
+    mode.add_argument("--half-step-extension", action="store_true")
     parser.add_argument("--preflight-root", type=Path)
     parser.add_argument("--reference-root", type=Path)
+    parser.add_argument("--prior-fd-root", type=Path)
     parser.add_argument("--output-root", type=Path)
     parser.add_argument("--threads", type=int, default=16)
     parser.add_argument("--nice", type=int, default=10)
     parser.add_argument("--log")
     parser.add_argument("--finite-difference-finalization", action="store_true")
+    parser.add_argument("--half-step-finalization", action="store_true")
     args = parser.parse_args()
-    if args.create_preflight:
-        if args.reference_root is not None:
+    if args.half_step_extension:
+        if args.prior_fd_root is None:
+            parser.error("--prior-fd-root is required with --half-step-extension")
+        if args.output_root is None:
+            parser.error("--output-root is required with --half-step-extension")
+        if args.preflight_root is not None or args.reference_root is not None:
             parser.error(
-                "--reference-root is valid only with --finite-difference-confirmation"
+                "--preflight-root/--reference-root are invalid with "
+                "--half-step-extension"
+            )
+        if args.finite_difference_finalization or args.half_step_finalization:
+            parser.error("finalization flags require --finalize-if-running")
+        receipt = run_half_step_extension(args.prior_fd_root, args.output_root)
+        print(
+            json.dumps(
+                {
+                    "state": receipt["state"],
+                    "receipt": str(args.output_root / "receipt.json"),
+                    "confirmation_passed": receipt["confirmation_passed"],
+                    "accepted_campaign_result": False,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+    if args.create_preflight:
+        if args.reference_root is not None or args.prior_fd_root is not None:
+            parser.error(
+                "--reference-root/--prior-fd-root are invalid with --create-preflight"
             )
         if args.preflight_root is None:
             parser.error("--preflight-root is required with --create-preflight")
-        if args.finite_difference_finalization:
-            parser.error(
-                "--finite-difference-finalization requires --finalize-if-running"
-            )
+        if args.finite_difference_finalization or args.half_step_finalization:
+            parser.error("finalization flags require --finalize-if-running")
         preflight_root = campaign._safe_absolute_root(args.preflight_root)
         receipt = campaign.create_preflight_receipt(
             campaign.DEFAULT_BUNDLE_ROOT, preflight_root
@@ -3646,15 +5878,16 @@ def main() -> int:
         )
         return 0
     if args.finalize_if_running:
-        if args.reference_root is not None:
-            parser.error(
-                "--reference-root is valid only with --finite-difference-confirmation"
-            )
+        if args.reference_root is not None or args.prior_fd_root is not None:
+            parser.error("provenance roots are invalid with --finalize-if-running")
+        if args.finite_difference_finalization and args.half_step_finalization:
+            parser.error("finalization mode must be unambiguous")
         if args.output_root is None:
             parser.error("--output-root is required with --finalize-if-running")
         terminal = finalize_if_running(
             args.output_root,
             finite_difference=args.finite_difference_finalization,
+            half_step=args.half_step_finalization,
         )
         print(json.dumps(terminal, sort_keys=True))
         return 0
@@ -3662,8 +5895,10 @@ def main() -> int:
         parser.error("--preflight-root is required unless --finalize-if-running is set")
     if args.output_root is None:
         parser.error("--output-root is required for a diagnostic run")
-    if args.finite_difference_finalization:
-        parser.error("--finite-difference-finalization requires --finalize-if-running")
+    if args.prior_fd_root is not None:
+        parser.error("--prior-fd-root requires --half-step-extension")
+    if args.finite_difference_finalization or args.half_step_finalization:
+        parser.error("finalization flags require --finalize-if-running")
     if args.finite_difference_confirmation:
         if args.reference_root is None:
             parser.error(
@@ -3684,7 +5919,7 @@ def main() -> int:
         "state": receipt["state"],
         "receipt": str(args.output_root / "receipt.json"),
     }
-    if receipt.get("schema") == FINITE_DIFFERENCE_SCHEMA:
+    if receipt.get("schema") in {FINITE_DIFFERENCE_SCHEMA, HALF_STEP_SCHEMA}:
         output.update(
             {
                 "confirmation_passed": receipt["confirmation_passed"],
