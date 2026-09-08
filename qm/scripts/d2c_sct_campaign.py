@@ -75,6 +75,8 @@ if __name__ == "__main__":
     _ETIQUETTE = bootstrap_cli(
         "d2c_sct_campaign",
         default_run_root=Path(__file__).resolve().parent.parent / "runs",
+        gpu_owner="D2c-instanton-tier",
+        gpu_ttl_hours=49.0,
     )
 
 import numpy as np  # noqa: E402

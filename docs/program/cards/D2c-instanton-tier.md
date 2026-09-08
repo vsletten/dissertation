@@ -247,3 +247,15 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   the new isolated-process regression exercises that exact seam. Whole-QM verification
   is `1081 passed, 1 skipped` with Ruff/format/diff clean. A fresh pushed head and
   preflight/run root remain required before relaunch.
+- 2026-09-08 02:11 PDT (hermes-custom-build-001; profile=workstation) —
+  FIRST CALCULATOR RECEIPT, SCIENTIFIC GATE RED: exact pushed head `7dece5a` passed
+  live preflight and production provenance, entered the first H+CO TS Hessian, hit
+  GPU4PySCF's known contiguity assertion, retried on CPU, then fail-closed because
+  the observed analytic Hessian exceeded the canonical symmetry tolerance. The
+  immutable receipt is
+  `/mnt/data/vsletten/dissertation-data/task300-d2c-instanton-7dece5a/production-terminal.json`;
+  no TS qualification or downstream artifact was published. The launch also exposed
+  that this driver had not supplied a `gpu_owner` to QI2 despite `--gpu`; the next
+  pushed head acquires the process-bound `D2c-instanton-tier` lease with a 49-hour
+  diagnostic TTL. Next action is a pushed-head quantitative asymmetry diagnostic,
+  not blind tolerance inflation or another identical launch.
