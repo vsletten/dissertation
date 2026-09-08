@@ -159,6 +159,44 @@ def test_path_adapter_preserves_both_directions_and_explicit_masses(monkeypatch)
         forward.points[0].coordinates_angstrom[0, 0] = 1.0
 
 
+def test_path_adapter_checkpoints_each_new_direction_and_skips_completed(
+    monkeypatch,
+):
+    ts_module, _, _, _ = _install_fake_irc(monkeypatch, _converged_routes())
+    transition_state = water()
+    masses = np.array([15.99, 1.01, 1.02])
+    original = ts_module.trace_sella_irc(
+        transition_state,
+        CHEAP,
+        masses_amu=masses,
+        max_steps=7,
+    )
+
+    ts_module, _, calls, _ = _install_fake_irc(monkeypatch, _converged_routes())
+    checkpointed = []
+    with pytest.raises(TypeError, match="_completed_directions"):
+        ts_module.trace_sella_irc(
+            transition_state,
+            CHEAP,
+            masses_amu=masses,
+            max_steps=7,
+            _completed_directions={"forward": original.directions[0]},
+        )
+    resumed = ts_module._trace_sella_irc_resume(
+        transition_state,
+        CHEAP,
+        masses_amu=masses,
+        max_steps=7,
+        _completed_directions={"forward": original.directions[0]},
+        _direction_callback=checkpointed.append,
+    )
+
+    assert [call["direction"] for call in calls] == ["reverse"]
+    assert [direction.sella_direction for direction in checkpointed] == ["reverse"]
+    assert resumed.directions[0] is original.directions[0]
+    assert resumed.directions[1].sella_direction == "reverse"
+
+
 @pytest.mark.parametrize("masses", [[1.0, 2.0], [1.0, np.nan, 2.0]])
 def test_path_adapter_rejects_invalid_explicit_masses_before_sella(monkeypatch, masses):
     ts_module, instances, _, _ = _install_fake_irc(monkeypatch, _converged_routes())

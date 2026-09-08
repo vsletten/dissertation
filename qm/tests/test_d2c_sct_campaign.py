@@ -36,6 +36,21 @@ FIXED_DEPENDENCIES = {
 BUNDLE_ROOT = Path(__file__).parents[1] / "data" / "D2c-instanton-tier" / "d2b-inputs"
 
 
+@pytest.fixture(autouse=True)
+def _fixed_production_runtime_identity(monkeypatch):
+    """Keep production-boundary tests deterministic without weakening wrappers."""
+
+    monkeypatch.setattr(
+        campaign,
+        "_current_code_dependency_identity",
+        lambda: {
+            "git_sha": FIXED_GIT_SHA,
+            "dependencies": dict(FIXED_DEPENDENCIES),
+            "python": campaign.platform.python_version(),
+        },
+    )
+
+
 def _route_template(route: str):
     return reactions(gpu=True, basis="def2-svp")[route].cluster
 
@@ -1516,7 +1531,7 @@ def _qualified_ancestry(
     transition_state, trace = _trace(route, "irc_back.xyz", "irc_fwd.xyz")
     reactant = _frozen_endpoint(route, "irc_back.xyz").coords
     product = _frozen_endpoint(route, "irc_fwd.xyz").coords
-    campaign.publish_transition_state_qualification(
+    campaign._publish_transition_state_qualification(
         run_root,
         route=route,
         qualified_transition_state=transition_state,
@@ -1535,7 +1550,7 @@ def _authoritative_ancestry(
     route: str = "h-co-1w-cside",
 ):
     preflight, transition_state, trace = _qualified_ancestry(run_root, route=route)
-    campaign.run_and_publish_irc(
+    campaign._run_and_publish_irc(
         run_root,
         route=route,
         _runner=lambda *_args, **_kwargs: trace,
@@ -1586,7 +1601,7 @@ def test_bound_irc_runner_receives_every_exact_campaign_argument(tmp_path: Path)
         calls.append((ts, settings, kwargs))
         return trace
 
-    published = campaign.run_and_publish_irc(
+    published = campaign._run_and_publish_irc(
         run_root,
         route="h-co-1w-cside",
         _runner=spy,
@@ -1602,6 +1617,8 @@ def test_bound_irc_runner_receives_every_exact_campaign_argument(tmp_path: Path)
         "fmax_inner_ev_a",
         "max_steps",
         "step_size_a",
+        "_completed_directions",
+        "_direction_callback",
     }
     assert np.array_equal(observed["masses_amu"], trace.masses_amu)
     assert observed["step_size_a"] == 0.05
@@ -1624,7 +1641,7 @@ def test_bound_irc_runner_receives_every_exact_campaign_argument(tmp_path: Path)
         "reverse": published.direction_receipt_sha256["reverse"],
     }
     assert canonical_run_identity == published.run_identity
-    resumed = campaign.run_and_publish_irc(
+    resumed = campaign._run_and_publish_irc(
         run_root,
         route="h-co-1w-cside",
         _runner=lambda *_args, **_kwargs: pytest.fail("full resume reran IRC"),
@@ -1648,7 +1665,7 @@ def test_bound_irc_runner_rejects_wrong_observed_arguments_before_publication(
     )
 
     with pytest.raises(ValueError, match="runner observed execution contract"):
-        campaign.run_and_publish_irc(
+        campaign._run_and_publish_irc(
             run_root,
             route="h-co-1w-cside",
             _runner=lambda *_args, **_kwargs: wrong,
@@ -1674,7 +1691,7 @@ def test_irc_direction_crash_resumes_without_runner_or_overwrite(tmp_path: Path)
             raise RuntimeError("injected crash after forward")
 
     with pytest.raises(RuntimeError, match="crash after forward"):
-        campaign.run_and_publish_irc(
+        campaign._run_and_publish_irc(
             run_root,
             route="h-co-1w-cside",
             _runner=runner,
@@ -1685,7 +1702,7 @@ def test_irc_direction_crash_resumes_without_runner_or_overwrite(tmp_path: Path)
     assert runner_calls == 1
     assert not (run_root / "h-co-1w-cside" / "irc-reverse").exists()
 
-    resumed = campaign.run_and_publish_irc(
+    resumed = campaign._run_and_publish_irc(
         run_root,
         route="h-co-1w-cside",
         _runner=lambda *_args, **_kwargs: pytest.fail("resume reran IRC"),
@@ -1719,7 +1736,7 @@ def test_irc_final_validation_rejects_shared_execution_race(tmp_path: Path, race
         execution_path.write_bytes(replacement_raw)
 
     with pytest.raises(ValueError, match="IRC execution receipt"):
-        campaign.run_and_publish_irc(
+        campaign._run_and_publish_irc(
             run_root,
             route=route,
             _runner=lambda *_args, **_kwargs: trace,
@@ -1757,7 +1774,7 @@ def test_canonical_ts_qualification_persists_native_evidence_and_reruns_gate(
     transition_state, _ = _trace(route, "irc_back.xyz", "irc_fwd.xyz")
     reactant = _frozen_endpoint(route, "irc_back.xyz").coords
     product = _frozen_endpoint(route, "irc_fwd.xyz").coords
-    published = campaign.publish_transition_state_qualification(
+    published = campaign._publish_transition_state_qualification(
         run_root,
         route=route,
         qualified_transition_state=transition_state,
@@ -1780,13 +1797,13 @@ def test_canonical_ts_qualification_persists_native_evidence_and_reruns_gate(
     assert published.receipt["gate_evidence"]["accepted"] is True
     assert published.receipt["native_hessian"]["electronic_hartree"] == -100.0
     assert (
-        campaign.publish_transition_state_qualification(
+        campaign._publish_transition_state_qualification(
             run_root, route=route
         ).receipt_sha256
         == published.receipt_sha256
     )
     with pytest.raises(TypeError, match="unstable_mode"):
-        campaign.publish_transition_state_qualification(
+        campaign._publish_transition_state_qualification(
             run_root, route=route, unstable_mode_mass_scaled=np.ones(18)
         )
 
@@ -1799,7 +1816,7 @@ def test_canonical_ts_qualification_persists_native_evidence_and_reruns_gate(
     ).hexdigest()
     published.receipt_path.write_bytes(campaign._json_bytes(receipt))
     with pytest.raises(ValueError, match="exactly one significant negative"):
-        campaign.publish_transition_state_qualification(run_root, route=route)
+        campaign._publish_transition_state_qualification(run_root, route=route)
 
 
 def test_ts_qualification_post_commit_preflight_race_removes_owned_child(
@@ -1823,7 +1840,7 @@ def test_ts_qualification_post_commit_preflight_race_removes_owned_child(
             )
 
     with pytest.raises(ValueError, match="preflight receipt SHA-256"):
-        campaign.publish_transition_state_qualification(
+        campaign._publish_transition_state_qualification(
             run_root,
             route=route,
             qualified_transition_state=transition_state,
@@ -1845,7 +1862,7 @@ def test_legacy_v3_and_self_attested_v1_roots_fail_with_fresh_root_guidance(
     preflight["schema"] = "d2c-sct-campaign-preflight-v3"
     (v3_root / campaign.PREFLIGHT_RECEIPT).write_bytes(campaign._json_bytes(preflight))
     with pytest.raises(ValueError, match="legacy D2c v3 run root.*fresh v4 run root"):
-        campaign.publish_transition_state_qualification(v3_root, route="h-co-1w-cside")
+        campaign._publish_transition_state_qualification(v3_root, route="h-co-1w-cside")
 
     v1_root = tmp_path / "v1"
     _preflight(v1_root)
@@ -1855,7 +1872,7 @@ def test_legacy_v3_and_self_attested_v1_roots_fail_with_fresh_root_guidance(
         campaign._json_bytes({"schema": "d2c-ts-qualification-v1"})
     )
     with pytest.raises(ValueError, match="TS qualification v1.*fresh v4 run root"):
-        campaign.publish_transition_state_qualification(v1_root, route="h-co-1w-cside")
+        campaign._publish_transition_state_qualification(v1_root, route="h-co-1w-cside")
 
 
 def _authoritative_path(run_root: Path):
@@ -2155,7 +2172,7 @@ def test_authoritative_hessian_computes_missing_points_and_never_reruns_resume(
         direct_calls.append(int(cluster.name.rsplit("-", 1)[-1]))
         return _energy_reproducing_result(cluster, path)
 
-    first = campaign.publish_path_hessians(
+    first = campaign._publish_authoritative_path_hessians(
         run_root,
         route="h-co-1w-cside",
         evaluator=direct,
@@ -2169,7 +2186,7 @@ def test_authoritative_hessian_computes_missing_points_and_never_reruns_resume(
         resume_calls.append(int(cluster.name.rsplit("-", 1)[-1]))
         return _energy_reproducing_result(cluster, path)
 
-    resumed = campaign.publish_path_hessians(
+    resumed = campaign._publish_authoritative_path_hessians(
         run_root,
         route="h-co-1w-cside",
         evaluator=resume,
@@ -2184,7 +2201,7 @@ def test_authoritative_hessian_resume_validates_persisted_energy_without_evaluat
 ):
     run_root = tmp_path / "run"
     _, path = _authoritative_path(run_root)
-    campaign.publish_path_hessians(
+    campaign._publish_authoritative_path_hessians(
         run_root,
         route="h-co-1w-cside",
         evaluator=lambda cluster: _energy_reproducing_result(cluster, path),
@@ -2207,7 +2224,7 @@ def test_authoritative_hessian_resume_validates_persisted_energy_without_evaluat
 
     _rewrite_canonical_json(point_receipt_path, forge_matching_receipt_shape)
     with pytest.raises(ValueError, match="persisted Hessian point 0 electronic energy"):
-        campaign.publish_path_hessians(
+        campaign._publish_authoritative_path_hessians(
             run_root,
             route="h-co-1w-cside",
             evaluator=lambda _cluster: pytest.fail("cached point reached evaluator"),
@@ -2225,7 +2242,7 @@ def test_authoritative_hessian_evaluator_must_match_preflight_settings(tmp_path:
         )
 
     with pytest.raises(ValueError, match="settings fingerprint mismatch"):
-        campaign.publish_path_hessians(
+        campaign._publish_authoritative_path_hessians(
             run_root,
             route="h-co-1w-cside",
             evaluator=wrong_settings,
@@ -2253,10 +2270,12 @@ def test_authoritative_hessian_energy_tolerance_boundary(
         "evaluator": evaluator,
     }
     if multiple < 1.0:
-        assert campaign.publish_path_hessians(run_root, **kwargs).receipt["accepted"]
+        assert campaign._publish_authoritative_path_hessians(
+            run_root, **kwargs
+        ).receipt["accepted"]
     else:
         with pytest.raises(ValueError, match="electronic energy reproduction"):
-            campaign.publish_path_hessians(run_root, **kwargs)
+            campaign._publish_authoritative_path_hessians(run_root, **kwargs)
         assert not (
             run_root / "h-co-1w-cside" / "hessians" / "points" / "000002"
         ).exists()
@@ -2274,7 +2293,9 @@ def test_authoritative_hessian_resume_rejects_irc_ancestry_tamper_before_compute
     kwargs = {
         "route": "h-co-1w-cside",
     }
-    campaign.publish_path_hessians(run_root, evaluator=evaluator, **kwargs)
+    campaign._publish_authoritative_path_hessians(
+        run_root, evaluator=evaluator, **kwargs
+    )
     receipt_path = run_root / "h-co-1w-cside" / "irc-reverse" / "receipt.json"
     _rewrite_canonical_json(
         receipt_path,
@@ -2282,7 +2303,7 @@ def test_authoritative_hessian_resume_rejects_irc_ancestry_tamper_before_compute
     )
 
     with pytest.raises(ValueError, match="standalone/shared execution receipt"):
-        campaign.publish_path_hessians(
+        campaign._publish_authoritative_path_hessians(
             run_root,
             evaluator=lambda _cluster: pytest.fail("tamper reached evaluator"),
             **kwargs,
@@ -2310,7 +2331,7 @@ def test_hessian_precommit_revalidation_rejects_shared_execution_mutation(
         return _energy_reproducing_result(cluster, path)
 
     with pytest.raises(ValueError, match="standalone/shared execution receipt"):
-        campaign.publish_path_hessians(
+        campaign._publish_authoritative_path_hessians(
             run_root,
             route=route,
             evaluator=mutate_during_evaluation,
@@ -2345,7 +2366,7 @@ def test_authoritative_hessian_rejects_low_level_unreproduced_checkpoint(
     )
 
     with pytest.raises(ValueError, match="legacy D2c Hessian point v1"):
-        campaign.publish_path_hessians(
+        campaign._publish_authoritative_path_hessians(
             run_root,
             route="h-co-1w-cside",
             evaluator=lambda cluster: _energy_reproducing_result(cluster, path),
@@ -2379,7 +2400,7 @@ def test_authoritative_hessian_rejects_matching_energy_legacy_hessian_tree(
     )
     assert legacy.receipt["schema"] == "d2c-native-path-hessians-v1"
     with pytest.raises(ValueError, match="legacy D2c Hessian point v1"):
-        campaign.publish_path_hessians(
+        campaign._publish_authoritative_path_hessians(
             run_root,
             route="h-co-1w-cside",
             evaluator=lambda _cluster: pytest.fail("legacy tree reached evaluator"),
@@ -2402,7 +2423,7 @@ def test_authoritative_hessian_partial_resume_evaluates_only_missing_points(
             raise RuntimeError("stop after two cached points")
 
     with pytest.raises(RuntimeError, match="two cached points"):
-        campaign.publish_path_hessians(
+        campaign._publish_authoritative_path_hessians(
             run_root,
             route="h-co-1w-cside",
             evaluator=first_evaluator,
@@ -2416,7 +2437,7 @@ def test_authoritative_hessian_partial_resume_evaluates_only_missing_points(
         resumed_calls.append(int(cluster.name.rsplit("-", 1)[-1]))
         return _energy_reproducing_result(cluster, path)
 
-    published = campaign.publish_path_hessians(
+    published = campaign._publish_authoritative_path_hessians(
         run_root,
         route="h-co-1w-cside",
         evaluator=resumed_evaluator,
@@ -2448,7 +2469,7 @@ def test_authoritative_hessian_post_commit_ancestry_mutation_fails_closed(
             )
 
     with pytest.raises(ValueError, match="standalone/shared execution receipt"):
-        campaign.publish_path_hessians(
+        campaign._publish_authoritative_path_hessians(
             run_root,
             route="h-co-1w-cside",
             evaluator=lambda cluster: _energy_reproducing_result(cluster, path),
@@ -2475,7 +2496,7 @@ def test_post_commit_cleanup_preserves_foreign_point_replacement(tmp_path: Path)
             raise RuntimeError("foreign replacement raced")
 
     with pytest.raises(RuntimeError, match="foreign replacement raced"):
-        campaign.publish_path_hessians(
+        campaign._publish_authoritative_path_hessians(
             run_root,
             route="h-co-1w-cside",
             evaluator=lambda cluster: _energy_reproducing_result(cluster, path),
@@ -2777,3 +2798,357 @@ def test_strict_transition_state_gate_rejects_projection_overflow():
             mapped_reactant_coordinates_angstrom=reactant,
             mapped_product_coordinates_angstrom=product,
         )
+
+
+def test_public_production_apis_reject_injected_scientific_evidence(tmp_path: Path):
+    run_root = tmp_path / "run"
+    preflight = _preflight(run_root)
+    route = "h-co-1w-cside"
+    transition_state, trace = _trace(route, "irc_back.xyz", "irc_fwd.xyz")
+    reactant = _frozen_endpoint(route, "irc_back.xyz").coords
+    product = _frozen_endpoint(route, "irc_fwd.xyz").coords
+    native = _qualification_native_result(
+        preflight, transition_state, reactant, product
+    )
+
+    with pytest.raises(TypeError, match="native_hessian"):
+        campaign.publish_transition_state_qualification(
+            run_root,
+            route=route,
+            native_hessian=native,
+        )
+    with pytest.raises(TypeError, match="_runner"):
+        campaign.run_and_publish_irc(
+            run_root,
+            route=route,
+            _runner=lambda *_args, **_kwargs: trace,
+        )
+    with pytest.raises(TypeError, match="evaluator"):
+        campaign.publish_path_hessians(
+            run_root,
+            route=route,
+            evaluator=lambda _cluster: native,
+        )
+
+
+def test_production_boundary_rejects_code_dependency_and_endpoint_drift(
+    monkeypatch, tmp_path: Path
+):
+    run_root = tmp_path / "run"
+    preflight = _preflight(run_root)
+    route = "h-co-1w-cside"
+
+    monkeypatch.setattr(
+        campaign,
+        "_current_code_dependency_identity",
+        lambda: {
+            "git_sha": "b" * 40,
+            "dependencies": FIXED_DEPENDENCIES,
+            "python": preflight["campaign"]["python"],
+        },
+    )
+    with pytest.raises(ValueError, match="current Git SHA"):
+        campaign._validate_production_boundary(run_root, route)
+
+    copied = tmp_path / "bundle"
+    shutil.copytree(BUNDLE_ROOT, copied)
+    endpoint = copied / route / "irc_back.xyz"
+    endpoint.write_text(endpoint.read_text() + "\n")
+    monkeypatch.setattr(campaign, "DEFAULT_BUNDLE_ROOT", copied)
+    monkeypatch.setattr(
+        campaign,
+        "_current_code_dependency_identity",
+        lambda: {
+            "git_sha": FIXED_GIT_SHA,
+            "dependencies": FIXED_DEPENDENCIES,
+            "python": preflight["campaign"]["python"],
+        },
+    )
+    with pytest.raises(ValueError, match="bundle|endpoint"):
+        campaign._validate_production_boundary(run_root, route)
+
+
+@pytest.mark.parametrize(
+    "entrypoint",
+    [
+        "publish_transition_state_qualification",
+        "run_and_publish_irc",
+        "publish_typed_irc_path",
+        "publish_path_hessians",
+    ],
+)
+def test_every_public_production_entrypoint_binds_current_identity(
+    monkeypatch, tmp_path: Path, entrypoint: str
+):
+    def reject_boundary(_run_root: Path, _route: str):
+        raise ValueError("live production identity drifted")
+
+    monkeypatch.setattr(campaign, "_validate_production_boundary", reject_boundary)
+
+    with pytest.raises(ValueError, match="live production identity drifted"):
+        getattr(campaign, entrypoint)(tmp_path / "run", route="h-co-1w-cside")
+
+
+def test_mid_irc_crash_checkpoints_completed_direction_and_resume_skips_it(
+    tmp_path: Path,
+):
+    run_root = tmp_path / "run"
+    _, _, trace = _qualified_ancestry(run_root)
+    route = "h-co-1w-cside"
+    first_calls: list[tuple[str, ...]] = []
+
+    def crashing_runner(*_args, _completed_directions, _direction_callback, **_kwargs):
+        first_calls.append(tuple(sorted(_completed_directions)))
+        _direction_callback(trace.directions[0])
+        raise RuntimeError("in-process crash after forward IRC")
+
+    with pytest.raises(RuntimeError, match="crash after forward IRC"):
+        campaign._run_and_publish_irc(
+            run_root,
+            route=route,
+            _runner=crashing_runner,
+        )
+    checkpoint = run_root / route / "irc-restart" / "forward" / "receipt.json"
+    checkpoint_before = checkpoint.read_bytes()
+    assert first_calls == [()]
+    assert not (run_root / route / "irc-execution").exists()
+
+    resumed_calls: list[tuple[str, ...]] = []
+
+    def resumed_runner(*_args, _completed_directions, _direction_callback, **_kwargs):
+        resumed_calls.append(tuple(sorted(_completed_directions)))
+        resumed_forward = _completed_directions["forward"]
+        assert len(resumed_forward.points) == len(trace.directions[0].points)
+        for resumed_point, expected_point in zip(
+            resumed_forward.points, trace.directions[0].points, strict=True
+        ):
+            assert resumed_point.outer_step == expected_point.outer_step
+            assert np.array_equal(
+                resumed_point.coordinates_angstrom,
+                expected_point.coordinates_angstrom,
+            )
+        _direction_callback(trace.directions[1])
+        return trace
+
+    published = campaign._run_and_publish_irc(
+        run_root,
+        route=route,
+        _runner=resumed_runner,
+    )
+
+    assert resumed_calls == [("forward",)]
+    assert checkpoint.read_bytes() == checkpoint_before
+    assert published.trace.execution_contract == trace.execution_contract
+    for observed, expected in zip(
+        published.trace.directions, trace.directions, strict=True
+    ):
+        assert observed.sella_direction == expected.sella_direction
+        assert len(observed.points) == len(expected.points)
+    assert (run_root / route / "irc-restart" / "reverse" / "receipt.json").is_file()
+
+
+@pytest.mark.parametrize("corruption", ["mixed-run", "unexpected-artifact"])
+def test_irc_restart_rejects_corrupt_checkpoint_before_recompute(
+    tmp_path: Path, corruption: str
+):
+    run_root = tmp_path / corruption
+    _, _, trace = _qualified_ancestry(run_root)
+    route = "h-co-1w-cside"
+
+    def stop_after_forward(
+        *_args, _completed_directions, _direction_callback, **_kwargs
+    ):
+        assert not _completed_directions
+        _direction_callback(trace.directions[0])
+        raise RuntimeError("checkpoint only")
+
+    with pytest.raises(RuntimeError, match="checkpoint only"):
+        campaign._run_and_publish_irc(
+            run_root,
+            route=route,
+            _runner=stop_after_forward,
+        )
+    restart_root = run_root / route / "irc-restart"
+    if corruption == "mixed-run":
+        _rewrite_canonical_json(
+            restart_root / "forward" / "receipt.json",
+            lambda receipt: receipt.__setitem__("irc_run_identity", "f" * 64),
+        )
+        match = "mixed run identities"
+    else:
+        (restart_root / "foreign").write_text("must be preserved")
+        match = "unexpected or incomplete"
+
+    with pytest.raises(ValueError, match=match):
+        campaign._run_and_publish_irc(
+            run_root,
+            route=route,
+            _runner=lambda *_args, **_kwargs: pytest.fail(
+                "corrupt checkpoint reached IRC runner"
+            ),
+        )
+    assert not (run_root / route / "irc-execution").exists()
+    if corruption == "unexpected-artifact":
+        assert (restart_root / "foreign").read_text() == "must be preserved"
+
+
+def test_irc_checkpoint_destination_race_is_non_overwriting(
+    monkeypatch, tmp_path: Path
+):
+    run_root = tmp_path / "run"
+    _, _, trace = _qualified_ancestry(run_root)
+    route = "h-co-1w-cside"
+    destination = run_root / route / "irc-restart" / "forward"
+    real_rename = campaign._renameat2_noreplace
+
+    def race(source: Path, target: Path) -> None:
+        if target == destination:
+            target.mkdir()
+            (target / "foreign").write_text("racer owns checkpoint")
+        real_rename(source, target)
+
+    monkeypatch.setattr(campaign, "_renameat2_noreplace", race)
+
+    def runner(*_args, _completed_directions, _direction_callback, **_kwargs):
+        assert not _completed_directions
+        _direction_callback(trace.directions[0])
+        return trace
+
+    with pytest.raises(FileExistsError):
+        campaign._run_and_publish_irc(run_root, route=route, _runner=runner)
+    assert (destination / "foreign").read_text() == "racer owns checkpoint"
+    assert not list(destination.parent.glob(".forward.*.tmp"))
+    assert not (run_root / route / "irc-execution").exists()
+
+
+def test_irc_restart_rejects_reverse_without_preceding_forward(
+    tmp_path: Path,
+):
+    run_root = tmp_path / "run"
+    _, _, trace = _qualified_ancestry(run_root)
+    route = "h-co-1w-cside"
+
+    def reverse_only(*_args, _completed_directions, _direction_callback, **_kwargs):
+        assert not _completed_directions
+        _direction_callback(trace.directions[1])
+        raise RuntimeError("stop after impossible reverse-only checkpoint")
+
+    with pytest.raises(RuntimeError, match="reverse-only"):
+        campaign._run_and_publish_irc(
+            run_root,
+            route=route,
+            _runner=reverse_only,
+        )
+    with pytest.raises(ValueError, match="direction completion order"):
+        campaign._run_and_publish_irc(
+            run_root,
+            route=route,
+            _runner=lambda *_args, **_kwargs: pytest.fail(
+                "malformed restart reached IRC runner"
+            ),
+        )
+
+
+def test_irc_restart_validates_completed_direction_before_checkpoint(tmp_path: Path):
+    run_root = tmp_path / "run"
+    _, _, trace = _qualified_ancestry(run_root)
+    route = "h-co-1w-cside"
+    forward = trace.directions[0]
+    bad_terminal = replace(
+        forward.points[-1],
+        projected_fmax_ev_per_angstrom=campaign.BOUNDS["irc"][
+            "outer_fmax_ev_per_angstrom"
+        ],
+    )
+    malformed = replace(forward, points=(*forward.points[:-1], bad_terminal))
+
+    def runner(*_args, _direction_callback, **_kwargs):
+        _direction_callback(malformed)
+        pytest.fail("invalid completed direction was checkpointed")
+
+    with pytest.raises(ValueError, match="terminal IRC fmax must be strictly below"):
+        campaign._run_and_publish_irc(run_root, route=route, _runner=runner)
+
+    assert not (run_root / route / "irc-restart" / "forward").exists()
+
+
+def test_irc_restart_recovers_owned_interrupted_root_publication(tmp_path: Path):
+    run_root = tmp_path / "run"
+    _, _, trace = _qualified_ancestry(run_root)
+    route_root = run_root / "h-co-1w-cside"
+    stale = route_root / ".irc-restart.123.456.tmp"
+    stale.mkdir()
+    (stale / "receipt.json").write_text("{}\n")
+
+    campaign._run_and_publish_irc(
+        run_root,
+        route="h-co-1w-cside",
+        _runner=lambda *_args, **_kwargs: trace,
+    )
+
+    assert not stale.exists()
+    assert (route_root / "irc-restart" / "forward" / "receipt.json").is_file()
+    assert (route_root / "irc-restart" / "reverse" / "receipt.json").is_file()
+
+
+def test_public_boundaries_build_native_backends_internally(
+    monkeypatch, tmp_path: Path
+):
+    route = "h-co-1w-cside"
+    qualification_root = tmp_path / "qualification"
+    preflight = _preflight(qualification_root)
+    transition_state, _ = _trace(route, "irc_back.xyz", "irc_fwd.xyz")
+    reactant = _frozen_endpoint(route, "irc_back.xyz").coords
+    product = _frozen_endpoint(route, "irc_fwd.xyz").coords
+    native = _qualification_native_result(
+        preflight, transition_state, reactant, product
+    )
+    qualification_calls = []
+
+    def qualify(cluster, settings):
+        qualification_calls.append((cluster, settings))
+        return native
+
+    monkeypatch.setattr(campaign, "native_cartesian_hessian", qualify)
+    qualified = campaign.publish_transition_state_qualification(
+        qualification_root, route=route
+    )
+    assert len(qualification_calls) == 1
+    assert qualified.receipt["accepted"] is True
+
+    hessian_root = tmp_path / "hessians"
+    _, path = _authoritative_path(hessian_root)
+    hessian_calls = []
+
+    def hessian(cluster, settings):
+        hessian_calls.append((cluster, settings))
+        return _energy_reproducing_result(cluster, path)
+
+    monkeypatch.setattr(campaign, "native_cartesian_hessian", hessian)
+    published = campaign.publish_path_hessians(hessian_root, route=route)
+    assert len(hessian_calls) == len(path.coordinates_angstrom)
+    assert published.receipt["accepted"] is True
+
+
+def test_public_resume_rejects_runtime_drift_before_backend(
+    monkeypatch, tmp_path: Path
+):
+    run_root = tmp_path / "run"
+    _qualified_ancestry(run_root)
+    route = "h-co-1w-cside"
+    monkeypatch.setattr(
+        campaign,
+        "_current_code_dependency_identity",
+        lambda: {
+            "git_sha": FIXED_GIT_SHA,
+            "dependencies": {**FIXED_DEPENDENCIES, "sella": "drifted"},
+            "python": campaign.platform.python_version(),
+        },
+    )
+    monkeypatch.setattr(
+        campaign.quarry_ts,
+        "_trace_sella_irc_resume",
+        lambda *_args, **_kwargs: pytest.fail("runtime drift reached Sella"),
+    )
+    with pytest.raises(ValueError, match="current dependency identity"):
+        campaign.run_and_publish_irc(run_root, route=route)

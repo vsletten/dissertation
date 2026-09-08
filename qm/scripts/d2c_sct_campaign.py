@@ -52,7 +52,11 @@ import numpy as np  # noqa: E402
 
 from quarry import ts as quarry_ts  # noqa: E402
 from quarry.clusters import Cluster  # noqa: E402
-from quarry.native_hessian import HARTREE_TO_EV, NativeHessianResult  # noqa: E402
+from quarry.native_hessian import (  # noqa: E402
+    HARTREE_TO_EV,
+    NativeHessianResult,
+    native_cartesian_hessian,
+)
 from quarry.pipeline import (  # noqa: E402
     BOHR_TO_ANGSTROM,
     DftSettings,
@@ -406,6 +410,10 @@ _TS_QUALIFICATION_TEMPORARY_NAME = re.compile(
 _IRC_EXECUTION_TEMPORARY_NAME = re.compile(r"\.irc-execution\.[0-9]+\.[0-9]+\.tmp\Z")
 _IRC_DIRECTION_TEMPORARY_NAME = re.compile(
     r"\.irc-(?:forward|reverse)\.[0-9]+\.[0-9]+\.tmp\Z"
+)
+_IRC_RESTART_ROOT_TEMPORARY_NAME = re.compile(r"\.irc-restart\.[0-9]+\.[0-9]+\.tmp\Z")
+_IRC_RESTART_TEMPORARY_NAME = re.compile(
+    r"\.(?:forward|reverse)\.[0-9]+\.[0-9]+\.tmp\Z"
 )
 _HESSIAN_POINT_TEMPORARY_NAME = re.compile(
     r"\.(?P<index>[0-9]{6})\.[0-9]+\.[0-9]+\.tmp\Z"
@@ -1301,6 +1309,24 @@ def _validated_preflight(root: Path, route: str) -> tuple[dict[str, Any], str]:
     routes = preflight.get("routes")
     if type(campaign) is not dict or type(routes) is not dict:
         raise ValueError("D2c preflight campaign inventory is invalid")
+    expected_campaign_keys = {
+        "schema",
+        "bundle_manifest_sha256",
+        "git_sha",
+        "dft_settings",
+        "dependencies",
+        "python",
+        "mass_standard",
+        "reference_mass_amu",
+        "routes",
+        "endpoint_classification_policy",
+        "trusted_frozen_endpoint_evidence",
+        "bounds",
+        "required_route_stages",
+        "required_campaign_stages",
+    }
+    if set(campaign) != expected_campaign_keys:
+        raise ValueError("D2c preflight campaign fields are unexpected or incomplete")
     if _canonical_hash(campaign) != identity:
         raise ValueError("D2c preflight campaign identity mismatch")
     _strict_json_equal(campaign.get("schema"), SCHEMA, label="campaign schema")
@@ -1313,6 +1339,34 @@ def _validated_preflight(root: Path, route: str) -> tuple[dict[str, Any], str]:
         ROUTE_STAGE_CONTRACT,
         label="campaign route-stage contract",
     )
+    _strict_json_equal(
+        campaign.get("required_campaign_stages"),
+        CAMPAIGN_STAGE_CONTRACT,
+        label="campaign stage contract",
+    )
+    _strict_json_equal(
+        campaign.get("endpoint_classification_policy"),
+        endpoint_classification_policy_payload(),
+        label="campaign endpoint classification policy",
+    )
+    _strict_json_equal(
+        campaign.get("trusted_frozen_endpoint_evidence"),
+        TRUSTED_FROZEN_ENDPOINT_EVIDENCE,
+        label="campaign trusted frozen endpoint evidence",
+    )
+    _require_sha(
+        _require_json_string(campaign.get("git_sha"), label="campaign Git SHA"),
+        length=40,
+        label="campaign Git SHA",
+    )
+    dependencies = campaign.get("dependencies")
+    if (
+        type(dependencies) is not dict
+        or set(dependencies) != DEPENDENCY_VERSION_KEYS
+        or any(type(value) is not str or not value for value in dependencies.values())
+    ):
+        raise ValueError("campaign dependency identity is incomplete")
+    _require_json_string(campaign.get("python"), label="campaign Python version")
     campaign_routes = campaign.get("routes")
     if (
         type(campaign_routes) is not dict
@@ -1598,7 +1652,7 @@ def _as_published_qualification(
     )
 
 
-def publish_transition_state_qualification(
+def _publish_transition_state_qualification(
     run_root: Path,
     *,
     route: str,
@@ -1606,14 +1660,19 @@ def publish_transition_state_qualification(
     native_hessian: NativeHessianResult | None = None,
     mapped_reactant_coordinates_angstrom: Any = None,
     mapped_product_coordinates_angstrom: Any = None,
+    _boundary_validator: Callable[[], None] | None = None,
     _failure_injector: Callable[[str], None] | None = None,
 ) -> PublishedTransitionStateQualification:
-    """Publish or reconstruct a TS qualification proven from persisted evidence."""
+    """Private deterministic publication seam for evaluated TS evidence."""
 
     root = _safe_absolute_root(run_root)
+    if _boundary_validator is not None:
+        _boundary_validator()
     preflight, preflight_sha = _validated_preflight(root, route)
     route_root = root / route
     with _exclusive_route_claim(route_root):
+        if _boundary_validator is not None:
+            _boundary_validator()
         _remove_owned_temporary_directories(
             route_root,
             name_pattern=_TS_QUALIFICATION_TEMPORARY_NAME,
@@ -1707,6 +1766,8 @@ def publish_transition_state_qualification(
             _fsync_directory(temporary)
             if _failure_injector is not None:
                 _failure_injector("before_ts_qualification_commit")
+            if _boundary_validator is not None:
+                _boundary_validator()
             current_preflight, current_preflight_sha = _validated_preflight(root, route)
             _strict_json_equal(
                 current_preflight,
@@ -1732,6 +1793,8 @@ def publish_transition_state_qualification(
         try:
             if _failure_injector is not None:
                 _failure_injector("after_ts_qualification_commit")
+            if _boundary_validator is not None:
+                _boundary_validator()
             return _as_published_qualification(
                 _load_canonical_qualification(root, route)
             )
@@ -1741,6 +1804,58 @@ def publish_transition_state_qualification(
                     qualification_root, owned_identity, owned_hashes
                 )
             raise
+
+
+def publish_transition_state_qualification(
+    run_root: Path,
+    *,
+    route: str,
+    _failure_injector: Callable[[str], None] | None = None,
+) -> PublishedTransitionStateQualification:
+    """Evaluate and publish the canonical TS gate from repository-bound inputs."""
+
+    preflight, _ = _validate_production_boundary(run_root, route)
+
+    def validate_boundary() -> None:
+        _validate_production_boundary(run_root, route)
+
+    root = _safe_absolute_root(run_root)
+    qualification_root = root / route / "ts-qualification"
+    if qualification_root.exists() or qualification_root.is_symlink():
+        return _publish_transition_state_qualification(
+            root,
+            route=route,
+            _boundary_validator=validate_boundary,
+            _failure_injector=_failure_injector,
+        )
+
+    bundle_root = _safe_absolute_root(DEFAULT_BUNDLE_ROOT)
+    template = reactions(gpu=True, basis="def2-svp")[route].cluster
+    transition_state = load_xyz_like(
+        bundle_root / route / "ts.xyz",
+        template,
+        name=f"{route}-qualified-ts",
+    )
+    endpoints: dict[str, np.ndarray] = {}
+    for filename, evidence in TRUSTED_FROZEN_ENDPOINT_EVIDENCE[route].items():
+        endpoint = load_xyz_like(
+            bundle_root / route / filename,
+            template,
+            name=f"{route}-{evidence['basin']}",
+        )
+        endpoints[evidence["basin"]] = endpoint.coords
+    settings, _ = _canonical_dft_settings(preflight)
+    evaluated = native_cartesian_hessian(transition_state, settings)
+    return _publish_transition_state_qualification(
+        root,
+        route=route,
+        qualified_transition_state=transition_state,
+        native_hessian=evaluated,
+        mapped_reactant_coordinates_angstrom=endpoints["reactant"],
+        mapped_product_coordinates_angstrom=endpoints["product"],
+        _boundary_validator=validate_boundary,
+        _failure_injector=_failure_injector,
+    )
 
 
 def _load_canonical_qualification(
@@ -2486,18 +2601,163 @@ def _publish_receipt_directory(
     return destination
 
 
-def run_and_publish_irc(
+def _irc_restart_receipt_payload(
+    ancestry: _CanonicalQualificationAncestry,
+    contract: IrcExecutionContract,
+    run_identity: str,
+) -> dict[str, Any]:
+    return {
+        "schema": "d2c-irc-restart-v1",
+        "stage": "irc_execution_restart",
+        "state": "running",
+        "accepted": False,
+        "irc_run_identity": run_identity,
+        "preflight_receipt_sha256": ancestry.preflight_receipt_sha256,
+        "campaign_identity": ancestry.campaign_identity,
+        "route": ancestry.route,
+        "atom_mapping_sha256": ancestry.atom_mapping_sha256,
+        "ts_qualification_receipt_sha256": ancestry.ts_qualification_receipt_sha256,
+        "qualified_transition_state_geometry_fingerprint": (
+            frequency_geometry_fingerprint(ancestry.qualified_transition_state)
+        ),
+        "execution_contract": _irc_execution_contract_payload(contract),
+        "masses_amu": [
+            ISOTOPIC_MASSES_AMU[symbol]
+            for symbol in ancestry.qualified_transition_state.symbols
+        ],
+    }
+
+
+def _load_irc_restart(
+    ancestry: _CanonicalQualificationAncestry,
+) -> tuple[Path, IrcExecutionContract, str, dict[str, IrcDirectionPath]]:
+    restart_root = ancestry.root / ancestry.route / "irc-restart"
+    if restart_root.is_symlink() or not restart_root.is_dir():
+        raise ValueError("canonical IRC restart checkpoint must be a real directory")
+    observed = {child.name for child in restart_root.iterdir()}
+    allowed = {"receipt.json", "forward", "reverse"}
+    if observed - allowed or "receipt.json" not in observed:
+        raise ValueError(
+            "IRC restart checkpoint artifacts are unexpected or incomplete"
+        )
+    receipt, _ = _read_json_object(
+        restart_root / "receipt.json", label="IRC restart checkpoint receipt"
+    )
+    expected_keys = {
+        "schema",
+        "stage",
+        "state",
+        "accepted",
+        "irc_run_identity",
+        "preflight_receipt_sha256",
+        "campaign_identity",
+        "route",
+        "atom_mapping_sha256",
+        "ts_qualification_receipt_sha256",
+        "qualified_transition_state_geometry_fingerprint",
+        "execution_contract",
+        "masses_amu",
+    }
+    if set(receipt) != expected_keys:
+        raise ValueError(
+            "IRC restart checkpoint receipt fields are unexpected or incomplete"
+        )
+    run_identity = _require_json_string(
+        receipt.get("irc_run_identity"), label="IRC restart run identity"
+    )
+    _require_sha(run_identity, length=64, label="IRC restart run identity")
+    contract = _validated_irc_execution_contract(
+        receipt.get("execution_contract"), label="IRC restart execution contract"
+    )
+    expected = _irc_restart_receipt_payload(ancestry, contract, run_identity)
+    _strict_json_equal(receipt, expected, label="IRC restart checkpoint receipt")
+    completed: dict[str, IrcDirectionPath] = {}
+    for name in ("forward", "reverse"):
+        direction_root = restart_root / name
+        if not (direction_root.exists() or direction_root.is_symlink()):
+            continue
+        if direction_root.is_symlink() or not direction_root.is_dir():
+            raise ValueError(f"IRC restart {name} checkpoint must be a real directory")
+        if {child.name for child in direction_root.iterdir()} != {"receipt.json"}:
+            raise ValueError(f"IRC restart {name} checkpoint artifacts are invalid")
+        direction_receipt, _ = _read_json_object(
+            direction_root / "receipt.json",
+            label=f"IRC restart {name} checkpoint receipt",
+        )
+        direction, observed_contract, observed_identity = _direction_from_irc_receipt(
+            direction_receipt, name=name, ancestry=ancestry
+        )
+        if observed_contract != contract or observed_identity != run_identity:
+            raise ValueError(
+                "IRC restart checkpoints have mixed run identities or contracts"
+            )
+        completed[name] = direction
+    if set(completed) == {"reverse"}:
+        raise ValueError("IRC restart checkpoints violate direction completion order")
+    return restart_root, contract, run_identity, completed
+
+
+def _checkpoint_irc_direction(
+    restart_root: Path,
+    *,
+    ancestry: _CanonicalQualificationAncestry,
+    contract: IrcExecutionContract,
+    run_identity: str,
+    direction: IrcDirectionPath,
+) -> None:
+    name = direction.sella_direction
+    if name not in {"forward", "reverse"}:
+        raise ValueError("IRC checkpoint direction must be forward or reverse")
+    receipt = _irc_direction_receipt_payload(
+        preflight=ancestry.preflight,
+        preflight_receipt_sha256=ancestry.preflight_receipt_sha256,
+        ts_qualification_receipt_sha256=ancestry.ts_qualification_receipt_sha256,
+        route=ancestry.route,
+        qualified_transition_state=ancestry.qualified_transition_state,
+        unstable_mode_mass_scaled=ancestry.unstable_mode_mass_scaled,
+        transition_state_vibrational_basis=ancestry.transition_state_vibrational_basis,
+        direction=direction,
+        masses_amu=np.asarray(
+            [
+                ISOTOPIC_MASSES_AMU[symbol]
+                for symbol in ancestry.qualified_transition_state.symbols
+            ]
+        ),
+        execution_contract=contract,
+        irc_run_identity=run_identity,
+    )
+    destination = restart_root / name
+    if destination.exists() or destination.is_symlink():
+        observed, _ = _read_json_object(
+            destination / "receipt.json", label=f"IRC restart {name} checkpoint receipt"
+        )
+        _strict_json_equal(observed, receipt, label=f"IRC restart {name} checkpoint")
+        return
+    _publish_receipt_directory(
+        restart_root,
+        directory_name=name,
+        temporary_name=f".{name}.{os.getpid()}.{time.time_ns()}.tmp",
+        receipt=receipt,
+    )
+
+
+def _run_and_publish_irc(
     run_root: Path,
     *,
     route: str,
     _runner: Callable[..., SellaIrcTrace] | None = None,
+    _boundary_validator: Callable[[], None] | None = None,
     _failure_injector: Callable[[str], None] | None = None,
 ) -> PublishedIrcRun:
-    """Run the exact bounded Sella IRC contract and publish both receipts."""
+    """Private IRC runner with durable per-direction restart checkpoints."""
 
+    if _boundary_validator is not None:
+        _boundary_validator()
     ancestry = _load_canonical_qualification(run_root, route)
     route_root = ancestry.root / route
     with _exclusive_route_claim(route_root):
+        if _boundary_validator is not None:
+            _boundary_validator()
         ancestry = _load_canonical_qualification(ancestry.root, route)
         _remove_owned_temporary_directories(
             route_root,
@@ -2509,11 +2769,48 @@ def run_and_publish_irc(
             name_pattern=_IRC_DIRECTION_TEMPORARY_NAME,
             allowed_files={"receipt.json"},
         )
+        _remove_owned_temporary_directories(
+            route_root,
+            name_pattern=_IRC_RESTART_ROOT_TEMPORARY_NAME,
+            allowed_files={"receipt.json"},
+        )
         execution_root = route_root / "irc-execution"
+        restart_candidate = route_root / "irc-restart"
+        if restart_candidate.exists() or restart_candidate.is_symlink():
+            if restart_candidate.is_symlink() or not restart_candidate.is_dir():
+                raise ValueError(
+                    "canonical IRC restart checkpoint must be a real directory"
+                )
+            _remove_owned_temporary_directories(
+                restart_candidate,
+                name_pattern=_IRC_RESTART_TEMPORARY_NAME,
+                allowed_files={"receipt.json"},
+            )
         if execution_root.exists() or execution_root.is_symlink():
             execution_receipt, execution_raw, trace, run_identity = (
                 _load_irc_execution_receipt(ancestry)
             )
+            _, restart_contract, restart_identity, completed = _load_irc_restart(
+                ancestry
+            )
+            if (
+                restart_identity != run_identity
+                or restart_contract != trace.execution_contract
+                or set(completed) != {"forward", "reverse"}
+            ):
+                raise ValueError(
+                    "canonical IRC execution and restart checkpoints disagree"
+                )
+            for name in ("forward", "reverse"):
+                checkpoint_receipt, _ = _read_json_object(
+                    route_root / "irc-restart" / name / "receipt.json",
+                    label=f"IRC restart {name} checkpoint receipt",
+                )
+                _strict_json_equal(
+                    checkpoint_receipt,
+                    execution_receipt["direction_receipts"][name],
+                    label=f"IRC restart/final {name} receipt",
+                )
         else:
             for name in ("forward", "reverse"):
                 direction_root = route_root / f"irc-{name}"
@@ -2531,7 +2828,70 @@ def run_and_publish_irc(
                 dtype=float,
             )
             irc_bounds = BOUNDS["irc"]
-            runner = quarry_ts.trace_sella_irc if _runner is None else _runner
+            canonical_contract = IrcExecutionContract(
+                algorithm=irc_bounds["algorithm"],
+                step_size_angstrom=irc_bounds["step_size_angstrom"],
+                maximum_steps=irc_bounds["maximum_steps_per_direction"],
+                outer_fmax_ev_per_angstrom=irc_bounds["outer_fmax_ev_per_angstrom"],
+                inner_fmax_ev_per_angstrom=irc_bounds["inner_fmax_ev_per_angstrom"],
+            )
+            restart_root = route_root / "irc-restart"
+            if restart_root.exists() or restart_root.is_symlink():
+                restart_root, checkpoint_contract, run_identity, completed = (
+                    _load_irc_restart(ancestry)
+                )
+                if checkpoint_contract != canonical_contract:
+                    raise ValueError("IRC restart execution contract drifted")
+            else:
+                run_identity = secrets.token_hex(32)
+                restart_receipt = _irc_restart_receipt_payload(
+                    ancestry, canonical_contract, run_identity
+                )
+                if _boundary_validator is not None:
+                    _boundary_validator()
+                restart_root = _publish_receipt_directory(
+                    route_root,
+                    directory_name="irc-restart",
+                    temporary_name=(f".irc-restart.{os.getpid()}.{time.time_ns()}.tmp"),
+                    receipt=restart_receipt,
+                )
+                checkpoint_contract = canonical_contract
+                completed = {}
+            _remove_owned_temporary_directories(
+                restart_root,
+                name_pattern=_IRC_RESTART_TEMPORARY_NAME,
+                allowed_files={"receipt.json"},
+            )
+            restart_root, checkpoint_contract, run_identity, completed = (
+                _load_irc_restart(ancestry)
+            )
+
+            def checkpoint_direction(direction: IrcDirectionPath) -> None:
+                _validate_irc_direction_contract(
+                    direction,
+                    ancestry.qualified_transition_state,
+                    ancestry.unstable_mode_mass_scaled,
+                    ancestry.transition_state_vibrational_basis,
+                )
+                if _boundary_validator is not None:
+                    _boundary_validator()
+                current = _load_canonical_qualification(ancestry.root, route)
+                if (
+                    current.preflight_receipt_sha256
+                    != ancestry.preflight_receipt_sha256
+                    or current.ts_qualification_receipt_sha256
+                    != ancestry.ts_qualification_receipt_sha256
+                ):
+                    raise ValueError("IRC canonical parent receipts changed")
+                _checkpoint_irc_direction(
+                    restart_root,
+                    ancestry=current,
+                    contract=checkpoint_contract,
+                    run_identity=run_identity,
+                    direction=direction,
+                )
+
+            runner = quarry_ts._trace_sella_irc_resume if _runner is None else _runner
             trace = runner(
                 ancestry.qualified_transition_state,
                 settings,
@@ -2540,6 +2900,8 @@ def run_and_publish_irc(
                 fmax_inner_ev_a=irc_bounds["inner_fmax_ev_per_angstrom"],
                 max_steps=irc_bounds["maximum_steps_per_direction"],
                 step_size_a=irc_bounds["step_size_angstrom"],
+                _completed_directions=dict(completed),
+                _direction_callback=checkpoint_direction,
             )
             if not isinstance(trace, SellaIrcTrace):
                 raise TypeError("IRC runner must return a SellaIrcTrace")
@@ -2550,10 +2912,12 @@ def run_and_publish_irc(
             )
             if trace.execution_contract is None:
                 raise TypeError("IRC runner returned no observed execution contract")
-            _validated_irc_execution_contract(
+            observed_contract = _validated_irc_execution_contract(
                 _irc_execution_contract_payload(trace.execution_contract),
                 label="IRC runner observed execution contract",
             )
+            if observed_contract != checkpoint_contract:
+                raise ValueError("IRC runner and restart execution contracts differ")
             for direction in trace.directions:
                 _validate_irc_direction_contract(
                     direction,
@@ -2561,13 +2925,67 @@ def run_and_publish_irc(
                     ancestry.unstable_mode_mass_scaled,
                     ancestry.transition_state_vibrational_basis,
                 )
-            run_identity = secrets.token_hex(32)
+                checkpoint_direction(direction)
+            _, _, checkpoint_identity, completed = _load_irc_restart(ancestry)
+            if checkpoint_identity != run_identity or set(completed) != {
+                "forward",
+                "reverse",
+            }:
+                raise ValueError("IRC restart checkpoints are incomplete")
+            for direction in trace.directions:
+                checkpointed = completed[direction.sella_direction]
+                expected = _irc_direction_receipt_payload(
+                    preflight=ancestry.preflight,
+                    preflight_receipt_sha256=ancestry.preflight_receipt_sha256,
+                    ts_qualification_receipt_sha256=(
+                        ancestry.ts_qualification_receipt_sha256
+                    ),
+                    route=route,
+                    qualified_transition_state=ancestry.qualified_transition_state,
+                    unstable_mode_mass_scaled=ancestry.unstable_mode_mass_scaled,
+                    transition_state_vibrational_basis=(
+                        ancestry.transition_state_vibrational_basis
+                    ),
+                    direction=checkpointed,
+                    masses_amu=masses,
+                    execution_contract=checkpoint_contract,
+                    irc_run_identity=run_identity,
+                )
+                observed = _irc_direction_receipt_payload(
+                    preflight=ancestry.preflight,
+                    preflight_receipt_sha256=ancestry.preflight_receipt_sha256,
+                    ts_qualification_receipt_sha256=(
+                        ancestry.ts_qualification_receipt_sha256
+                    ),
+                    route=route,
+                    qualified_transition_state=ancestry.qualified_transition_state,
+                    unstable_mode_mass_scaled=ancestry.unstable_mode_mass_scaled,
+                    transition_state_vibrational_basis=(
+                        ancestry.transition_state_vibrational_basis
+                    ),
+                    direction=direction,
+                    masses_amu=masses,
+                    execution_contract=checkpoint_contract,
+                    irc_run_identity=run_identity,
+                )
+                _strict_json_equal(
+                    observed,
+                    expected,
+                    label=f"IRC {direction.sella_direction} checkpoint agreement",
+                )
+            canonical_trace = SellaIrcTrace(
+                masses_amu=masses,
+                directions=(completed["forward"], completed["reverse"]),
+                execution_contract=checkpoint_contract,
+            )
             execution_receipt = _irc_execution_receipt_payload(
-                ancestry, trace, run_identity
+                ancestry, canonical_trace, run_identity
             )
             _validate_irc_execution_receipt_payload(execution_receipt, ancestry)
             if _failure_injector is not None:
                 _failure_injector("before_irc_execution_commit")
+            if _boundary_validator is not None:
+                _boundary_validator()
             execution_root = _publish_receipt_directory(
                 route_root,
                 directory_name="irc-execution",
@@ -2576,6 +2994,8 @@ def run_and_publish_irc(
             )
             if _failure_injector is not None:
                 _failure_injector("after_irc_execution_commit")
+            if _boundary_validator is not None:
+                _boundary_validator()
             execution_receipt, execution_raw, trace, run_identity = (
                 _load_irc_execution_receipt(ancestry)
             )
@@ -2596,6 +3016,8 @@ def run_and_publish_irc(
                 )
                 _direction_from_irc_receipt(observed, name=name, ancestry=ancestry)
                 continue
+            if _boundary_validator is not None:
+                _boundary_validator()
             current = _load_canonical_qualification(ancestry.root, route)
             if (
                 current.preflight_receipt_sha256 != ancestry.preflight_receipt_sha256
@@ -2623,7 +3045,11 @@ def run_and_publish_irc(
             )
             if _failure_injector is not None:
                 _failure_injector(f"after_irc_direction_commit:{name}")
+            if _boundary_validator is not None:
+                _boundary_validator()
 
+        if _boundary_validator is not None:
+            _boundary_validator()
         current = _load_canonical_qualification(ancestry.root, route)
         if (
             current.preflight_receipt_sha256 != ancestry.preflight_receipt_sha256
@@ -2660,6 +3086,28 @@ def run_and_publish_irc(
             },
             trace=current_trace,
         )
+
+
+def run_and_publish_irc(
+    run_root: Path,
+    *,
+    route: str,
+    _failure_injector: Callable[[str], None] | None = None,
+) -> PublishedIrcRun:
+    """Run/resume the repository-bound Sella backend with durable checkpoints."""
+
+    _validate_production_boundary(run_root, route)
+
+    def validate_boundary() -> None:
+        _validate_production_boundary(run_root, route)
+
+    return _run_and_publish_irc(
+        run_root,
+        route=route,
+        _runner=quarry_ts._trace_sella_irc_resume,
+        _boundary_validator=validate_boundary,
+        _failure_injector=_failure_injector,
+    )
 
 
 def _validate_published_path(
@@ -3099,6 +3547,7 @@ def publish_typed_irc_path(
 ) -> PublishedTypedIrcPath:
     """Publish or resume solely from canonical shared and direction IRC receipts."""
 
+    _validate_production_boundary(run_root, route)
     ancestry = _load_canonical_qualification(run_root, route)
     trace, irc_hashes, run_identity = _validate_canonical_irc_receipts(ancestry)
     ancestor_receipts = {
@@ -3110,6 +3559,7 @@ def publish_typed_irc_path(
     }
 
     def validate_again() -> None:
+        _validate_production_boundary(run_root, route)
         current = _load_canonical_qualification(run_root, route)
         _, current_hashes, current_run_identity = _validate_canonical_irc_receipts(
             current
@@ -4077,15 +4527,18 @@ def _publish_path_hessians(
             raise
 
 
-def publish_path_hessians(
+def _publish_authoritative_path_hessians(
     run_root: Path,
     *,
     route: str,
     evaluator: Callable[[Cluster], NativeHessianResult],
+    _boundary_validator: Callable[[], None] | None = None,
     _failure_injector: Callable[[str], None] | None = None,
 ) -> PublishedPathHessians:
-    """Publish/resume Hessians using only canonical preflight DFT settings."""
+    """Private deterministic wrapper over canonical production ancestry."""
 
+    if _boundary_validator is not None:
+        _boundary_validator()
     ancestry, path, ancestor_receipts = _validate_authoritative_published_path(
         run_root, route
     )
@@ -4094,6 +4547,8 @@ def publish_path_hessians(
     initial_path_sha = path.receipt_sha256
 
     def revalidate_ancestry() -> None:
+        if _boundary_validator is not None:
+            _boundary_validator()
         current_ancestry, current_path, current_ancestors = (
             _validate_authoritative_published_path(run_root, route)
         )
@@ -4131,6 +4586,34 @@ def publish_path_hessians(
         ancestor_receipts=ancestor_receipts,
         energy_reproduction_tolerance_ev=tolerance,
         _ancestry_validator=revalidate_ancestry,
+        _failure_injector=_failure_injector,
+    )
+
+
+def publish_path_hessians(
+    run_root: Path,
+    *,
+    route: str,
+    _failure_injector: Callable[[str], None] | None = None,
+) -> PublishedPathHessians:
+    """Evaluate path Hessians with the repository-selected native backend."""
+
+    _validate_production_boundary(run_root, route)
+    ancestry = _load_canonical_qualification(run_root, route)
+    settings, _ = _canonical_dft_settings(ancestry.preflight)
+
+    def validate_boundary() -> None:
+        _validate_production_boundary(run_root, route)
+
+    def evaluate(cluster: Cluster) -> NativeHessianResult:
+        validate_boundary()
+        return native_cartesian_hessian(cluster, settings)
+
+    return _publish_authoritative_path_hessians(
+        run_root,
+        route=route,
+        evaluator=evaluate,
+        _boundary_validator=validate_boundary,
         _failure_injector=_failure_injector,
     )
 
@@ -4655,6 +5138,73 @@ def _route_inventory(bundle_root: Path, manifest: dict[str, Any]) -> dict[str, A
             "D2c preflight must enumerate exactly the four frozen routes"
         )
     return inventory
+
+
+def _identity_route_inventory(routes: dict[str, Any]) -> dict[str, Any]:
+    """Strip mutable stage state from route records used by campaign identity."""
+
+    return {
+        route: {
+            "symbols": record["symbols"],
+            "atom_identity_labels": record["atom_identity_labels"],
+            "atom_mapping_sha256": record["atom_mapping_sha256"],
+            "canonical_transition_state_geometry_sha256": record[
+                "canonical_transition_state_geometry_sha256"
+            ],
+            "masses_amu": record["masses_amu"],
+            "transition_state_sha256": record["transition_state_sha256"],
+            "frozen_endpoint_evidence": record["frozen_endpoint_evidence"],
+        }
+        for route, record in routes.items()
+    }
+
+
+def _current_code_dependency_identity() -> dict[str, Any]:
+    """Resolve the live executable identity; tests replace this private seam."""
+
+    return {
+        "git_sha": _git_sha(Path(__file__).resolve().parents[2]),
+        "dependencies": _dependency_versions(),
+        "python": platform.python_version(),
+    }
+
+
+def _validate_production_boundary(
+    run_root: Path, route: str
+) -> tuple[dict[str, Any], str]:
+    """Rebind a persisted run to live code, dependencies, and trusted inputs."""
+
+    root = _safe_absolute_root(run_root)
+    preflight, preflight_sha = _validated_preflight(root, route)
+    current = _current_code_dependency_identity()
+    campaign = preflight["campaign"]
+    _strict_json_equal(
+        current.get("git_sha"), campaign["git_sha"], label="current Git SHA"
+    )
+    _strict_json_equal(
+        current.get("dependencies"),
+        campaign["dependencies"],
+        label="current dependency identity",
+    )
+    _strict_json_equal(
+        current.get("python"), campaign["python"], label="current Python version"
+    )
+
+    bundle_root = _safe_absolute_root(DEFAULT_BUNDLE_ROOT)
+    manifest = d2c_input_bundle.verify_bundle(bundle_root)
+    manifest_sha = d2c_input_bundle.sha256_path(bundle_root / "manifest.json")
+    _strict_json_equal(
+        manifest_sha,
+        campaign["bundle_manifest_sha256"],
+        label="current trusted bundle manifest SHA-256",
+    )
+    current_routes = _route_inventory(bundle_root, manifest)
+    _strict_json_equal(
+        _identity_route_inventory(current_routes),
+        campaign["routes"],
+        label="current independently trusted frozen endpoint identity",
+    )
+    return preflight, preflight_sha
 
 
 @contextmanager

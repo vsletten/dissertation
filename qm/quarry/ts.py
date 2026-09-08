@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from types import MethodType
@@ -928,7 +929,7 @@ def _capture_irc_point(
     )
 
 
-def trace_sella_irc(
+def _trace_sella_irc_resume(
     ts: Cluster,
     settings: DftSettings,
     *,
@@ -939,6 +940,8 @@ def trace_sella_irc(
     step_size_a: float = 0.10,
     trajectory: str | Path | None = None,
     logfile: str | Path | None = None,
+    _completed_directions: dict[str, IrcDirectionPath] | None = None,
+    _direction_callback: Callable[[IrcDirectionPath], None] | None = None,
 ) -> SellaIrcTrace:
     """Capture both bounded Gonzalez--Schlegel paths from one Sella object.
 
@@ -957,10 +960,6 @@ def trace_sella_irc(
     and independently pass the outer projected-force threshold.
     """
 
-    from ase import Atoms
-    from ase.constraints import FixAtoms
-    from sella import IRC
-
     if max_steps <= 0:
         raise ValueError("full IRC max_steps must be positive")
     if (
@@ -977,6 +976,35 @@ def trace_sella_irc(
         raise ValueError("full IRC TS coordinates must have shape (N, 3)")
     if not np.all(np.isfinite(coordinates)):
         raise ValueError("full IRC TS coordinates must be finite")
+
+    completed = dict(_completed_directions or {})
+    if set(completed) - {"forward", "reverse"}:
+        raise ValueError("completed IRC directions must be forward and/or reverse")
+    for name, path in completed.items():
+        expected_sign = 1 if name == "forward" else -1
+        if (
+            not isinstance(path, IrcDirectionPath)
+            or path.sella_direction != name
+            or path.algebraic_direction != expected_sign
+        ):
+            raise ValueError("completed IRC direction identity is invalid")
+    execution_contract = IrcExecutionContract(
+        algorithm="sella-gonzalez-schlegel",
+        step_size_angstrom=float(step_size_a),
+        maximum_steps=max_steps,
+        outer_fmax_ev_per_angstrom=float(fmax_ev_a),
+        inner_fmax_ev_per_angstrom=float(fmax_inner_ev_a),
+    )
+    if set(completed) == {"forward", "reverse"}:
+        return SellaIrcTrace(
+            masses_amu=np.asarray(masses_amu, dtype=float),
+            directions=(completed["forward"], completed["reverse"]),
+            execution_contract=execution_contract,
+        )
+
+    from ase import Atoms
+    from ase.constraints import FixAtoms
+    from sella import IRC
 
     atoms = Atoms(symbols=ts.symbols, positions=coordinates)
     # Never let IRC.__init__ choose masses implicitly. D2c supplies its frozen
@@ -1019,6 +1047,9 @@ def trace_sella_irc(
         tuple[Literal["forward", "reverse"], Literal[-1, 1]], ...
     ] = (("forward", 1), ("reverse", -1))
     for direction, algebraic_direction in direction_specs:
+        if direction in completed:
+            direction_paths.append(completed[direction])
+            continue
         nsteps_before = int(irc.nsteps)
         states = iter(
             irc.irun(
@@ -1073,23 +1104,45 @@ def trace_sella_irc(
                 f"full IRC {direction} endpoint projected fmax "
                 f"{endpoint_fmax:.6f} eV/A is not below {fmax_ev_a:.6f} eV/A"
             )
-        direction_paths.append(
-            IrcDirectionPath(
-                sella_direction=direction,
-                algebraic_direction=algebraic_direction,
-                points=tuple(points),
-            )
+        path = IrcDirectionPath(
+            sella_direction=direction,
+            algebraic_direction=algebraic_direction,
+            points=tuple(points),
         )
+        direction_paths.append(path)
+        if _direction_callback is not None:
+            _direction_callback(path)
     return SellaIrcTrace(
         masses_amu=recorded_masses_amu,
         directions=(direction_paths[0], direction_paths[1]),
-        execution_contract=IrcExecutionContract(
-            algorithm="sella-gonzalez-schlegel",
-            step_size_angstrom=float(step_size_a),
-            maximum_steps=max_steps,
-            outer_fmax_ev_per_angstrom=float(fmax_ev_a),
-            inner_fmax_ev_per_angstrom=float(fmax_inner_ev_a),
-        ),
+        execution_contract=execution_contract,
+    )
+
+
+def trace_sella_irc(
+    ts: Cluster,
+    settings: DftSettings,
+    *,
+    masses_amu: np.ndarray | list[float] | tuple[float, ...] | None = None,
+    fmax_ev_a: float = 0.05,
+    fmax_inner_ev_a: float = 0.01,
+    max_steps: int = 400,
+    step_size_a: float = 0.10,
+    trajectory: str | Path | None = None,
+    logfile: str | Path | None = None,
+) -> SellaIrcTrace:
+    """Capture both bounded Gonzalez--Schlegel paths from one Sella object."""
+
+    return _trace_sella_irc_resume(
+        ts,
+        settings,
+        masses_amu=masses_amu,
+        fmax_ev_a=fmax_ev_a,
+        fmax_inner_ev_a=fmax_inner_ev_a,
+        max_steps=max_steps,
+        step_size_a=step_size_a,
+        trajectory=trajectory,
+        logfile=logfile,
     )
 
 
