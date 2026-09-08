@@ -10,7 +10,9 @@ no IRC, Hessian, high-level, VAG, or tunnelling calculation.
 from __future__ import annotations
 
 import argparse
+import ast
 import ctypes
+import enum
 import errno
 import fcntl
 import hashlib
@@ -25,6 +27,7 @@ import platform
 import re
 import secrets
 import shutil
+import socket
 import stat
 import subprocess
 import sys
@@ -35,6 +38,24 @@ from contextlib import contextmanager, nullcontext, suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
+
+_THIS_MODULE_IMPORT_CODE = sys._getframe().f_code
+_OBSERVED_MODULE_CODE: dict[str, types.CodeType] = {}
+_PREVIOUS_IMPORT_PROFILE = sys.getprofile()
+
+
+def _capture_module_execution(frame: types.FrameType, event: Any, arg: Any) -> None:
+    """Retain module code objects at the instant CPython executes them."""
+
+    if event == "call" and frame.f_code.co_name == "<module>":
+        module_name = frame.f_globals.get("__name__")
+        if type(module_name) is str:
+            _OBSERVED_MODULE_CODE.setdefault(module_name, frame.f_code)
+    if _PREVIOUS_IMPORT_PROFILE is not None:
+        _PREVIOUS_IMPORT_PROFILE(frame, event, arg)
+
+
+sys.setprofile(_capture_module_execution)
 
 if __name__ == "__main__":
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -81,11 +102,13 @@ from quarry.ts import (  # noqa: E402
     IrcPoint,
     SellaIrcTrace,
 )
-from scripts import d2c_input_bundle
-from scripts.production_energetics import parse_xyz
-from scripts.surface_rate_protocol import reactions
+from scripts import d2c_input_bundle  # noqa: E402
+from scripts.production_energetics import parse_xyz  # noqa: E402
+from scripts.surface_rate_protocol import reactions  # noqa: E402
 
-SCHEMA = "d2c-sct-campaign-preflight-v5"
+sys.setprofile(_PREVIOUS_IMPORT_PROFILE)
+
+SCHEMA = "d2c-sct-campaign-preflight-v6"
 PREFLIGHT_RECEIPT = "preflight.json"
 DEFAULT_BUNDLE_ROOT = (
     Path(__file__).resolve().parent.parent
@@ -125,6 +148,17 @@ DEPENDENCY_VERSION_KEYS = frozenset(
 )
 _TRUSTED_XYZ_MAXIMUM_BYTES = 64 * 1024
 _MODULE_FILE_MAXIMUM_BYTES = 64 * 1024 * 1024
+_NATIVE_PAYLOAD_MAXIMUM_BYTES = 2 * 1024 * 1024 * 1024
+REQUIRED_NATIVE_PAYLOAD_BASENAMES = frozenset(
+    {
+        "libao2mo.so",
+        "libcgto.so",
+        "libcint.so",
+        "libcvhf.so",
+        "libdft.so",
+        "libxc.so",
+    }
+)
 EXECUTABLE_MODULES: dict[str, Literal["repository", "third-party"]] = {
     "quarry.clusters": "repository",
     "quarry.native_hessian": "repository",
@@ -137,6 +171,7 @@ EXECUTABLE_MODULES: dict[str, Literal["repository", "third-party"]] = {
     "scripts.surface_rate_protocol": "repository",
     "numpy._core._multiarray_umath": "third-party",
     "numpy.linalg._linalg": "third-party",
+    "numpy.linalg._umath_linalg": "third-party",
     "scipy._lib._util": "third-party",
     "scipy.integrate._ivp.base": "third-party",
     "scipy.integrate._ivp.common": "third-party",
@@ -146,6 +181,7 @@ EXECUTABLE_MODULES: dict[str, Literal["repository", "third-party"]] = {
     "scipy.integrate._odepack": "third-party",
     "scipy.integrate._vode": "third-party",
     "scipy.linalg._basic": "third-party",
+    "scipy.linalg._flapack": "third-party",
     "scipy.linalg._decomp": "third-party",
     "scipy.linalg._decomp_polar": "third-party",
     "scipy.linalg._decomp_qr": "third-party",
@@ -1290,7 +1326,30 @@ def _exclusive_route_claim(route_root: Path) -> Iterator[Path]:
     route_descriptor = -1
     lock_descriptor = -1
     locked = False
+    claim_sockets: list[socket.socket] = []
     try:
+        parent_status = os.fstat(parent_descriptor)
+        lexical_identity = os.path.normpath(os.path.abspath(os.fspath(route_root)))
+        claim_identities = (
+            f"path:{lexical_identity}",
+            f"parent:{parent_status.st_dev}:{parent_status.st_ino}:{route_name}",
+        )
+        for identity in claim_identities:
+            claim_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            claim_sockets.append(claim_socket)
+            address = (
+                b"\0d2c-route-" + hashlib.sha256(identity.encode()).hexdigest().encode()
+            )
+            try:
+                claim_socket.bind(address)
+            except OSError as exc:
+                if exc.errno == errno.EADDRINUSE:
+                    raise RuntimeError(
+                        f"D2c route is already claimed by another process: {route_root}"
+                    ) from exc
+                raise RuntimeError(
+                    f"D2c route kernel claim cannot be established: {route_root}"
+                ) from exc
         try:
             os.mkdir(route_name, mode=0o700, dir_fd=parent_descriptor)
             os.fsync(parent_descriptor)
@@ -1342,6 +1401,8 @@ def _exclusive_route_claim(route_root: Path) -> Iterator[Path]:
             os.close(lock_descriptor)
         if route_descriptor >= 0:
             os.close(route_descriptor)
+        for claim_socket in claim_sockets:
+            claim_socket.close()
         os.close(parent_descriptor)
 
 
@@ -1489,9 +1550,12 @@ def _validated_preflight(root: Path, route: str) -> tuple[dict[str, Any], str]:
     )
     observed_schema = preflight.get("schema")
     if observed_schema != SCHEMA:
-        if observed_schema == "d2c-sct-campaign-preflight-v3":
+        if observed_schema in {
+            "d2c-sct-campaign-preflight-v3",
+            "d2c-sct-campaign-preflight-v5",
+        }:
             raise ValueError(
-                "incompatible legacy D2c v3 run root; create a fresh v5 run root "
+                "incompatible legacy D2c run root; create a fresh v6 run root "
                 "because automatic migration is forbidden"
             )
         raise ValueError(
@@ -1530,6 +1594,7 @@ def _validated_preflight(root: Path, route: str) -> tuple[dict[str, Any], str]:
         "dft_settings",
         "dependencies",
         "executable_modules",
+        "native_payloads",
         "python",
         "mass_standard",
         "reference_mass_amu",
@@ -1582,6 +1647,7 @@ def _validated_preflight(root: Path, route: str) -> tuple[dict[str, Any], str]:
     ):
         raise ValueError("campaign dependency identity is incomplete")
     _validated_executable_module_manifest(campaign.get("executable_modules"))
+    _validated_native_payload_manifest(campaign.get("native_payloads"))
     _require_json_string(campaign.get("python"), label="campaign Python version")
     campaign_routes = campaign.get("routes")
     if (
@@ -2189,7 +2255,7 @@ def _load_canonical_qualification(
     observed_schema = receipt.get("schema")
     if observed_schema in {"d2c-ts-qualification-v1", "d2c-ts-qualification-v2"}:
         raise ValueError(
-            "incompatible legacy D2c TS qualification; use a fresh v5 run root "
+            "incompatible legacy D2c TS qualification; use a fresh v6 run root "
             "because trusted input fingerprints cannot be migrated"
         )
     if observed_schema != "d2c-ts-qualification-v3":
@@ -5589,6 +5655,178 @@ def _proven_pyscf_generated_wrapper(
     return any(_code_digest(candidate.__code__) == digest for candidate in candidates)
 
 
+def _literal_state_payload(value: Any) -> Any:
+    """Encode source literals without coercing type-distinct resident values."""
+
+    if value is None or type(value) in {bool, int, float, complex, str}:
+        return {type(value).__name__: repr(value)}
+    if isinstance(value, bytes):
+        return {"bytes": value.hex()}
+    if isinstance(value, tuple):
+        return {"tuple": [_literal_state_payload(item) for item in value]}
+    if isinstance(value, frozenset):
+        items = [_literal_state_payload(item) for item in value]
+        return {"frozenset": sorted(items, key=repr)}
+    raise TypeError(type(value).__name__)
+
+
+def _loaded_literal_state_identity(module: Any, module_name: str, raw: bytes) -> str:
+    """Check statically knowable globals/defaults/class attrs against live state."""
+
+    try:
+        tree = ast.parse(raw.decode("utf-8"), filename=str(module.__file__))
+    except (UnicodeDecodeError, SyntaxError) as exc:
+        raise RuntimeError(
+            f"Python executable module source cannot be parsed: {module_name}"
+        ) from exc
+    records: list[tuple[str, Any]] = []
+    unsupported = object()
+
+    def state_mismatch(label: str) -> RuntimeError:
+        return RuntimeError(
+            f"loaded Python module state disagrees with source: {module_name}.{label}"
+        )
+
+    def expected_literal(node: ast.expr | None) -> Any:
+        if node is None:
+            return unsupported
+        try:
+            value = ast.literal_eval(node)
+            _literal_state_payload(value)
+        except (TypeError, ValueError):
+            return unsupported
+        return value
+
+    def require_equal(label: str, expected: Any, observed: Any) -> None:
+        expected_payload = _literal_state_payload(expected)
+        try:
+            observed_payload = _literal_state_payload(observed)
+        except TypeError as exc:
+            raise state_mismatch(label) from exc
+        if observed_payload != expected_payload:
+            raise state_mismatch(label)
+        records.append((label, observed_payload))
+
+    def check_defaults(
+        label: str, node: ast.FunctionDef | ast.AsyncFunctionDef, value: Any
+    ) -> None:
+        if not inspect.isfunction(value):
+            return
+        value = inspect.unwrap(value)
+        if value.__code__.co_name != node.name:
+            return
+        positional = [*node.args.posonlyargs, *node.args.args]
+        expected_defaults = [expected_literal(item) for item in node.args.defaults]
+        observed_defaults = value.__defaults__ or ()
+        if len(observed_defaults) != len(expected_defaults):
+            raise state_mismatch(label)
+        for argument, expected, observed in zip(
+            positional[-len(expected_defaults) :] if expected_defaults else (),
+            expected_defaults,
+            observed_defaults,
+            strict=True,
+        ):
+            if expected is not unsupported:
+                require_equal(f"{label}.default.{argument.arg}", expected, observed)
+        observed_keywords = value.__kwdefaults__ or {}
+        for argument, default in zip(
+            node.args.kwonlyargs, node.args.kw_defaults, strict=True
+        ):
+            expected = expected_literal(default)
+            if expected is not unsupported:
+                if argument.arg not in observed_keywords:
+                    raise RuntimeError(
+                        "loaded Python module state disagrees with source: "
+                        f"{module_name}.{label}"
+                    )
+                require_equal(
+                    f"{label}.default.{argument.arg}",
+                    expected,
+                    observed_keywords[argument.arg],
+                )
+
+    for node in tree.body:
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            expected = expected_literal(node.value)
+            if (
+                expected is not unsupported
+                and len(targets) == 1
+                and isinstance(targets[0], ast.Name)
+            ):
+                name = targets[0].id
+                if name in vars(module):
+                    require_equal(f"global.{name}", expected, vars(module)[name])
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            value = vars(module).get(node.name)
+            if getattr(value, "__module__", None) == getattr(module, "__name__", None):
+                check_defaults(node.name, node, value)
+        elif isinstance(node, ast.ClassDef):
+            class_value = vars(module).get(node.name)
+            if (
+                not inspect.isclass(class_value)
+                or getattr(class_value, "__module__", None)
+                != getattr(module, "__name__", None)
+                or issubclass(class_value, enum.Enum)
+            ):
+                continue
+            for member in node.body:
+                if isinstance(member, (ast.Assign, ast.AnnAssign)):
+                    targets = (
+                        member.targets
+                        if isinstance(member, ast.Assign)
+                        else [member.target]
+                    )
+                    expected = expected_literal(member.value)
+                    if (
+                        expected is not unsupported
+                        and len(targets) == 1
+                        and isinstance(targets[0], ast.Name)
+                        and targets[0].id in vars(class_value)
+                    ):
+                        name = targets[0].id
+                        require_equal(
+                            f"class.{node.name}.{name}",
+                            expected,
+                            vars(class_value)[name],
+                        )
+                elif isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    value = vars(class_value).get(member.name)
+                    if isinstance(value, (staticmethod, classmethod)):
+                        value = value.__func__
+                    check_defaults(f"class.{node.name}.{member.name}", member, value)
+
+    encoded = json.dumps(records, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _resident_module_code(module: Any, module_name: str) -> types.CodeType:
+    """Return a stable import-code witness or fail closed when none exists."""
+
+    if module is sys.modules.get(__name__):
+        code = _THIS_MODULE_IMPORT_CODE
+    elif module_name in _OBSERVED_MODULE_CODE:
+        code = _OBSERVED_MODULE_CODE[module_name]
+    else:
+        raise RuntimeError(
+            f"loaded Python module-level code has no resident proof: {module_name}"
+        )
+    return code
+
+
+def _import_executable_module(module_name: str) -> Any:
+    """Import one module while retaining the exact top-level code CPython executes."""
+
+    if module_name in sys.modules:
+        return sys.modules[module_name]
+    previous_profile = sys.getprofile()
+    sys.setprofile(_capture_module_execution)
+    try:
+        return importlib.import_module(module_name)
+    finally:
+        sys.setprofile(previous_profile)
+
+
 def _python_source_execution_identity(
     module: Any,
     module_name: str,
@@ -5611,6 +5849,13 @@ def _python_source_execution_identity(
         raise RuntimeError(
             f"Python executable module source cannot be compiled: {module_name}"
         ) from exc
+    resident_code = _resident_module_code(module, module_name)
+    resident_module_code_sha256 = _code_digest(resident_code)
+    if resident_module_code_sha256 != _code_digest(source_code):
+        raise RuntimeError(
+            f"loaded Python code disagrees with source at module level: {module_name}"
+        )
+    loaded_state_sha256 = _loaded_literal_state_identity(module, module_name, raw)
     source_digests = _nested_code_digests(source_code)
     source_files = {str(origin): hashlib.sha256(raw).hexdigest()}
     source_cache = {origin: source_digests}
@@ -5741,7 +5986,9 @@ def _python_source_execution_identity(
     encoded = json.dumps(loaded, sort_keys=True, separators=(",", ":")).encode()
     return {
         "kind": "python-source",
+        "loaded_module_code_sha256": resident_module_code_sha256,
         "loaded_code_sha256": hashlib.sha256(encoded).hexdigest(),
+        "loaded_state_sha256": loaded_state_sha256,
         "source_files": dict(sorted(source_files.items())),
     }
 
@@ -5783,6 +6030,151 @@ def _native_extension_execution_identity(
         "mapped_device": status.st_dev,
         "mapped_inode": status.st_ino,
     }
+
+
+def _hash_mapped_native_payload(
+    path: Path, *, mapped_device: int, mapped_inode: int
+) -> dict[str, Any]:
+    """Hash one mapped native inode through a no-follow descriptor."""
+
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise RuntimeError(
+            f"mapped native payload cannot be opened safely: {path}"
+        ) from exc
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_size < 1
+            or before.st_size > _NATIVE_PAYLOAD_MAXIMUM_BYTES
+            or (before.st_dev, before.st_ino) != (mapped_device, mapped_inode)
+        ):
+            raise RuntimeError(f"mapped native payload identity is invalid: {path}")
+        digest = hashlib.sha256()
+        byte_count = 0
+        while chunk := os.read(descriptor, 1024 * 1024):
+            digest.update(chunk)
+            byte_count += len(chunk)
+        after = os.fstat(descriptor)
+        named = os.stat(path, follow_symlinks=False)
+        identity = (before.st_dev, before.st_ino, before.st_size)
+        if (
+            (after.st_dev, after.st_ino, after.st_size) != identity
+            or (named.st_dev, named.st_ino, named.st_size) != identity
+            or byte_count != before.st_size
+        ):
+            raise RuntimeError(f"mapped native payload changed while hashed: {path}")
+        return {
+            "origin": str(path),
+            "sha256": digest.hexdigest(),
+            "byte_count": byte_count,
+            "mapped_device": before.st_dev,
+            "mapped_inode": before.st_ino,
+        }
+    finally:
+        os.close(descriptor)
+
+
+def _validated_native_payload_manifest(payload: Any) -> dict[str, dict[str, Any]]:
+    """Validate a complete active-environment native mapping inventory."""
+
+    if type(payload) is not dict or not payload:
+        raise ValueError("native payload manifest must be a non-empty inventory")
+    validated: dict[str, dict[str, Any]] = {}
+    for relative_name, record in payload.items():
+        if (
+            type(relative_name) is not str
+            or not relative_name
+            or Path(relative_name).is_absolute()
+            or ".." in Path(relative_name).parts
+            or type(record) is not dict
+            or set(record)
+            != {
+                "origin",
+                "sha256",
+                "byte_count",
+                "mapped_device",
+                "mapped_inode",
+            }
+        ):
+            raise ValueError("native payload manifest record is invalid")
+        origin = _require_json_string(
+            record.get("origin"), label=f"{relative_name} native payload origin"
+        )
+        if not Path(origin).is_absolute():
+            raise ValueError(f"{relative_name} native payload origin must be absolute")
+        digest = _require_sha(
+            _require_json_string(
+                record.get("sha256"), label=f"{relative_name} native payload SHA-256"
+            ),
+            length=64,
+            label=f"{relative_name} native payload SHA-256",
+        )
+        for field in ("byte_count", "mapped_device", "mapped_inode"):
+            if type(record.get(field)) is not int or record[field] <= 0:
+                raise ValueError(f"{relative_name} native payload identity is invalid")
+        if record["byte_count"] > _NATIVE_PAYLOAD_MAXIMUM_BYTES:
+            raise ValueError(f"{relative_name} native payload exceeds size bound")
+        validated[relative_name] = {
+            "origin": origin,
+            "sha256": digest,
+            "byte_count": record["byte_count"],
+            "mapped_device": record["mapped_device"],
+            "mapped_inode": record["mapped_inode"],
+        }
+    present_basenames = {Path(name).name for name in validated}
+    missing = REQUIRED_NATIVE_PAYLOAD_BASENAMES - present_basenames
+    if missing:
+        raise ValueError(
+            "native payload manifest omits required numerical libraries: "
+            + ", ".join(sorted(missing))
+        )
+    return dict(sorted(validated.items()))
+
+
+def _native_payload_manifest() -> dict[str, dict[str, Any]]:
+    """Hash every executable mapping loaded from the active Python environment."""
+
+    environment_root = Path(sys.prefix).resolve(strict=True)
+    for module_name in EXECUTABLE_MODULES:
+        if module_name != "scripts.d2c_sct_campaign":
+            _import_executable_module(module_name)
+    try:
+        maps = Path("/proc/self/maps").read_text()
+    except OSError as exc:
+        raise RuntimeError(
+            "native payload provenance requires /proc/self/maps"
+        ) from exc
+    mapped: dict[Path, tuple[int, int]] = {}
+    for line in maps.splitlines():
+        fields = line.split(maxsplit=5)
+        if len(fields) != 6 or "x" not in fields[1] or not fields[5].startswith("/"):
+            continue
+        raw_path = fields[5]
+        if raw_path.endswith(" (deleted)"):
+            raise RuntimeError(f"mapped native payload was deleted: {raw_path}")
+        try:
+            path = Path(raw_path).resolve(strict=True)
+            path.relative_to(environment_root)
+            major, minor = (int(value, 16) for value in fields[3].split(":", 1))
+            identity = (os.makedev(major, minor), int(fields[4]))
+        except (OSError, RuntimeError, ValueError):
+            continue
+        previous = mapped.setdefault(path, identity)
+        if previous != identity:
+            raise RuntimeError(
+                f"mapped native payload has conflicting identities: {path}"
+            )
+    records = {
+        path.relative_to(environment_root).as_posix(): _hash_mapped_native_payload(
+            path, mapped_device=identity[0], mapped_inode=identity[1]
+        )
+        for path, identity in sorted(mapped.items(), key=lambda item: str(item[0]))
+    }
+    return _validated_native_payload_manifest(records)
 
 
 def _validated_executable_module_manifest(payload: Any) -> dict[str, dict[str, Any]]:
@@ -5832,7 +6224,9 @@ def _validated_executable_module_manifest(payload: Any) -> dict[str, dict[str, A
         if execution_identity.get("kind") == "python-source":
             if set(execution_identity) != {
                 "kind",
+                "loaded_module_code_sha256",
                 "loaded_code_sha256",
+                "loaded_state_sha256",
                 "source_files",
             }:
                 raise ValueError(
@@ -5846,6 +6240,17 @@ def _validated_executable_module_manifest(payload: Any) -> dict[str, dict[str, A
                 length=64,
                 label=f"{module_name} loaded code SHA-256",
             )
+            for field, label in (
+                ("loaded_module_code_sha256", "loaded module code SHA-256"),
+                ("loaded_state_sha256", "loaded state SHA-256"),
+            ):
+                _require_sha(
+                    _require_json_string(
+                        execution_identity.get(field), label=f"{module_name} {label}"
+                    ),
+                    length=64,
+                    label=f"{module_name} {label}",
+                )
             source_files = execution_identity.get("source_files")
             if type(source_files) is not dict or not source_files:
                 raise ValueError(
@@ -5906,7 +6311,7 @@ def _executable_module_manifest() -> dict[str, dict[str, Any]]:
             origin = source_path.resolve(strict=True)
             module = sys.modules[__name__]
         else:
-            module = importlib.import_module(module_name)
+            module = _import_executable_module(module_name)
             spec = getattr(module, "__spec__", None)
             origin_value = getattr(spec, "origin", None)
             file_value = getattr(module, "__file__", None)
@@ -6460,6 +6865,7 @@ def _current_code_dependency_identity() -> dict[str, Any]:
         "git_sha": _git_sha(Path(__file__).resolve().parents[2]),
         "dependencies": _dependency_versions(),
         "executable_modules": _executable_module_manifest(),
+        "native_payloads": _native_payload_manifest(),
         "python": platform.python_version(),
     }
 
@@ -6485,6 +6891,11 @@ def _validate_production_boundary(
         _validated_executable_module_manifest(current.get("executable_modules")),
         _validated_executable_module_manifest(campaign["executable_modules"]),
         label="current executable module identity",
+    )
+    _strict_json_equal(
+        _validated_native_payload_manifest(current.get("native_payloads")),
+        _validated_native_payload_manifest(campaign["native_payloads"]),
+        label="current native payload identity",
     )
     _strict_json_equal(
         current.get("python"), campaign["python"], label="current Python version"
@@ -6577,6 +6988,7 @@ def create_preflight_receipt(
     git_sha: str | None = None,
     dependency_versions: dict[str, str] | None = None,
     executable_module_manifest: dict[str, dict[str, Any]] | None = None,
+    native_payload_manifest: dict[str, dict[str, Any]] | None = None,
     created_utc: str | None = None,
 ) -> dict[str, Any]:
     """Validate all immutable inputs and publish one pending campaign receipt.
@@ -6622,6 +7034,11 @@ def create_preflight_receipt(
         if executable_module_manifest is None
         else executable_module_manifest
     )
+    native_payloads = _validated_native_payload_manifest(
+        _native_payload_manifest()
+        if native_payload_manifest is None
+        else native_payload_manifest
+    )
 
     identity_payload = {
         "schema": SCHEMA,
@@ -6630,6 +7047,7 @@ def create_preflight_receipt(
         "dft_settings": DFT_SETTINGS,
         "dependencies": dependencies,
         "executable_modules": modules,
+        "native_payloads": native_payloads,
         "python": platform.python_version(),
         "mass_standard": "ground-state neutral isotopic masses",
         "reference_mass_amu": REFERENCE_MASS_AMU,
@@ -6698,6 +7116,7 @@ def main(
     git_sha: str | None = None,
     dependency_versions: dict[str, str] | None = None,
     executable_module_manifest: dict[str, dict[str, Any]] | None = None,
+    native_payload_manifest: dict[str, dict[str, Any]] | None = None,
 ) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true")
@@ -6722,6 +7141,7 @@ def main(
         git_sha=git_sha,
         dependency_versions=dependency_versions,
         executable_module_manifest=executable_module_manifest,
+        native_payload_manifest=native_payload_manifest,
     )
     print(
         json.dumps(

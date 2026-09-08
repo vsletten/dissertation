@@ -4,6 +4,7 @@ import hashlib
 import inspect
 import json
 import mmap
+import multiprocessing
 import os
 import shutil
 import subprocess
@@ -46,7 +47,11 @@ FIXED_MODULE_MANIFEST = {
         "trust_class": trust_class,
         "execution_identity": {
             "kind": "python-source",
+            "loaded_module_code_sha256": hashlib.sha256(
+                f"module:{name}".encode()
+            ).hexdigest(),
             "loaded_code_sha256": hashlib.sha256(f"loaded:{name}".encode()).hexdigest(),
+            "loaded_state_sha256": hashlib.sha256(f"state:{name}".encode()).hexdigest(),
             "source_files": {
                 f"/opt/d2c-test-modules/{name.replace('.', '/')}.py": hashlib.sha256(
                     name.encode()
@@ -56,7 +61,39 @@ FIXED_MODULE_MANIFEST = {
     }
     for name, trust_class in campaign.EXECUTABLE_MODULES.items()
 }
+FIXED_NATIVE_PAYLOAD_MANIFEST = {
+    f"lib/python3.13/site-packages/pyscf/lib/{name}": {
+        "origin": f"/opt/d2c-test-native/pyscf/lib/{name}",
+        "sha256": hashlib.sha256(name.encode()).hexdigest(),
+        "byte_count": len(name),
+        "mapped_device": 1,
+        "mapped_inode": index,
+    }
+    for index, name in enumerate(
+        sorted(campaign.REQUIRED_NATIVE_PAYLOAD_BASENAMES), start=1
+    )
+}
 BUNDLE_ROOT = Path(__file__).parents[1] / "data" / "D2c-instanton-tier" / "d2b-inputs"
+
+
+def _hold_route_claim(route_root, entered, release, outcome):
+    try:
+        with campaign._exclusive_route_claim(Path(route_root)):
+            entered.set()
+            if not release.wait(10):
+                raise TimeoutError("test did not release route claim")
+    except Exception as exc:
+        outcome.put(("failed", type(exc).__name__, str(exc)))
+    else:
+        outcome.put(("released", "", ""))
+
+
+def _attempt_route_claim(route_root, outcome):
+    try:
+        with campaign._exclusive_route_claim(Path(route_root)):
+            outcome.put(("entered", "", ""))
+    except Exception as exc:
+        outcome.put(("blocked", type(exc).__name__, str(exc)))
 
 
 @pytest.fixture(autouse=True)
@@ -71,6 +108,10 @@ def _fixed_production_runtime_identity(monkeypatch):
             "dependencies": dict(FIXED_DEPENDENCIES),
             "executable_modules": {
                 name: dict(record) for name, record in FIXED_MODULE_MANIFEST.items()
+            },
+            "native_payloads": {
+                name: dict(record)
+                for name, record in FIXED_NATIVE_PAYLOAD_MANIFEST.items()
             },
             "python": campaign.platform.python_version(),
         },
@@ -223,6 +264,7 @@ def _preflight(run_root: Path, bundle_root: Path = BUNDLE_ROOT) -> dict:
         git_sha=FIXED_GIT_SHA,
         dependency_versions=FIXED_DEPENDENCIES,
         executable_module_manifest=FIXED_MODULE_MANIFEST,
+        native_payload_manifest=FIXED_NATIVE_PAYLOAD_MANIFEST,
         created_utc="2026-09-07T12:00:00Z",
     )
 
@@ -238,6 +280,7 @@ def test_dry_run_identity_and_exact_four_route_inventory(tmp_path: Path):
         git_sha=FIXED_GIT_SHA,
         dependency_versions=changed_gpu,
         executable_module_manifest=FIXED_MODULE_MANIFEST,
+        native_payload_manifest=FIXED_NATIVE_PAYLOAD_MANIFEST,
         created_utc="2026-09-07T12:00:00Z",
     )
 
@@ -625,7 +668,7 @@ def test_boolean_cluster_state_cannot_publish_path_and_corrected_retry_succeeds(
 def test_preflight_binds_trusted_typed_endpoint_evidence(tmp_path: Path):
     receipt = _preflight(tmp_path / "run")
 
-    assert receipt["schema"] == "d2c-sct-campaign-preflight-v5"
+    assert receipt["schema"] == "d2c-sct-campaign-preflight-v6"
     assert receipt["campaign"]["endpoint_classification_policy"] == (
         campaign.endpoint_classification_policy_payload()
     )
@@ -1988,7 +2031,7 @@ def test_legacy_v3_and_self_attested_v1_roots_fail_with_fresh_root_guidance(
     preflight = _preflight(v3_root)
     preflight["schema"] = "d2c-sct-campaign-preflight-v3"
     (v3_root / campaign.PREFLIGHT_RECEIPT).write_bytes(campaign._json_bytes(preflight))
-    with pytest.raises(ValueError, match="legacy D2c v3 run root.*fresh v5 run root"):
+    with pytest.raises(ValueError, match="legacy D2c run root.*fresh v6 run root"):
         campaign._publish_transition_state_qualification(v3_root, route="h-co-1w-cside")
 
     v1_root = tmp_path / "v1"
@@ -1999,7 +2042,7 @@ def test_legacy_v3_and_self_attested_v1_roots_fail_with_fresh_root_guidance(
         campaign._json_bytes({"schema": "d2c-ts-qualification-v1"})
     )
     with pytest.raises(
-        ValueError, match="legacy D2c TS qualification.*fresh v5 run root"
+        ValueError, match="legacy D2c TS qualification.*fresh v6 run root"
     ):
         campaign._publish_transition_state_qualification(v1_root, route="h-co-1w-cside")
 
@@ -3030,6 +3073,7 @@ def test_production_boundary_rejects_code_dependency_and_endpoint_drift(
             "git_sha": FIXED_GIT_SHA,
             "dependencies": FIXED_DEPENDENCIES,
             "executable_modules": FIXED_MODULE_MANIFEST,
+            "native_payloads": FIXED_NATIVE_PAYLOAD_MANIFEST,
             "python": preflight["campaign"]["python"],
         },
     )
@@ -3584,11 +3628,23 @@ def test_shared_irc_validator_rejects_restart_direction_divergence(tmp_path: Pat
         campaign._validate_canonical_irc_receipts(ancestry)
 
 
-def test_executable_module_manifest_hashes_concrete_repository_leaf(monkeypatch):
-    monkeypatch.setattr(
-        campaign, "EXECUTABLE_MODULES", {"quarry.clusters": "repository"}
+def test_executable_module_manifest_hashes_concrete_repository_leaf():
+    qm_root = Path(campaign.__file__).resolve().parents[1]
+    code = """
+import json, sys
+sys.path.insert(0, '.')
+from scripts import d2c_sct_campaign as campaign
+campaign.EXECUTABLE_MODULES = {'quarry.clusters': 'repository'}
+print(json.dumps(campaign._executable_module_manifest()))
+"""
+    completed = subprocess.run(
+        [str(qm_root / ".venv" / "bin" / "python"), "-c", code],
+        cwd=qm_root,
+        check=True,
+        capture_output=True,
+        text=True,
     )
-    manifest = campaign._executable_module_manifest()
+    manifest = json.loads(completed.stdout)
     record = manifest["quarry.clusters"]
     origin = Path(record["origin"])
     assert (
@@ -3602,6 +3658,8 @@ def test_executable_module_manifest_hashes_concrete_repository_leaf(monkeypatch)
 
 def test_executable_manifest_covers_direct_sella_scipy_pyscf_and_gpu_leaves():
     required = {
+        "numpy.linalg._umath_linalg",
+        "scipy.linalg._flapack",
         "scipy.linalg._decomp",
         "scipy.integrate._ivp.base",
         "scipy.integrate._ivp.common",
@@ -3638,12 +3696,17 @@ sys.path.insert(0, '.')
 from scripts import d2c_sct_campaign as campaign
 campaign.EXECUTABLE_MODULES = {
     'scipy.linalg._decomp': 'third-party',
+    'scipy.linalg._flapack': 'third-party',
     'numpy._core._multiarray_umath': 'third-party',
+    'numpy.linalg._umath_linalg': 'third-party',
     'pyscf.grad.rhf': 'third-party',
     'pyscf.lib.misc': 'third-party',
     'pyscf.scf.hf': 'third-party',
 }
-print(json.dumps(campaign._executable_module_manifest(), sort_keys=True))
+print(json.dumps({
+    'modules': campaign._executable_module_manifest(),
+    'native_payloads': campaign._native_payload_manifest(),
+}, sort_keys=True))
 """
     completed = subprocess.run(
         [str(python), "-c", code],
@@ -3652,7 +3715,8 @@ print(json.dumps(campaign._executable_module_manifest(), sort_keys=True))
         capture_output=True,
         text=True,
     )
-    manifest = json.loads(completed.stdout)
+    result = json.loads(completed.stdout)
+    manifest = result["modules"]
 
     assert Path(manifest["scipy.linalg._decomp"]["origin"]).is_relative_to(
         qm_root / ".venv"
@@ -3665,6 +3729,77 @@ print(json.dumps(campaign._executable_module_manifest(), sort_keys=True))
     )
     assert manifest["pyscf.grad.rhf"]["execution_identity"]["kind"] == "python-source"
     assert manifest["pyscf.scf.hf"]["execution_identity"]["kind"] == "python-source"
+    for module_name in ("scipy.linalg._flapack", "numpy.linalg._umath_linalg"):
+        assert manifest[module_name]["execution_identity"]["kind"] == "native-extension"
+        assert Path(manifest[module_name]["origin"]).is_relative_to(qm_root / ".venv")
+    native_payloads = result["native_payloads"]
+    assert native_payloads
+    assert all(
+        Path(record["origin"]).is_relative_to(qm_root / ".venv")
+        for record in native_payloads.values()
+    )
+    present = {Path(name).name for name in native_payloads}
+    assert present >= campaign.REQUIRED_NATIVE_PAYLOAD_BASENAMES
+    for required_name in campaign.REQUIRED_NATIVE_PAYLOAD_BASENAMES:
+        record = next(
+            record
+            for name, record in native_payloads.items()
+            if Path(name).name == required_name
+        )
+        origin = Path(record["origin"])
+        status = origin.stat()
+        assert record["sha256"] == hashlib.sha256(origin.read_bytes()).hexdigest()
+        assert (record["mapped_device"], record["mapped_inode"]) == (
+            status.st_dev,
+            status.st_ino,
+        )
+
+
+@pytest.mark.parametrize(
+    ("module_name", "before", "after"),
+    [
+        (
+            "d2c_loaded_global_fixture",
+            "VALUE = 1\ndef value():\n    return VALUE\n",
+            "VALUE = 2\ndef value():\n    return VALUE\n",
+        ),
+        (
+            "d2c_loaded_default_fixture",
+            "def value(setting=1):\n    return setting\n",
+            "def value(setting=2):\n    return setting\n",
+        ),
+        (
+            "d2c_loaded_class_fixture",
+            "class Config:\n    SETTING = 1\ndef value():\n    return Config.SETTING\n",
+            "class Config:\n    SETTING = 2\ndef value():\n    return Config.SETTING\n",
+        ),
+    ],
+)
+def test_manifest_rejects_module_level_state_replacement_with_restored_timestamp(
+    monkeypatch, tmp_path: Path, module_name: str, before: str, after: str
+):
+    source = tmp_path / f"{module_name}.py"
+    source.write_text(before)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(campaign.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(campaign, "EXECUTABLE_MODULES", {module_name: "third-party"})
+    imported = campaign._import_executable_module(module_name)
+    original = source.stat()
+    replacement = tmp_path / "replacement.py"
+    replacement.write_text(after)
+    assert replacement.stat().st_size == original.st_size
+    replacement.replace(source)
+    os.utime(source, ns=(original.st_atime_ns, original.st_mtime_ns))
+    assert imported.value() == 1
+
+    try:
+        with pytest.raises(
+            RuntimeError, match="loaded Python (?:code|module state) disagrees"
+        ):
+            campaign._executable_module_manifest()
+    finally:
+        campaign._OBSERVED_MODULE_CODE.pop(module_name, None)
+        sys.modules.pop(module_name, None)
 
 
 def test_manifest_rejects_source_replacement_after_module_was_loaded(
@@ -3676,7 +3811,7 @@ def test_manifest_rejects_source_replacement_after_module_was_loaded(
     monkeypatch.syspath_prepend(str(tmp_path))
     monkeypatch.setattr(campaign.sys, "prefix", str(tmp_path))
     monkeypatch.setattr(campaign, "EXECUTABLE_MODULES", {module_name: "third-party"})
-    imported = campaign.importlib.import_module(module_name)
+    imported = campaign._import_executable_module(module_name)
     original = source.stat()
     replacement = tmp_path / "replacement.py"
     replacement.write_text("def value():\n    return 2\n")
@@ -3702,12 +3837,33 @@ def test_manifest_rejects_loaded_python_code_without_source_origin(
     monkeypatch.syspath_prepend(str(tmp_path))
     monkeypatch.setattr(campaign.sys, "prefix", str(tmp_path))
     monkeypatch.setattr(campaign, "EXECUTABLE_MODULES", {module_name: "third-party"})
-    imported = campaign.importlib.import_module(module_name)
+    imported = campaign._import_executable_module(module_name)
     exec("def unproven():\n    return 2\n", imported.__dict__)
 
     try:
         with pytest.raises(
             RuntimeError, match="loaded Python code has no provable origin"
+        ):
+            campaign._executable_module_manifest()
+    finally:
+        sys.modules.pop(module_name, None)
+
+
+def test_manifest_fails_closed_for_python_module_loaded_before_execution_capture(
+    monkeypatch, tmp_path: Path
+):
+    module_name = "d2c_uncaptured_loaded_fixture"
+    source = tmp_path / f"{module_name}.py"
+    source.write_text("def value():\n    return 1\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(campaign.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(campaign, "EXECUTABLE_MODULES", {module_name: "third-party"})
+    imported = campaign.importlib.import_module(module_name)
+    assert imported.value() == 1
+
+    try:
+        with pytest.raises(
+            RuntimeError, match="module-level code has no resident proof"
         ):
             campaign._executable_module_manifest()
     finally:
@@ -3727,7 +3883,7 @@ def test_manifest_rejects_loaded_code_outside_trusted_source_roots(
     monkeypatch.syspath_prepend(str(environment))
     monkeypatch.setattr(campaign.sys, "prefix", str(environment))
     monkeypatch.setattr(campaign, "EXECUTABLE_MODULES", {module_name: "third-party"})
-    imported = campaign.importlib.import_module(module_name)
+    imported = campaign._import_executable_module(module_name)
     namespace = {"__name__": module_name}
     exec(compile(external.read_text(), str(external), "exec"), namespace)
     imported.__dict__["injected"] = namespace["injected"]
@@ -3776,7 +3932,8 @@ def test_executable_module_manifest_rejects_import_origin_escape(
     monkeypatch.setattr(
         campaign, "EXECUTABLE_MODULES", {"quarry.clusters": "repository"}
     )
-    monkeypatch.setattr(campaign.importlib, "import_module", lambda _name: FakeModule())
+    fake_module = FakeModule()
+    monkeypatch.setitem(campaign.sys.modules, "quarry.clusters", fake_module)
     with pytest.raises(
         RuntimeError, match="repository executable module origin drifted"
     ):
@@ -3807,6 +3964,44 @@ def test_production_boundary_rejects_executable_module_origin_or_hash_drift(
     )
 
     with pytest.raises(ValueError, match="current executable module identity"):
+        campaign._validate_production_boundary(run_root, route)
+
+
+def test_native_payload_manifest_rejects_missing_required_numerical_library():
+    incomplete = dict(FIXED_NATIVE_PAYLOAD_MANIFEST)
+    target = next(name for name in incomplete if Path(name).name == "libcint.so")
+    del incomplete[target]
+
+    with pytest.raises(
+        ValueError, match="omits required numerical libraries: libcint.so"
+    ):
+        campaign._validated_native_payload_manifest(incomplete)
+
+
+def test_production_boundary_rejects_native_payload_hash_drift(
+    monkeypatch, tmp_path: Path
+):
+    route = "h-co-1w-cside"
+    run_root = tmp_path / "run"
+    preflight = _preflight(run_root)
+    native_payloads = {
+        name: dict(record) for name, record in FIXED_NATIVE_PAYLOAD_MANIFEST.items()
+    }
+    target = next(name for name in native_payloads if Path(name).name == "libxc.so")
+    native_payloads[target]["sha256"] = "f" * 64
+    monkeypatch.setattr(
+        campaign,
+        "_current_code_dependency_identity",
+        lambda: {
+            "git_sha": FIXED_GIT_SHA,
+            "dependencies": dict(FIXED_DEPENDENCIES),
+            "executable_modules": FIXED_MODULE_MANIFEST,
+            "native_payloads": native_payloads,
+            "python": preflight["campaign"]["python"],
+        },
+    )
+
+    with pytest.raises(ValueError, match="current native payload identity"):
         campaign._validate_production_boundary(run_root, route)
 
 
@@ -3918,3 +4113,59 @@ def test_route_claim_rejects_lock_file_replacement(tmp_path: Path):
     ):
         (route_root / ".route.lock").replace(displaced_lock)
         (route_root / ".route.lock").write_bytes(b"replacement")
+
+
+@pytest.mark.parametrize("replacement", ["lock", "route"])
+def test_kernel_route_claim_blocks_second_process_after_namespace_replacement(
+    tmp_path: Path, replacement: str
+):
+    context = multiprocessing.get_context("spawn")
+    route_root = tmp_path / "route"
+    entered = context.Event()
+    release = context.Event()
+    first_outcome = context.Queue()
+    second_outcome = context.Queue()
+    first = context.Process(
+        target=_hold_route_claim,
+        args=(str(route_root), entered, release, first_outcome),
+    )
+    second = context.Process(
+        target=_attempt_route_claim,
+        args=(str(route_root), second_outcome),
+    )
+    first.start()
+    try:
+        assert entered.wait(10), "first process did not enter route claim"
+        if replacement == "lock":
+            (route_root / ".route.lock").replace(tmp_path / "displaced.lock")
+            (route_root / ".route.lock").write_bytes(b"replacement")
+        else:
+            route_root.rename(tmp_path / "displaced-route")
+            route_root.mkdir()
+        second.start()
+        second.join(10)
+        assert not second.is_alive(), "second process blocked instead of failing closed"
+        assert second.exitcode == 0
+        blocked = second_outcome.get(timeout=2)
+        assert blocked[0] == "blocked"
+        assert blocked[1] == "RuntimeError"
+        assert "already claimed by another process" in blocked[2]
+    finally:
+        release.set()
+        if second.pid is not None and second.is_alive():
+            second.terminate()
+        if first.pid is not None:
+            first.join(10)
+            if first.is_alive():
+                first.terminate()
+                first.join(5)
+    assert first.exitcode == 0
+    failed = first_outcome.get(timeout=2)
+    assert failed[0] == "failed"
+    assert failed[1] == "RuntimeError"
+    expected_drift = (
+        "route lock identity changed"
+        if replacement == "lock"
+        else "route directory identity changed"
+    )
+    assert expected_drift in failed[2]
