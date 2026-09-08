@@ -294,3 +294,20 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   Await atomic terminal receipt at
   `/mnt/data/vsletten/dissertation-data/task300-d2c-hessian-5f74662-diagnostic/terminal.json`;
   no TS qualification, IRC, SCT rate, D2b gate flip, D3b table, or PR exists.
+- 2026-09-08 04:45 PDT (hermes-custom-build-001; profile=workstation) —
+  DIAGNOSTIC INDEPENDENTLY VERIFIED, PRODUCTION STILL RED: bounded unit
+  `task300-d2c-hessian-5f74662.service` completed successfully; its diagnostic-only
+  receipt contains four cases and explicitly publishes no accepted campaign result.
+  A different worker rehashed all 20 raw `18x18` artifacts, reproduced component
+  sums/symmetrizations and every projected eigenvalue within `4.44e-16`, and verified
+  the complete source/preflight/terminal chain. Grid level 3 retains two negative
+  modes (spectator about `-13.5 cm^-1`) even under strict SCF/CPSCF; grid level 5
+  produces one negative mode and a stable low positive mode (`14.719` versus
+  `14.928 cm^-1`, overlap `0.9999978`, symmetric-matrix relative delta `4.95e-7`).
+  Raw electronic skew worsens from `1.52625e-6` to `6.13389e-5 Eh/Bohr^2` on the
+  denser grid, so the evidence rejects global tolerance inflation even though dense
+  post-symmetrization TS gates pass. Next bounded pass must predeclare tolerances and
+  run one dense-grid finite-difference-of-gradients Hessian at this frozen TS; only a
+  confirmed one-negative-mode spectrum may authorize a narrowly scoped
+  PySCF/PWB6K/D3BJ/grid-5 policy and TS rerun. No IRC, SCT/literature verdict, D2b
+  gate flip, D3b table, or PR exists.
