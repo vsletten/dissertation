@@ -12,6 +12,7 @@ import sys
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -451,17 +452,99 @@ def test_preflight_refuses_and_preserves_declared_route_stage_receipt(
     assert not (run_root / campaign.PREFLIGHT_RECEIPT).exists()
 
 
-def test_cli_refuses_execution_without_dry_run(tmp_path: Path, capsys):
-    with pytest.raises(SystemExit) as excinfo:
-        campaign.main(
-            ["--run-root", str(tmp_path / "run")],
-            git_sha=FIXED_GIT_SHA,
-            dependency_versions=FIXED_DEPENDENCIES,
+def test_production_foundation_runs_canonical_route_stages_and_writes_terminal(
+    monkeypatch, tmp_path: Path
+):
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    routes = list(campaign.ENDPOINT_ROUTE_STATES)
+    calls = []
+    preflight = {"identity": "c" * 64, "routes": {route: {} for route in routes}}
+    monkeypatch.setattr(
+        campaign, "_validated_preflight", lambda root, route: (preflight, "p" * 64)
+    )
+
+    def qualification(root, *, route):
+        calls.append((route, "qualification"))
+        return SimpleNamespace(receipt_sha256=f"q-{route}")
+
+    def irc(root, *, route):
+        calls.append((route, "irc"))
+        return SimpleNamespace(
+            execution_receipt_sha256=f"x-{route}",
+            direction_receipt_sha256={
+                "forward": f"f-{route}",
+                "reverse": f"r-{route}",
+            },
         )
 
-    assert excinfo.value.code == 2
-    assert "--dry-run is required" in capsys.readouterr().err
-    assert not (tmp_path / "run").exists()
+    def path(root, *, route):
+        calls.append((route, "path"))
+        return SimpleNamespace(receipt_sha256=f"p-{route}")
+
+    def hessians(root, *, route):
+        calls.append((route, "hessians"))
+        return SimpleNamespace(
+            receipt_sha256=f"h-{route}", point_results=(object(), object())
+        )
+
+    monkeypatch.setattr(
+        campaign, "publish_transition_state_qualification", qualification
+    )
+    monkeypatch.setattr(campaign, "run_and_publish_irc", irc)
+    monkeypatch.setattr(campaign, "publish_typed_irc_path", path)
+    monkeypatch.setattr(campaign, "publish_path_hessians", hessians)
+
+    receipt = campaign.execute_production_foundation(run_root)
+
+    assert calls == [
+        (route, stage)
+        for route in routes
+        for stage in ("qualification", "irc", "path", "hessians")
+    ]
+    assert receipt["state"] == "completed"
+    assert receipt["accepted_result"] is False
+    assert set(receipt["routes"]) == set(routes)
+    assert json.loads((run_root / campaign.PRODUCTION_TERMINAL).read_text()) == receipt
+    status = json.loads((run_root / campaign.PRODUCTION_STATUS).read_text())
+    assert status["terminal_receipt"] == campaign.PRODUCTION_TERMINAL
+
+
+def test_production_foundation_failure_and_deadman_write_terminal(
+    monkeypatch, tmp_path: Path
+):
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    routes = list(campaign.ENDPOINT_ROUTE_STATES)
+    preflight = {"identity": "c" * 64, "routes": {route: {} for route in routes}}
+    monkeypatch.setattr(
+        campaign, "_validated_preflight", lambda root, route: (preflight, "p" * 64)
+    )
+
+    def fail(root, *, route):
+        raise RuntimeError("synthetic scientific rejection")
+
+    monkeypatch.setattr(campaign, "publish_transition_state_qualification", fail)
+    with pytest.raises(RuntimeError, match="synthetic scientific rejection"):
+        campaign.execute_production_foundation(run_root)
+    terminal = json.loads((run_root / campaign.PRODUCTION_TERMINAL).read_text())
+    assert terminal["state"] == "failed"
+    assert terminal["phase"].endswith(":transition_state_qualification")
+    assert "synthetic scientific rejection" in terminal["detail"]
+
+    dead_root = tmp_path / "dead"
+    dead_root.mkdir()
+    campaign._atomic_replace_json(
+        dead_root / campaign.PRODUCTION_STATUS,
+        {
+            "campaign_identity": "d" * 64,
+            "phase": "route:irc",
+            "routes": {},
+        },
+    )
+    dead = campaign.finalize_production_if_running(dead_root)
+    assert dead["state"] == "failed"
+    assert "bounded systemd unit ended" in dead["detail"]
 
 
 def test_cli_enforces_compute_etiquette_bounds(tmp_path: Path, capsys):

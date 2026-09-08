@@ -207,3 +207,14 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   injected foreign class. The sabotage regression fails without the rule; all 182
   D2c tests plus focused Ruff/format/diff pass. No calculator ran; receipt generation
   remains pinned to the next corrected pushed head.
+- 2026-09-08 01:49 PDT (hermes-custom-build-001; profile=workstation) —
+  BOUNDED PRODUCTION FOUNDATION DRIVER READY: production mode now resumes each
+  canonical route through fresh TS qualification, shared-checkpoint Sella IRC,
+  typed-path publication, and per-point native Hessians; it writes atomic mutable
+  phase status plus an immutable completed/failed terminal receipt. SIGTERM/SIGINT
+  produce an orderly receipt, and `--finalize-if-running` provides the systemd
+  dead-man path if the worker exits without one. Deterministic route-order, failure,
+  and dead-man tests pass; whole-QM verification is `1079 passed, 1 skipped` with
+  whole-tree Ruff/format/diff clean. No production calculator has run from this
+  unpushed source; the fresh preflight and transient launch remain pinned to the
+  committed/pushed head.

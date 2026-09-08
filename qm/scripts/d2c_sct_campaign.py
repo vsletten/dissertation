@@ -1,10 +1,11 @@
 #!/usr/bin/env python
-"""D2c SCT campaign preflight and immutable resume contract.
+"""D2c SCT campaign preflight and resumable production foundation.
 
-Only ``--dry-run`` is implemented.  The command verifies the frozen D2b bundle,
-validates all four transition-state atom mappings against the existing D2b reaction
-templates, and writes one non-overwriting pending receipt.  It deliberately performs
-no IRC, Hessian, high-level, VAG, or tunnelling calculation.
+``--dry-run`` verifies the frozen D2b bundle and writes the immutable campaign
+identity.  Production mode then resumes each route through transition-state
+qualification, bounded full IRC, typed-path publication, and per-point native
+Hessians.  Later VAG, high-level, SCT, and final-freeze stages remain deliberately
+separate from this expensive receipt-producing foundation.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ import platform
 import re
 import secrets
 import shutil
+import signal
 import socket
 import stat
 import subprocess
@@ -111,6 +113,9 @@ sys.setprofile(_PREVIOUS_IMPORT_PROFILE)
 
 SCHEMA = "d2c-sct-campaign-preflight-v6"
 PREFLIGHT_RECEIPT = "preflight.json"
+PRODUCTION_STATUS = "production-status.json"
+PRODUCTION_TERMINAL = "production-terminal.json"
+PRODUCTION_SCHEMA = "d2c-sct-production-foundation-v1"
 DEFAULT_BUNDLE_ROOT = (
     Path(__file__).resolve().parent.parent
     / "data"
@@ -7323,6 +7328,212 @@ def create_preflight_receipt(
     return receipt
 
 
+class ProductionInterrupted(RuntimeError):
+    """A bounded service requested an orderly, receipt-producing stop."""
+
+
+def _atomic_replace_json(path: Path, payload: dict[str, Any]) -> None:
+    """Durably replace a mutable status file without exposing partial JSON."""
+
+    raw = _json_bytes(payload)
+    temporary = path.parent / f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp"
+    _write_fsync(temporary, raw)
+    try:
+        os.replace(temporary, path)
+        _fsync_directory(path.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _production_route_summary(
+    qualification: PublishedTransitionStateQualification,
+    irc: PublishedIrcRun,
+    path: PublishedTypedIrcPath,
+    hessians: PublishedPathHessians,
+) -> dict[str, Any]:
+    return {
+        "transition_state_qualification": qualification.receipt_sha256,
+        "irc_execution": irc.execution_receipt_sha256,
+        "irc_forward": irc.direction_receipt_sha256["forward"],
+        "irc_reverse": irc.direction_receipt_sha256["reverse"],
+        "typed_irc_path": path.receipt_sha256,
+        "path_hessians": hessians.receipt_sha256,
+        "path_point_count": len(hessians.point_results),
+    }
+
+
+def _write_production_terminal(
+    root: Path,
+    *,
+    state: Literal["completed", "failed"],
+    campaign_identity: str | None,
+    routes: dict[str, dict[str, Any]],
+    phase: str,
+    detail: str | None,
+) -> dict[str, Any]:
+    payload = {
+        "schema": PRODUCTION_SCHEMA,
+        "state": state,
+        "accepted_result": False,
+        "campaign_identity": campaign_identity,
+        "phase": phase,
+        "routes": routes,
+        "detail": detail,
+        "finished_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "next_required_stages": [
+            "vibrationally_adiabatic_potential",
+            "high_level_correction",
+            "sct",
+            "branching_common_reference_gate",
+            "final_freeze",
+        ],
+    }
+    destination = root / PRODUCTION_TERMINAL
+    if destination.exists() or destination.is_symlink():
+        existing, _ = _read_json_object(
+            destination, label="production terminal receipt"
+        )
+        _strict_json_equal(existing, payload, label="production terminal receipt")
+        return existing
+    _atomic_non_overwriting_json(destination, payload)
+    return payload
+
+
+def execute_production_foundation(run_root: Path) -> dict[str, Any]:
+    """Resume the four authoritative routes and publish a finite terminal receipt."""
+
+    root = _safe_absolute_root(run_root)
+    terminal_path = root / PRODUCTION_TERMINAL
+    if terminal_path.exists() or terminal_path.is_symlink():
+        terminal, _ = _read_json_object(
+            terminal_path, label="production terminal receipt"
+        )
+        if terminal.get("schema") != PRODUCTION_SCHEMA:
+            raise ValueError("unsupported production terminal receipt schema")
+        return terminal
+
+    first_route = next(iter(ENDPOINT_ROUTE_STATES))
+    preflight, _ = _validated_preflight(root, first_route)
+    campaign_identity = preflight["identity"]
+    route_names = list(preflight["routes"])
+    if route_names != list(ENDPOINT_ROUTE_STATES):
+        raise ValueError("production preflight route order is not canonical")
+
+    completed: dict[str, dict[str, Any]] = {}
+    phase = "starting"
+
+    def write_status() -> None:
+        _atomic_replace_json(
+            root / PRODUCTION_STATUS,
+            {
+                "schema": PRODUCTION_SCHEMA,
+                "state": "running",
+                "campaign_identity": campaign_identity,
+                "phase": phase,
+                "routes": completed,
+                "updated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            },
+        )
+
+    def interrupted(signum: int, _frame: types.FrameType | None) -> None:
+        raise ProductionInterrupted(f"received signal {signum}")
+
+    previous_handlers: dict[int, Any] = {}
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        previous_handlers[signum] = signal.getsignal(signum)
+        signal.signal(signum, interrupted)
+    write_status()
+    try:
+        for route in route_names:
+            phase = f"{route}:transition_state_qualification"
+            write_status()
+            qualification = publish_transition_state_qualification(root, route=route)
+            phase = f"{route}:irc"
+            write_status()
+            irc = run_and_publish_irc(root, route=route)
+            phase = f"{route}:typed_path"
+            write_status()
+            path = publish_typed_irc_path(root, route=route)
+            phase = f"{route}:path_hessians"
+            write_status()
+            hessians = publish_path_hessians(root, route=route)
+            completed[route] = _production_route_summary(
+                qualification, irc, path, hessians
+            )
+            phase = f"{route}:complete"
+            write_status()
+        terminal = _write_production_terminal(
+            root,
+            state="completed",
+            campaign_identity=campaign_identity,
+            routes=completed,
+            phase="foundation_complete",
+            detail=None,
+        )
+        _atomic_replace_json(
+            root / PRODUCTION_STATUS,
+            {**terminal, "terminal_receipt": PRODUCTION_TERMINAL},
+        )
+        return terminal
+    except BaseException as exc:
+        terminal = _write_production_terminal(
+            root,
+            state="failed",
+            campaign_identity=campaign_identity,
+            routes=completed,
+            phase=phase,
+            detail=f"{type(exc).__name__}: {exc}",
+        )
+        _atomic_replace_json(
+            root / PRODUCTION_STATUS,
+            {**terminal, "terminal_receipt": PRODUCTION_TERMINAL},
+        )
+        raise
+    finally:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
+
+
+def finalize_production_if_running(run_root: Path) -> dict[str, Any]:
+    """Write the dead-man receipt when the service manager stops the worker."""
+
+    root = _safe_absolute_root(run_root)
+    terminal_path = root / PRODUCTION_TERMINAL
+    if terminal_path.exists() or terminal_path.is_symlink():
+        terminal, _ = _read_json_object(
+            terminal_path, label="production terminal receipt"
+        )
+        return terminal
+    status_path = root / PRODUCTION_STATUS
+    status: dict[str, Any] = {}
+    if status_path.exists() and not status_path.is_symlink():
+        status, _ = _read_json_object(status_path, label="production status")
+    campaign_identity = status.get("campaign_identity")
+    if type(campaign_identity) is not str:
+        campaign_identity = None
+    routes = status.get("routes")
+    if type(routes) is not dict:
+        routes = {}
+    phase = status.get("phase")
+    if type(phase) is not str:
+        phase = "unknown"
+    terminal = _write_production_terminal(
+        root,
+        state="failed",
+        campaign_identity=campaign_identity,
+        routes=routes,
+        phase=phase,
+        detail=(
+            "ProductionInterrupted: bounded systemd unit ended without a "
+            "terminal receipt"
+        ),
+    )
+    _atomic_replace_json(
+        status_path, {**terminal, "terminal_receipt": PRODUCTION_TERMINAL}
+    )
+    return terminal
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -7332,7 +7543,9 @@ def main(
     native_payload_manifest: dict[str, dict[str, Any]] | None = None,
 ) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dry-run", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--dry-run", action="store_true")
+    mode.add_argument("--finalize-if-running", action="store_true")
     parser.add_argument("--bundle-root", type=Path, default=DEFAULT_BUNDLE_ROOT)
     parser.add_argument("--run-root", type=Path, required=True)
     # Pre-parsed by bootstrap_cli for an executable invocation; retained here so
@@ -7341,12 +7554,20 @@ def main(
     parser.add_argument("--nice", type=int, default=10)
     parser.add_argument("--log")
     args = parser.parse_args(argv)
-    if not args.dry_run:
-        parser.error("production execution is not implemented; --dry-run is required")
+
     if not 1 <= args.threads <= 16:
         parser.error("--threads must be <= 16 and at least 1")
     if args.nice < 10:
         parser.error("--nice must be >= 10")
+
+    if args.finalize_if_running:
+        receipt = finalize_production_if_running(args.run_root)
+        print(json.dumps(receipt, sort_keys=True))
+        return 0
+    if not args.dry_run:
+        receipt = execute_production_foundation(args.run_root)
+        print(json.dumps(receipt, sort_keys=True))
+        return 0 if receipt["state"] == "completed" else 1
 
     receipt = create_preflight_receipt(
         args.bundle_root,

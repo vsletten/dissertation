@@ -4,6 +4,7 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-08 01:49 PDT — (hermes-custom-build-001; profile=workstation) — D2c ACTIVE/PRODUCTION DRIVER READY: added the finite resumable TS → shared-checkpoint IRC → typed path → per-point Hessian orchestration with atomic status, immutable terminal receipt, signal handling, and a systemd dead-man finalizer; deterministic lifecycle tests plus whole-QM gates pass (`1079 passed, 1 skipped`). No production calculator ran before the required commit/push and fresh preflight.
 - 2026-09-08 01:36 PDT — (hermes-custom-build-001; profile=workstation) — D2c ACTIVE/SCIPY REGISTRY ATTESTATION: the live preflight exposed SciPy's source-declared empty integrator registry being populated with local classes during verified module execution. Attestation now binds only unique same-module source-declared class identities and rejects foreign injection; the sabotage regression fails without it, and all 182 D2c tests plus focused Ruff/format/diff pass. No calculator ran.
 
 - 2026-09-08 01:30 PDT — (hermes-custom-build-001; profile=workstation) — D2c ACTIVE/PREFLIGHT CAPTURE: the corrected preflight now captures modules imported by GPU dependency discovery before preimporting and attesting the complete executable inventory. The new sabotage regression fails without that scope; all 181 D2c tests plus focused Ruff/format/diff pass. No calculator ran; the live receipt remains pending the corrected pushed head.
