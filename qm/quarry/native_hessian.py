@@ -28,8 +28,8 @@ from quarry.pipeline import (
 )
 
 HARTREE_TO_EV = 27.211386245988
-_HESSIAN_SYMMETRY_RTOL = 1.0e-8
-_HESSIAN_SYMMETRY_ATOL_SCALE = 2.0e-9
+HESSIAN_SYMMETRY_ABSOLUTE_MAX = 1.0e-8
+HESSIAN_SYMMETRY_SPECTRAL_RELATIVE_MAX = 1.0e-8
 
 
 def _immutable_f64(array: np.ndarray) -> np.ndarray:
@@ -37,6 +37,67 @@ def _immutable_f64(array: np.ndarray) -> np.ndarray:
 
     contiguous = np.ascontiguousarray(array, dtype="<f8")
     return np.frombuffer(contiguous.tobytes(), dtype="<f8").reshape(contiguous.shape)
+
+
+@dataclass(frozen=True)
+class HessianSymmetryMetrics:
+    """Raw Cartesian-Hessian skew metrics evaluated before symmetrization."""
+
+    maximum_absolute_asymmetry: float
+    matrix_absolute_maximum: float
+    symmetric_spectral_norm: float
+    asymmetry_spectral_norm: float
+    spectral_relative_asymmetry: float
+    absolute_limit: float
+    spectral_relative_limit: float
+    accepted: bool
+
+
+def cartesian_hessian_symmetry_metrics(hessian: Any) -> HessianSymmetryMetrics:
+    """Measure global absolute and scale-relative skew without hiding low scales."""
+
+    matrix = np.asarray(hessian, dtype=float)
+    if matrix.ndim != 2 or matrix.shape[0] < 1 or matrix.shape[0] != matrix.shape[1]:
+        raise ValueError("Cartesian Hessian must be a non-empty square matrix")
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError("Cartesian Hessian contains non-finite values")
+    symmetric = 0.5 * (matrix + matrix.T)
+    asymmetry = matrix - matrix.T
+    maximum_absolute_asymmetry = float(np.max(np.abs(asymmetry)))
+    matrix_absolute_maximum = float(np.max(np.abs(matrix)))
+    symmetric_spectral_norm = float(np.linalg.norm(symmetric, ord=2))
+    asymmetry_spectral_norm = float(np.linalg.norm(asymmetry, ord=2))
+    if symmetric_spectral_norm == 0.0:
+        spectral_relative_asymmetry = (
+            0.0 if asymmetry_spectral_norm == 0.0 else math.inf
+        )
+    else:
+        spectral_relative_asymmetry = asymmetry_spectral_norm / symmetric_spectral_norm
+    accepted = (
+        maximum_absolute_asymmetry < HESSIAN_SYMMETRY_ABSOLUTE_MAX
+        and spectral_relative_asymmetry < HESSIAN_SYMMETRY_SPECTRAL_RELATIVE_MAX
+    )
+    return HessianSymmetryMetrics(
+        maximum_absolute_asymmetry=maximum_absolute_asymmetry,
+        matrix_absolute_maximum=matrix_absolute_maximum,
+        symmetric_spectral_norm=symmetric_spectral_norm,
+        asymmetry_spectral_norm=asymmetry_spectral_norm,
+        spectral_relative_asymmetry=spectral_relative_asymmetry,
+        absolute_limit=HESSIAN_SYMMETRY_ABSOLUTE_MAX,
+        spectral_relative_limit=HESSIAN_SYMMETRY_SPECTRAL_RELATIVE_MAX,
+        accepted=accepted,
+    )
+
+
+def _symmetry_error(metrics: HessianSymmetryMetrics) -> str:
+    return (
+        "Cartesian Hessian is not symmetric: "
+        f"max_abs_asymmetry={metrics.maximum_absolute_asymmetry:.12g}, "
+        f"matrix_abs_max={metrics.matrix_absolute_maximum:.12g}, "
+        f"absolute_limit={metrics.absolute_limit:.12g}, "
+        f"spectral_relative_asymmetry={metrics.spectral_relative_asymmetry:.12g}, "
+        f"spectral_relative_limit={metrics.spectral_relative_limit:.12g}"
+    )
 
 
 @dataclass(frozen=True)
@@ -66,14 +127,9 @@ class NativeHessianResult:
             )
         if not np.all(np.isfinite(hessian)):
             raise ValueError("canonical Cartesian Hessian contains non-finite values")
-        scale = max(1.0, float(np.max(np.abs(hessian))))
-        if not np.allclose(
-            hessian,
-            hessian.T,
-            rtol=_HESSIAN_SYMMETRY_RTOL,
-            atol=_HESSIAN_SYMMETRY_ATOL_SCALE * scale,
-        ):
-            raise ValueError("canonical Cartesian Hessian is not symmetric")
+        symmetry = cartesian_hessian_symmetry_metrics(hessian)
+        if not symmetry.accepted:
+            raise ValueError(_symmetry_error(symmetry))
         expected_fmax = float(np.max(np.linalg.norm(gradient, axis=1)))
         expected_fmax *= HARTREE_TO_EV / BOHR_TO_ANGSTROM
         if (
@@ -132,20 +188,11 @@ def canonicalize_pyscf_hessian(hessian: Any, atom_count: int) -> np.ndarray:
     if not np.all(np.isfinite(native)):
         raise ValueError("PySCF Hessian contains non-finite values")
     canonical = native.transpose(0, 2, 1, 3).reshape(3 * atom_count, 3 * atom_count)
-    scale = max(1.0, float(np.max(np.abs(canonical))))
-    if not np.allclose(
-        canonical,
-        canonical.T,
-        rtol=_HESSIAN_SYMMETRY_RTOL,
-        atol=_HESSIAN_SYMMETRY_ATOL_SCALE * scale,
-    ):
-        asymmetry = np.abs(canonical - canonical.T)
+    symmetry = cartesian_hessian_symmetry_metrics(canonical)
+    if not symmetry.accepted:
         raise ValueError(
             "PySCF Hessian is not symmetric in canonical Cartesian layout: "
-            f"max_abs_asymmetry={float(np.max(asymmetry)):.12g}, "
-            f"matrix_abs_max={float(np.max(np.abs(canonical))):.12g}, "
-            f"rtol={_HESSIAN_SYMMETRY_RTOL:.12g}, "
-            f"atol={_HESSIAN_SYMMETRY_ATOL_SCALE * scale:.12g}"
+            + _symmetry_error(symmetry)
         )
     return 0.5 * (canonical + canonical.T)
 

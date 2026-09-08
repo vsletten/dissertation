@@ -33,6 +33,97 @@ def test_native_pyscf_hessian_accepts_observed_backend_symmetry_noise():
     assert observed == pytest.approx(0.5 * (canonical + canonical.T))
 
 
+def _native_layout(canonical: np.ndarray, atom_count: int) -> np.ndarray:
+    return canonical.reshape(atom_count, 3, atom_count, 3).transpose(0, 2, 1, 3)
+
+
+def test_hessian_symmetry_policy_rejects_exact_and_above_absolute_boundary():
+    atom_count = 2
+    limit = native_hessian.HESSIAN_SYMMETRY_ABSOLUTE_MAX
+    for skew in (limit, np.nextafter(limit, np.inf)):
+        canonical = np.eye(3 * atom_count) * 1.0e8
+        canonical[0, 1] = skew
+        with pytest.raises(ValueError, match="absolute_limit"):
+            native_hessian.canonicalize_pyscf_hessian(
+                _native_layout(canonical, atom_count), atom_count
+            )
+
+
+def test_hessian_symmetry_policy_accepts_immediately_below_both_boundaries():
+    atom_count = 2
+    skew = np.nextafter(native_hessian.HESSIAN_SYMMETRY_ABSOLUTE_MAX, 0.0)
+    canonical = np.eye(3 * atom_count)
+    canonical[0, 1] = skew
+
+    metrics = native_hessian.cartesian_hessian_symmetry_metrics(canonical)
+    observed = native_hessian.canonicalize_pyscf_hessian(
+        _native_layout(canonical, atom_count), atom_count
+    )
+
+    assert metrics.accepted is True
+    assert observed == pytest.approx(0.5 * (canonical + canonical.T))
+
+
+def test_hessian_symmetry_policy_rejects_low_scale_relative_skew():
+    atom_count = 2
+    canonical = np.eye(3 * atom_count) * 1.0e-12
+    canonical[0, 1] = 1.0e-12
+
+    metrics = native_hessian.cartesian_hessian_symmetry_metrics(canonical)
+
+    assert (
+        metrics.maximum_absolute_asymmetry
+        < native_hessian.HESSIAN_SYMMETRY_ABSOLUTE_MAX
+    )
+    assert (
+        metrics.spectral_relative_asymmetry
+        > native_hessian.HESSIAN_SYMMETRY_SPECTRAL_RELATIVE_MAX
+    )
+    with pytest.raises(ValueError, match="spectral_relative_limit"):
+        native_hessian.canonicalize_pyscf_hessian(
+            _native_layout(canonical, atom_count), atom_count
+        )
+
+
+def test_hessian_symmetry_policy_zero_and_distributed_skew_edges():
+    zero = native_hessian.cartesian_hessian_symmetry_metrics(np.zeros((6, 6)))
+    assert zero.accepted is True
+    assert zero.spectral_relative_asymmetry == 0.0
+
+    canonical = np.eye(6)
+    skew = np.nextafter(native_hessian.HESSIAN_SYMMETRY_ABSOLUTE_MAX, 0.0)
+    canonical[0, 1] = skew
+    canonical[1, 2] = skew
+    canonical[2, 3] = skew
+    metrics = native_hessian.cartesian_hessian_symmetry_metrics(canonical)
+    assert (
+        metrics.maximum_absolute_asymmetry
+        < native_hessian.HESSIAN_SYMMETRY_ABSOLUTE_MAX
+    )
+    assert (
+        metrics.spectral_relative_asymmetry
+        > native_hessian.HESSIAN_SYMMETRY_SPECTRAL_RELATIVE_MAX
+    )
+    assert metrics.accepted is False
+
+
+def test_native_hessian_result_cannot_bypass_symmetry_policy():
+    hessian = np.eye(3) * 1.0e-12
+    hessian[0, 1] = 1.0e-12
+    with pytest.raises(ValueError, match="not symmetric"):
+        native_hessian.NativeHessianResult(
+            electronic_hartree=-1.0,
+            gradient_hartree_per_bohr=np.zeros((1, 3)),
+            physical_fmax_ev_per_angstrom=0.0,
+            cartesian_hessian_hartree_per_bohr2=hessian,
+            requested_backend="pyscf",
+            actual_backend="pyscf",
+            gpu_fallback_used=False,
+            geometry_fingerprint="geometry",
+            settings_fingerprint="settings",
+        )
+
+
 def test_native_pyscf_hessian_rejects_shape_nonfinite_and_material_asymmetry():
     with pytest.raises(ValueError, match="shape"):
         native_hessian.canonicalize_pyscf_hessian(np.eye(6), 2)
