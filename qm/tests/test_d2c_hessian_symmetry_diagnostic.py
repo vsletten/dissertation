@@ -1893,6 +1893,14 @@ def test_half_step_run_reuses_prior_points_and_has_exact_36_call_bound(
     assert receipt["prior_fd_root"] == str(tmp_path / "prior")
     assert (output / "matrices/H_0.005-raw.f64").is_file()
     assert (output / "matrices/H_0.01-raw.f64").is_file()
+    first_point = json.loads(
+        (
+            output / "points" / diagnostic._half_step_plan(6)[0]["key"] / "receipt.json"
+        ).read_text()
+    )
+    assert first_point["accepted_campaign_result"] is False
+    aggregate = json.loads((output / "matrices/receipt.json").read_text())
+    assert aggregate["accepted_campaign_result"] is False
     terminal = json.loads((output / diagnostic.TERMINAL).read_text())
     assert terminal["schema"] == diagnostic.HALF_STEP_SCHEMA
     assert terminal["state"] == "completed"
@@ -2307,6 +2315,70 @@ def test_half_step_finalizer_rejects_wrong_mode_terminal_without_rewriting_statu
 
 
 @pytest.mark.parametrize(
+    "wrong_schema", [diagnostic.SCHEMA, diagnostic.HALF_STEP_SCHEMA]
+)
+def test_fd_finalizer_rejects_wrong_mode_terminal_without_rewriting_status(
+    tmp_path, monkeypatch, wrong_schema
+):
+    source, calls = _patch_fake_half_step_environment(tmp_path, monkeypatch)
+    output = tmp_path / f"finite-difference-wrong-terminal-{wrong_schema}"
+    output.mkdir()
+    status = {
+        "schema": diagnostic.FINITE_DIFFERENCE_SCHEMA,
+        "state": "running",
+    }
+    status_raw = diagnostic._json_bytes(status)
+    (output / "status.json").write_bytes(status_raw)
+    wrong_status = (
+        diagnostic._initial_half_step_status(_identity(), tmp_path / "prior", source)
+        if wrong_schema == diagnostic.HALF_STEP_SCHEMA
+        else {
+            "schema": diagnostic.SCHEMA,
+            "git_sha": "a" * 40,
+            "script_sha256": "b" * 64,
+        }
+    )
+    wrong_mode = diagnostic._terminal_payload(
+        wrong_status,
+        state="failed",
+        detail="synthetic wrong-mode failure",
+    )
+    terminal_raw = diagnostic._json_bytes(wrong_mode)
+    (output / diagnostic.TERMINAL).write_bytes(terminal_raw)
+
+    with pytest.raises(ValueError, match="finite-difference terminal schema"):
+        diagnostic.finalize_if_running(output, finite_difference=True)
+
+    assert calls == []
+    assert (output / "status.json").read_bytes() == status_raw
+    assert (output / diagnostic.TERMINAL).read_bytes() == terminal_raw
+
+
+@pytest.mark.parametrize(
+    ("requested", "running_schema"),
+    [
+        ({"half_step": True}, diagnostic.FINITE_DIFFERENCE_SCHEMA),
+        ({"finite_difference": True}, diagnostic.HALF_STEP_SCHEMA),
+    ],
+)
+def test_finalizer_rejects_running_status_from_another_requested_mode_without_writes(
+    tmp_path, requested, running_schema
+):
+    output = tmp_path / running_schema
+    output.mkdir()
+    status_raw = diagnostic._json_bytes(
+        {"schema": running_schema, "state": "running", "sentinel": "unchanged"}
+    )
+    (output / "status.json").write_bytes(status_raw)
+
+    with pytest.raises(ValueError, match="running status schema does not match"):
+        diagnostic.finalize_if_running(output, **requested)
+
+    assert (output / "status.json").read_bytes() == status_raw
+    assert not (output / diagnostic.TERMINAL).exists()
+
+
+@pytest.mark.parametrize(
     "mutation",
     [
         "contract",
@@ -2366,6 +2438,65 @@ def test_half_step_finalizer_rejects_forged_failed_terminal(
 
     assert (output / "status.json").read_bytes() == status_raw
     assert (output / diagnostic.TERMINAL).read_bytes() == terminal_raw
+
+
+@pytest.mark.parametrize("artifact", ["gradient.f64", "density.f64"])
+def test_half_step_finalizer_rejects_tampered_failed_progress_payload(
+    tmp_path, monkeypatch, artifact
+):
+    _source, calls = _patch_fake_half_step_environment(tmp_path, monkeypatch)
+    output = tmp_path / f"tampered-failed-{artifact}"
+    diagnostic.run_half_step_extension(tmp_path / "prior", output)
+    status = json.loads((output / "status.json").read_text())
+    status.update(
+        {
+            "state": "failed",
+            "confirmation_passed": False,
+            "error": "synthetic failure after durable progress",
+            "finished_utc": "2026-09-08T00:00:00Z",
+        }
+    )
+    status.pop("receipt")
+    status.pop("receipt_sha256")
+    status_raw = diagnostic._json_bytes(status)
+    (output / "status.json").write_bytes(status_raw)
+    terminal = diagnostic._terminal_payload(
+        status, state="failed", detail=status["error"]
+    )
+    terminal_raw = diagnostic._json_bytes(terminal)
+    (output / diagnostic.TERMINAL).write_bytes(terminal_raw)
+    point_path = output / "points" / diagnostic._half_step_plan(6)[-1]["key"] / artifact
+    payload = bytearray(point_path.read_bytes())
+    payload[0] ^= 1
+    point_path.write_bytes(payload)
+
+    with pytest.raises(ValueError, match=rf"{artifact} hash mismatch"):
+        diagnostic.finalize_if_running(output, half_step=True)
+
+    assert calls
+    assert (output / "status.json").read_bytes() == status_raw
+    assert (output / diagnostic.TERMINAL).read_bytes() == terminal_raw
+
+
+@pytest.mark.parametrize("receipt_kind", ["point", "aggregate"])
+def test_completed_half_step_validator_requires_explicit_negative_artifact_verdict(
+    tmp_path, monkeypatch, receipt_kind
+):
+    _source, _calls = _patch_fake_half_step_environment(tmp_path, monkeypatch)
+    output = tmp_path / f"missing-artifact-verdict-{receipt_kind}"
+    diagnostic.run_half_step_extension(tmp_path / "prior", output)
+    if receipt_kind == "point":
+        path = (
+            output / "points" / diagnostic._half_step_plan(6)[0]["key"] / "receipt.json"
+        )
+    else:
+        path = output / "matrices" / "receipt.json"
+    artifact_receipt = json.loads(path.read_text())
+    artifact_receipt.pop("accepted_campaign_result")
+    path.write_bytes(diagnostic._json_bytes(artifact_receipt))
+
+    with pytest.raises(ValueError, match="receipt schema is not exact"):
+        diagnostic._validated_completed_half_step_receipt(output)
 
 
 def test_half_step_finalizer_adopts_receipt_published_before_terminal(

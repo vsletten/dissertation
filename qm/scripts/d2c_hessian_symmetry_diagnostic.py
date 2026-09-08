@@ -1361,7 +1361,13 @@ def _validated_completed_half_step_receipt(
                 | _HALF_STEP_POINT_BINDING_KEYS
                 | set(definition)
                 | _DENSITY_CONTINUITY_KEYS
-                | {"schema", "point_key", "kind", "artifacts"}
+                | {
+                    "schema",
+                    "point_key",
+                    "kind",
+                    "accepted_campaign_result",
+                    "artifacts",
+                }
             ),
             expected_artifacts={
                 "gradient.f64": ((6, 3), "hartree / bohr"),
@@ -1381,6 +1387,7 @@ def _validated_completed_half_step_receipt(
         if (
             point_sha != ancestry["receipt_sha256"]
             or point.get("schema") != HALF_STEP_SCHEMA
+            or point.get("accepted_campaign_result") is not False
             or point.get("point_key") != key
             or point.get("kind") != "new-half-step-displacement"
             or any(point.get(field) != value for field, value in definition.items())
@@ -1446,6 +1453,7 @@ def _validated_completed_half_step_receipt(
         expected_receipt_keys={
             "schema",
             "kind",
+            "accepted_campaign_result",
             "confirmation_passed",
             *_HALF_STEP_POINT_BINDING_KEYS,
             "new_point_receipts",
@@ -1458,6 +1466,7 @@ def _validated_completed_half_step_receipt(
     expected_aggregate = {
         "schema": HALF_STEP_SCHEMA,
         "kind": "immutable-half-step-finite-difference-analysis",
+        "accepted_campaign_result": False,
         "confirmation_passed": receipt["confirmation_passed"],
         **_half_step_point_bindings(expected_status),
         "new_point_receipts": points,
@@ -1617,13 +1626,49 @@ def _validate_failed_half_step_terminal(
         raise ValueError("failed half-step terminal/status identity hash mismatch")
 
     completed = status.get("completed_points")
-    expected_keys = [item["key"] for item in _half_step_plan(6)]
     if (
         type(completed) is not list
         or len(completed) != terminal["completed_point_count"]
     ):
         raise ValueError("failed half-step terminal point-count mismatch")
-    for ancestry, expected_key in zip(completed, expected_keys, strict=False):
+    if completed:
+        center_receipt = status.get("center_receipt")
+        if (
+            type(center_receipt) is not dict
+            or set(center_receipt)
+            != {"point_key", "receipt_sha256", "density_sha256", "density_shape"}
+            or center_receipt.get("point_key") != "center"
+            or type(center_receipt.get("density_shape")) is not list
+        ):
+            raise ValueError("failed half-step bound center receipt is invalid")
+        for field in ("receipt_sha256", "density_sha256"):
+            campaign._require_sha(
+                campaign._require_json_string(
+                    center_receipt.get(field),
+                    label=f"failed half-step center {field}",
+                ),
+                length=64,
+                label=f"failed half-step center {field}",
+            )
+        density_shape = tuple(center_receipt["density_shape"])
+        if (
+            len(density_shape) != 3
+            or density_shape[0] != 2
+            or density_shape[1] != density_shape[2]
+            or any(type(size) is not int or size < 1 for size in density_shape)
+        ):
+            raise ValueError("failed half-step bound center density shape is invalid")
+        if type(status.get("reference_binding_sha256")) is not str:
+            raise ValueError("failed half-step reference binding is missing")
+        campaign._require_sha(
+            status["reference_binding_sha256"],
+            length=64,
+            label="failed half-step reference binding SHA-256",
+        )
+    else:
+        density_shape = ()
+    for ancestry, definition in zip(completed, _half_step_plan(6), strict=False):
+        expected_key = definition["key"]
         if (
             type(ancestry) is not dict
             or set(ancestry) != {"point_key", "receipt_sha256"}
@@ -1638,13 +1683,68 @@ def _validate_failed_half_step_terminal(
             length=64,
             label="failed half-step point receipt SHA-256",
         )
-        raw = campaign._read_bounded_regular_snapshot(
-            output_root / "points" / expected_key / "receipt.json",
-            label="failed half-step durable point receipt",
-            maximum_bytes=1024 * 1024,
+        point, point_sha, arrays = _read_record_bundle(
+            output_root,
+            Path("points") / expected_key,
+            expected_receipt_keys=(
+                _POINT_OBSERVATION_KEYS
+                | _HALF_STEP_POINT_BINDING_KEYS
+                | set(definition)
+                | _DENSITY_CONTINUITY_KEYS
+                | {
+                    "schema",
+                    "point_key",
+                    "kind",
+                    "accepted_campaign_result",
+                    "artifacts",
+                }
+            ),
+            expected_artifacts={
+                "gradient.f64": ((6, 3), "hartree / bohr"),
+                "density.f64": (density_shape, "electrons"),
+            },
         )
-        if hashlib.sha256(raw).hexdigest() != digest:
-            raise ValueError("failed half-step terminal progress receipt hash mismatch")
+        density = arrays["density.f64"]
+        density_sha = hashlib.sha256(
+            np.ascontiguousarray(density, dtype="<f8").tobytes()
+        ).hexdigest()
+        if (
+            point_sha != digest
+            or point.get("schema") != HALF_STEP_SCHEMA
+            or point.get("accepted_campaign_result") is not False
+            or point.get("point_key") != expected_key
+            or point.get("kind") != "new-half-step-displacement"
+            or any(point.get(field) != value for field, value in definition.items())
+            or any(
+                point.get(field) != value
+                for field, value in _half_step_point_bindings(status).items()
+            )
+            or point.get("density_initial_guess_sha256")
+            != status["center_receipt"]["density_sha256"]
+            or point.get("density_final_sha256") != density_sha
+        ):
+            raise ValueError(
+                f"failed half-step terminal point content is invalid: {expected_key}"
+            )
+        _validate_point_record(
+            point,
+            center_spin_square=None,
+            center=False,
+            enforce_scientific_gates=False,
+        )
+        campaign._require_sha(
+            campaign._require_json_string(
+                point.get("geometry_fingerprint"),
+                label=f"failed half-step point geometry fingerprint {expected_key}",
+            ),
+            length=64,
+            label=f"failed half-step point geometry fingerprint {expected_key}",
+        )
+        for field in _DENSITY_CONTINUITY_KEYS:
+            _finite_number(
+                point.get(field),
+                label=f"failed half-step point {field} {expected_key}",
+            )
     if terminal.get("current_point") != status.get("current_point"):
         raise ValueError("failed half-step terminal current-point mismatch")
 
@@ -1712,6 +1812,16 @@ def finalize_if_running(
 
     if finite_difference and half_step:
         raise ValueError("dead-man finalization mode must be unambiguous")
+    requested_schema = (
+        FINITE_DIFFERENCE_SCHEMA
+        if finite_difference
+        else HALF_STEP_SCHEMA
+        if half_step
+        else None
+    )
+    requested_mode = (
+        "finite-difference" if finite_difference else "half-step" if half_step else None
+    )
     output = campaign._safe_absolute_root(output_root)
     with _exclusive_output_claim(output) as claim:
         terminal_path = output / TERMINAL
@@ -1726,11 +1836,21 @@ def finalize_if_running(
                 )
             except ValueError:
                 status = {}
+        if (
+            requested_schema is not None
+            and status.get("state") == "running"
+            and status.get("schema") != requested_schema
+        ):
+            raise ValueError(
+                f"dead-man {requested_mode} running status schema does not match "
+                "requested mode"
+            )
         if terminal_path.exists() or terminal_path.is_symlink():
             terminal = _validated_terminal(terminal_path)
-            if half_step and terminal["schema"] != HALF_STEP_SCHEMA:
+            if requested_schema is not None and terminal["schema"] != requested_schema:
                 raise ValueError(
-                    "dead-man half-step terminal schema does not match requested mode"
+                    f"dead-man {requested_mode} terminal schema does not match "
+                    "requested mode"
                 )
             if terminal["schema"] == HALF_STEP_SCHEMA and terminal["state"] == "failed":
                 _validate_failed_half_step_terminal(output, terminal, status)
@@ -5116,7 +5236,13 @@ def _resume_half_step_points(
                 | _HALF_STEP_POINT_BINDING_KEYS
                 | set(definition)
                 | _DENSITY_CONTINUITY_KEYS
-                | {"schema", "point_key", "kind", "artifacts"}
+                | {
+                    "schema",
+                    "point_key",
+                    "kind",
+                    "accepted_campaign_result",
+                    "artifacts",
+                }
             ),
             expected_artifacts={
                 "gradient.f64": ((6, 3), "hartree / bohr"),
@@ -5125,6 +5251,7 @@ def _resume_half_step_points(
         )
         if (
             point.get("schema") != HALF_STEP_SCHEMA
+            or point.get("accepted_campaign_result") is not False
             or point.get("point_key") != key
             or point.get("kind") != "new-half-step-displacement"
             or any(point.get(field) != value for field, value in definition.items())
@@ -5355,6 +5482,7 @@ def _run_half_step_locked(
                         "schema": HALF_STEP_SCHEMA,
                         "point_key": key,
                         "kind": "new-half-step-displacement",
+                        "accepted_campaign_result": False,
                         **_half_step_point_bindings(status),
                         **definition,
                         **_density_continuity_metrics(density, center_density),
@@ -5463,6 +5591,7 @@ def _run_half_step_locked(
         aggregate_record = {
             "schema": HALF_STEP_SCHEMA,
             "kind": "immutable-half-step-finite-difference-analysis",
+            "accepted_campaign_result": False,
             "confirmation_passed": confirmation_passed,
             **_half_step_point_bindings(status),
             "new_point_receipts": status["completed_points"],
