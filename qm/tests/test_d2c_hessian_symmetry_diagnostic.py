@@ -1151,6 +1151,114 @@ def test_analytic_matrix_artifact_refuses_replaced_output_root(tmp_path):
     assert not (output / "A-baseline" / "electronic.f64").exists()
 
 
+def test_status_publication_cannot_follow_replaced_output_root(tmp_path, monkeypatch):
+    output = tmp_path / "output"
+    displaced = tmp_path / "displaced-original"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    real_replace = diagnostic.os.replace
+    swapped = False
+
+    with (
+        pytest.raises(RuntimeError, match="output root was replaced"),
+        diagnostic._exclusive_output_claim(output) as claim,
+    ):
+
+        def replace_after_staging(
+            source, destination, *, src_dir_fd=None, dst_dir_fd=None
+        ):
+            nonlocal swapped
+            output.rename(displaced)
+            output.symlink_to(outside, target_is_directory=True)
+            swapped = True
+            return real_replace(
+                source,
+                destination,
+                src_dir_fd=src_dir_fd,
+                dst_dir_fd=dst_dir_fd,
+            )
+
+        monkeypatch.setattr(diagnostic.os, "replace", replace_after_staging)
+        diagnostic._claimed_write(
+            claim, output / "status.json", diagnostic._json_bytes({"state": "test"})
+        )
+
+    assert swapped is True
+    assert list(outside.iterdir()) == []
+    assert json.loads((displaced / "status.json").read_text()) == {"state": "test"}
+
+
+def _assert_noreplace_publication_cannot_follow_replaced_output_root(
+    tmp_path, monkeypatch, *, artifact, publish
+):
+    output = tmp_path / "output"
+    displaced = tmp_path / "displaced-original"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    real_path_rename = diagnostic.campaign._renameat2_noreplace
+    real_at_rename = diagnostic._renameat2_noreplace_at
+    swapped = False
+
+    def swap_root():
+        nonlocal swapped
+        output.rename(displaced)
+        output.symlink_to(outside, target_is_directory=True)
+        swapped = True
+
+    with (
+        pytest.raises(RuntimeError, match="output root was replaced"),
+        diagnostic._exclusive_output_claim(output) as claim,
+    ):
+
+        def replace_during_path_publication(source, destination):
+            swap_root()
+            return real_path_rename(source, destination)
+
+        def replace_during_descriptor_publication(
+            directory_fd, source_name, destination_name
+        ):
+            swap_root()
+            return real_at_rename(directory_fd, source_name, destination_name)
+
+        monkeypatch.setattr(
+            diagnostic.campaign,
+            "_renameat2_noreplace",
+            replace_during_path_publication,
+        )
+        monkeypatch.setattr(
+            diagnostic, "_renameat2_noreplace_at", replace_during_descriptor_publication
+        )
+        publish(claim, output / artifact)
+
+    assert swapped is True
+    assert list(outside.iterdir()) == []
+    assert (displaced / artifact).is_file()
+
+
+def test_receipt_publication_cannot_follow_replaced_output_root(tmp_path, monkeypatch):
+    _assert_noreplace_publication_cannot_follow_replaced_output_root(
+        tmp_path,
+        monkeypatch,
+        artifact="receipt.json",
+        publish=lambda claim, path: diagnostic._claimed_write_noreplace(
+            claim, path, diagnostic._json_bytes({"state": "completed"})
+        ),
+    )
+
+
+def test_terminal_publication_cannot_follow_replaced_output_root(tmp_path, monkeypatch):
+    _assert_noreplace_publication_cannot_follow_replaced_output_root(
+        tmp_path,
+        monkeypatch,
+        artifact=diagnostic.TERMINAL,
+        publish=lambda claim, path: diagnostic._terminal_write_noreplace(
+            claim,
+            path,
+            diagnostic._terminal_payload({}, state="failed", detail="synthetic"),
+        ),
+    )
+
+
 def test_external_claim_prevents_duplicate_expensive_call(tmp_path, monkeypatch):
     output = tmp_path / "output"
     calls = []
@@ -2628,6 +2736,42 @@ def test_finalizer_rejects_failed_status_from_another_requested_mode_without_wri
         assert not (output / diagnostic.TERMINAL).exists()
     else:
         assert (output / diagnostic.TERMINAL).read_bytes() == terminal_raw
+
+
+@pytest.mark.parametrize(
+    ("requested", "completed_schema"),
+    [
+        ({"half_step": True}, diagnostic.FINITE_DIFFERENCE_SCHEMA),
+        ({"finite_difference": True}, diagnostic.HALF_STEP_SCHEMA),
+    ],
+)
+@pytest.mark.parametrize("published_artifact", ["receipt.json", diagnostic.TERMINAL])
+def test_finalizer_rejects_completed_status_from_another_mode_before_crash_recovery(
+    tmp_path, requested, completed_schema, published_artifact
+):
+    output = tmp_path / f"completed-{completed_schema}-{published_artifact}"
+    output.mkdir()
+    status = {
+        "schema": completed_schema,
+        "state": "completed",
+        "sentinel": "contradictory provenance must not be relabeled",
+    }
+    status_raw = diagnostic._json_bytes(status)
+    artifact_raw = diagnostic._json_bytes(
+        {"schema": completed_schema, "state": "completed", "sentinel": "unchanged"}
+    )
+    (output / "status.json").write_bytes(status_raw)
+    (output / published_artifact).write_bytes(artifact_raw)
+
+    with pytest.raises(ValueError, match="completed status schema does not match"):
+        diagnostic.finalize_if_running(output, **requested)
+
+    assert (output / "status.json").read_bytes() == status_raw
+    assert (output / published_artifact).read_bytes() == artifact_raw
+    unpublished = (
+        diagnostic.TERMINAL if published_artifact == "receipt.json" else "receipt.json"
+    )
+    assert not (output / unpublished).exists()
 
 
 @pytest.mark.parametrize(

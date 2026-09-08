@@ -632,31 +632,129 @@ def _exclusive_output_claim(output_root: Path) -> Iterator[_OutputRootClaim]:
 
 
 def _claimed_write(claim: _OutputRootClaim, path: Path, raw: bytes) -> None:
+    if path.parent == claim.path:
+        _claimed_root_write(claim, path, raw, replace_existing=True)
+        return
     claim.verify()
     _atomic_write(path, raw, claim=claim)
     claim.verify()
 
 
+def _claimed_root_artifact_name(claim: _OutputRootClaim, path: Path) -> str:
+    if (
+        claim.root_descriptor is None
+        or path.parent != claim.path
+        or Path(path.name).name != path.name
+        or path.name in {".", ".."}
+    ):
+        raise ValueError("claimed root artifact path is not root-confined")
+    return path.name
+
+
+def _claimed_root_write(
+    claim: _OutputRootClaim,
+    path: Path,
+    raw: bytes,
+    *,
+    replace_existing: bool,
+) -> None:
+    """Stage, publish, and verify a root artifact relative to the bound root."""
+
+    if type(raw) is not bytes or not raw:
+        raise ValueError("claimed root artifact must contain nonempty bytes")
+    name = _claimed_root_artifact_name(claim, path)
+    claim.verify()
+    assert claim.root_descriptor is not None
+    root_fd = claim.root_descriptor
+    stage_name = f".{name}.{os.getpid()}.{time.time_ns()}.tmp"
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        raise RuntimeError("O_NOFOLLOW is required for diagnostic artifact publication")
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | nofollow | getattr(os, "O_CLOEXEC", 0)
+    stage_fd = os.open(stage_name, flags, 0o600, dir_fd=root_fd)
+    published = False
+    try:
+        offset = 0
+        while offset < len(raw):
+            written = os.write(stage_fd, raw[offset:])
+            if written <= 0:
+                raise OSError("diagnostic root artifact write made no progress")
+            offset += written
+        os.fsync(stage_fd)
+        staged = os.fstat(stage_fd)
+        staged_identity = (staged.st_dev, staged.st_ino)
+        if not stat.S_ISREG(staged.st_mode):
+            raise RuntimeError("diagnostic root artifact staging inode is not regular")
+        claim.verify()
+        if replace_existing:
+            os.replace(
+                stage_name,
+                name,
+                src_dir_fd=root_fd,
+                dst_dir_fd=root_fd,
+            )
+        else:
+            _renameat2_noreplace_at(root_fd, stage_name, name)
+        published = True
+        os.fsync(root_fd)
+        readback = _read_bounded_regular_snapshot_at(
+            root_fd,
+            name,
+            label=f"published diagnostic root artifact {name}",
+            maximum_bytes=len(raw),
+            expected_identity=staged_identity,
+        )
+        if readback != raw:
+            raise RuntimeError(f"published diagnostic root artifact changed: {name}")
+        claim.verify()
+    finally:
+        os.close(stage_fd)
+        if not published:
+            with suppress(FileNotFoundError):
+                os.unlink(stage_name, dir_fd=root_fd)
+
+
 def _claimed_write_noreplace(claim: _OutputRootClaim, path: Path, raw: bytes) -> None:
     """Publish one root-level artifact without replacing any existing inode."""
 
+    _claimed_root_write(claim, path, raw, replace_existing=False)
+
+
+def _claimed_root_entry_exists(claim: _OutputRootClaim, path: Path) -> bool:
+    name = _claimed_root_artifact_name(claim, path)
     claim.verify()
-    stage = path.parent / f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp"
+    assert claim.root_descriptor is not None
     try:
-        with stage.open("xb") as handle:
-            handle.write(raw)
-            handle.flush()
-            os.fsync(handle.fileno())
+        os.stat(name, dir_fd=claim.root_descriptor, follow_symlinks=False)
+    except FileNotFoundError:
         claim.verify()
-        campaign._renameat2_noreplace(stage, path)
-        directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-    finally:
-        stage.unlink(missing_ok=True)
+        return False
     claim.verify()
+    return True
+
+
+def _claimed_json_object(
+    claim: _OutputRootClaim, path: Path, *, label: str, max_bytes: int
+) -> tuple[dict[str, Any], bytes]:
+    if type(max_bytes) is not int or max_bytes <= 0:
+        raise ValueError(f"{label} maximum byte count must be positive")
+    name = _claimed_root_artifact_name(claim, path)
+    claim.verify()
+    assert claim.root_descriptor is not None
+    raw = _read_bounded_regular_snapshot_at(
+        claim.root_descriptor,
+        name,
+        label=label,
+        maximum_bytes=max_bytes,
+    )
+    claim.verify()
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError(f"malformed {label}: {path}") from exc
+    if not isinstance(payload, dict) or _json_bytes(payload) != raw:
+        raise ValueError(f"{label} is not canonical JSON: {path}")
+    return payload, raw
 
 
 def _terminal_write_noreplace(
@@ -711,10 +809,20 @@ def _terminal_payload(
     return payload
 
 
-def _validated_terminal(path: Path) -> dict[str, Any]:
-    terminal, _raw = campaign._read_json_object(
-        path, label="diagnostic terminal receipt", max_bytes=1024 * 1024
-    )
+def _validated_terminal(
+    path: Path, *, claim: _OutputRootClaim | None = None
+) -> dict[str, Any]:
+    if claim is None:
+        terminal, _raw = campaign._read_json_object(
+            path, label="diagnostic terminal receipt", max_bytes=1024 * 1024
+        )
+    else:
+        terminal, _raw = _claimed_json_object(
+            claim,
+            path,
+            label="diagnostic terminal receipt",
+            max_bytes=1024 * 1024,
+        )
     schema = terminal.get("schema")
     base_keys = {
         "schema",
@@ -800,13 +908,25 @@ def _validated_terminal(path: Path) -> dict[str, Any]:
 
 
 def _validated_completed_fd_receipt(
-    output_root: Path, *, verify_resident_identity: bool = True
+    output_root: Path,
+    *,
+    verify_resident_identity: bool = True,
+    claim: _OutputRootClaim | None = None,
 ) -> tuple[dict[str, Any], str]:
-    receipt, raw = campaign._read_json_object(
-        output_root / "receipt.json",
-        label="completed FD confirmation receipt",
-        max_bytes=4 * 1024 * 1024,
-    )
+    receipt_path = output_root / "receipt.json"
+    if claim is None:
+        receipt, raw = campaign._read_json_object(
+            receipt_path,
+            label="completed FD confirmation receipt",
+            max_bytes=4 * 1024 * 1024,
+        )
+    else:
+        receipt, raw = _claimed_json_object(
+            claim,
+            receipt_path,
+            label="completed FD confirmation receipt",
+            max_bytes=4 * 1024 * 1024,
+        )
     expected_keys = {
         "schema",
         "state",
@@ -1037,6 +1157,7 @@ def _validated_completed_fd_receipt(
             output_root,
             Path("points") / expected_key,
             expected_receipt_keys=receipt_keys,
+            claim=claim,
         )
         if point_sha != record["receipt_sha256"]:
             raise ValueError("completed FD point receipt SHA-256 hash mismatch")
@@ -1159,6 +1280,7 @@ def _validated_completed_fd_receipt(
             "artifacts",
         },
         expected_artifacts=matrix_contract,
+        claim=claim,
     )
     if aggregate_sha != aggregate.get("sha256"):
         raise ValueError("completed FD aggregate receipt hash mismatch")
@@ -1259,11 +1381,20 @@ def _validated_completed_half_step_receipt(
 ) -> tuple[dict[str, Any], str]:
     """Validate and independently reconstruct a completed half-step receipt."""
 
-    receipt, raw = campaign._read_json_object(
-        output_root / "receipt.json",
-        label="completed half-step receipt",
-        max_bytes=4 * 1024 * 1024,
-    )
+    receipt_path = output_root / "receipt.json"
+    if claim is None:
+        receipt, raw = campaign._read_json_object(
+            receipt_path,
+            label="completed half-step receipt",
+            max_bytes=4 * 1024 * 1024,
+        )
+    else:
+        receipt, raw = _claimed_json_object(
+            claim,
+            receipt_path,
+            label="completed half-step receipt",
+            max_bytes=4 * 1024 * 1024,
+        )
     expected_keys = {
         "schema",
         "state",
@@ -1958,27 +2089,32 @@ def finalize_if_running(
         terminal_path = output / TERMINAL
         status_path = output / "status.json"
         status: dict[str, Any] = {}
-        if status_path.exists() or status_path.is_symlink():
+        status_parsed = False
+        if _claimed_root_entry_exists(claim, status_path):
             try:
-                status, _ = campaign._read_json_object(
+                status, _ = _claimed_json_object(
+                    claim,
                     status_path,
                     label="diagnostic status",
                     max_bytes=1024 * 1024,
                 )
             except ValueError:
                 status = {}
+            else:
+                status_parsed = True
         status_state = status.get("state")
         if (
             requested_schema is not None
-            and status_state in {"running", "failed"}
+            and status_parsed
             and status.get("schema") != requested_schema
         ):
+            state_label = status_state if isinstance(status_state, str) else "parsed"
             raise ValueError(
-                f"dead-man {requested_mode} {status_state} status schema "
+                f"dead-man {requested_mode} {state_label} status schema "
                 "does not match requested mode"
             )
-        if terminal_path.exists() or terminal_path.is_symlink():
-            terminal = _validated_terminal(terminal_path)
+        if _claimed_root_entry_exists(claim, terminal_path):
+            terminal = _validated_terminal(terminal_path, claim=claim)
             if requested_schema is not None and terminal["schema"] != requested_schema:
                 raise ValueError(
                     f"dead-man {requested_mode} terminal schema does not match "
@@ -1992,7 +2128,9 @@ def finalize_if_running(
                 terminal["state"] == "completed"
                 and terminal["schema"] == FINITE_DIFFERENCE_SCHEMA
             ):
-                completed_receipt, receipt_sha = _validated_completed_fd_receipt(output)
+                completed_receipt, receipt_sha = _validated_completed_fd_receipt(
+                    output, claim=claim
+                )
                 completed_status = _completed_fd_status(completed_receipt, receipt_sha)
                 expected_terminal = _terminal_payload(
                     completed_status, state="completed", detail=None
@@ -2029,11 +2167,16 @@ def finalize_if_running(
                 _claimed_write(claim, status_path, _json_bytes(completed_status))
                 return terminal
             if terminal["state"] == "completed":
-                receipt_raw = campaign._read_bounded_regular_snapshot(
-                    output / terminal["receipt"],
+                receipt_path = output / terminal["receipt"]
+                receipt_name = _claimed_root_artifact_name(claim, receipt_path)
+                assert claim.root_descriptor is not None
+                receipt_raw = _read_bounded_regular_snapshot_at(
+                    claim.root_descriptor,
+                    receipt_name,
                     label="completed diagnostic receipt",
                     maximum_bytes=4 * 1024 * 1024,
                 )
+                claim.verify()
                 receipt_sha = hashlib.sha256(receipt_raw).hexdigest()
                 if terminal["receipt_sha256"] != receipt_sha:
                     raise ValueError("terminal completed receipt hash mismatch")
@@ -2043,9 +2186,7 @@ def finalize_if_running(
         completed_receipt: dict[str, Any] | None = None
         completed_receipt_sha: str | None = None
         completed_schema: str | None = None
-        if (
-            (output / "receipt.json").exists() or (output / "receipt.json").is_symlink()
-        ) and (
+        if _claimed_root_entry_exists(claim, output / "receipt.json") and (
             finite_difference
             or half_step
             or status.get("schema") in {FINITE_DIFFERENCE_SCHEMA, HALF_STEP_SCHEMA}
@@ -2064,7 +2205,7 @@ def finalize_if_running(
                     )
                 else:
                     completed_receipt, completed_receipt_sha = (
-                        _validated_completed_fd_receipt(output)
+                        _validated_completed_fd_receipt(output, claim=claim)
                     )
                 completed_schema = requested_schema
             except (ValueError, RuntimeError) as exc:
@@ -2964,7 +3105,12 @@ def _publish_record_bundle(
 
 
 def _read_bounded_regular_snapshot_at(
-    directory_fd: int, name: str, *, label: str, maximum_bytes: int
+    directory_fd: int,
+    name: str,
+    *,
+    label: str,
+    maximum_bytes: int,
+    expected_identity: tuple[int, int] | None = None,
 ) -> bytes:
     nofollow = getattr(os, "O_NOFOLLOW", None)
     if nofollow is None:
@@ -2988,6 +3134,9 @@ def _read_bounded_regular_snapshot_at(
                 f"{label} must be a nonempty regular file no larger than "
                 f"{maximum_bytes} bytes"
             )
+        observed_identity = (before.st_dev, before.st_ino)
+        if expected_identity is not None and observed_identity != expected_identity:
+            raise RuntimeError(f"{label} publication inode changed")
         chunks = []
         remaining = before.st_size
         while remaining:
@@ -3014,6 +3163,20 @@ def _read_bounded_regular_snapshot_at(
             after.st_ctime_ns,
         )
         if before_identity != after_identity:
+            raise ValueError(f"{label} changed while its snapshot was read")
+        try:
+            published = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        except FileNotFoundError as exc:
+            if expected_identity is not None:
+                raise RuntimeError(f"{label} publication name was removed") from exc
+            raise ValueError(f"{label} changed while its snapshot was read") from exc
+        namespace_identity = (published.st_dev, published.st_ino)
+        if (
+            not stat.S_ISREG(published.st_mode)
+            or namespace_identity != observed_identity
+        ):
+            if expected_identity is not None:
+                raise RuntimeError(f"{label} publication inode changed")
             raise ValueError(f"{label} changed while its snapshot was read")
         return b"".join(chunks)
     finally:
@@ -5067,9 +5230,12 @@ def _run_finite_difference_locked(
             os.close(legacy_descriptor)
         claim.verify()
     identity = _fd_execution_identity()
-    if status_path.exists() or status_path.is_symlink():
-        status, _ = campaign._read_json_object(
-            status_path, label="FD confirmation status", max_bytes=1024 * 1024
+    if _claimed_root_entry_exists(claim, status_path):
+        status, _ = _claimed_json_object(
+            claim,
+            status_path,
+            label="FD confirmation status",
+            max_bytes=1024 * 1024,
         )
         expected = _initial_fd_status(identity, preflight_root, reference_root)
         if set(status) != set(expected):
@@ -5090,8 +5256,8 @@ def _run_finite_difference_locked(
                 raise ValueError(f"finite-difference resume status {key} mismatch")
         if (
             status.get("state") != "running"
-            or (output_root / TERMINAL).exists()
-            or (output_root / "receipt.json").exists()
+            or _claimed_root_entry_exists(claim, output_root / TERMINAL)
+            or _claimed_root_entry_exists(claim, output_root / "receipt.json")
         ):
             raise ValueError(
                 "finite-difference output root is not resumable running state"
@@ -5474,8 +5640,9 @@ def _run_finite_difference_locked(
         return receipt
     except BaseException as exc:
         terminal_path = output_root / TERMINAL
-        if terminal_path.exists() or terminal_path.is_symlink():
-            campaign._read_json_object(
+        if _claimed_root_entry_exists(claim, terminal_path):
+            _claimed_json_object(
+                claim,
                 terminal_path,
                 label="authoritative FD terminal receipt",
                 max_bytes=1024 * 1024,
@@ -5491,7 +5658,7 @@ def _run_finite_difference_locked(
             }
         )
         _claimed_write(claim, status_path, _json_bytes(status))
-        if not terminal_path.exists() and not terminal_path.is_symlink():
+        if not _claimed_root_entry_exists(claim, terminal_path):
             _terminal_write_noreplace(
                 claim,
                 terminal_path,
@@ -5515,7 +5682,7 @@ def run_finite_difference(
             if isinstance(exc, ConcurrentRunError):
                 raise
             terminal_path = output / TERMINAL
-            if terminal_path.exists() or terminal_path.is_symlink():
+            if _claimed_root_entry_exists(claim, terminal_path):
                 raise
             status_path = output / "status.json"
             status: dict[str, Any] = {
@@ -5530,9 +5697,10 @@ def run_finite_difference(
                 "current_point": None,
                 "confirmation_passed": False,
             }
-            if status_path.is_file() and not status_path.is_symlink():
+            if _claimed_root_entry_exists(claim, status_path):
                 try:
-                    loaded, _ = campaign._read_json_object(
+                    loaded, _ = _claimed_json_object(
+                        claim,
                         status_path,
                         label="failed FD confirmation status",
                         max_bytes=1024 * 1024,
@@ -5914,12 +6082,17 @@ def _run_half_step_locked(
     identity = _fd_execution_identity()
     status_path = output_root / "status.json"
     expected_status = _initial_half_step_status(identity, prior_root, source)
-    if status_path.exists() or status_path.is_symlink():
-        status, _raw = campaign._read_json_object(
-            status_path, label="half-step status", max_bytes=4 * 1024 * 1024
+    if _claimed_root_entry_exists(claim, status_path):
+        status, _raw = _claimed_json_object(
+            claim,
+            status_path,
+            label="half-step status",
+            max_bytes=4 * 1024 * 1024,
         )
         _validate_half_step_resume_status(status, expected_status)
-        if (output_root / TERMINAL).exists() or (output_root / "receipt.json").exists():
+        if _claimed_root_entry_exists(
+            claim, output_root / TERMINAL
+        ) or _claimed_root_entry_exists(claim, output_root / "receipt.json"):
             raise ValueError("half-step output root is not resumable running state")
     else:
         if not claim.root_created:
@@ -6198,7 +6371,7 @@ def _run_half_step_locked(
         return receipt
     except BaseException as exc:
         terminal_path = output_root / TERMINAL
-        if terminal_path.exists() or terminal_path.is_symlink():
+        if _claimed_root_entry_exists(claim, terminal_path):
             raise
         detail = f"{type(exc).__name__}: {exc}"
         status.update(
@@ -6259,8 +6432,8 @@ def run_half_step_extension(prior_root: Path, output_root: Path) -> dict[str, An
         _require_regular_existing_artifact(claim, TERMINAL)
         _require_regular_existing_artifact(claim, "receipt.json")
         status_path = output / "status.json"
-        if not claim.root_created and not (
-            status_path.exists() or status_path.is_symlink()
+        if not claim.root_created and not _claimed_root_entry_exists(
+            claim, status_path
         ):
             raise FileExistsError(
                 f"half-step extension requires a fresh output root: {output}"
@@ -6271,7 +6444,7 @@ def run_half_step_extension(prior_root: Path, output_root: Path) -> dict[str, An
             if isinstance(exc, ConcurrentRunError):
                 raise
             terminal_path = output / TERMINAL
-            if terminal_path.exists() or terminal_path.is_symlink():
+            if _claimed_root_entry_exists(claim, terminal_path):
                 raise
             status_path = output / "status.json"
             failure_identity = _half_step_failure_execution_identity()
@@ -6296,9 +6469,10 @@ def run_half_step_extension(prior_root: Path, output_root: Path) -> dict[str, An
                 "confirmation_passed": False,
                 "accepted_campaign_result": False,
             }
-            if status_path.is_file() and not status_path.is_symlink():
+            if _claimed_root_entry_exists(claim, status_path):
                 try:
-                    loaded, _raw = campaign._read_json_object(
+                    loaded, _raw = _claimed_json_object(
+                        claim,
                         status_path,
                         label="failed half-step status",
                         max_bytes=4 * 1024 * 1024,
@@ -6443,8 +6617,8 @@ def _run_analytic_locked(
         return receipt
     except BaseException as exc:
         terminal_path = output_root / TERMINAL
-        if terminal_path.exists() or terminal_path.is_symlink():
-            _validated_terminal(terminal_path)
+        if _claimed_root_entry_exists(claim, terminal_path):
+            _validated_terminal(terminal_path, claim=claim)
             raise
         detail = f"{type(exc).__name__}: {exc}"
         status.update(
