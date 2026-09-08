@@ -167,3 +167,16 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   origins/hashes rather than package versions alone, and hold the route claim across native
   TS Hessian evaluation/publication. No production calculator, literature benchmark,
   D2b gate flip, D3b table, or PR exists.
+- 2026-09-08 00:41 PDT (hermes-custom-build-001; profile=workstation) —
+  PRODUCTION HARDENING REVIEW PASSED: exact pushed implementation head
+  `cab53c44564fd50c2d05f45d153b5975c26759dc` closes every previously identified
+  restart, trusted-input, executable-provenance, and route-claim defect. The strict
+  final pass binds bounded Sella PES-cache/H0/mass/kick state; canonical restart and
+  final directions; immutable trusted geometries; resident Python module code plus
+  literal/container state; concrete NumPy/SciPy/PySCF native payloads; and a
+  replacement-resistant abstract-kernel route fence with pinned rollback of displaced
+  publications. The independent cold review approved all final regressions; whole-QM
+  verification is `1075 passed, 1 skipped` with Ruff/format/diff clean. No production
+  calculator, 12–20 K literature benchmark, D2b gate flip, D3b table, or PR ran in
+  this implementation slice. Acceptance remains red only on executing the bounded
+  production campaign and adjudicating its receipt-backed scientific outputs.
