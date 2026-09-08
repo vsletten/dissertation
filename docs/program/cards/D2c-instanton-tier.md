@@ -277,3 +277,20 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   then encode acceptance/rejection boundaries (including low-scale and direct-result
   construction) before changing policy. No TS qualification, IRC, SCT rate, D2b gate
   flip, D3b table, or PR exists.
+- 2026-09-08 04:28 PDT (hermes-custom-build-001; profile=workstation) —
+  HESSIAN CONVERGENCE DIAGNOSTIC LAUNCHED: exact pushed source head
+  `5f74662a079129b54cbbbe7a37aaba47c6cf6a99` adds a provenance-bound,
+  evidence-only four-case raw Hessian/component diagnostic (baseline, strict
+  response, dense grid, dense+strict reference), keeps production acceptance
+  fail-closed at the historical near-zero absolute floor plus a global spectral
+  relative gate, and binds the operative PWB6K/D3BJ Python dispatch plus
+  `libs-dftd3.so`. Cold review exposed and the implementation closed missing D3
+  dispatch provenance, false-running failure status, and absent terminal/dead-man
+  receipts; focused verification is `204 passed` with whole-QM Ruff/format/diff
+  clean (the preceding whole suite was `1083 passed`). Fresh same-entrypoint
+  preflight identity `07964984561e5c6e6e553f18f70223fac8e999e6d813fb8db48956087946e967`
+  is running as bounded user unit `task300-d2c-hessian-5f74662.service`
+  (`RuntimeMaxSec=12h`, 16 threads, nice 10, SIGINT + ExecStopPost dead-man).
+  Await atomic terminal receipt at
+  `/mnt/data/vsletten/dissertation-data/task300-d2c-hessian-5f74662-diagnostic/terminal.json`;
+  no TS qualification, IRC, SCT rate, D2b gate flip, D3b table, or PR exists.
