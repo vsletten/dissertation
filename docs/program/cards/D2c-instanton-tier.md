@@ -311,3 +311,33 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   confirmed one-negative-mode spectrum may authorize a narrowly scoped
   PySCF/PWB6K/D3BJ/grid-5 policy and TS rerun. No IRC, SCT/literature verdict, D2b
   gate flip, D3b table, or PR exists.
+- 2026-09-08 15:26 PDT (hermes-custom-build-001; profile=workstation) —
+  HALF-STEP FD RECEIPT INDEPENDENTLY VERIFIED, SCIENTIFIC CONFIRMATION REJECTED:
+  exact clean/pushed head `83d372d778431f2e733fec8b8ce64e5a5ae19b99`
+  adds the immutable `+/-0.005 Bohr` extension of the prior `+/-0.01 Bohr`
+  finite-difference Hessian, with fresh-root/no-clobber output claims, strict
+  resume/dead-man validation, 36 new receipt-bound gradients, Richardson
+  reconstruction, and predeclared matrix/mode gates. Spec review passed after
+  three corrective rounds; quality review passed after output-confinement,
+  source-root, mode-recovery, dangling-artifact, TOCTOU, and wrong-mode terminal
+  corrections. Parent verification is 152 focused tests plus Ruff/format/diff;
+  the implementation pass also reported the whole QM suite green (`1233 passed,
+  2 skipped`). The first immutable attempt failed before its first calculator
+  because this worktree's local venv lacked locked `pyscf-dispersion==1.5.0`;
+  that failed root is preserved. After installing the locked dependency, bounded
+  unit `task300-d2c-halfstep-83d372d-r2.service` completed all 36 points under a
+  2-hour cap, 16 threads, nice 10, SIGINT, and dead-man finalizer. Independent
+  read-only verification passed every artifact/provenance check, reconstructed
+  both finite-difference matrices, Richardson matrix, all four projected spectra,
+  476 gate booleans, and matched receipt SHA-256
+  `dbde8c707bddbb8f1d4a226755d4e52efbd15a437bd612255bc0e9c969d5f84a`.
+  Exactly ten gates fail, including Richardson-vs-inner spectral-relative drift
+  (`3.41075e-5 > 2e-5`), FD-vs-analytic absolute/relative deltas
+  (`5.86602e-4 > 2e-4`; `2.62359e-4 > 1e-4`), low-positive eigenvalue floors,
+  and low-positive frequency agreement (`6.7622 cm^-1 > 1.0` versus analytic;
+  `2.04659 cm^-1 > 0.5` versus the inner stencil). The receipt therefore
+  correctly declares `confirmation_passed=false` and
+  `accepted_campaign_result=false`. No tolerance change, TS qualification, IRC,
+  SCT/literature verdict, D2b gate flip, D3b table, or PR is authorized; the next
+  bounded continuation must choose and predeclare a scientifically different
+  route rather than replaying this rejected Hessian policy.
