@@ -1,5 +1,6 @@
 """Deterministic contract tests for the path-preserving Sella IRC adapter."""
 
+import hashlib
 from dataclasses import replace
 
 import numpy as np
@@ -25,18 +26,28 @@ def _install_fake_irc(monkeypatch, routes):
     instances = []
     calls = []
     constructor_masses = []
+    diagonalizations = []
     transition_state = water().coords.copy()
     atom_count = len(transition_state)
 
     class FakePes:
         def __init__(self, optimizer):
             self.optimizer = optimizer
+            self.curr = {"x": None, "f": None, "g": None}
+            self.last = self.curr.copy()
 
         def get_f(self):
             return self.optimizer.energy_ev
 
         def get_projected_forces(self):
             return self.optimizer.projected_forces
+
+        def set_x(self, target):
+            self.optimizer.atoms.positions[:] = np.asarray(target).reshape((-1, 3))
+
+        def set_H(self, target, *, initialized):
+            assert initialized is True
+            self.optimizer.restored_hessian = np.asarray(target).copy()
 
     class FakeIRC:
         def __init__(self, atoms, **kwargs):
@@ -50,6 +61,12 @@ def _install_fake_irc(monkeypatch, routes):
             self.first = True
             self._terminal_converged = False
             self.pes = FakePes(self)
+            self.x0 = transition_state.reshape(-1).copy()
+            self.v0ts = None
+            self.H0 = None
+            self.pescurr = None
+            self.peslast = None
+            self.restored_hessian = None
             self.terminal_convergence_calls = 0
             instances.append(self)
 
@@ -61,6 +78,30 @@ def _install_fake_irc(monkeypatch, routes):
             return not self.first and self._terminal_converged
 
         def irun(self, *, fmax, fmax_inner, steps, direction):
+            if self.v0ts is None:
+                diagonalizations.append(direction)
+                dimension = atom_count * 3
+                self.H0 = np.diag(np.arange(1, dimension + 1, dtype=float))
+                self.v0ts = np.zeros(dimension)
+                self.v0ts[0] = 0.1
+                self.pescurr = {
+                    "x": self.x0.copy(),
+                    "f": -10.0,
+                    "g": np.zeros(dimension),
+                    "state_hash": self.atoms.positions.tobytes(),
+                }
+                self.peslast = {"x": None, "f": None, "g": None}
+            else:
+                # Match Sella 2.5's new-direction branch: a restored v0ts must
+                # bypass the TS kick/diagonalization and reinstall the exact
+                # PES coordinates, caches, and Hessian captured at the TS.
+                assert self.pescurr is not None
+                assert self.peslast is not None
+                assert self.H0 is not None
+                self.pes.set_x(self.x0)
+                self.pes.curr = self.pescurr.copy()
+                self.pes.last = self.peslast.copy()
+                self.pes.set_H(self.H0.copy(), initialized=True)
             calls.append(
                 {
                     "fmax": fmax,
@@ -90,7 +131,7 @@ def _install_fake_irc(monkeypatch, routes):
 
     monkeypatch.setattr(sella, "IRC", FakeIRC)
     monkeypatch.setattr(ts_module, "make_ase_calculator", lambda *args: object())
-    return ts_module, instances, calls, constructor_masses
+    return ts_module, instances, calls, constructor_masses, diagonalizations
 
 
 def _converged_routes():
@@ -101,8 +142,8 @@ def _converged_routes():
 
 
 def test_path_adapter_preserves_both_directions_and_explicit_masses(monkeypatch):
-    ts_module, instances, calls, constructor_masses = _install_fake_irc(
-        monkeypatch, _converged_routes()
+    ts_module, instances, calls, constructor_masses, diagonalizations = (
+        _install_fake_irc(monkeypatch, _converged_routes())
     )
     transition_state = replace(water(), frozen_indices=[0])
     frozen_masses = np.array([15.99, 1.01, 1.02])
@@ -118,6 +159,7 @@ def test_path_adapter_preserves_both_directions_and_explicit_masses(monkeypatch)
     )
 
     assert len(instances) == 1
+    assert diagonalizations == ["forward"]
     assert [call["direction"] for call in calls] == ["forward", "reverse"]
     assert all(call["steps"] == 7 for call in calls)
     assert instances[0].kwargs["dx"] == pytest.approx(0.12)
@@ -162,17 +204,19 @@ def test_path_adapter_preserves_both_directions_and_explicit_masses(monkeypatch)
 def test_path_adapter_checkpoints_each_new_direction_and_skips_completed(
     monkeypatch,
 ):
-    ts_module, _, _, _ = _install_fake_irc(monkeypatch, _converged_routes())
+    ts_module, _, _, _, _ = _install_fake_irc(monkeypatch, _converged_routes())
     transition_state = water()
     masses = np.array([15.99, 1.01, 1.02])
-    original = ts_module.trace_sella_irc(
+    initialized = []
+    original = ts_module._trace_sella_irc_resume(
         transition_state,
         CHEAP,
         masses_amu=masses,
         max_steps=7,
+        _initialization_callback=initialized.append,
     )
 
-    ts_module, _, calls, _ = _install_fake_irc(monkeypatch, _converged_routes())
+    ts_module, _, calls, _, _ = _install_fake_irc(monkeypatch, _converged_routes())
     checkpointed = []
     with pytest.raises(TypeError, match="_completed_directions"):
         ts_module.trace_sella_irc(
@@ -189,6 +233,7 @@ def test_path_adapter_checkpoints_each_new_direction_and_skips_completed(
         max_steps=7,
         _completed_directions={"forward": original.directions[0]},
         _direction_callback=checkpointed.append,
+        _initialization_state=initialized[0],
     )
 
     assert [call["direction"] for call in calls] == ["reverse"]
@@ -197,9 +242,160 @@ def test_path_adapter_checkpoints_each_new_direction_and_skips_completed(
     assert resumed.directions[1].sella_direction == "reverse"
 
 
+def test_path_adapter_resume_restores_shared_initialization_without_diagonalizing(
+    monkeypatch,
+):
+    ts_module, _, _, _, first_diagonalizations = _install_fake_irc(
+        monkeypatch, _converged_routes()
+    )
+    transition_state = water()
+    masses = np.array([15.99, 1.01, 1.02])
+    initialized = []
+    checkpointed = []
+
+    def crash_after_forward(path):
+        checkpointed.append(path)
+        raise RuntimeError("simulated process loss after forward checkpoint")
+
+    with pytest.raises(RuntimeError, match="process loss after forward"):
+        ts_module._trace_sella_irc_resume(
+            transition_state,
+            CHEAP,
+            masses_amu=masses,
+            max_steps=7,
+            _initialization_callback=initialized.append,
+            _direction_callback=crash_after_forward,
+        )
+
+    assert first_diagonalizations == ["forward"]
+    assert len(initialized) == 1
+    assert [path.sella_direction for path in checkpointed] == ["forward"]
+    fingerprint = initialized[0].fingerprint
+    assert checkpointed[0].initialization_fingerprint == fingerprint
+
+    (
+        ts_module,
+        resumed_instances,
+        resumed_calls,
+        _,
+        resumed_diagonalizations,
+    ) = _install_fake_irc(monkeypatch, _converged_routes())
+    resumed = ts_module._trace_sella_irc_resume(
+        transition_state,
+        CHEAP,
+        masses_amu=masses,
+        max_steps=7,
+        _completed_directions={"forward": checkpointed[0]},
+        _initialization_state=initialized[0],
+    )
+
+    assert resumed_diagonalizations == []
+    assert [call["direction"] for call in resumed_calls] == ["reverse"]
+    assert len(resumed_instances) == 1
+    resumed_irc = resumed_instances[0]
+    assert np.array_equal(resumed_irc.restored_hessian, initialized[0].h0)
+    assert np.array_equal(resumed_irc.v0ts, initialized[0].v0ts)
+    assert np.array_equal(resumed_irc.pes.curr["x"], initialized[0].pes_current["x"])
+    assert np.array_equal(resumed_irc.pes.curr["g"], initialized[0].pes_current["g"])
+    assert resumed_irc.pes.curr["f"] == initialized[0].pes_current["f"]
+    assert resumed.initialization_fingerprint == fingerprint
+    assert {
+        direction.initialization_fingerprint for direction in resumed.directions
+    } == {fingerprint}
+
+
+def test_restore_installs_checkpoint_before_fresh_real_sella_irc_has_pes_caches():
+    from ase import Atoms
+    from ase.calculators.lj import LennardJones
+    from sella import IRC
+
+    import quarry.ts as ts_module
+
+    transition_state = water()
+    masses = np.array([15.99, 1.01, 1.02])
+    dimension = 3 * len(transition_state.symbols)
+    contract = ts_module.IrcExecutionContract(
+        algorithm="sella-gonzalez-schlegel",
+        step_size_angstrom=0.1,
+        maximum_steps=7,
+        outer_fmax_ev_per_angstrom=0.05,
+        inner_fmax_ev_per_angstrom=0.01,
+    )
+    x0 = transition_state.coords.reshape(-1).copy()
+    state = ts_module.SellaIrcInitializationState(
+        symbols=tuple(transition_state.symbols),
+        charge=transition_state.charge,
+        spin=transition_state.spin,
+        frozen_indices=tuple(transition_state.frozen_indices or ()),
+        settings_fingerprint=hashlib.sha256(
+            ts_module.frequency_settings_fingerprint(CHEAP).encode()
+        ).hexdigest(),
+        execution_contract=contract,
+        x0=x0,
+        masses_amu=masses,
+        h0=np.eye(dimension),
+        v0ts=np.eye(1, dimension, 0).reshape(-1),
+        pes_current={"x": x0, "f": -1.0, "g": np.zeros(dimension)},
+        pes_last={"x": None, "f": None, "g": None},
+    )
+    atoms = Atoms(symbols=transition_state.symbols, positions=transition_state.coords)
+    atoms.set_masses(masses)
+    atoms.calc = LennardJones()
+    irc = IRC(atoms, logfile=None, dx=contract.step_size_angstrom)
+
+    assert not hasattr(irc, "pescurr")
+    ts_module._restore_sella_irc_initialization(
+        irc,
+        state,
+        transition_state,
+        CHEAP,
+        masses,
+        contract,
+    )
+    irc.pes.kick = lambda *_args, **_kwargs: pytest.fail(
+        "restored real Sella IRC performed a second TS diagonalization"
+    )
+    states = irc.irun(
+        fmax=contract.outer_fmax_ev_per_angstrom,
+        fmax_inner=contract.inner_fmax_ev_per_angstrom,
+        steps=contract.maximum_steps,
+        direction="reverse",
+    )
+    states.close()
+
+    assert np.array_equal(irc.H0, state.h0)
+    assert np.array_equal(irc.v0ts, state.v0ts)
+    expected_pes_x = state.pes_current["x"]
+    assert isinstance(expected_pes_x, np.ndarray)
+    assert np.array_equal(irc.pes.curr["x"], expected_pes_x)
+
+
+def test_path_adapter_resume_fails_closed_without_exact_shared_initialization(
+    monkeypatch,
+):
+    ts_module, _, _, _, _ = _install_fake_irc(monkeypatch, _converged_routes())
+    transition_state = water()
+    masses = np.array([15.99, 1.01, 1.02])
+    original = ts_module.trace_sella_irc(
+        transition_state,
+        CHEAP,
+        masses_amu=masses,
+        max_steps=7,
+    )
+
+    with pytest.raises(ValueError, match="shared Sella initialization"):
+        ts_module._trace_sella_irc_resume(
+            transition_state,
+            CHEAP,
+            masses_amu=masses,
+            max_steps=7,
+            _completed_directions={"forward": original.directions[0]},
+        )
+
+
 @pytest.mark.parametrize("masses", [[1.0, 2.0], [1.0, np.nan, 2.0]])
 def test_path_adapter_rejects_invalid_explicit_masses_before_sella(monkeypatch, masses):
-    ts_module, instances, _, _ = _install_fake_irc(monkeypatch, _converged_routes())
+    ts_module, instances, _, _, _ = _install_fake_irc(monkeypatch, _converged_routes())
 
     with pytest.raises(ValueError, match="masses|finite"):
         ts_module.trace_sella_irc(water(), CHEAP, masses_amu=masses)
@@ -210,7 +406,7 @@ def test_path_adapter_rejects_invalid_explicit_masses_before_sella(monkeypatch, 
 def test_path_adapter_rejects_a_zero_step_direction(monkeypatch):
     routes = _converged_routes()
     routes["forward"] = []
-    ts_module, _, _, _ = _install_fake_irc(monkeypatch, routes)
+    ts_module, _, _, _, _ = _install_fake_irc(monkeypatch, routes)
 
     with pytest.raises(RuntimeError, match="forward.*zero outer IRC steps"):
         ts_module.trace_sella_irc(water(), CHEAP, max_steps=3)
@@ -219,7 +415,7 @@ def test_path_adapter_rejects_a_zero_step_direction(monkeypatch):
 def test_path_adapter_fails_closed_on_exhaustion(monkeypatch):
     routes = _converged_routes()
     routes["reverse"] = [(-0.1, -10.1, 0.2, False)] * 3
-    ts_module, instances, _, _ = _install_fake_irc(monkeypatch, routes)
+    ts_module, instances, _, _, _ = _install_fake_irc(monkeypatch, routes)
 
     with pytest.raises(
         RuntimeError, match="reverse direction did not converge.*3 steps"
@@ -232,7 +428,7 @@ def test_path_adapter_fails_closed_on_exhaustion(monkeypatch):
 def test_path_adapter_rejects_more_than_the_bounded_point_count(monkeypatch):
     routes = _converged_routes()
     routes["forward"] = [(0.1, -10.1, 0.01, True)] * 3
-    ts_module, _, _, _ = _install_fake_irc(monkeypatch, routes)
+    ts_module, _, _, _, _ = _install_fake_irc(monkeypatch, routes)
 
     with pytest.raises(RuntimeError, match="forward.*point bound"):
         ts_module.trace_sella_irc(water(), CHEAP, max_steps=2)
@@ -245,7 +441,7 @@ def test_path_adapter_rejects_nonfinite_points(monkeypatch, bad_field):
     force = np.nan if bad_field == "forces" else 0.01
     routes = _converged_routes()
     routes["forward"] = [(coords, energy, force, True)]
-    ts_module, _, _, _ = _install_fake_irc(monkeypatch, routes)
+    ts_module, _, _, _, _ = _install_fake_irc(monkeypatch, routes)
 
     with pytest.raises(RuntimeError, match=f"non-finite {bad_field}"):
         ts_module.trace_sella_irc(water(), CHEAP, max_steps=2)
@@ -254,14 +450,14 @@ def test_path_adapter_rejects_nonfinite_points(monkeypatch, bad_field):
 def test_path_adapter_rejects_endpoint_above_outer_force_threshold(monkeypatch):
     routes = _converged_routes()
     routes["forward"] = [(0.1, -10.1, 0.05, True)]
-    ts_module, _, _, _ = _install_fake_irc(monkeypatch, routes)
+    ts_module, _, _, _, _ = _install_fake_irc(monkeypatch, routes)
 
     with pytest.raises(RuntimeError, match="endpoint projected fmax"):
         ts_module.trace_sella_irc(water(), CHEAP, fmax_ev_a=0.05, max_steps=2)
 
 
 def test_full_irc_compatibility_wrapper_returns_endpoints(monkeypatch):
-    ts_module, _, _, _ = _install_fake_irc(monkeypatch, _converged_routes())
+    ts_module, _, _, _, _ = _install_fake_irc(monkeypatch, _converged_routes())
     transition_state = water()
 
     sella_forward, sella_reverse = ts_module.full_irc(

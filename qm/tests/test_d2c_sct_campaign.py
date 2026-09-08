@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import shutil
 import subprocess
@@ -80,6 +81,9 @@ def _trace(
         "forward": _frozen_endpoint(route, forward_terminal_file).coords,
         "reverse": _frozen_endpoint(route, reverse_terminal_file).coords,
     }
+    initialization_fingerprint = hashlib.sha256(
+        f"test-sella-initialization:{route}".encode()
+    ).hexdigest()
     directions = []
     for direction, sign in (("forward", 1), ("reverse", -1)):
         start = transition_state.coords.copy()
@@ -91,7 +95,14 @@ def _trace(
             IrcPoint(1, 0.5 * (transition_state.coords + terminal), -10.1, 0.02),
             IrcPoint(2, terminal, -10.2, 0.01),
         )
-        directions.append(IrcDirectionPath(direction, sign, points))
+        directions.append(
+            IrcDirectionPath(
+                direction,
+                sign,
+                points,
+                initialization_fingerprint=initialization_fingerprint,
+            )
+        )
     masses = np.array(
         [campaign.ISOTOPIC_MASSES_AMU[s] for s in transition_state.symbols]
     )
@@ -105,6 +116,56 @@ def _trace(
             outer_fmax_ev_per_angstrom=0.05,
             inner_fmax_ev_per_angstrom=0.01,
         ),
+        initialization_fingerprint,
+    )
+
+
+def _sella_initialization_state(
+    transition_state: Cluster,
+    trace: SellaIrcTrace,
+) -> campaign.quarry_ts.SellaIrcInitializationState:
+    assert trace.execution_contract is not None
+    dimension = transition_state.coords.size
+    x0 = transition_state.coords.reshape(-1).copy()
+    masses = np.asarray(
+        [campaign.ISOTOPIC_MASSES_AMU[symbol] for symbol in transition_state.symbols]
+    )
+    settings = campaign.DftSettings(**campaign.DFT_SETTINGS)
+    return campaign.quarry_ts.SellaIrcInitializationState(
+        symbols=tuple(transition_state.symbols),
+        charge=transition_state.charge,
+        spin=transition_state.spin,
+        frozen_indices=tuple(sorted(transition_state.frozen_indices)),
+        settings_fingerprint=hashlib.sha256(
+            campaign.frequency_settings_fingerprint(settings).encode()
+        ).hexdigest(),
+        execution_contract=trace.execution_contract,
+        x0=x0,
+        masses_amu=masses,
+        h0=np.eye(dimension),
+        v0ts=np.eye(1, dimension, 0).reshape(-1),
+        pes_current={
+            "x": x0,
+            "f": -10.0,
+            "g": np.zeros(dimension),
+            "state_hash": transition_state.coords.tobytes(),
+        },
+        pes_last={"x": None, "f": None, "g": None},
+    )
+
+
+def _bind_trace_initialization(
+    trace: SellaIrcTrace,
+    initialization: campaign.quarry_ts.SellaIrcInitializationState,
+) -> SellaIrcTrace:
+    directions = tuple(
+        replace(direction, initialization_fingerprint=initialization.fingerprint)
+        for direction in trace.directions
+    )
+    return replace(
+        trace,
+        directions=directions,
+        initialization_fingerprint=initialization.fingerprint,
     )
 
 
@@ -1619,6 +1680,8 @@ def test_bound_irc_runner_receives_every_exact_campaign_argument(tmp_path: Path)
         "step_size_a",
         "_completed_directions",
         "_direction_callback",
+        "_initialization_state",
+        "_initialization_callback",
     }
     assert np.array_equal(observed["masses_amu"], trace.masses_amu)
     assert observed["step_size_a"] == 0.05
@@ -2566,13 +2629,42 @@ def test_path_post_commit_ancestry_mutation_removes_only_owned_publication(
                 ),
             )
 
+    ancestry = campaign._load_canonical_qualification(run_root, "h-co-1w-cside")
+    trace, hashes, _ = campaign._validate_canonical_irc_receipts(ancestry)
+    ancestors = {
+        "preflight": ancestry.preflight_receipt_sha256,
+        "transition_state_qualification": ancestry.ts_qualification_receipt_sha256,
+        "irc_execution": hashes["execution"],
+        "irc_forward": hashes["forward"],
+        "irc_reverse": hashes["reverse"],
+    }
+
+    def validate_ancestry() -> None:
+        campaign._load_canonical_qualification(run_root, "h-co-1w-cside")
+
     with pytest.raises(ValueError, match="preflight receipt SHA-256"):
-        campaign.publish_typed_irc_path(
-            run_root,
-            route="h-co-1w-cside",
+        campaign._publish_typed_irc_path(
+            ancestry.root,
+            campaign_identity=ancestry.campaign_identity,
+            route=ancestry.route,
+            atom_mapping_sha256=ancestry.atom_mapping_sha256,
+            qualified_transition_state=ancestry.qualified_transition_state,
+            trace=trace,
+            ancestor_receipts=ancestors,
+            _ancestry_validator=validate_ancestry,
             _failure_injector=mutate_after_commit,
         )
     assert not (run_root / "h-co-1w-cside" / "path").exists()
+
+
+def test_public_production_apis_do_not_expose_failure_injection():
+    for public_api in (
+        campaign.publish_transition_state_qualification,
+        campaign.run_and_publish_irc,
+        campaign.publish_typed_irc_path,
+        campaign.publish_path_hessians,
+    ):
+        assert "_failure_injector" not in inspect.signature(public_api).parameters
 
 
 def test_public_hessian_api_rejects_caller_supplied_settings(tmp_path: Path):
@@ -2893,12 +2985,21 @@ def test_mid_irc_crash_checkpoints_completed_direction_and_resume_skips_it(
     tmp_path: Path,
 ):
     run_root = tmp_path / "run"
-    _, _, trace = _qualified_ancestry(run_root)
+    _, transition_state, trace = _qualified_ancestry(run_root)
+    initialization = _sella_initialization_state(transition_state, trace)
+    trace = _bind_trace_initialization(trace, initialization)
     route = "h-co-1w-cside"
     first_calls: list[tuple[str, ...]] = []
 
-    def crashing_runner(*_args, _completed_directions, _direction_callback, **_kwargs):
+    def crashing_runner(
+        *_args,
+        _completed_directions,
+        _direction_callback,
+        _initialization_callback,
+        **_kwargs,
+    ):
         first_calls.append(tuple(sorted(_completed_directions)))
+        _initialization_callback(initialization)
         _direction_callback(trace.directions[0])
         raise RuntimeError("in-process crash after forward IRC")
 
@@ -2910,13 +3011,33 @@ def test_mid_irc_crash_checkpoints_completed_direction_and_resume_skips_it(
         )
     checkpoint = run_root / route / "irc-restart" / "forward" / "receipt.json"
     checkpoint_before = checkpoint.read_bytes()
+    initialization_receipt = json.loads(
+        (
+            run_root / route / "irc-restart" / "initialization" / "receipt.json"
+        ).read_text()
+    )
+    assert (
+        initialization_receipt["initialization_fingerprint"]
+        == initialization.fingerprint
+    )
+    assert set(initialization_receipt["initialization_state"]) >= {"H0", "v0ts"}
+    assert json.loads(checkpoint_before)["initialization_fingerprint"] == (
+        initialization.fingerprint
+    )
     assert first_calls == [()]
     assert not (run_root / route / "irc-execution").exists()
 
     resumed_calls: list[tuple[str, ...]] = []
 
-    def resumed_runner(*_args, _completed_directions, _direction_callback, **_kwargs):
+    def resumed_runner(
+        *_args,
+        _completed_directions,
+        _direction_callback,
+        _initialization_state,
+        **_kwargs,
+    ):
         resumed_calls.append(tuple(sorted(_completed_directions)))
+        assert _initialization_state.fingerprint == initialization.fingerprint
         resumed_forward = _completed_directions["forward"]
         assert len(resumed_forward.points) == len(trace.directions[0].points)
         for resumed_point, expected_point in zip(
@@ -2947,18 +3068,27 @@ def test_mid_irc_crash_checkpoints_completed_direction_and_resume_skips_it(
     assert (run_root / route / "irc-restart" / "reverse" / "receipt.json").is_file()
 
 
-@pytest.mark.parametrize("corruption", ["mixed-run", "unexpected-artifact"])
+@pytest.mark.parametrize(
+    "corruption", ["mixed-run", "tampered-initialization", "unexpected-artifact"]
+)
 def test_irc_restart_rejects_corrupt_checkpoint_before_recompute(
     tmp_path: Path, corruption: str
 ):
     run_root = tmp_path / corruption
-    _, _, trace = _qualified_ancestry(run_root)
+    _, transition_state, trace = _qualified_ancestry(run_root)
+    initialization = _sella_initialization_state(transition_state, trace)
+    trace = _bind_trace_initialization(trace, initialization)
     route = "h-co-1w-cside"
 
     def stop_after_forward(
-        *_args, _completed_directions, _direction_callback, **_kwargs
+        *_args,
+        _completed_directions,
+        _direction_callback,
+        _initialization_callback,
+        **_kwargs,
     ):
         assert not _completed_directions
+        _initialization_callback(initialization)
         _direction_callback(trace.directions[0])
         raise RuntimeError("checkpoint only")
 
@@ -2975,6 +3105,15 @@ def test_irc_restart_rejects_corrupt_checkpoint_before_recompute(
             lambda receipt: receipt.__setitem__("irc_run_identity", "f" * 64),
         )
         match = "mixed run identities"
+    elif corruption == "tampered-initialization":
+
+        def tamper_hessian(receipt):
+            receipt["initialization_state"]["H0"]["values"][0] += 1.0
+
+        _rewrite_canonical_json(
+            restart_root / "initialization" / "receipt.json", tamper_hessian
+        )
+        match = "Sella H0 array hash mismatch"
     else:
         (restart_root / "foreign").write_text("must be preserved")
         match = "unexpected or incomplete"
@@ -2996,7 +3135,9 @@ def test_irc_checkpoint_destination_race_is_non_overwriting(
     monkeypatch, tmp_path: Path
 ):
     run_root = tmp_path / "run"
-    _, _, trace = _qualified_ancestry(run_root)
+    _, transition_state, trace = _qualified_ancestry(run_root)
+    initialization = _sella_initialization_state(transition_state, trace)
+    trace = _bind_trace_initialization(trace, initialization)
     route = "h-co-1w-cside"
     destination = run_root / route / "irc-restart" / "forward"
     real_rename = campaign._renameat2_noreplace
@@ -3009,8 +3150,15 @@ def test_irc_checkpoint_destination_race_is_non_overwriting(
 
     monkeypatch.setattr(campaign, "_renameat2_noreplace", race)
 
-    def runner(*_args, _completed_directions, _direction_callback, **_kwargs):
+    def runner(
+        *_args,
+        _completed_directions,
+        _direction_callback,
+        _initialization_callback,
+        **_kwargs,
+    ):
         assert not _completed_directions
+        _initialization_callback(initialization)
         _direction_callback(trace.directions[0])
         return trace
 

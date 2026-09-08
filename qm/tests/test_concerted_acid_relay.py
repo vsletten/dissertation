@@ -199,6 +199,24 @@ def test_full_irc_gate_rejects_framework_collision_with_correct_basins():
     assert "minimum pair distance" in reason
 
 
+def _initialize_fake_sella_irc(irc) -> None:
+    """Emulate Sella's one-time shared-Hessian initialization contract."""
+
+    if hasattr(irc, "v0ts"):
+        return
+    dimension = irc.atoms.positions.size
+    irc.x0 = irc.atoms.positions.reshape(-1).copy()
+    irc.H0 = np.eye(dimension)
+    irc.v0ts = np.eye(1, dimension, 0).reshape(-1)
+    irc.pescurr = {
+        "x": irc.x0.copy(),
+        "f": -1.0,
+        "g": np.zeros(dimension),
+        "state_hash": irc.atoms.positions.tobytes(),
+    }
+    irc.peslast = {"x": None, "f": None, "g": None}
+
+
 def test_full_irc_reuses_one_optimizer_for_both_directions(monkeypatch, tmp_path):
     import sella
 
@@ -230,6 +248,7 @@ def test_full_irc_reuses_one_optimizer_for_both_directions(monkeypatch, tmp_path
             calls.append(kwargs)
             self.atoms.positions[:] = water().coords
             self.first = True
+            _initialize_fake_sella_irc(self)
 
             def states():
                 yield self.gradient_converged(np.zeros(9))
@@ -289,6 +308,7 @@ def test_full_irc_bridges_ase_329_gradient_convergence_api(monkeypatch):
         def irun(self, **kwargs):
             self.atoms.positions[:] = water().coords
             self.first = True  # Sella resets this for each direction.
+            _initialize_fake_sella_irc(self)
 
             def states():
                 decision = self.gradient_converged(np.zeros(9))
@@ -338,6 +358,7 @@ def test_full_irc_fails_closed_when_either_direction_exhausts(monkeypatch):
             self.direction = kwargs["direction"]
             self.atoms.positions[:] = water().coords
             self.first = True
+            _initialize_fake_sella_irc(self)
 
             def states():
                 yield self.gradient_converged(np.zeros(9))

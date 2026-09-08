@@ -413,7 +413,7 @@ _IRC_DIRECTION_TEMPORARY_NAME = re.compile(
 )
 _IRC_RESTART_ROOT_TEMPORARY_NAME = re.compile(r"\.irc-restart\.[0-9]+\.[0-9]+\.tmp\Z")
 _IRC_RESTART_TEMPORARY_NAME = re.compile(
-    r"\.(?:forward|reverse)\.[0-9]+\.[0-9]+\.tmp\Z"
+    r"\.(?:initialization|forward|reverse)\.[0-9]+\.[0-9]+\.tmp\Z"
 )
 _HESSIAN_POINT_TEMPORARY_NAME = re.compile(
     r"\.(?P<index>[0-9]{6})\.[0-9]+\.[0-9]+\.tmp\Z"
@@ -1810,7 +1810,6 @@ def publish_transition_state_qualification(
     run_root: Path,
     *,
     route: str,
-    _failure_injector: Callable[[str], None] | None = None,
 ) -> PublishedTransitionStateQualification:
     """Evaluate and publish the canonical TS gate from repository-bound inputs."""
 
@@ -1826,7 +1825,6 @@ def publish_transition_state_qualification(
             root,
             route=route,
             _boundary_validator=validate_boundary,
-            _failure_injector=_failure_injector,
         )
 
     bundle_root = _safe_absolute_root(DEFAULT_BUNDLE_ROOT)
@@ -1854,7 +1852,6 @@ def publish_transition_state_qualification(
         mapped_reactant_coordinates_angstrom=endpoints["reactant"],
         mapped_product_coordinates_angstrom=endpoints["product"],
         _boundary_validator=validate_boundary,
-        _failure_injector=_failure_injector,
     )
 
 
@@ -2155,6 +2152,14 @@ def _irc_direction_receipt_payload(
     """Build one receipt from observed runner output and its execution contract."""
 
     _require_sha(irc_run_identity, length=64, label="IRC run identity")
+    initialization_fingerprint = direction.initialization_fingerprint
+    if initialization_fingerprint is None:
+        raise ValueError("IRC direction lacks a shared initialization fingerprint")
+    _require_sha(
+        initialization_fingerprint,
+        length=64,
+        label="IRC initialization fingerprint",
+    )
     mode = _validated_unit_mode(
         unstable_mode_mass_scaled, len(qualified_transition_state.symbols)
     )
@@ -2166,11 +2171,12 @@ def _irc_direction_receipt_payload(
     )
     contract = _irc_execution_contract_payload(execution_contract)
     return {
-        "schema": "d2c-irc-direction-v1",
+        "schema": "d2c-irc-direction-v2",
         "stage": f"irc_{direction.sella_direction}",
         "state": "accepted",
         "accepted": True,
         "irc_run_identity": irc_run_identity,
+        "initialization_fingerprint": initialization_fingerprint,
         "preflight_receipt_sha256": preflight_receipt_sha256,
         "campaign_identity": preflight["identity"],
         "route": route,
@@ -2259,6 +2265,7 @@ def _direction_from_irc_receipt(
         "state",
         "accepted",
         "irc_run_identity",
+        "initialization_fingerprint",
         "preflight_receipt_sha256",
         "campaign_identity",
         "route",
@@ -2284,7 +2291,7 @@ def _direction_from_irc_receipt(
         raise ValueError(f"IRC {name} receipt fields are unexpected or incomplete")
     expected_sign = 1 if name == "forward" else -1
     expected_identity = {
-        "schema": "d2c-irc-direction-v1",
+        "schema": "d2c-irc-direction-v2",
         "stage": f"irc_{name}",
         "state": "accepted",
         "accepted": True,
@@ -2313,6 +2320,15 @@ def _direction_from_irc_receipt(
         receipt.get("irc_run_identity"), label=f"IRC {name} run identity"
     )
     _require_sha(run_identity, length=64, label=f"IRC {name} run identity")
+    initialization_fingerprint = _require_json_string(
+        receipt.get("initialization_fingerprint"),
+        label=f"IRC {name} initialization fingerprint",
+    )
+    _require_sha(
+        initialization_fingerprint,
+        length=64,
+        label=f"IRC {name} initialization fingerprint",
+    )
     contract_payload = {
         "algorithm": receipt["algorithm"],
         "step_size_angstrom": receipt["step_size_angstrom"],
@@ -2393,7 +2409,12 @@ def _direction_from_irc_receipt(
                 ),
             )
         )
-    direction = IrcDirectionPath(name, expected_sign, tuple(points))
+    direction = IrcDirectionPath(
+        name,
+        expected_sign,
+        tuple(points),
+        initialization_fingerprint=initialization_fingerprint,
+    )
     overlap = _validate_irc_direction_contract(
         direction,
         ancestry.qualified_transition_state,
@@ -2451,6 +2472,13 @@ def _irc_execution_receipt_payload(
 ) -> dict[str, Any]:
     if trace.execution_contract is None:
         raise TypeError("IRC runner returned no observed execution contract")
+    if trace.initialization_fingerprint is None:
+        raise ValueError("IRC runner returned no shared initialization fingerprint")
+    _require_sha(
+        trace.initialization_fingerprint,
+        length=64,
+        label="IRC execution initialization fingerprint",
+    )
     masses = _immutable_little_f64(
         trace.masses_amu, (len(ancestry.qualified_transition_state.symbols),)
     )
@@ -2475,11 +2503,12 @@ def _irc_execution_receipt_payload(
     if set(direction_receipts) != {"forward", "reverse"}:
         raise ValueError("IRC runner must return forward and reverse directions")
     return {
-        "schema": "d2c-irc-execution-v1",
+        "schema": "d2c-irc-execution-v2",
         "stage": "irc_execution",
         "state": "accepted",
         "accepted": True,
         "irc_run_identity": run_identity,
+        "initialization_fingerprint": trace.initialization_fingerprint,
         "preflight_receipt_sha256": ancestry.preflight_receipt_sha256,
         "campaign_identity": ancestry.campaign_identity,
         "route": ancestry.route,
@@ -2503,6 +2532,7 @@ def _validate_irc_execution_receipt_payload(
         "state",
         "accepted",
         "irc_run_identity",
+        "initialization_fingerprint",
         "preflight_receipt_sha256",
         "campaign_identity",
         "route",
@@ -2516,7 +2546,7 @@ def _validate_irc_execution_receipt_payload(
     if type(receipt) is not dict or set(receipt) != expected_keys:
         raise ValueError("IRC execution receipt fields are unexpected or incomplete")
     expected_identity = {
-        "schema": "d2c-irc-execution-v1",
+        "schema": "d2c-irc-execution-v2",
         "stage": "irc_execution",
         "state": "accepted",
         "accepted": True,
@@ -2537,6 +2567,15 @@ def _validate_irc_execution_receipt_payload(
         receipt.get("irc_run_identity"), label="IRC execution run identity"
     )
     _require_sha(run_identity, length=64, label="IRC execution run identity")
+    initialization_fingerprint = _require_json_string(
+        receipt.get("initialization_fingerprint"),
+        label="IRC execution initialization fingerprint",
+    )
+    _require_sha(
+        initialization_fingerprint,
+        length=64,
+        label="IRC execution initialization fingerprint",
+    )
     contract = _validated_irc_execution_contract(
         receipt.get("execution_contract"),
         label="IRC execution observed contract",
@@ -2560,12 +2599,15 @@ def _validate_irc_execution_receipt_payload(
             raise ValueError("IRC execution direction contract mismatch")
         if observed_run_identity != run_identity:
             raise ValueError("IRC execution direction run identity mismatch")
+        if direction.initialization_fingerprint != initialization_fingerprint:
+            raise ValueError("IRC execution direction initialization mismatch")
         directions.append(direction)
     return (
         SellaIrcTrace(
             masses_amu=np.asarray(expected_masses),
             directions=(directions[0], directions[1]),
             execution_contract=contract,
+            initialization_fingerprint=initialization_fingerprint,
         ),
         run_identity,
     )
@@ -2607,7 +2649,7 @@ def _irc_restart_receipt_payload(
     run_identity: str,
 ) -> dict[str, Any]:
     return {
-        "schema": "d2c-irc-restart-v1",
+        "schema": "d2c-irc-restart-v2",
         "stage": "irc_execution_restart",
         "state": "running",
         "accepted": False,
@@ -2628,14 +2670,77 @@ def _irc_restart_receipt_payload(
     }
 
 
+def _irc_initialization_receipt_payload(
+    ancestry: _CanonicalQualificationAncestry,
+    contract: IrcExecutionContract,
+    run_identity: str,
+    state: quarry_ts.SellaIrcInitializationState,
+) -> dict[str, Any]:
+    if state.execution_contract != contract:
+        raise ValueError("Sella initialization execution contract drifted")
+    return {
+        "schema": "d2c-irc-initialization-v1",
+        "stage": "irc_shared_sella_initialization",
+        "state": "checkpointed",
+        "accepted": False,
+        "irc_run_identity": run_identity,
+        "preflight_receipt_sha256": ancestry.preflight_receipt_sha256,
+        "campaign_identity": ancestry.campaign_identity,
+        "route": ancestry.route,
+        "atom_mapping_sha256": ancestry.atom_mapping_sha256,
+        "ts_qualification_receipt_sha256": ancestry.ts_qualification_receipt_sha256,
+        "qualified_transition_state_geometry_fingerprint": (
+            frequency_geometry_fingerprint(ancestry.qualified_transition_state)
+        ),
+        "execution_contract": _irc_execution_contract_payload(contract),
+        "initialization_fingerprint": state.fingerprint,
+        "initialization_state": quarry_ts._sella_irc_initialization_payload(state),
+    }
+
+
+def _checkpoint_irc_initialization(
+    restart_root: Path,
+    *,
+    ancestry: _CanonicalQualificationAncestry,
+    contract: IrcExecutionContract,
+    run_identity: str,
+    state: quarry_ts.SellaIrcInitializationState,
+) -> None:
+    receipt = _irc_initialization_receipt_payload(
+        ancestry, contract, run_identity, state
+    )
+    destination = restart_root / "initialization"
+    if destination.exists() or destination.is_symlink():
+        observed, _ = _read_json_object(
+            destination / "receipt.json",
+            label="IRC shared initialization checkpoint receipt",
+        )
+        _strict_json_equal(
+            observed, receipt, label="IRC shared initialization checkpoint"
+        )
+        return
+    _publish_receipt_directory(
+        restart_root,
+        directory_name="initialization",
+        temporary_name=f".initialization.{os.getpid()}.{time.time_ns()}.tmp",
+        receipt=receipt,
+    )
+
+
 def _load_irc_restart(
     ancestry: _CanonicalQualificationAncestry,
-) -> tuple[Path, IrcExecutionContract, str, dict[str, IrcDirectionPath]]:
+) -> tuple[
+    Path,
+    IrcExecutionContract,
+    str,
+    quarry_ts.SellaIrcInitializationState | None,
+    dict[str, IrcDirectionPath],
+]:
     restart_root = ancestry.root / ancestry.route / "irc-restart"
     if restart_root.is_symlink() or not restart_root.is_dir():
         raise ValueError("canonical IRC restart checkpoint must be a real directory")
     observed = {child.name for child in restart_root.iterdir()}
-    allowed = {"receipt.json", "forward", "reverse"}
+    allowed = {"receipt.json", "initialization", "forward", "reverse"}
     if observed - allowed or "receipt.json" not in observed:
         raise ValueError(
             "IRC restart checkpoint artifacts are unexpected or incomplete"
@@ -2671,6 +2776,31 @@ def _load_irc_restart(
     )
     expected = _irc_restart_receipt_payload(ancestry, contract, run_identity)
     _strict_json_equal(receipt, expected, label="IRC restart checkpoint receipt")
+    initialization: quarry_ts.SellaIrcInitializationState | None = None
+    initialization_root = restart_root / "initialization"
+    if initialization_root.exists() or initialization_root.is_symlink():
+        if initialization_root.is_symlink() or not initialization_root.is_dir():
+            raise ValueError(
+                "IRC shared initialization checkpoint must be a real directory"
+            )
+        if {child.name for child in initialization_root.iterdir()} != {"receipt.json"}:
+            raise ValueError(
+                "IRC shared initialization checkpoint artifacts are invalid"
+            )
+        initialization_receipt, _ = _read_json_object(
+            initialization_root / "receipt.json",
+            label="IRC shared initialization checkpoint receipt",
+        )
+        state_payload = initialization_receipt.get("initialization_state")
+        initialization = quarry_ts._sella_irc_initialization_from_payload(state_payload)
+        expected_initialization = _irc_initialization_receipt_payload(
+            ancestry, contract, run_identity, initialization
+        )
+        _strict_json_equal(
+            initialization_receipt,
+            expected_initialization,
+            label="IRC shared initialization checkpoint receipt",
+        )
     completed: dict[str, IrcDirectionPath] = {}
     for name in ("forward", "reverse"):
         direction_root = restart_root / name
@@ -2691,10 +2821,23 @@ def _load_irc_restart(
             raise ValueError(
                 "IRC restart checkpoints have mixed run identities or contracts"
             )
+        if (
+            initialization is not None
+            and direction.initialization_fingerprint != initialization.fingerprint
+        ):
+            raise ValueError(
+                "IRC restart direction initialization fingerprint mismatch"
+            )
         completed[name] = direction
     if set(completed) == {"reverse"}:
         raise ValueError("IRC restart checkpoints violate direction completion order")
-    return restart_root, contract, run_identity, completed
+    if (
+        completed
+        and set(completed) != {"forward", "reverse"}
+        and initialization is None
+    ):
+        raise ValueError("partial IRC restart lacks shared Sella initialization state")
+    return restart_root, contract, run_identity, initialization, completed
 
 
 def _checkpoint_irc_direction(
@@ -2790,7 +2933,7 @@ def _run_and_publish_irc(
             execution_receipt, execution_raw, trace, run_identity = (
                 _load_irc_execution_receipt(ancestry)
             )
-            _, restart_contract, restart_identity, completed = _load_irc_restart(
+            _, restart_contract, restart_identity, _, completed = _load_irc_restart(
                 ancestry
             )
             if (
@@ -2837,9 +2980,13 @@ def _run_and_publish_irc(
             )
             restart_root = route_root / "irc-restart"
             if restart_root.exists() or restart_root.is_symlink():
-                restart_root, checkpoint_contract, run_identity, completed = (
-                    _load_irc_restart(ancestry)
-                )
+                (
+                    restart_root,
+                    checkpoint_contract,
+                    run_identity,
+                    initialization_state,
+                    completed,
+                ) = _load_irc_restart(ancestry)
                 if checkpoint_contract != canonical_contract:
                     raise ValueError("IRC restart execution contract drifted")
             else:
@@ -2856,15 +3003,50 @@ def _run_and_publish_irc(
                     receipt=restart_receipt,
                 )
                 checkpoint_contract = canonical_contract
+                initialization_state = None
                 completed = {}
             _remove_owned_temporary_directories(
                 restart_root,
                 name_pattern=_IRC_RESTART_TEMPORARY_NAME,
                 allowed_files={"receipt.json"},
             )
-            restart_root, checkpoint_contract, run_identity, completed = (
-                _load_irc_restart(ancestry)
-            )
+            (
+                restart_root,
+                checkpoint_contract,
+                run_identity,
+                initialization_state,
+                completed,
+            ) = _load_irc_restart(ancestry)
+
+            def checkpoint_initialization(
+                state: quarry_ts.SellaIrcInitializationState,
+            ) -> None:
+                nonlocal initialization_state
+                if state.execution_contract != checkpoint_contract:
+                    raise ValueError("Sella initialization execution contract drifted")
+                if _boundary_validator is not None:
+                    _boundary_validator()
+                current = _load_canonical_qualification(ancestry.root, route)
+                if (
+                    current.preflight_receipt_sha256
+                    != ancestry.preflight_receipt_sha256
+                    or current.ts_qualification_receipt_sha256
+                    != ancestry.ts_qualification_receipt_sha256
+                ):
+                    raise ValueError("IRC canonical parent receipts changed")
+                _checkpoint_irc_initialization(
+                    restart_root,
+                    ancestry=current,
+                    contract=checkpoint_contract,
+                    run_identity=run_identity,
+                    state=state,
+                )
+                if (
+                    initialization_state is not None
+                    and initialization_state.fingerprint != state.fingerprint
+                ):
+                    raise ValueError("Sella initialization checkpoint changed")
+                initialization_state = state
 
             def checkpoint_direction(direction: IrcDirectionPath) -> None:
                 _validate_irc_direction_contract(
@@ -2873,6 +3055,14 @@ def _run_and_publish_irc(
                     ancestry.unstable_mode_mass_scaled,
                     ancestry.transition_state_vibrational_basis,
                 )
+                if (
+                    initialization_state is not None
+                    and direction.initialization_fingerprint
+                    != initialization_state.fingerprint
+                ):
+                    raise ValueError(
+                        "IRC direction does not match shared Sella initialization"
+                    )
                 if _boundary_validator is not None:
                     _boundary_validator()
                 current = _load_canonical_qualification(ancestry.root, route)
@@ -2892,6 +3082,7 @@ def _run_and_publish_irc(
                 )
 
             runner = quarry_ts._trace_sella_irc_resume if _runner is None else _runner
+            production_runner = runner is quarry_ts._trace_sella_irc_resume
             trace = runner(
                 ancestry.qualified_transition_state,
                 settings,
@@ -2902,9 +3093,16 @@ def _run_and_publish_irc(
                 step_size_a=irc_bounds["step_size_angstrom"],
                 _completed_directions=dict(completed),
                 _direction_callback=checkpoint_direction,
+                _initialization_state=initialization_state,
+                _initialization_callback=checkpoint_initialization,
             )
             if not isinstance(trace, SellaIrcTrace):
                 raise TypeError("IRC runner must return a SellaIrcTrace")
+            if production_runner and initialization_state is None:
+                raise RuntimeError(
+                    "production IRC runner did not checkpoint "
+                    "shared Sella initialization"
+                )
             _strict_json_equal(
                 trace.masses_amu.tolist(),
                 masses.tolist(),
@@ -2918,6 +3116,15 @@ def _run_and_publish_irc(
             )
             if observed_contract != checkpoint_contract:
                 raise ValueError("IRC runner and restart execution contracts differ")
+            if trace.initialization_fingerprint is None:
+                raise ValueError(
+                    "IRC runner returned no shared initialization fingerprint"
+                )
+            if (
+                initialization_state is not None
+                and trace.initialization_fingerprint != initialization_state.fingerprint
+            ):
+                raise ValueError("IRC runner and restart initialization differ")
             for direction in trace.directions:
                 _validate_irc_direction_contract(
                     direction,
@@ -2926,7 +3133,7 @@ def _run_and_publish_irc(
                     ancestry.transition_state_vibrational_basis,
                 )
                 checkpoint_direction(direction)
-            _, _, checkpoint_identity, completed = _load_irc_restart(ancestry)
+            _, _, checkpoint_identity, _, completed = _load_irc_restart(ancestry)
             if checkpoint_identity != run_identity or set(completed) != {
                 "forward",
                 "reverse",
@@ -2977,6 +3184,7 @@ def _run_and_publish_irc(
                 masses_amu=masses,
                 directions=(completed["forward"], completed["reverse"]),
                 execution_contract=checkpoint_contract,
+                initialization_fingerprint=trace.initialization_fingerprint,
             )
             execution_receipt = _irc_execution_receipt_payload(
                 ancestry, canonical_trace, run_identity
@@ -3092,7 +3300,6 @@ def run_and_publish_irc(
     run_root: Path,
     *,
     route: str,
-    _failure_injector: Callable[[str], None] | None = None,
 ) -> PublishedIrcRun:
     """Run/resume the repository-bound Sella backend with durable checkpoints."""
 
@@ -3106,7 +3313,6 @@ def run_and_publish_irc(
         route=route,
         _runner=quarry_ts._trace_sella_irc_resume,
         _boundary_validator=validate_boundary,
-        _failure_injector=_failure_injector,
     )
 
 
@@ -3543,7 +3749,6 @@ def publish_typed_irc_path(
     run_root: Path,
     *,
     route: str,
-    _failure_injector: Callable[[str], None] | None = None,
 ) -> PublishedTypedIrcPath:
     """Publish or resume solely from canonical shared and direction IRC receipts."""
 
@@ -3588,7 +3793,6 @@ def publish_typed_irc_path(
         trace=trace,
         ancestor_receipts=ancestor_receipts,
         _ancestry_validator=validate_again,
-        _failure_injector=_failure_injector,
     )
     current_ancestry, current_path, current_ancestors = (
         _validate_authoritative_published_path(run_root, route)
@@ -4594,7 +4798,6 @@ def publish_path_hessians(
     run_root: Path,
     *,
     route: str,
-    _failure_injector: Callable[[str], None] | None = None,
 ) -> PublishedPathHessians:
     """Evaluate path Hessians with the repository-selected native backend."""
 
@@ -4614,7 +4817,6 @@ def publish_path_hessians(
         route=route,
         evaluator=evaluate,
         _boundary_validator=validate_boundary,
-        _failure_injector=_failure_injector,
     )
 
 

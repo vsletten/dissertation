@@ -12,6 +12,7 @@ Gonzalez--Schlegel integrator.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from collections.abc import Callable
@@ -87,6 +88,7 @@ class IrcDirectionPath:
     sella_direction: Literal["forward", "reverse"]
     algebraic_direction: Literal[-1, 1]
     points: tuple[IrcPoint, ...]
+    initialization_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
         expected_sign = {"forward": 1, "reverse": -1}.get(self.sella_direction)
@@ -97,6 +99,15 @@ class IrcDirectionPath:
             raise ValueError("an IRC direction path must contain its start point")
         if [point.outer_step for point in points] != list(range(len(points))):
             raise ValueError("IRC outer steps must be consecutive from zero")
+        if self.initialization_fingerprint is not None and (
+            type(self.initialization_fingerprint) is not str
+            or len(self.initialization_fingerprint) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in self.initialization_fingerprint
+            )
+        ):
+            raise ValueError("IRC initialization fingerprint must be lowercase SHA-256")
         object.__setattr__(self, "points", points)
 
 
@@ -126,6 +137,280 @@ class IrcExecutionContract:
                 )
 
 
+def _copy_sella_pes_state(
+    state: Any, *, label: str
+) -> dict[str, np.ndarray | float | bytes | None]:
+    """Copy only the deterministic value types used by Sella PES caches."""
+
+    if type(state) is not dict or not {"x", "f", "g"}.issubset(state):
+        raise RuntimeError(f"{label} is not a restorable Sella PES state")
+    copied: dict[str, np.ndarray | float | bytes | None] = {}
+    for key, value in state.items():
+        if type(key) is not str:
+            raise RuntimeError(f"{label} contains a non-string field")
+        if value is None:
+            copied[key] = None
+        elif isinstance(value, bytes):
+            copied[key] = bytes(value)
+        elif np.isscalar(value):
+            scalar = float(value)
+            if not np.isfinite(scalar):
+                raise RuntimeError(f"{label} contains a non-finite scalar")
+            copied[key] = scalar
+        else:
+            array = _immutable_float_array(np.asarray(value, dtype=float))
+            if not np.all(np.isfinite(array)):
+                raise RuntimeError(f"{label} contains a non-finite array")
+            copied[key] = array
+    return copied
+
+
+def _sella_state_value_payload(
+    value: np.ndarray | float | bytes | None,
+) -> dict[str, Any]:
+    if value is None:
+        return {"kind": "none"}
+    if isinstance(value, bytes):
+        return {
+            "kind": "bytes",
+            "hex": value.hex(),
+            "sha256": hashlib.sha256(value).hexdigest(),
+        }
+    if isinstance(value, np.ndarray):
+        array = np.ascontiguousarray(value, dtype="<f8")
+        raw = array.tobytes()
+        return {
+            "kind": "float64-array",
+            "shape": list(array.shape),
+            "values": array.reshape(-1).tolist(),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+        }
+    return {"kind": "float", "value": value}
+
+
+def _sella_state_value_from_payload(payload: Any, *, label: str):
+    if type(payload) is not dict or type(payload.get("kind")) is not str:
+        raise ValueError(f"{label} payload is invalid")
+    kind = payload["kind"]
+    if kind == "none" and set(payload) == {"kind"}:
+        return None
+    if kind == "float" and set(payload) == {"kind", "value"}:
+        value = payload["value"]
+        if type(value) is not float or not np.isfinite(value):
+            raise ValueError(f"{label} scalar is invalid")
+        return value
+    if kind == "bytes" and set(payload) == {"kind", "hex", "sha256"}:
+        try:
+            value = bytes.fromhex(payload["hex"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{label} bytes are invalid") from exc
+        if hashlib.sha256(value).hexdigest() != payload["sha256"]:
+            raise ValueError(f"{label} bytes hash mismatch")
+        return value
+    if kind == "float64-array" and set(payload) == {
+        "kind",
+        "shape",
+        "values",
+        "sha256",
+    }:
+        shape = payload["shape"]
+        if type(shape) is not list or any(
+            type(size) is not int or size < 0 for size in shape
+        ):
+            raise ValueError(f"{label} array shape is invalid")
+        try:
+            array = np.asarray(payload["values"], dtype="<f8").reshape(tuple(shape))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{label} array values are invalid") from exc
+        if not np.all(np.isfinite(array)):
+            raise ValueError(f"{label} array contains non-finite values")
+        if hashlib.sha256(array.tobytes()).hexdigest() != payload["sha256"]:
+            raise ValueError(f"{label} array hash mismatch")
+        return array
+    raise ValueError(f"{label} payload fields are unexpected")
+
+
+@dataclass(frozen=True)
+class SellaIrcInitializationState:
+    """Exact TS diagonalization state needed to continue one Sella IRC identity."""
+
+    symbols: tuple[str, ...]
+    charge: int
+    spin: int
+    frozen_indices: tuple[int, ...]
+    settings_fingerprint: str
+    execution_contract: IrcExecutionContract
+    x0: np.ndarray
+    masses_amu: np.ndarray
+    h0: np.ndarray
+    v0ts: np.ndarray
+    pes_current: dict[str, np.ndarray | float | bytes | None]
+    pes_last: dict[str, np.ndarray | float | bytes | None]
+
+    def __post_init__(self) -> None:
+        symbols = tuple(self.symbols)
+        if not symbols or any(
+            type(symbol) is not str or not symbol for symbol in symbols
+        ):
+            raise ValueError("Sella initialization symbols are invalid")
+        if type(self.charge) is not int or type(self.spin) is not int:
+            raise ValueError("Sella initialization electronic state is invalid")
+        frozen = tuple(self.frozen_indices)
+        if (
+            any(
+                type(index) is not int or index < 0 or index >= len(symbols)
+                for index in frozen
+            )
+            or tuple(sorted(set(frozen))) != frozen
+        ):
+            raise ValueError("Sella initialization frozen atom identity is invalid")
+        if (
+            type(self.settings_fingerprint) is not str
+            or len(self.settings_fingerprint) != 64
+        ):
+            raise ValueError("Sella initialization settings fingerprint is invalid")
+        if not isinstance(self.execution_contract, IrcExecutionContract):
+            raise TypeError("Sella initialization execution contract is invalid")
+        dimension = 3 * len(symbols)
+        x0 = _immutable_float_array(self.x0)
+        masses = _immutable_float_array(self.masses_amu)
+        h0 = _immutable_float_array(self.h0)
+        v0ts = _immutable_float_array(self.v0ts)
+        if x0.shape != (dimension,) or not np.all(np.isfinite(x0)):
+            raise ValueError("Sella initialization TS coordinates are invalid")
+        if masses.shape != (len(symbols),) or np.any(masses <= 0.0):
+            raise ValueError("Sella initialization masses are invalid")
+        if h0.shape != (dimension, dimension) or not np.all(np.isfinite(h0)):
+            raise ValueError("Sella initialization Hessian is invalid")
+        if not np.array_equal(h0, h0.T):
+            raise ValueError("Sella initialization Hessian is not symmetric")
+        if (
+            v0ts.shape != (dimension,)
+            or not np.all(np.isfinite(v0ts))
+            or float(np.linalg.norm(v0ts)) < 1e-12
+        ):
+            raise ValueError("Sella initialization TS vector is invalid")
+        object.__setattr__(self, "symbols", symbols)
+        object.__setattr__(self, "frozen_indices", frozen)
+        object.__setattr__(self, "x0", x0)
+        object.__setattr__(self, "masses_amu", masses)
+        object.__setattr__(self, "h0", h0)
+        object.__setattr__(self, "v0ts", v0ts)
+        object.__setattr__(
+            self,
+            "pes_current",
+            _copy_sella_pes_state(self.pes_current, label="Sella current PES state"),
+        )
+        object.__setattr__(
+            self,
+            "pes_last",
+            _copy_sella_pes_state(self.pes_last, label="Sella previous PES state"),
+        )
+
+    @property
+    def fingerprint(self) -> str:
+        raw = json.dumps(
+            _sella_irc_initialization_identity_payload(self),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        return hashlib.sha256(raw).hexdigest()
+
+
+def _sella_irc_initialization_identity_payload(
+    state: SellaIrcInitializationState,
+) -> dict[str, Any]:
+    contract = state.execution_contract
+    return {
+        "schema": "sella-irc-shared-initialization-v1",
+        "symbols": list(state.symbols),
+        "charge": state.charge,
+        "spin": state.spin,
+        "frozen_indices": list(state.frozen_indices),
+        "settings_fingerprint": state.settings_fingerprint,
+        "execution_contract": asdict(contract),
+        "x0": _sella_state_value_payload(state.x0),
+        "masses_amu": _sella_state_value_payload(state.masses_amu),
+        "H0": _sella_state_value_payload(state.h0),
+        "v0ts": _sella_state_value_payload(state.v0ts),
+        "pes_current": {
+            key: _sella_state_value_payload(value)
+            for key, value in sorted(state.pes_current.items())
+        },
+        "pes_last": {
+            key: _sella_state_value_payload(value)
+            for key, value in sorted(state.pes_last.items())
+        },
+    }
+
+
+def _sella_irc_initialization_payload(
+    state: SellaIrcInitializationState,
+) -> dict[str, Any]:
+    payload = _sella_irc_initialization_identity_payload(state)
+    payload["fingerprint"] = state.fingerprint
+    return payload
+
+
+def _sella_irc_initialization_from_payload(payload: Any) -> SellaIrcInitializationState:
+    expected = {
+        "schema",
+        "symbols",
+        "charge",
+        "spin",
+        "frozen_indices",
+        "settings_fingerprint",
+        "execution_contract",
+        "x0",
+        "masses_amu",
+        "H0",
+        "v0ts",
+        "pes_current",
+        "pes_last",
+        "fingerprint",
+    }
+    if type(payload) is not dict or set(payload) != expected:
+        raise ValueError("Sella initialization checkpoint fields are unexpected")
+    if payload["schema"] != "sella-irc-shared-initialization-v1":
+        raise ValueError("unsupported Sella initialization checkpoint schema")
+    contract_payload = payload["execution_contract"]
+    if type(contract_payload) is not dict:
+        raise ValueError("Sella initialization execution contract is invalid")
+    try:
+        contract = IrcExecutionContract(**contract_payload)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Sella initialization execution contract is invalid") from exc
+    for state_name in ("pes_current", "pes_last"):
+        if type(payload[state_name]) is not dict:
+            raise ValueError(f"Sella initialization {state_name} is invalid")
+    state = SellaIrcInitializationState(
+        symbols=tuple(payload["symbols"]),
+        charge=payload["charge"],
+        spin=payload["spin"],
+        frozen_indices=tuple(payload["frozen_indices"]),
+        settings_fingerprint=payload["settings_fingerprint"],
+        execution_contract=contract,
+        x0=_sella_state_value_from_payload(payload["x0"], label="Sella x0"),
+        masses_amu=_sella_state_value_from_payload(
+            payload["masses_amu"], label="Sella masses"
+        ),
+        h0=_sella_state_value_from_payload(payload["H0"], label="Sella H0"),
+        v0ts=_sella_state_value_from_payload(payload["v0ts"], label="Sella v0ts"),
+        pes_current={
+            key: _sella_state_value_from_payload(value, label=f"Sella current {key}")
+            for key, value in payload["pes_current"].items()
+        },
+        pes_last={
+            key: _sella_state_value_from_payload(value, label=f"Sella previous {key}")
+            for key, value in payload["pes_last"].items()
+        },
+    )
+    if payload["fingerprint"] != state.fingerprint:
+        raise ValueError("Sella initialization checkpoint fingerprint mismatch")
+    return state
+
+
 @dataclass(frozen=True)
 class SellaIrcTrace:
     """Both paths generated from one shared-Hessian Sella IRC object."""
@@ -133,6 +418,7 @@ class SellaIrcTrace:
     masses_amu: np.ndarray
     directions: tuple[IrcDirectionPath, IrcDirectionPath]
     execution_contract: IrcExecutionContract | None = None
+    initialization_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
         masses = _immutable_float_array(self.masses_amu)
@@ -152,6 +438,20 @@ class SellaIrcTrace:
             self.execution_contract, IrcExecutionContract
         ):
             raise TypeError("IRC execution_contract must be an IrcExecutionContract")
+        direction_fingerprints = {
+            direction.initialization_fingerprint for direction in directions
+        }
+        if self.initialization_fingerprint is None:
+            if direction_fingerprints != {None}:
+                raise ValueError("IRC directions have an unbound shared initialization")
+        elif (
+            type(self.initialization_fingerprint) is not str
+            or len(self.initialization_fingerprint) != 64
+            or direction_fingerprints != {self.initialization_fingerprint}
+        ):
+            raise ValueError(
+                "IRC directions do not share one initialization fingerprint"
+            )
 
 
 def make_ase_calculator(settings: DftSettings, charge: int, spin: int):
@@ -929,6 +1229,104 @@ def _capture_irc_point(
     )
 
 
+def _capture_sella_irc_initialization(
+    irc: Any,
+    ts: Cluster,
+    settings: DftSettings,
+    masses_amu: np.ndarray,
+    execution_contract: IrcExecutionContract,
+) -> SellaIrcInitializationState:
+    """Snapshot the exact state Sella itself restores for its second direction."""
+
+    required = ("x0", "H0", "v0ts", "pescurr", "peslast", "pes")
+    if any(not hasattr(irc, attribute) for attribute in required):
+        raise RuntimeError(
+            "installed Sella IRC does not expose exact shared initialization state"
+        )
+    if irc.H0 is None or irc.v0ts is None or irc.pescurr is None or irc.peslast is None:
+        raise RuntimeError("Sella IRC did not complete its TS initialization")
+    return SellaIrcInitializationState(
+        symbols=tuple(ts.symbols),
+        charge=ts.charge,
+        spin=ts.spin,
+        frozen_indices=tuple(sorted(ts.frozen_indices or [])),
+        settings_fingerprint=hashlib.sha256(
+            frequency_settings_fingerprint(settings).encode()
+        ).hexdigest(),
+        execution_contract=execution_contract,
+        x0=np.asarray(irc.x0, dtype=float),
+        masses_amu=masses_amu,
+        h0=np.asarray(irc.H0, dtype=float),
+        v0ts=np.asarray(irc.v0ts, dtype=float),
+        pes_current=irc.pescurr,
+        pes_last=irc.peslast,
+    )
+
+
+def _restore_sella_irc_initialization(
+    irc: Any,
+    state: SellaIrcInitializationState,
+    ts: Cluster,
+    settings: DftSettings,
+    masses_amu: np.ndarray,
+    execution_contract: IrcExecutionContract,
+) -> None:
+    """Restore a checkpoint only when every path-defining identity still agrees."""
+
+    if not isinstance(state, SellaIrcInitializationState):
+        raise TypeError("shared Sella initialization checkpoint has the wrong type")
+    expected_identity = (
+        tuple(ts.symbols),
+        ts.charge,
+        ts.spin,
+        tuple(sorted(ts.frozen_indices or [])),
+        hashlib.sha256(frequency_settings_fingerprint(settings).encode()).hexdigest(),
+        execution_contract,
+    )
+    observed_identity = (
+        state.symbols,
+        state.charge,
+        state.spin,
+        state.frozen_indices,
+        state.settings_fingerprint,
+        state.execution_contract,
+    )
+    if observed_identity != expected_identity:
+        raise ValueError("shared Sella initialization identity does not match this IRC")
+    expected_x0 = np.ascontiguousarray(ts.coords, dtype=float).reshape(-1)
+    if not np.array_equal(state.x0, expected_x0):
+        raise ValueError("shared Sella initialization TS geometry does not match")
+    if not np.array_equal(state.masses_amu, masses_amu):
+        raise ValueError("shared Sella initialization masses do not match")
+    pes = getattr(irc, "pes", None)
+    if (
+        pes is None
+        or not callable(getattr(pes, "set_x", None))
+        or not callable(getattr(pes, "set_H", None))
+    ):
+        raise RuntimeError(
+            "installed Sella IRC cannot restore exact shared initialization state"
+        )
+    try:
+        # Fresh Sella 2.5 IRC objects do not create ``pescurr``/``peslast``
+        # until their first diagonalization. A durable resume must install
+        # those snapshots before ``irun()`` enters its no-diagonalization
+        # restore branch rather than requiring them to exist already.
+        irc.x0 = state.x0.copy()
+        irc.H0 = state.h0.copy()
+        irc.v0ts = state.v0ts.copy()
+        irc.pescurr = _copy_sella_pes_state(
+            state.pes_current, label="Sella current PES checkpoint"
+        )
+        irc.peslast = _copy_sella_pes_state(
+            state.pes_last, label="Sella previous PES checkpoint"
+        )
+    except (AttributeError, TypeError) as exc:
+        raise RuntimeError(
+            "installed Sella IRC cannot install exact shared initialization state"
+        ) from exc
+
+
 def _trace_sella_irc_resume(
     ts: Cluster,
     settings: DftSettings,
@@ -942,6 +1340,9 @@ def _trace_sella_irc_resume(
     logfile: str | Path | None = None,
     _completed_directions: dict[str, IrcDirectionPath] | None = None,
     _direction_callback: Callable[[IrcDirectionPath], None] | None = None,
+    _initialization_state: SellaIrcInitializationState | None = None,
+    _initialization_callback: Callable[[SellaIrcInitializationState], None]
+    | None = None,
 ) -> SellaIrcTrace:
     """Capture both bounded Gonzalez--Schlegel paths from one Sella object.
 
@@ -988,6 +1389,14 @@ def _trace_sella_irc_resume(
             or path.algebraic_direction != expected_sign
         ):
             raise ValueError("completed IRC direction identity is invalid")
+    if (
+        completed
+        and set(completed) != {"forward", "reverse"}
+        and _initialization_state is None
+    ):
+        raise ValueError(
+            "a partial IRC resume requires the exact shared Sella initialization"
+        )
     execution_contract = IrcExecutionContract(
         algorithm="sella-gonzalez-schlegel",
         step_size_angstrom=float(step_size_a),
@@ -996,10 +1405,16 @@ def _trace_sella_irc_resume(
         inner_fmax_ev_per_angstrom=float(fmax_inner_ev_a),
     )
     if set(completed) == {"forward", "reverse"}:
+        fingerprints = {
+            direction.initialization_fingerprint for direction in completed.values()
+        }
+        if len(fingerprints) != 1 or None in fingerprints:
+            raise ValueError("completed IRC directions lack one shared initialization")
         return SellaIrcTrace(
             masses_amu=np.asarray(masses_amu, dtype=float),
             directions=(completed["forward"], completed["reverse"]),
             execution_contract=execution_contract,
+            initialization_fingerprint=fingerprints.pop(),
         )
 
     from ase import Atoms
@@ -1032,6 +1447,24 @@ def _trace_sella_irc_resume(
         logfile=str(logfile) if logfile is not None else "-",
         dx=step_size_a,
     )
+    shared_initialization = _initialization_state
+    if shared_initialization is not None:
+        _restore_sella_irc_initialization(
+            irc,
+            shared_initialization,
+            ts,
+            settings,
+            recorded_masses_amu,
+            execution_contract,
+        )
+        for direction in completed.values():
+            if (
+                direction.initialization_fingerprint
+                != shared_initialization.fingerprint
+            ):
+                raise ValueError(
+                    "completed IRC direction does not match shared Sella initialization"
+                )
     # Sella 2.5 implements its IRC stop rule in ``converged()``, but ASE 3.29
     # changed Optimizer.irun() to call ``gradient_converged()`` directly.  Left
     # unbridged, a force-converged transition state returns success at step zero
@@ -1059,6 +1492,21 @@ def _trace_sella_irc_resume(
                 direction=direction,
             )
         )
+        observed_initialization = _capture_sella_irc_initialization(
+            irc,
+            ts,
+            settings,
+            recorded_masses_amu,
+            execution_contract,
+        )
+        if shared_initialization is None:
+            shared_initialization = observed_initialization
+            if _initialization_callback is not None:
+                _initialization_callback(shared_initialization)
+        elif observed_initialization.fingerprint != shared_initialization.fingerprint:
+            raise RuntimeError(
+                "Sella IRC shared initialization changed between directions"
+            )
         points: list[IrcPoint] = []
         reported_convergence = False
         for outer_step, converged in enumerate(states):
@@ -1108,14 +1556,18 @@ def _trace_sella_irc_resume(
             sella_direction=direction,
             algebraic_direction=algebraic_direction,
             points=tuple(points),
+            initialization_fingerprint=shared_initialization.fingerprint,
         )
         direction_paths.append(path)
         if _direction_callback is not None:
             _direction_callback(path)
+    if shared_initialization is None:
+        raise RuntimeError("Sella IRC produced no shared initialization state")
     return SellaIrcTrace(
         masses_amu=recorded_masses_amu,
         directions=(direction_paths[0], direction_paths[1]),
         execution_contract=execution_contract,
+        initialization_fingerprint=shared_initialization.fingerprint,
     )
 
 
