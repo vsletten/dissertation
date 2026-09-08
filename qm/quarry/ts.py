@@ -418,17 +418,35 @@ class SellaIrcInitializationState:
                 "Sella initialization mass-weighted Hessian is invalid"
             ) from exc
         lowest = float(eigenvalues[0])
+        spectral_radius = float(np.max(np.abs(eigenvalues)))
         with np.errstate(over="ignore", invalid="ignore"):
-            rayleigh = float(unit_kick @ mass_weighted_hessian @ unit_kick)
-            residual = mass_weighted_hessian @ unit_kick - lowest * unit_kick
+            hessian_action = mass_weighted_hessian @ unit_kick
+            rayleigh = float(unit_kick @ hessian_action)
+            residual = hessian_action - rayleigh * unit_kick
             residual_norm = float(np.linalg.norm(residual))
-            scale = max(1.0, float(np.max(np.abs(mass_weighted_hessian))))
-        tolerance = 256.0 * np.finfo(float).eps * dimension * scale
+            action_norm = float(np.linalg.norm(hessian_action))
+            local_scale = max(abs(lowest), abs(rayleigh), action_norm)
+        precision = np.finfo(float).eps
+        tolerance = 256.0 * precision * dimension * local_scale
+        # A spectator mode many orders of magnitude stiffer than the candidate
+        # unstable mode makes a global Hessian-scaled residual meaningless: it can
+        # accept an unrelated kick.  Such a spectrum also cannot numerically bind
+        # the lowest eigenpair at float64 precision, so reject it rather than
+        # attesting an unresolvable restart.
+        resolvable_spectrum = (
+            lowest < 0.0
+            and local_scale > 0.0
+            and spectral_radius * 256.0 * precision * dimension <= abs(lowest)
+        )
         if (
             not np.isfinite(lowest)
+            or not np.all(np.isfinite(eigenvalues))
+            or not np.isfinite(spectral_radius)
             or not np.isfinite(rayleigh)
+            or not np.isfinite(action_norm)
             or not np.all(np.isfinite(residual))
             or not np.isfinite(residual_norm)
+            or not resolvable_spectrum
             or abs(rayleigh - lowest) > tolerance
             or residual_norm > tolerance
         ):

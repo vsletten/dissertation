@@ -64,7 +64,7 @@ def _valid_initialization_state():
         execution_contract=contract,
         x0=x0,
         masses_amu=masses,
-        h0=np.diag(np.arange(1, dimension + 1, dtype=float)),
+        h0=np.diag([-1.0, *np.arange(2, dimension + 1, dtype=float)]),
         v0ts=(
             np.eye(1, dimension, 0).reshape(-1)
             * contract.step_size_angstrom
@@ -163,7 +163,7 @@ def _install_fake_irc(monkeypatch, routes):
             if self.v0ts is None:
                 diagonalizations.append(direction)
                 dimension = atom_count * 3
-                self.H0 = np.diag(np.arange(1, dimension + 1, dtype=float))
+                self.H0 = np.diag([-1.0, *np.arange(2, dimension + 1, dtype=float)])
                 self.v0ts = np.zeros(dimension)
                 self.v0ts[0] = self.kwargs["dx"] / np.sqrt(self.atoms.get_masses()[0])
                 self.pescurr, self.peslast = _exact_sella_pes_caches(
@@ -411,7 +411,7 @@ def test_restore_installs_checkpoint_before_fresh_real_sella_irc_has_pes_caches(
         execution_contract=contract,
         x0=x0,
         masses_amu=masses,
-        h0=np.diag(np.arange(1, dimension + 1, dtype=float)),
+        h0=np.diag([-1.0, *np.arange(2, dimension + 1, dtype=float)]),
         v0ts=(
             np.eye(1, dimension, 0).reshape(-1)
             * contract.step_size_angstrom
@@ -527,6 +527,30 @@ def test_sella_restart_binds_mass_weighted_kick_to_hessian_masses_and_dx(v0ts, m
         )
     with pytest.raises(ValueError, match=match):
         replace(state, v0ts=kick)
+
+
+def test_sella_restart_rejects_wrong_mode_despite_huge_spectator_eigenvalue():
+    state = _valid_initialization_state()
+    h0 = np.eye(state.h0.shape[0])
+    h0[0, 0] = -1.0
+    h0[-1, -1] = 1.0e30
+    wrong = np.zeros_like(state.v0ts)
+    wrong[3] = state.execution_contract.step_size_angstrom / np.sqrt(
+        state.masses_amu[1]
+    )
+
+    with pytest.raises(ValueError, match="lowest mass-weighted H0 eigendirection"):
+        replace(state, h0=h0, v0ts=wrong)
+
+
+@pytest.mark.parametrize("lowest", [0.0, 1.0])
+def test_sella_restart_rejects_h0_without_resolvable_unstable_mode(lowest):
+    state = _valid_initialization_state()
+    h0 = np.eye(state.h0.shape[0])
+    h0[0, 0] = lowest
+
+    with pytest.raises(ValueError, match="lowest mass-weighted H0 eigendirection"):
+        replace(state, h0=h0)
 
 
 def test_sella_restore_reconstructs_and_rejects_derived_cache_drift():

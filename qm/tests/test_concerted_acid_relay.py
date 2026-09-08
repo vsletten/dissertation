@@ -206,7 +206,9 @@ def _initialize_fake_sella_irc(irc) -> None:
         return
     dimension = irc.atoms.positions.size
     irc.x0 = irc.atoms.positions.reshape(-1).copy()
-    irc.H0 = np.diag(np.arange(1, dimension + 1, dtype=float))
+    masses = np.repeat(irc.atoms.get_masses(), 3)
+    eigenvalues = np.array([-1.0, *np.arange(2, dimension + 1, dtype=float)])
+    irc.H0 = np.diag(masses * eigenvalues)
     irc.v0ts = np.zeros(dimension)
     dx = getattr(irc, "kwargs", {}).get("dx", 0.1)
     irc.v0ts[0] = dx / np.sqrt(irc.atoms.get_masses()[0])

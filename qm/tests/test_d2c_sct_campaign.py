@@ -3,8 +3,11 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import mmap
+import os
 import shutil
 import subprocess
+import sys
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -41,6 +44,15 @@ FIXED_MODULE_MANIFEST = {
         "sha256": hashlib.sha256(name.encode()).hexdigest(),
         "byte_count": len(name),
         "trust_class": trust_class,
+        "execution_identity": {
+            "kind": "python-source",
+            "loaded_code_sha256": hashlib.sha256(f"loaded:{name}".encode()).hexdigest(),
+            "source_files": {
+                f"/opt/d2c-test-modules/{name.replace('.', '/')}.py": hashlib.sha256(
+                    name.encode()
+                ).hexdigest()
+            },
+        },
     }
     for name, trust_class in campaign.EXECUTABLE_MODULES.items()
 }
@@ -1076,7 +1088,7 @@ def test_hessian_aggregate_destination_race_never_clobbers(monkeypatch, tmp_path
     original_rename = campaign._renameat2_noreplace
 
     def create_destination_then_rename(source: Path, destination: Path) -> None:
-        if destination == aggregate:
+        if destination.name == aggregate.name and destination.parent.name == "hessians":
             destination.write_bytes(b"racer owns aggregate\n")
         original_rename(source, destination)
 
@@ -3332,7 +3344,7 @@ def test_irc_checkpoint_destination_race_is_non_overwriting(
     real_rename = campaign._renameat2_noreplace
 
     def race(source: Path, target: Path) -> None:
-        if target == destination:
+        if target.name == destination.name and target.parent.name == "irc-restart":
             target.mkdir()
             (target / "foreign").write_text("racer owns checkpoint")
         real_rename(source, target)
@@ -3585,6 +3597,167 @@ def test_executable_module_manifest_hashes_concrete_repository_leaf(monkeypatch)
     )
     assert record["byte_count"] == origin.stat().st_size
     assert record["sha256"] == hashlib.sha256(origin.read_bytes()).hexdigest()
+    assert record["execution_identity"]["kind"] == "python-source"
+
+
+def test_executable_manifest_covers_direct_sella_scipy_pyscf_and_gpu_leaves():
+    required = {
+        "scipy.linalg._decomp",
+        "scipy.integrate._ivp.base",
+        "scipy.integrate._ivp.common",
+        "scipy.integrate._dop",
+        "scipy.integrate._ode",
+        "scipy.integrate._odepack",
+        "scipy.integrate._vode",
+        "scipy.sparse.linalg._interface",
+        "pyscf.dft.rks",
+        "pyscf.scf.uhf",
+        "pyscf.grad.uhf",
+        "pyscf.hessian.rhf",
+        "pyscf.lib.misc",
+        "sella.eigensolvers",
+        "sella.hessian_update",
+        "sella.internal",
+        "sella.linalg",
+        "gpu4pyscf.dft.rks",
+        "gpu4pyscf.scf.uhf",
+        "gpu4pyscf.grad.uhf",
+        "gpu4pyscf.hessian.rhf",
+    }
+
+    assert required <= campaign.EXECUTABLE_MODULES.keys()
+
+
+def test_actual_nested_venv_manifest_attests_source_and_loaded_native_image():
+    qm_root = Path(campaign.__file__).resolve().parents[1]
+    python = qm_root / ".venv" / "bin" / "python"
+    assert python.is_file()
+    code = """
+import json, sys
+sys.path.insert(0, '.')
+from scripts import d2c_sct_campaign as campaign
+campaign.EXECUTABLE_MODULES = {
+    'scipy.linalg._decomp': 'third-party',
+    'numpy._core._multiarray_umath': 'third-party',
+    'pyscf.grad.rhf': 'third-party',
+    'pyscf.lib.misc': 'third-party',
+    'pyscf.scf.hf': 'third-party',
+}
+print(json.dumps(campaign._executable_module_manifest(), sort_keys=True))
+"""
+    completed = subprocess.run(
+        [str(python), "-c", code],
+        cwd=qm_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    manifest = json.loads(completed.stdout)
+
+    assert Path(manifest["scipy.linalg._decomp"]["origin"]).is_relative_to(
+        qm_root / ".venv"
+    )
+    assert manifest["scipy.linalg._decomp"]["execution_identity"]["kind"] == (
+        "python-source"
+    )
+    assert manifest["numpy._core._multiarray_umath"]["execution_identity"]["kind"] == (
+        "native-extension"
+    )
+    assert manifest["pyscf.grad.rhf"]["execution_identity"]["kind"] == "python-source"
+    assert manifest["pyscf.scf.hf"]["execution_identity"]["kind"] == "python-source"
+
+
+def test_manifest_rejects_source_replacement_after_module_was_loaded(
+    monkeypatch, tmp_path: Path
+):
+    module_name = "d2c_loaded_replacement_fixture"
+    source = tmp_path / f"{module_name}.py"
+    source.write_text("def value():\n    return 1\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(campaign.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(campaign, "EXECUTABLE_MODULES", {module_name: "third-party"})
+    imported = campaign.importlib.import_module(module_name)
+    original = source.stat()
+    replacement = tmp_path / "replacement.py"
+    replacement.write_text("def value():\n    return 2\n")
+    replacement.replace(source)
+    os.utime(source, ns=(original.st_atime_ns, original.st_mtime_ns))
+    assert imported.value() == 1
+
+    try:
+        with pytest.raises(
+            RuntimeError, match="loaded Python code disagrees with source"
+        ):
+            campaign._executable_module_manifest()
+    finally:
+        sys.modules.pop(module_name, None)
+
+
+def test_manifest_rejects_loaded_python_code_without_source_origin(
+    monkeypatch, tmp_path: Path
+):
+    module_name = "d2c_unproven_loaded_fixture"
+    source = tmp_path / f"{module_name}.py"
+    source.write_text("def value():\n    return 1\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(campaign.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(campaign, "EXECUTABLE_MODULES", {module_name: "third-party"})
+    imported = campaign.importlib.import_module(module_name)
+    exec("def unproven():\n    return 2\n", imported.__dict__)
+
+    try:
+        with pytest.raises(
+            RuntimeError, match="loaded Python code has no provable origin"
+        ):
+            campaign._executable_module_manifest()
+    finally:
+        sys.modules.pop(module_name, None)
+
+
+def test_manifest_rejects_loaded_code_outside_trusted_source_roots(
+    monkeypatch, tmp_path: Path
+):
+    module_name = "d2c_external_loaded_fixture"
+    environment = tmp_path / "venv"
+    environment.mkdir()
+    source = environment / f"{module_name}.py"
+    source.write_text("def value():\n    return 1\n")
+    external = tmp_path / "external.py"
+    external.write_text("def injected():\n    return 2\n")
+    monkeypatch.syspath_prepend(str(environment))
+    monkeypatch.setattr(campaign.sys, "prefix", str(environment))
+    monkeypatch.setattr(campaign, "EXECUTABLE_MODULES", {module_name: "third-party"})
+    imported = campaign.importlib.import_module(module_name)
+    namespace = {"__name__": module_name}
+    exec(compile(external.read_text(), str(external), "exec"), namespace)
+    imported.__dict__["injected"] = namespace["injected"]
+
+    try:
+        with pytest.raises(RuntimeError, match="escaped trusted source roots"):
+            campaign._executable_module_manifest()
+    finally:
+        sys.modules.pop(module_name, None)
+
+
+def test_native_execution_identity_rejects_replaced_mapped_file(tmp_path: Path):
+    origin = tmp_path / "fixture.so"
+    origin.write_bytes(b"mapped native fixture")
+    with (
+        origin.open("rb") as source,
+        mmap.mmap(source.fileno(), 0, access=mmap.ACCESS_READ) as mapped,
+    ):
+        assert mapped[:6] == b"mapped"
+        identity = campaign._native_extension_execution_identity("fixture", origin)
+        assert identity["kind"] == "native-extension"
+        replacement = tmp_path / "replacement.so"
+        replacement.write_bytes(b"replacement fixture")
+        replacement.replace(origin)
+
+        with pytest.raises(
+            RuntimeError,
+            match="loaded native executable file identity cannot be proven",
+        ):
+            campaign._native_extension_execution_identity("fixture", origin)
 
 
 def test_executable_module_manifest_rejects_import_origin_escape(
@@ -3675,3 +3848,73 @@ def test_native_ts_hessian_evaluation_and_publication_share_one_route_claim(
     assert evaluator_observed_claim is True
     assert claim_calls == 1
     assert published.receipt["accepted"] is True
+
+
+def test_oversized_initialization_receipt_rejects_before_json_parsing(tmp_path: Path):
+    route = "h-co-1w-cside"
+    run_root = tmp_path / "oversized-initialization"
+    _, transition_state, trace = _qualified_ancestry(run_root, route=route)
+    initialization = _sella_initialization_state(transition_state, trace)
+    trace = _bind_trace_initialization(trace, initialization)
+
+    def checkpointing_runner(*_args, _initialization_callback, **_kwargs):
+        _initialization_callback(initialization)
+        return trace
+
+    campaign._run_and_publish_irc(
+        run_root,
+        route=route,
+        _runner=checkpointing_runner,
+    )
+    receipt_path = run_root / route / "irc-restart" / "initialization" / "receipt.json"
+    maximum = campaign._irc_initialization_receipt_maximum_bytes(
+        len(transition_state.symbols)
+    )
+    receipt_path.write_bytes(b" " * (maximum + 1))
+    ancestry = campaign._load_canonical_qualification(run_root, route)
+
+    with pytest.raises(ValueError, match=rf"no larger than {maximum} bytes"):
+        campaign._load_irc_restart(ancestry)
+
+
+def test_route_replacement_during_native_evaluation_fails_closed(
+    monkeypatch, tmp_path: Path
+):
+    route = "h-co-1w-cside"
+    run_root = tmp_path / "route-replacement"
+    preflight = _preflight(run_root)
+    route_root = run_root / route
+    displaced = run_root / f"{route}.displaced"
+    evaluator_calls = 0
+
+    def evaluate(transition_state, _settings):
+        nonlocal evaluator_calls
+        evaluator_calls += 1
+        route_root.rename(displaced)
+        route_root.mkdir()
+        reactant = _frozen_endpoint(route, "irc_back.xyz").coords
+        product = _frozen_endpoint(route, "irc_fwd.xyz").coords
+        return _qualification_native_result(
+            preflight, transition_state, reactant, product
+        )
+
+    monkeypatch.setattr(campaign, "native_cartesian_hessian", evaluate)
+
+    with pytest.raises(RuntimeError, match="route directory identity changed"):
+        campaign.publish_transition_state_qualification(run_root, route=route)
+
+    assert evaluator_calls == 1
+    assert not (route_root / "ts-qualification").exists()
+    assert (displaced / ".route.lock").is_file()
+
+
+def test_route_claim_rejects_lock_file_replacement(tmp_path: Path):
+    route_root = tmp_path / "route"
+    displaced_lock = tmp_path / "displaced.lock"
+
+    with (
+        pytest.raises(RuntimeError, match="route lock identity changed"),
+        campaign._exclusive_route_claim(route_root),
+    ):
+        (route_root / ".route.lock").replace(displaced_lock)
+        (route_root / ".route.lock").write_bytes(b"replacement")

@@ -15,7 +15,9 @@ import errno
 import fcntl
 import hashlib
 import importlib
+import importlib.machinery
 import importlib.metadata
+import inspect
 import json
 import math
 import os
@@ -27,6 +29,7 @@ import stat
 import subprocess
 import sys
 import time
+import types
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext, suppress
 from dataclasses import dataclass, replace
@@ -134,22 +137,64 @@ EXECUTABLE_MODULES: dict[str, Literal["repository", "third-party"]] = {
     "scripts.surface_rate_protocol": "repository",
     "numpy._core._multiarray_umath": "third-party",
     "numpy.linalg._linalg": "third-party",
+    "scipy._lib._util": "third-party",
+    "scipy.integrate._ivp.base": "third-party",
+    "scipy.integrate._ivp.common": "third-party",
+    "scipy.integrate._ivp.lsoda": "third-party",
+    "scipy.integrate._dop": "third-party",
+    "scipy.integrate._ode": "third-party",
+    "scipy.integrate._odepack": "third-party",
+    "scipy.integrate._vode": "third-party",
+    "scipy.linalg._basic": "third-party",
+    "scipy.linalg._decomp": "third-party",
+    "scipy.linalg._decomp_polar": "third-party",
+    "scipy.linalg._decomp_qr": "third-party",
+    "scipy.linalg._decomp_svd": "third-party",
+    "scipy.linalg._expm_frechet": "third-party",
+    "scipy.linalg._matfuncs": "third-party",
+    "scipy.sparse.linalg._interface": "third-party",
     "ase.atoms": "third-party",
     "ase.calculators.calculator": "third-party",
     "ase.constraints": "third-party",
     "ase.optimize.optimize": "third-party",
+    "pyscf.df.df_jk": "third-party",
+    "pyscf.dft.rks": "third-party",
     "pyscf.dft.uks": "third-party",
+    "pyscf.grad.rhf": "third-party",
+    "pyscf.grad.rks": "third-party",
+    "pyscf.grad.uhf": "third-party",
     "pyscf.grad.uks": "third-party",
     "pyscf.gto.mole": "third-party",
+    "pyscf.hessian.rhf": "third-party",
+    "pyscf.hessian.rks": "third-party",
+    "pyscf.hessian.uhf": "third-party",
     "pyscf.hessian.uks": "third-party",
+    "pyscf.lib.misc": "third-party",
     "pyscf.scf.hf": "third-party",
+    "pyscf.scf.uhf": "third-party",
+    "sella._gpu": "third-party",
+    "sella.eigensolvers": "third-party",
+    "sella.hessian_update": "third-party",
+    "sella.internal": "third-party",
+    "sella.linalg": "third-party",
     "sella.optimize.irc": "third-party",
     "sella.optimize.restricted_step": "third-party",
     "sella.optimize.stepper": "third-party",
     "sella.peswrapper": "third-party",
+    "sella.utilities.math": "third-party",
+    "gpu4pyscf.dft.rks": "third-party",
     "gpu4pyscf.dft.uks": "third-party",
+    "gpu4pyscf.df.df_jk": "third-party",
+    "gpu4pyscf.grad.rhf": "third-party",
+    "gpu4pyscf.grad.rks": "third-party",
+    "gpu4pyscf.grad.uhf": "third-party",
     "gpu4pyscf.grad.uks": "third-party",
+    "gpu4pyscf.hessian.rhf": "third-party",
+    "gpu4pyscf.hessian.rks": "third-party",
+    "gpu4pyscf.hessian.uhf": "third-party",
     "gpu4pyscf.hessian.uks": "third-party",
+    "gpu4pyscf.scf.hf": "third-party",
+    "gpu4pyscf.scf.uhf": "third-party",
     "cupy._core.core": "third-party",
 }
 # These geometry hashes are trusted source constants, deliberately independent of
@@ -684,6 +729,7 @@ class _CanonicalQualificationAncestry:
 
     root: Path
     route: str
+    route_root: Path
     preflight: dict[str, Any]
     preflight_receipt_sha256: str
     campaign_identity: str
@@ -1175,28 +1221,128 @@ def _json_bytes(payload: dict[str, Any]) -> bytes:
     ).encode()
 
 
+def _same_directory_identity(status: os.stat_result, descriptor: int) -> bool:
+    pinned = os.fstat(descriptor)
+    return (
+        stat.S_ISDIR(status.st_mode)
+        and stat.S_ISDIR(pinned.st_mode)
+        and (status.st_dev, status.st_ino) == (pinned.st_dev, pinned.st_ino)
+    )
+
+
+def _validate_pinned_route(
+    parent_path: Path,
+    route_name: str,
+    parent_descriptor: int,
+    route_descriptor: int,
+) -> None:
+    try:
+        parent_status = os.stat(parent_path, follow_symlinks=False)
+        route_status = os.stat(
+            route_name, dir_fd=parent_descriptor, follow_symlinks=False
+        )
+    except OSError as exc:
+        raise RuntimeError("route directory identity changed while claimed") from exc
+    if not _same_directory_identity(parent_status, parent_descriptor) or not (
+        _same_directory_identity(route_status, route_descriptor)
+    ):
+        raise RuntimeError("route directory identity changed while claimed")
+
+
+def _validate_pinned_route_lock(route_descriptor: int, lock_descriptor: int) -> None:
+    try:
+        status = os.stat(".route.lock", dir_fd=route_descriptor, follow_symlinks=False)
+        pinned = os.fstat(lock_descriptor)
+    except OSError as exc:
+        raise RuntimeError("route lock identity changed while claimed") from exc
+    if (
+        not stat.S_ISREG(status.st_mode)
+        or not stat.S_ISREG(pinned.st_mode)
+        or (status.st_dev, status.st_ino) != (pinned.st_dev, pinned.st_ino)
+    ):
+        raise RuntimeError("route lock identity changed while claimed")
+
+
+def _claimed_route_root(claimed: Path | None, expected: Path) -> Path:
+    """Compatibility seam for tests that replace the claim context manager."""
+
+    return expected if claimed is None else claimed
+
+
 @contextmanager
-def _exclusive_route_claim(route_root: Path) -> Iterator[None]:
-    route_existed = route_root.exists()
-    route_root.mkdir(parents=True, exist_ok=True)
-    if route_root.is_symlink() or not route_root.is_dir():
-        raise ValueError(f"route root must be a real directory: {route_root}")
-    if not route_existed:
-        _fsync_directory(route_root.parent)
-    lock_path = route_root / ".route.lock"
-    if lock_path.is_symlink():
-        raise ValueError(f"route lock must not be a symlink: {lock_path}")
-    descriptor = os.open(
-        lock_path,
-        os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0),
-        0o600,
+def _exclusive_route_claim(route_root: Path) -> Iterator[Path]:
+    """Lock and expose a descriptor-pinned route, rejecting namespace replacement."""
+
+    parent_path = route_root.parent
+    route_name = route_root.name
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None or os.name != "posix" or not sys.platform.startswith("linux"):
+        raise RuntimeError("descriptor-pinned route claims require Linux O_NOFOLLOW")
+    directory_flags = (
+        os.O_RDONLY | os.O_DIRECTORY | nofollow | getattr(os, "O_CLOEXEC", 0)
     )
     try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
-        yield
+        parent_descriptor = os.open(parent_path, directory_flags)
+    except OSError as exc:
+        raise ValueError(
+            f"route parent must be a real directory: {parent_path}"
+        ) from exc
+    route_descriptor = -1
+    lock_descriptor = -1
+    locked = False
+    try:
+        try:
+            os.mkdir(route_name, mode=0o700, dir_fd=parent_descriptor)
+            os.fsync(parent_descriptor)
+        except FileExistsError:
+            pass
+        route_descriptor = os.open(
+            route_name, directory_flags, dir_fd=parent_descriptor
+        )
+        _validate_pinned_route(
+            parent_path,
+            route_name,
+            parent_descriptor,
+            route_descriptor,
+        )
+        lock_descriptor = os.open(
+            ".route.lock",
+            os.O_RDWR | os.O_CREAT | nofollow | getattr(os, "O_CLOEXEC", 0),
+            0o600,
+            dir_fd=route_descriptor,
+        )
+        lock_status = os.fstat(lock_descriptor)
+        if not stat.S_ISREG(lock_status.st_mode):
+            raise ValueError("route lock must be a regular file")
+        _validate_pinned_route_lock(route_descriptor, lock_descriptor)
+        fcntl.flock(lock_descriptor, fcntl.LOCK_EX)
+        locked = True
+        _validate_pinned_route(
+            parent_path,
+            route_name,
+            parent_descriptor,
+            route_descriptor,
+        )
+        _validate_pinned_route_lock(route_descriptor, lock_descriptor)
+        pinned_root = Path(f"/proc/self/fd/{route_descriptor}")
+        try:
+            yield pinned_root
+        finally:
+            _validate_pinned_route(
+                parent_path,
+                route_name,
+                parent_descriptor,
+                route_descriptor,
+            )
+            _validate_pinned_route_lock(route_descriptor, lock_descriptor)
     finally:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
-        os.close(descriptor)
+        if locked:
+            fcntl.flock(lock_descriptor, fcntl.LOCK_UN)
+        if lock_descriptor >= 0:
+            os.close(lock_descriptor)
+        if route_descriptor >= 0:
+            os.close(route_descriptor)
+        os.close(parent_descriptor)
 
 
 _PATH_ANCESTOR_RECEIPT_KEYS = frozenset(
@@ -1300,10 +1446,17 @@ def _path_receipt_payload(
     return receipt, coordinates_bytes
 
 
-def _read_json_object(path: Path, *, label: str) -> tuple[dict[str, Any], bytes]:
-    if path.is_symlink() or not path.is_file():
-        raise ValueError(f"{label} must be a regular file: {path}")
-    raw = path.read_bytes()
+def _read_json_object(
+    path: Path, *, label: str, max_bytes: int | None = None
+) -> tuple[dict[str, Any], bytes]:
+    if max_bytes is None:
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"{label} must be a regular file: {path}")
+        raw = path.read_bytes()
+    else:
+        if type(max_bytes) is not int or max_bytes <= 0:
+            raise ValueError(f"{label} maximum byte count must be positive")
+        raw = _read_bounded_regular_snapshot(path, label=label, maximum_bytes=max_bytes)
     try:
         payload = json.loads(raw)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -1311,6 +1464,19 @@ def _read_json_object(path: Path, *, label: str) -> tuple[dict[str, Any], bytes]
     if not isinstance(payload, dict) or _json_bytes(payload) != raw:
         raise ValueError(f"{label} is not canonical JSON: {path}")
     return payload, raw
+
+
+def _irc_initialization_receipt_maximum_bytes(atom_count: int) -> int:
+    """Bound canonical Sella JSON before parsing using the fixed route size."""
+
+    if type(atom_count) is not int or not 1 <= atom_count <= 8:
+        raise ValueError("D2c IRC initialization atom count is invalid")
+    dimension = 3 * atom_count
+    # H0 plus bounded Sella PES cache matrices dominate this canonical receipt.
+    # Forty-eight bytes per finite float is conservative for canonical JSON while
+    # remaining far below the generic restart ceiling.
+    maximum_float_values = 4 * dimension * dimension + 8 * dimension + atom_count
+    return 64 * 1024 + 48 * maximum_float_values
 
 
 def _validated_preflight(root: Path, route: str) -> tuple[dict[str, Any], str]:
@@ -1803,6 +1969,7 @@ def _publish_transition_state_qualification(
     mapped_reactant_coordinates_angstrom: Any = None,
     mapped_product_coordinates_angstrom: Any = None,
     _route_claim_held: bool = False,
+    _pinned_route_root: Path | None = None,
     _boundary_validator: Callable[[], None] | None = None,
     _failure_injector: Callable[[str], None] | None = None,
 ) -> PublishedTransitionStateQualification:
@@ -1813,8 +1980,14 @@ def _publish_transition_state_qualification(
         _boundary_validator()
     preflight, preflight_sha = _validated_preflight(root, route)
     route_root = root / route
-    claim = nullcontext() if _route_claim_held else _exclusive_route_claim(route_root)
-    with claim:
+    if _route_claim_held:
+        if _pinned_route_root is None:
+            raise RuntimeError("held route claim lacks its pinned descriptor path")
+        claim = nullcontext(_pinned_route_root)
+    else:
+        claim = _exclusive_route_claim(route_root)
+    with claim as claimed_route_root:
+        route_root = _claimed_route_root(claimed_route_root, root / route)
         if _boundary_validator is not None:
             _boundary_validator()
         _remove_owned_temporary_directories(
@@ -1832,7 +2005,7 @@ def _publish_transition_state_qualification(
         qualification_root = route_root / "ts-qualification"
         if qualification_root.exists() or qualification_root.is_symlink():
             return _as_published_qualification(
-                _load_canonical_qualification(root, route)
+                _load_canonical_qualification(root, route, _route_root=route_root)
             )
         if (
             qualified_transition_state is None
@@ -1940,7 +2113,7 @@ def _publish_transition_state_qualification(
             if _boundary_validator is not None:
                 _boundary_validator()
             return _as_published_qualification(
-                _load_canonical_qualification(root, route)
+                _load_canonical_qualification(root, route, _route_root=route_root)
             )
         except BaseException:
             with suppress(OSError, RuntimeError, ValueError):
@@ -1957,12 +2130,15 @@ def publish_transition_state_qualification(
 ) -> PublishedTransitionStateQualification:
     """Evaluate and publish the canonical TS gate from repository-bound inputs."""
 
+    _validate_production_boundary(run_root, route)
+
     def validate_boundary() -> None:
         _validate_production_boundary(run_root, route)
 
     root = _safe_absolute_root(run_root)
     route_root = root / route
-    with _exclusive_route_claim(route_root):
+    with _exclusive_route_claim(route_root) as claimed_route_root:
+        pinned_route_root = _claimed_route_root(claimed_route_root, route_root)
         preflight, _ = _validate_production_boundary(root, route)
         bundle_root = _safe_absolute_root(DEFAULT_BUNDLE_ROOT)
         template = reactions(gpu=True, basis="def2-svp")[route].cluster
@@ -1972,12 +2148,13 @@ def publish_transition_state_qualification(
         inputs = _trusted_route_input_snapshots(
             bundle_root, route, template, fingerprints
         )
-        qualification_root = route_root / "ts-qualification"
+        qualification_root = pinned_route_root / "ts-qualification"
         if qualification_root.exists() or qualification_root.is_symlink():
             return _publish_transition_state_qualification(
                 root,
                 route=route,
                 _route_claim_held=True,
+                _pinned_route_root=pinned_route_root,
                 _boundary_validator=validate_boundary,
             )
         transition_state = inputs["transition_state"]
@@ -1991,16 +2168,19 @@ def publish_transition_state_qualification(
             mapped_reactant_coordinates_angstrom=inputs["reactant"].coords,
             mapped_product_coordinates_angstrom=inputs["product"].coords,
             _route_claim_held=True,
+            _pinned_route_root=pinned_route_root,
             _boundary_validator=validate_boundary,
         )
 
 
 def _load_canonical_qualification(
-    run_root: Path, route: str
+    run_root: Path, route: str, *, _route_root: Path | None = None
 ) -> _CanonicalQualificationAncestry:
     root = _safe_absolute_root(run_root)
     preflight, preflight_sha = _validated_preflight(root, route)
-    qualification_root = root / route / "ts-qualification"
+    qualification_root = (
+        root / route if _route_root is None else _route_root
+    ) / "ts-qualification"
     if qualification_root.is_symlink() or not qualification_root.is_dir():
         raise ValueError("canonical TS qualification must be a real directory")
     receipt, receipt_raw = _read_json_object(
@@ -2162,6 +2342,7 @@ def _load_canonical_qualification(
     return _CanonicalQualificationAncestry(
         root=root,
         route=route,
+        route_root=qualification_root.parent,
         preflight=preflight,
         preflight_receipt_sha256=preflight_sha,
         campaign_identity=preflight["identity"],
@@ -2606,7 +2787,7 @@ def _validate_canonical_irc_receipts(
     direction_receipts = execution_receipt["direction_receipts"]
     for name in ("forward", "reverse"):
         restart_receipt, _ = _read_json_object(
-            ancestry.root / ancestry.route / "irc-restart" / name / "receipt.json",
+            ancestry.route_root / "irc-restart" / name / "receipt.json",
             label=f"IRC restart {name} checkpoint receipt",
         )
         _strict_json_equal(
@@ -2614,7 +2795,7 @@ def _validate_canonical_irc_receipts(
             direction_receipts[name],
             label=f"IRC restart/final canonical {name} receipt",
         )
-        receipt_path = ancestry.root / ancestry.route / f"irc-{name}" / "receipt.json"
+        receipt_path = ancestry.route_root / f"irc-{name}" / "receipt.json"
         receipt, raw = _read_json_object(receipt_path, label=f"IRC {name} receipt")
         _strict_json_equal(
             receipt,
@@ -2785,7 +2966,7 @@ def _validate_irc_execution_receipt_payload(
 def _load_irc_execution_receipt(
     ancestry: _CanonicalQualificationAncestry,
 ) -> tuple[dict[str, Any], bytes, SellaIrcTrace, str]:
-    receipt_path = ancestry.root / ancestry.route / "irc-execution" / "receipt.json"
+    receipt_path = ancestry.route_root / "irc-execution" / "receipt.json"
     receipt, raw = _read_json_object(receipt_path, label="IRC execution receipt")
     trace, run_identity = _validate_irc_execution_receipt_payload(receipt, ancestry)
     return receipt, raw, trace, run_identity
@@ -2912,6 +3093,9 @@ def _checkpoint_irc_initialization(
         observed, _ = _read_json_object(
             destination / "receipt.json",
             label="IRC shared initialization checkpoint receipt",
+            max_bytes=_irc_initialization_receipt_maximum_bytes(
+                len(ancestry.qualified_transition_state.symbols)
+            ),
         )
         _strict_json_equal(
             observed, receipt, label="IRC shared initialization checkpoint"
@@ -2934,7 +3118,7 @@ def _load_irc_restart(
     quarry_ts.SellaIrcInitializationState | None,
     dict[str, IrcDirectionPath],
 ]:
-    restart_root = ancestry.root / ancestry.route / "irc-restart"
+    restart_root = ancestry.route_root / "irc-restart"
     if restart_root.is_symlink() or not restart_root.is_dir():
         raise ValueError("canonical IRC restart checkpoint must be a real directory")
     observed = {child.name for child in restart_root.iterdir()}
@@ -2988,6 +3172,9 @@ def _load_irc_restart(
         initialization_receipt, _ = _read_json_object(
             initialization_root / "receipt.json",
             label="IRC shared initialization checkpoint receipt",
+            max_bytes=_irc_initialization_receipt_maximum_bytes(
+                len(ancestry.qualified_transition_state.symbols)
+            ),
         )
         state_payload = initialization_receipt.get("initialization_state")
         initialization = quarry_ts._sella_irc_initialization_from_payload(state_payload)
@@ -3092,10 +3279,13 @@ def _run_and_publish_irc(
         _boundary_validator()
     ancestry = _load_canonical_qualification(run_root, route)
     route_root = ancestry.root / route
-    with _exclusive_route_claim(route_root):
+    with _exclusive_route_claim(route_root) as claimed_route_root:
+        route_root = _claimed_route_root(claimed_route_root, ancestry.root / route)
         if _boundary_validator is not None:
             _boundary_validator()
-        ancestry = _load_canonical_qualification(ancestry.root, route)
+        ancestry = _load_canonical_qualification(
+            ancestry.root, route, _route_root=route_root
+        )
         _remove_owned_temporary_directories(
             route_root,
             name_pattern=_IRC_EXECUTION_TEMPORARY_NAME,
@@ -3226,7 +3416,9 @@ def _run_and_publish_irc(
                     raise ValueError("Sella initialization execution contract drifted")
                 if _boundary_validator is not None:
                     _boundary_validator()
-                current = _load_canonical_qualification(ancestry.root, route)
+                current = _load_canonical_qualification(
+                    ancestry.root, route, _route_root=route_root
+                )
                 if (
                     current.preflight_receipt_sha256
                     != ancestry.preflight_receipt_sha256
@@ -3265,7 +3457,9 @@ def _run_and_publish_irc(
                     )
                 if _boundary_validator is not None:
                     _boundary_validator()
-                current = _load_canonical_qualification(ancestry.root, route)
+                current = _load_canonical_qualification(
+                    ancestry.root, route, _route_root=route_root
+                )
                 if (
                     current.preflight_receipt_sha256
                     != ancestry.preflight_receipt_sha256
@@ -3435,7 +3629,9 @@ def _run_and_publish_irc(
                 continue
             if _boundary_validator is not None:
                 _boundary_validator()
-            current = _load_canonical_qualification(ancestry.root, route)
+            current = _load_canonical_qualification(
+                ancestry.root, route, _route_root=route_root
+            )
             if (
                 current.preflight_receipt_sha256 != ancestry.preflight_receipt_sha256
                 or current.ts_qualification_receipt_sha256
@@ -3467,7 +3663,9 @@ def _run_and_publish_irc(
 
         if _boundary_validator is not None:
             _boundary_validator()
-        current = _load_canonical_qualification(ancestry.root, route)
+        current = _load_canonical_qualification(
+            ancestry.root, route, _route_root=route_root
+        )
         if (
             current.preflight_receipt_sha256 != ancestry.preflight_receipt_sha256
             or current.ts_qualification_receipt_sha256
@@ -3496,7 +3694,9 @@ def _run_and_publish_irc(
             raise ValueError("canonical IRC execution receipt changed")
         return PublishedIrcRun(
             run_identity=run_identity,
-            execution_receipt_path=execution_root / "receipt.json",
+            execution_receipt_path=(
+                ancestry.root / route / "irc-execution" / "receipt.json"
+            ),
             execution_receipt_sha256=hashes["execution"],
             direction_receipt_sha256={
                 name: hashes[name] for name in ("forward", "reverse")
@@ -3818,8 +4018,9 @@ def _publish_typed_irc_path(
     root.mkdir(parents=True, exist_ok=True)
     if root.is_symlink() or not root.is_dir():
         raise ValueError(f"run root must be a real directory: {root}")
-    route_root = root / route
-    with _exclusive_route_claim(route_root):
+    canonical_route_root = root / route
+    with _exclusive_route_claim(canonical_route_root) as claimed_route_root:
+        route_root = _claimed_route_root(claimed_route_root, canonical_route_root)
         _remove_owned_temporary_directories(
             route_root,
             name_pattern=_PATH_TEMPORARY_NAME,
@@ -3827,13 +4028,16 @@ def _publish_typed_irc_path(
         )
         path_dir = route_root / "path"
         if path_dir.exists() or path_dir.is_symlink():
-            return _validate_published_path(
-                path_dir,
-                campaign_identity=campaign_identity,
-                route=route,
-                atom_mapping_sha256=atom_mapping_sha256,
-                qualified_transition_state=qualified_transition_state,
-                ancestor_receipts=ancestor_receipts,
+            return replace(
+                _validate_published_path(
+                    path_dir,
+                    campaign_identity=campaign_identity,
+                    route=route,
+                    atom_mapping_sha256=atom_mapping_sha256,
+                    qualified_transition_state=qualified_transition_state,
+                    ancestor_receipts=ancestor_receipts,
+                ),
+                receipt_path=canonical_route_root / "path" / "receipt.json",
             )
         if trace is None:
             raise ValueError(
@@ -3895,7 +4099,10 @@ def _publish_typed_irc_path(
             )
             if _ancestry_validator is not None:
                 _ancestry_validator()
-            return published
+            return replace(
+                published,
+                receipt_path=canonical_route_root / "path" / "receipt.json",
+            )
         except BaseException:
             with suppress(OSError, RuntimeError, ValueError):
                 _safe_remove_owned_directory(path_dir, owned_identity, owned_hashes)
@@ -4683,8 +4890,16 @@ def _publish_path_hessians(
     policy = _validated_backend_policy(backend_policy)
     _route_identity_cluster(route, qualified_transition_state, label="qualified TS")
     root = _safe_absolute_root(run_root)
-    route_root = root / route
-    with _exclusive_route_claim(route_root):
+    canonical_route_root = root / route
+
+    def canonicalize(published: PublishedPathHessians) -> PublishedPathHessians:
+        return replace(
+            published,
+            receipt_path=canonical_route_root / "hessians" / "receipt.json",
+        )
+
+    with _exclusive_route_claim(canonical_route_root) as claimed_route_root:
+        route_root = _claimed_route_root(claimed_route_root, canonical_route_root)
         if _ancestry_validator is not None:
             _ancestry_validator()
         current_path = _validate_published_path(
@@ -4743,7 +4958,7 @@ def _publish_path_hessians(
             )
             if _ancestry_validator is not None:
                 _ancestry_validator()
-            return published
+            return canonicalize(published)
 
         results: list[NativeHessianResult] = []
         child_hashes: list[str] = []
@@ -4877,7 +5092,7 @@ def _publish_path_hessians(
             )
             if _ancestry_validator is not None:
                 _ancestry_validator()
-            return published
+            return canonicalize(published)
         aggregate = _aggregate_hessian_receipt(
             campaign_identity=campaign_identity,
             route=route,
@@ -4929,7 +5144,7 @@ def _publish_path_hessians(
             )
             if _ancestry_validator is not None:
                 _ancestry_validator()
-            return published
+            return canonicalize(published)
         except BaseException:
             with suppress(OSError, RuntimeError, ValueError):
                 _safe_remove_owned_file(
@@ -5282,6 +5497,294 @@ def _installed_distribution(label: str, candidates: tuple[str, ...]) -> tuple[st
     return installed[0]
 
 
+def _code_digest(code: types.CodeType) -> str:
+    def constant(value: Any) -> Any:
+        if isinstance(value, types.CodeType):
+            return {"code": code_payload(value)}
+        if isinstance(value, tuple):
+            return {"tuple": [constant(item) for item in value]}
+        if isinstance(value, frozenset):
+            values = [constant(item) for item in value]
+            return {"frozenset": sorted(values, key=repr)}
+        if isinstance(value, bytes):
+            return {"bytes": value.hex()}
+        if value is Ellipsis:
+            return {"singleton": "Ellipsis"}
+        if value is None or type(value) in {bool, int, float, complex, str}:
+            return {type(value).__name__: repr(value)}
+        raise RuntimeError(f"unsupported Python code constant: {type(value).__name__}")
+
+    def code_payload(current: types.CodeType) -> dict[str, Any]:
+        return {
+            "argcount": current.co_argcount,
+            "posonlyargcount": current.co_posonlyargcount,
+            "kwonlyargcount": current.co_kwonlyargcount,
+            "nlocals": current.co_nlocals,
+            "stacksize": current.co_stacksize,
+            "flags": current.co_flags,
+            "code": current.co_code.hex(),
+            "consts": [constant(value) for value in current.co_consts],
+            "names": current.co_names,
+            "varnames": current.co_varnames,
+            "filename": current.co_filename,
+            "name": current.co_name,
+            "qualname": current.co_qualname,
+            "firstlineno": current.co_firstlineno,
+            "linetable": current.co_linetable.hex(),
+            "exceptiontable": current.co_exceptiontable.hex(),
+            "freevars": current.co_freevars,
+            "cellvars": current.co_cellvars,
+        }
+
+    encoded = json.dumps(
+        code_payload(code), sort_keys=True, separators=(",", ":")
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _nested_code_digests(code: types.CodeType) -> dict[str, set[str]]:
+    records: dict[str, set[str]] = {}
+
+    def visit(current: types.CodeType) -> None:
+        records.setdefault(current.co_qualname, set()).add(_code_digest(current))
+        for value in current.co_consts:
+            if isinstance(value, types.CodeType):
+                visit(value)
+
+    visit(code)
+    return records
+
+
+def _proven_pyscf_generated_wrapper(
+    module: Any,
+    module_name: str,
+    function: types.FunctionType,
+    owner_class: type[Any] | None,
+    member_name: str | None,
+) -> bool:
+    """Reproduce PySCF's source-backed ``exec`` wrappers exactly."""
+
+    if (
+        not module_name.startswith("pyscf.")
+        or owner_class is None
+        or member_name is None
+    ):
+        return False
+    names = function.__code__.co_names
+    if not names:
+        return False
+    misc = importlib.import_module("pyscf.lib.misc")
+    candidates: list[types.FunctionType] = []
+    target_name = names[-1]
+    for container in (owner_class, module):
+        target = getattr(container, target_name, None)
+        if inspect.isfunction(target):
+            candidates.append(misc.alias(target, alias_name=member_name))
+    target = getattr(module, member_name, None)
+    if inspect.isfunction(target):
+        parameters = inspect.signature(target).parameters
+        absences = [name for name in names[:-1] if name in parameters]
+        candidates.append(misc.module_method(target, absences=absences))
+    digest = _code_digest(function.__code__)
+    return any(_code_digest(candidate.__code__) == digest for candidate in candidates)
+
+
+def _python_source_execution_identity(
+    module: Any,
+    module_name: str,
+    origin: Path,
+    raw: bytes,
+    *,
+    trusted_source_roots: tuple[Path, ...],
+) -> dict[str, Any]:
+    """Bind live Python callables and prove path-backed code matches source."""
+
+    try:
+        source_code = compile(
+            raw.decode("utf-8"),
+            str(origin),
+            "exec",
+            dont_inherit=True,
+            optimize=sys.flags.optimize,
+        )
+    except (UnicodeDecodeError, SyntaxError) as exc:
+        raise RuntimeError(
+            f"Python executable module source cannot be compiled: {module_name}"
+        ) from exc
+    source_digests = _nested_code_digests(source_code)
+    source_files = {str(origin): hashlib.sha256(raw).hexdigest()}
+    source_cache = {origin: source_digests}
+    loaded: list[tuple[str, str, str]] = []
+    seen_objects: set[int] = set()
+    module_owner = getattr(module, "__name__", module_name)
+
+    def visit(
+        value: Any,
+        *,
+        generated: bool = False,
+        owner_class: type[Any] | None = None,
+        member_name: str | None = None,
+    ) -> None:
+        identity = id(value)
+        if identity in seen_objects:
+            return
+        seen_objects.add(identity)
+        if inspect.isfunction(value):
+            if getattr(value, "__module__", None) != module_owner:
+                return
+            code = value.__code__
+            digest = _code_digest(code)
+            filename = code.co_filename
+            if generated and code.co_qualname not in source_digests:
+                return
+            if filename == "<string>":
+                if not _proven_pyscf_generated_wrapper(
+                    module, module_name, value, owner_class, member_name
+                ):
+                    raise RuntimeError(
+                        f"loaded Python code has no provable origin: {module_name}"
+                    )
+                loaded.append((code.co_qualname, filename, digest))
+                return
+            try:
+                code_origin = Path(filename).resolve(strict=True)
+            except (OSError, RuntimeError) as exc:
+                raise RuntimeError(
+                    f"loaded Python code has no provable origin: {module_name}"
+                ) from exc
+            if not any(
+                code_origin.is_relative_to(root) for root in trusted_source_roots
+            ):
+                raise RuntimeError(
+                    "loaded Python code escaped trusted source roots: "
+                    f"{module_name}.{code.co_qualname}"
+                )
+            if code_origin not in source_cache:
+                external_raw = _read_bounded_regular_snapshot(
+                    code_origin,
+                    label=f"{module_name} loaded code source",
+                    maximum_bytes=_MODULE_FILE_MAXIMUM_BYTES,
+                )
+                try:
+                    external_code = compile(
+                        external_raw.decode("utf-8"),
+                        str(code_origin),
+                        "exec",
+                        dont_inherit=True,
+                        optimize=sys.flags.optimize,
+                    )
+                except (UnicodeDecodeError, SyntaxError) as exc:
+                    raise RuntimeError(
+                        f"loaded Python code source cannot be proven: {module_name}"
+                    ) from exc
+                source_cache[code_origin] = _nested_code_digests(external_code)
+                source_files[str(code_origin)] = hashlib.sha256(
+                    external_raw
+                ).hexdigest()
+            source_matches = digest in source_cache[code_origin].get(
+                code.co_qualname, set()
+            )
+            if not source_matches:
+                raise RuntimeError(
+                    "loaded Python code disagrees with source: "
+                    f"{module_name}.{code.co_qualname}"
+                )
+            loaded.append((code.co_qualname, filename, digest))
+            return
+        if (
+            inspect.isclass(value)
+            and getattr(value, "__module__", None) == module_owner
+        ):
+            dataclass_generated = "__dataclass_fields__" in vars(value)
+            generated_names = {
+                "__init__",
+                "__repr__",
+                "__eq__",
+                "__hash__",
+                "__setattr__",
+                "__delattr__",
+            }
+            for member_name, member in vars(value).items():
+                member_generated = (
+                    dataclass_generated and member_name in generated_names
+                )
+                if isinstance(member, (staticmethod, classmethod)):
+                    visit(
+                        member.__func__,
+                        generated=member_generated,
+                        owner_class=value,
+                        member_name=member_name,
+                    )
+                elif isinstance(member, property):
+                    for accessor in (member.fget, member.fset, member.fdel):
+                        if accessor is not None:
+                            visit(
+                                accessor,
+                                generated=member_generated,
+                                owner_class=value,
+                                member_name=member_name,
+                            )
+                else:
+                    visit(
+                        member,
+                        generated=member_generated,
+                        owner_class=value,
+                        member_name=member_name,
+                    )
+
+    for value in vars(module).values():
+        visit(value)
+    if not loaded:
+        raise RuntimeError(
+            f"Python executable module has no attestable loaded code: {module_name}"
+        )
+    encoded = json.dumps(loaded, sort_keys=True, separators=(",", ":")).encode()
+    return {
+        "kind": "python-source",
+        "loaded_code_sha256": hashlib.sha256(encoded).hexdigest(),
+        "source_files": dict(sorted(source_files.items())),
+    }
+
+
+def _native_extension_execution_identity(
+    module_name: str, origin: Path
+) -> dict[str, Any]:
+    """Bind the imported extension to its mapped inode without overclaiming."""
+
+    # Linux loads the extension before manifest construction. /proc/self/maps proves
+    # this process mapped the same inode still named by origin. It detects replacement
+    # after import, but deliberately does not claim a hash of relocated memory pages.
+    status = origin.stat(follow_symlinks=False)
+    try:
+        maps = Path("/proc/self/maps").read_text()
+    except OSError as exc:
+        raise RuntimeError(
+            "native executable provenance requires /proc/self/maps"
+        ) from exc
+    mapped = False
+    for line in maps.splitlines():
+        fields = line.split(maxsplit=5)
+        if len(fields) < 5:
+            continue
+        try:
+            major, minor = (int(value, 16) for value in fields[3].split(":", 1))
+            inode = int(fields[4])
+        except (ValueError, IndexError):
+            continue
+        if os.makedev(major, minor) == status.st_dev and inode == status.st_ino:
+            mapped = True
+            break
+    if not mapped:
+        raise RuntimeError(
+            f"loaded native executable file identity cannot be proven: {module_name}"
+        )
+    return {
+        "kind": "native-extension",
+        "mapped_device": status.st_dev,
+        "mapped_inode": status.st_ino,
+    }
+
+
 def _validated_executable_module_manifest(payload: Any) -> dict[str, dict[str, Any]]:
     if type(payload) is not dict or set(payload) != set(EXECUTABLE_MODULES):
         raise ValueError(
@@ -5295,6 +5798,7 @@ def _validated_executable_module_manifest(payload: Any) -> dict[str, dict[str, A
             "sha256",
             "byte_count",
             "trust_class",
+            "execution_identity",
         }:
             raise ValueError(
                 f"executable module manifest record is invalid: {module_name}"
@@ -5320,11 +5824,68 @@ def _validated_executable_module_manifest(payload: Any) -> dict[str, dict[str, A
             raise ValueError(
                 f"executable module manifest bounds are invalid: {module_name}"
             )
+        execution_identity = record.get("execution_identity")
+        if type(execution_identity) is not dict:
+            raise ValueError(
+                f"executable module execution identity is invalid: {module_name}"
+            )
+        if execution_identity.get("kind") == "python-source":
+            if set(execution_identity) != {
+                "kind",
+                "loaded_code_sha256",
+                "source_files",
+            }:
+                raise ValueError(
+                    f"Python module execution identity is invalid: {module_name}"
+                )
+            _require_sha(
+                _require_json_string(
+                    execution_identity.get("loaded_code_sha256"),
+                    label=f"{module_name} loaded code SHA-256",
+                ),
+                length=64,
+                label=f"{module_name} loaded code SHA-256",
+            )
+            source_files = execution_identity.get("source_files")
+            if type(source_files) is not dict or not source_files:
+                raise ValueError(
+                    f"Python module loaded source identity is invalid: {module_name}"
+                )
+            for source_path, source_sha in source_files.items():
+                if type(source_path) is not str or not Path(source_path).is_absolute():
+                    raise ValueError(
+                        f"Python module loaded source path is invalid: {module_name}"
+                    )
+                _require_sha(
+                    _require_json_string(
+                        source_sha, label=f"{module_name} loaded source SHA-256"
+                    ),
+                    length=64,
+                    label=f"{module_name} loaded source SHA-256",
+                )
+        elif execution_identity.get("kind") == "native-extension":
+            if set(execution_identity) != {
+                "kind",
+                "mapped_device",
+                "mapped_inode",
+            } or any(
+                type(execution_identity.get(key)) is not int
+                or execution_identity[key] <= 0
+                for key in ("mapped_device", "mapped_inode")
+            ):
+                raise ValueError(
+                    f"native module execution identity is invalid: {module_name}"
+                )
+        else:
+            raise ValueError(
+                f"executable module execution kind is invalid: {module_name}"
+            )
         validated[module_name] = {
             "origin": origin,
             "sha256": digest,
             "byte_count": byte_count,
             "trust_class": trust_class,
+            "execution_identity": dict(execution_identity),
         }
     return validated
 
@@ -5343,6 +5904,7 @@ def _executable_module_manifest() -> dict[str, dict[str, Any]]:
                     "campaign executable module source cannot be a symlink"
                 )
             origin = source_path.resolve(strict=True)
+            module = sys.modules[__name__]
         else:
             module = importlib.import_module(module_name)
             spec = getattr(module, "__spec__", None)
@@ -5383,25 +5945,40 @@ def _executable_module_manifest() -> dict[str, dict[str, Any]]:
                     "third-party executable module escaped the active environment: "
                     f"{module_name}"
                 ) from exc
-            try:
-                origin.relative_to(qm_root)
-            except ValueError:
-                pass
-            else:
-                raise RuntimeError(
-                    "third-party executable module resolves inside the repository: "
-                    f"{module_name}"
-                )
         raw = _read_bounded_regular_snapshot(
             origin,
             label=f"{module_name} executable module",
             maximum_bytes=_MODULE_FILE_MAXIMUM_BYTES,
         )
+        if any(
+            str(origin).endswith(suffix)
+            for suffix in importlib.machinery.EXTENSION_SUFFIXES
+        ):
+            execution_identity = _native_extension_execution_identity(
+                module_name, origin
+            )
+        elif origin.suffix == ".py":
+            execution_identity = _python_source_execution_identity(
+                module,
+                module_name,
+                origin,
+                raw,
+                trusted_source_roots=(
+                    qm_root,
+                    environment_root,
+                    Path(sys.base_prefix).resolve(),
+                ),
+            )
+        else:
+            raise RuntimeError(
+                f"executable module file kind cannot be attested: {module_name}"
+            )
         records[module_name] = {
             "origin": str(origin),
             "sha256": hashlib.sha256(raw).hexdigest(),
             "byte_count": len(raw),
             "trust_class": trust_class,
+            "execution_identity": execution_identity,
         }
     return _validated_executable_module_manifest(records)
 
