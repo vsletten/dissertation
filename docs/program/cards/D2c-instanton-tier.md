@@ -259,3 +259,21 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   pushed head acquires the process-bound `D2c-instanton-tier` lease with a 49-hour
   diagnostic TTL. Next action is a pushed-head quantitative asymmetry diagnostic,
   not blind tolerance inflation or another identical launch.
+- 2026-09-08 02:27 PDT (hermes-custom-build-001; profile=workstation) —
+  QUANTITATIVE DIAGNOSTIC COMPLETE, TOLERANCE CHANGE REJECTED: pushed head
+  `0b7471a` reran the same bounded first-route evaluation under a verified QI2 lease
+  (owner `D2c-instanton-tier`, PID 784938, 18 GB) and measured CPU PySCF canonical
+  asymmetry `1.52624800126e-06 Eh/Bohr^2` against matrix max
+  `1.21773596401`; the existing absolute tolerance was `2.43547192802e-09`.
+  Receipt:
+  `/mnt/data/vsletten/dissertation-data/task300-d2c-instanton-0b7471a/production-terminal.json`.
+  A cold scientific review rejected simply raising the tolerance: one scalar run
+  does not distinguish grid/CPSCF convergence noise from a material defect, the
+  proposed `max(1, scale)` rule was not uniformly relative, and its tests left a
+  broad false-green interval. The uncommitted relaxation was fully reverted. Exact
+  head remains clean; whole-QM verification is `1081 passed, 1 skipped` with
+  Ruff/format/diff clean. Next continuation must compare the raw asymmetry and
+  post-symmetrization vibrational verdict under a denser DFT grid and stricter CPSCF,
+  then encode acceptance/rejection boundaries (including low-scale and direct-result
+  construction) before changing policy. No TS qualification, IRC, SCT rate, D2b gate
+  flip, D3b table, or PR exists.
