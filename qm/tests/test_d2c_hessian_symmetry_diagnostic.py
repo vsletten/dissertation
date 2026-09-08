@@ -1134,6 +1134,23 @@ def test_external_claim_survives_output_directory_replacement_and_blocks_second_
         claim.verify()
 
 
+def test_analytic_matrix_artifact_refuses_replaced_output_root(tmp_path):
+    output = tmp_path / "output"
+    displaced = tmp_path / "displaced-original"
+
+    with (
+        pytest.raises(RuntimeError, match="output root was replaced"),
+        diagnostic._exclusive_output_claim(output) as claim,
+    ):
+        os.rename(output, displaced)
+        output.mkdir()
+        diagnostic._matrix_artifact(
+            claim, output, "A-baseline", "electronic", np.eye(2)
+        )
+
+    assert not (output / "A-baseline" / "electronic.f64").exists()
+
+
 def test_external_claim_prevents_duplicate_expensive_call(tmp_path, monkeypatch):
     output = tmp_path / "output"
     calls = []

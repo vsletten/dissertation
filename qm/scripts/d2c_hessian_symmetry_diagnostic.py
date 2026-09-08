@@ -1087,14 +1087,20 @@ def finalize_if_running(
 
 
 def _matrix_artifact(
-    root: Path, case: str, label: str, matrix: np.ndarray
+    claim: _OutputRootClaim,
+    root: Path,
+    case: str,
+    label: str,
+    matrix: np.ndarray,
 ) -> dict[str, Any]:
     array = np.ascontiguousarray(matrix, dtype="<f8")
     raw = array.tobytes()
     relative = Path(case) / f"{label}.f64"
     destination = root / relative
+    claim.verify()
     destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    _atomic_write(destination, raw)
+    claim.verify()
+    _claimed_write(claim, destination, raw)
     return {
         "path": str(relative),
         "dtype": "little-endian float64",
@@ -1367,6 +1373,7 @@ def _fd_execution_identity() -> dict[str, Any]:
 
 
 def _evaluate_case(
+    claim: _OutputRootClaim,
     root: Path,
     definition: dict[str, Any],
     transition_state: Any,
@@ -1466,11 +1473,13 @@ def _evaluate_case(
     component_records = {}
     for label, matrix in components.items():
         component_records[label] = {
-            "artifact": _matrix_artifact(root, definition["name"], label, matrix),
+            "artifact": _matrix_artifact(
+                claim, root, definition["name"], label, matrix
+            ),
             "symmetry": _metric_payload(matrix),
         }
     symmetric_artifact = _matrix_artifact(
-        root, definition["name"], "total-symmetric", symmetric
+        claim, root, definition["name"], "total-symmetric", symmetric
     )
     grid_points = int(np.asarray(mf.grids.coords).shape[0])
     spin_square = None
@@ -3499,6 +3508,7 @@ def _run_analytic_locked(
             status["current_case"] = definition["name"]
             _claimed_write(claim, output_root / "status.json", _json_bytes(status))
             record, symmetric, modes = _evaluate_case(
+                claim,
                 output_root,
                 definition,
                 transition_state,
