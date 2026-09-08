@@ -1646,6 +1646,140 @@ def test_external_claim_inode_replacement_is_detected(tmp_path):
         claim.verify()
 
 
+@pytest.mark.parametrize(
+    "relative_directory", [diagnostic.Path("points/test"), diagnostic.Path("matrices")]
+)
+def test_claimed_bundle_validation_rejects_replaced_intermediate_directory(
+    tmp_path, relative_directory
+):
+    output = tmp_path / "output"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    with (
+        pytest.raises(RuntimeError, match="bound artifact directory was replaced"),
+        diagnostic._exclusive_output_claim(output) as claim,
+    ):
+        diagnostic._publish_record_bundle(
+            output,
+            relative_directory,
+            {"schema": diagnostic.HALF_STEP_SCHEMA, "kind": "test"},
+            {"array.f64": (np.eye(2), "test-units")},
+            claim=claim,
+        )
+        intermediate = output / relative_directory.parts[0]
+        displaced = tmp_path / f"displaced-{relative_directory.parts[0]}"
+        intermediate.rename(displaced)
+        intermediate.symlink_to(outside, target_is_directory=True)
+
+        diagnostic._read_record_bundle(
+            output,
+            relative_directory,
+            claim=claim,
+        )
+
+    assert list(outside.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "relative_directory", [diagnostic.Path("points/test"), diagnostic.Path("matrices")]
+)
+def test_claimed_bundle_publication_rejects_symlink_intermediate_without_redirect(
+    tmp_path, relative_directory
+):
+    output = tmp_path / "output"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    with diagnostic._exclusive_output_claim(output) as claim:
+        intermediate = output / relative_directory.parts[0]
+        intermediate.symlink_to(outside, target_is_directory=True)
+        with pytest.raises((ValueError, FileExistsError)):
+            diagnostic._publish_record_bundle(
+                output,
+                relative_directory,
+                {"schema": diagnostic.HALF_STEP_SCHEMA, "kind": "test"},
+                {"array.f64": (np.eye(2), "test-units")},
+                claim=claim,
+            )
+
+    assert intermediate.is_symlink()
+    assert list(outside.iterdir()) == []
+
+
+@pytest.mark.parametrize("directory_name", ["points", "matrices"])
+def test_claimed_artifact_directory_bind_rejects_inode_swap_before_open(
+    tmp_path, monkeypatch, directory_name
+):
+    output = tmp_path / "output"
+    displaced = tmp_path / f"displaced-{directory_name}"
+
+    with diagnostic._exclusive_output_claim(output) as claim:
+        intermediate = output / directory_name
+        intermediate.mkdir()
+        original_identity = intermediate.stat()
+        real_open = diagnostic.os.open
+        swapped = False
+
+        def replace_before_open(path, flags, mode=0o777, *, dir_fd=None):
+            nonlocal swapped
+            if (
+                not swapped
+                and path == directory_name
+                and dir_fd == claim.root_descriptor
+            ):
+                intermediate.rename(displaced)
+                intermediate.mkdir()
+                swapped = True
+            return real_open(path, flags, mode, dir_fd=dir_fd)
+
+        monkeypatch.setattr(diagnostic.os, "open", replace_before_open)
+        with pytest.raises(
+            RuntimeError, match=rf"diagnostic {directory_name} root changed"
+        ):
+            claim.bind_artifact_directory(directory_name, create=False)
+
+    assert swapped is True
+    displaced_identity = displaced.stat()
+    assert (displaced_identity.st_dev, displaced_identity.st_ino) == (
+        original_identity.st_dev,
+        original_identity.st_ino,
+    )
+    assert list(displaced.iterdir()) == []
+    assert list(intermediate.iterdir()) == []
+
+
+def test_claimed_point_publication_detects_mid_write_ancestor_replacement(
+    tmp_path, monkeypatch
+):
+    output = tmp_path / "output"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    displaced = tmp_path / "displaced-points"
+    real_rename = diagnostic._renameat2_noreplace_at
+
+    def replace_points(directory_fd, source_name, destination_name):
+        (output / "points").rename(displaced)
+        (output / "points").symlink_to(outside, target_is_directory=True)
+        real_rename(directory_fd, source_name, destination_name)
+
+    monkeypatch.setattr(diagnostic, "_renameat2_noreplace_at", replace_points)
+    with (
+        pytest.raises(RuntimeError, match="bound artifact directory was replaced"),
+        diagnostic._exclusive_output_claim(output) as claim,
+    ):
+        diagnostic._publish_record_bundle(
+            output,
+            diagnostic.Path("points/test"),
+            {"schema": diagnostic.HALF_STEP_SCHEMA, "kind": "test"},
+            {"array.f64": (np.eye(2), "test-units")},
+            claim=claim,
+        )
+
+    assert list(outside.iterdir()) == []
+    assert (displaced / "test/receipt.json").is_file()
+
+
 def test_fd_identity_rejects_source_not_equal_to_committed_bytes(monkeypatch):
     identity = {
         "git_sha": "a" * 40,
@@ -2119,6 +2253,89 @@ def test_half_step_requires_fresh_separate_output_root(tmp_path, monkeypatch):
     assert list(output.iterdir()) == []
 
 
+@pytest.mark.parametrize("protected_name", ["prior", "preflight", "reference"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_half_step_rejects_output_in_any_source_tree_without_mutation(
+    tmp_path, monkeypatch, protected_name, nested
+):
+    roots = {name: tmp_path / name for name in ("prior", "preflight", "reference")}
+    for root in roots.values():
+        root.mkdir()
+        (root / "sentinel").write_text(root.name)
+    monkeypatch.setattr(diagnostic, "PRIOR_FD_ROOT", str(roots["prior"]))
+    monkeypatch.setattr(diagnostic, "PRIOR_FD_PREFLIGHT_ROOT", str(roots["preflight"]))
+    monkeypatch.setattr(diagnostic, "PRIOR_FD_REFERENCE_ROOT", str(roots["reference"]))
+    calls = []
+    monkeypatch.setattr(
+        diagnostic, "_load_half_step_source", lambda *_args: calls.append("source")
+    )
+    output = (
+        roots[protected_name] / "evidence" / "attempt"
+        if nested
+        else roots[protected_name]
+    )
+    before = {
+        path: sorted(child.name for child in path.iterdir()) for path in roots.values()
+    }
+
+    with pytest.raises(ValueError, match="outside all half-step source roots"):
+        diagnostic.run_half_step_extension(roots["prior"], output)
+
+    assert calls == []
+    assert {
+        path: sorted(child.name for child in path.iterdir()) for path in roots.values()
+    } == before
+    assert not (output.parent / f".{output.name}.d2c-hessian-diagnostic.claim").exists()
+
+
+@pytest.mark.parametrize("artifact", [diagnostic.TERMINAL, "receipt.json"])
+@pytest.mark.parametrize("artifact_kind", ["dangling-symlink", "directory"])
+def test_half_step_rejects_nonregular_terminal_artifacts_before_calculator(
+    tmp_path, monkeypatch, artifact, artifact_kind
+):
+    source, calls = _patch_fake_half_step_environment(tmp_path, monkeypatch)
+    output = tmp_path / f"{artifact}-{artifact_kind}"
+    output.mkdir()
+    status = diagnostic._initial_half_step_status(
+        _identity(), tmp_path / "prior", source
+    )
+    (output / "status.json").write_bytes(diagnostic._json_bytes(status))
+    artifact_path = output / artifact
+    if artifact_kind == "dangling-symlink":
+        artifact_path.symlink_to(output / "missing-target")
+    else:
+        artifact_path.mkdir()
+    artifact_identity = artifact_path.lstat()
+
+    with pytest.raises(ValueError, match=rf"{artifact} must be a regular file"):
+        diagnostic.run_half_step_extension(tmp_path / "prior", output)
+
+    assert calls == []
+    assert artifact_path.lstat() == artifact_identity
+
+
+def test_half_step_receipt_race_never_replaces_dangling_artifact(tmp_path, monkeypatch):
+    _source, calls = _patch_fake_half_step_environment(tmp_path, monkeypatch)
+    output = tmp_path / "receipt-race"
+    original_evaluate = diagnostic._evaluate_fd_gradient
+
+    def inject_receipt(*args, **kwargs):
+        result = original_evaluate(*args, **kwargs)
+        receipt_path = output / "receipt.json"
+        if not receipt_path.is_symlink():
+            receipt_path.symlink_to(output / "missing-receipt-target")
+        return result
+
+    monkeypatch.setattr(diagnostic, "_evaluate_fd_gradient", inject_receipt)
+
+    with pytest.raises(FileExistsError, match="receipt.json"):
+        diagnostic.run_half_step_extension(tmp_path / "prior", output)
+
+    assert len(calls) == 36
+    assert (output / "receipt.json").is_symlink()
+    assert not (output / "missing-receipt-target").exists()
+
+
 def test_half_step_uncertain_unreceipted_attempt_never_retries(tmp_path, monkeypatch):
     source, calls = _patch_fake_half_step_environment(tmp_path, monkeypatch)
     output = tmp_path / "uncertain"
@@ -2376,6 +2593,41 @@ def test_finalizer_rejects_running_status_from_another_requested_mode_without_wr
 
     assert (output / "status.json").read_bytes() == status_raw
     assert not (output / diagnostic.TERMINAL).exists()
+
+
+@pytest.mark.parametrize(
+    ("requested", "failed_schema"),
+    [
+        ({"half_step": True}, diagnostic.FINITE_DIFFERENCE_SCHEMA),
+        ({"finite_difference": True}, diagnostic.HALF_STEP_SCHEMA),
+    ],
+)
+@pytest.mark.parametrize("terminal_present", [False, True])
+def test_finalizer_rejects_failed_status_from_another_requested_mode_without_writes(
+    tmp_path, requested, failed_schema, terminal_present
+):
+    output = tmp_path / f"failed-{failed_schema}-{terminal_present}"
+    output.mkdir()
+    status = {"schema": failed_schema, "state": "failed", "sentinel": "unchanged"}
+    status_raw = diagnostic._json_bytes(status)
+    (output / "status.json").write_bytes(status_raw)
+    terminal_raw = None
+    if terminal_present:
+        terminal_raw = diagnostic._json_bytes(
+            diagnostic._terminal_payload(
+                status, state="failed", detail="cross-mode crash window"
+            )
+        )
+        (output / diagnostic.TERMINAL).write_bytes(terminal_raw)
+
+    with pytest.raises(ValueError, match="failed status schema does not match"):
+        diagnostic.finalize_if_running(output, **requested)
+
+    assert (output / "status.json").read_bytes() == status_raw
+    if terminal_raw is None:
+        assert not (output / diagnostic.TERMINAL).exists()
+    else:
+        assert (output / diagnostic.TERMINAL).read_bytes() == terminal_raw
 
 
 @pytest.mark.parametrize(

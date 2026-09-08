@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import argparse
 import ast
+import ctypes
+import errno
 import fcntl
 import hashlib
 import json
@@ -26,7 +28,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
@@ -365,7 +367,9 @@ def _atomic_write(
 
 
 class _OutputRootClaim:
-    """External basename claim plus a continuously checked output inode binding."""
+    """External basename claim plus descriptor-bound output directories."""
+
+    _ARTIFACT_DIRECTORIES = frozenset({"points", "matrices"})
 
     def __init__(
         self, path: Path, parent_fd: int, descriptor: int, claim_name: str
@@ -382,6 +386,17 @@ class _OutputRootClaim:
             raise ValueError("diagnostic external claim must be a regular file")
         self.claim_identity = (claim_stat.st_dev, claim_stat.st_ino)
         self.root_identity: tuple[int, int] | None = None
+        self.root_descriptor: int | None = None
+        self._artifact_directories: dict[str, tuple[int, tuple[int, int]]] = {}
+
+    @staticmethod
+    def _directory_flags() -> int:
+        nofollow = getattr(os, "O_NOFOLLOW", None)
+        if nofollow is None:
+            raise RuntimeError(
+                "O_NOFOLLOW is required for diagnostic output confinement"
+            )
+        return os.O_RDONLY | os.O_DIRECTORY | nofollow | getattr(os, "O_CLOEXEC", 0)
 
     def bind(self) -> None:
         try:
@@ -394,7 +409,91 @@ class _OutputRootClaim:
         if not stat.S_ISDIR(root.st_mode):
             raise ValueError("diagnostic output root must be a regular directory")
         self.root_identity = (root.st_dev, root.st_ino)
+        try:
+            self.root_descriptor = os.open(
+                self.name, self._directory_flags(), dir_fd=self.parent_fd
+            )
+        except OSError as exc:
+            raise ValueError(
+                "diagnostic output root cannot be descriptor-bound"
+            ) from exc
+        descriptor_stat = os.fstat(self.root_descriptor)
+        if (
+            not stat.S_ISDIR(descriptor_stat.st_mode)
+            or (descriptor_stat.st_dev, descriptor_stat.st_ino) != self.root_identity
+        ):
+            raise RuntimeError("diagnostic output root changed while it was bound")
         self.verify()
+
+    def _verify_artifact_directories(self) -> None:
+        if self.root_descriptor is None:
+            return
+        for name, (descriptor, identity) in self._artifact_directories.items():
+            try:
+                path_stat = os.stat(
+                    name, dir_fd=self.root_descriptor, follow_symlinks=False
+                )
+            except FileNotFoundError as exc:
+                raise RuntimeError("bound artifact directory was removed") from exc
+            descriptor_stat = os.fstat(descriptor)
+            if (
+                not stat.S_ISDIR(path_stat.st_mode)
+                or not stat.S_ISDIR(descriptor_stat.st_mode)
+                or (path_stat.st_dev, path_stat.st_ino) != identity
+                or (descriptor_stat.st_dev, descriptor_stat.st_ino) != identity
+            ):
+                raise RuntimeError("bound artifact directory was replaced")
+
+    def bind_artifact_directory(self, name: str, *, create: bool) -> int:
+        """Return a duplicate descriptor for one root-relative artifact directory."""
+
+        if name not in self._ARTIFACT_DIRECTORIES or Path(name).name != name:
+            raise ValueError("unsupported diagnostic artifact directory")
+        self.verify()
+        if self.root_descriptor is None:
+            raise RuntimeError("diagnostic output root descriptor is unavailable")
+        if create:
+            with suppress(FileExistsError):
+                os.mkdir(name, mode=0o700, dir_fd=self.root_descriptor)
+        try:
+            path_stat = os.stat(
+                name, dir_fd=self.root_descriptor, follow_symlinks=False
+            )
+        except FileNotFoundError:
+            raise
+        if not stat.S_ISDIR(path_stat.st_mode):
+            raise ValueError(f"diagnostic {name} root must be a regular directory")
+        expected_identity = (path_stat.st_dev, path_stat.st_ino)
+        try:
+            descriptor = os.open(
+                name, self._directory_flags(), dir_fd=self.root_descriptor
+            )
+        except FileNotFoundError:
+            raise
+        except OSError as exc:
+            raise ValueError(
+                f"diagnostic {name} root must be a regular directory"
+            ) from exc
+        descriptor_stat = os.fstat(descriptor)
+        identity = (descriptor_stat.st_dev, descriptor_stat.st_ino)
+        if not stat.S_ISDIR(descriptor_stat.st_mode) or identity != expected_identity:
+            os.close(descriptor)
+            raise RuntimeError(f"diagnostic {name} root changed while it was bound")
+        existing = self._artifact_directories.get(name)
+        if existing is not None:
+            os.close(descriptor)
+            if existing[1] != identity:
+                raise RuntimeError("bound artifact directory was replaced")
+            self.verify()
+            return os.dup(existing[0])
+        self._artifact_directories[name] = (descriptor, identity)
+        try:
+            self.verify()
+        except BaseException:
+            self._artifact_directories.pop(name, None)
+            os.close(descriptor)
+            raise
+        return os.dup(descriptor)
 
     def verify(self) -> None:
         parent_path = os.stat(self.parent, follow_symlinks=False)
@@ -425,9 +524,15 @@ class _OutputRootClaim:
             raise RuntimeError(
                 "diagnostic output root was removed while claimed"
             ) from exc
+        root_descriptor = (
+            os.fstat(self.root_descriptor) if self.root_descriptor is not None else None
+        )
         if (
             not stat.S_ISDIR(root.st_mode)
             or (root.st_dev, root.st_ino) != self.root_identity
+            or root_descriptor is None
+            or not stat.S_ISDIR(root_descriptor.st_mode)
+            or (root_descriptor.st_dev, root_descriptor.st_ino) != self.root_identity
         ):
             raise RuntimeError("diagnostic output root was replaced while claimed")
         path_root = os.stat(self.path, follow_symlinks=False)
@@ -435,6 +540,15 @@ class _OutputRootClaim:
             raise RuntimeError(
                 "diagnostic output path no longer names the claimed root"
             )
+        self._verify_artifact_directories()
+
+    def close(self) -> None:
+        for descriptor, _identity in self._artifact_directories.values():
+            os.close(descriptor)
+        self._artifact_directories.clear()
+        if self.root_descriptor is not None:
+            os.close(self.root_descriptor)
+            self.root_descriptor = None
 
 
 @contextmanager
@@ -477,6 +591,7 @@ def _exclusive_output_claim(output_root: Path) -> Iterator[_OutputRootClaim]:
         os.close(parent_fd)
         raise
     locked = False
+    claim: _OutputRootClaim | None = None
     try:
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -506,6 +621,8 @@ def _exclusive_output_claim(output_root: Path) -> Iterator[_OutputRootClaim]:
         yield claim
         claim.verify()
     finally:
+        if claim is not None:
+            claim.close()
         if locked:
             fcntl.flock(descriptor, fcntl.LOCK_UN)
         os.close(descriptor)
@@ -520,16 +637,14 @@ def _claimed_write(claim: _OutputRootClaim, path: Path, raw: bytes) -> None:
     claim.verify()
 
 
-def _terminal_write_noreplace(
-    claim: _OutputRootClaim, path: Path, payload: dict[str, Any]
-) -> None:
-    """Publish the authoritative terminal once; never replace prior evidence."""
+def _claimed_write_noreplace(claim: _OutputRootClaim, path: Path, raw: bytes) -> None:
+    """Publish one root-level artifact without replacing any existing inode."""
 
     claim.verify()
     stage = path.parent / f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp"
     try:
         with stage.open("xb") as handle:
-            handle.write(_json_bytes(payload))
+            handle.write(raw)
             handle.flush()
             os.fsync(handle.fileno())
         claim.verify()
@@ -542,6 +657,14 @@ def _terminal_write_noreplace(
     finally:
         stage.unlink(missing_ok=True)
     claim.verify()
+
+
+def _terminal_write_noreplace(
+    claim: _OutputRootClaim, path: Path, payload: dict[str, Any]
+) -> None:
+    """Publish the authoritative terminal once; never replace prior evidence."""
+
+    _claimed_write_noreplace(claim, path, _json_bytes(payload))
 
 
 def _terminal_payload(
@@ -1129,7 +1252,10 @@ def _completed_fd_status(
 
 
 def _validated_completed_half_step_receipt(
-    output_root: Path, *, verify_resident_identity: bool = True
+    output_root: Path,
+    *,
+    verify_resident_identity: bool = True,
+    claim: _OutputRootClaim | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Validate and independently reconstruct a completed half-step receipt."""
 
@@ -1373,6 +1499,7 @@ def _validated_completed_half_step_receipt(
                 "gradient.f64": ((6, 3), "hartree / bohr"),
                 "density.f64": (center_density.shape, "electrons"),
             },
+            claim=claim,
         )
         density = arrays["density.f64"]
         density_sha = hashlib.sha256(
@@ -1462,6 +1589,7 @@ def _validated_completed_half_step_receipt(
             "artifacts",
         },
         expected_artifacts=matrix_contract,
+        claim=claim,
     )
     expected_aggregate = {
         "schema": HALF_STEP_SCHEMA,
@@ -1559,6 +1687,8 @@ def _validate_failed_half_step_terminal(
     output_root: Path,
     terminal: dict[str, Any],
     status: dict[str, Any],
+    *,
+    claim: _OutputRootClaim | None = None,
 ) -> None:
     """Bind a failed half-step terminal to its identity and durable progress."""
 
@@ -1703,6 +1833,7 @@ def _validate_failed_half_step_terminal(
                 "gradient.f64": ((6, 3), "hartree / bohr"),
                 "density.f64": (density_shape, "electrons"),
             },
+            claim=claim,
         )
         density = arrays["density.f64"]
         density_sha = hashlib.sha256(
@@ -1836,14 +1967,15 @@ def finalize_if_running(
                 )
             except ValueError:
                 status = {}
+        status_state = status.get("state")
         if (
             requested_schema is not None
-            and status.get("state") == "running"
+            and status_state in {"running", "failed"}
             and status.get("schema") != requested_schema
         ):
             raise ValueError(
-                f"dead-man {requested_mode} running status schema does not match "
-                "requested mode"
+                f"dead-man {requested_mode} {status_state} status schema "
+                "does not match requested mode"
             )
         if terminal_path.exists() or terminal_path.is_symlink():
             terminal = _validated_terminal(terminal_path)
@@ -1853,7 +1985,9 @@ def finalize_if_running(
                     "requested mode"
                 )
             if terminal["schema"] == HALF_STEP_SCHEMA and terminal["state"] == "failed":
-                _validate_failed_half_step_terminal(output, terminal, status)
+                _validate_failed_half_step_terminal(
+                    output, terminal, status, claim=claim
+                )
             if (
                 terminal["state"] == "completed"
                 and terminal["schema"] == FINITE_DIFFERENCE_SCHEMA
@@ -1877,7 +2011,7 @@ def finalize_if_running(
                 and terminal["schema"] == HALF_STEP_SCHEMA
             ):
                 completed_receipt, receipt_sha = _validated_completed_half_step_receipt(
-                    output
+                    output, claim=claim
                 )
                 completed_status = _completed_half_step_status(
                     completed_receipt, receipt_sha
@@ -1926,7 +2060,7 @@ def finalize_if_running(
             try:
                 if requested_schema == HALF_STEP_SCHEMA:
                     completed_receipt, completed_receipt_sha = (
-                        _validated_completed_half_step_receipt(output)
+                        _validated_completed_half_step_receipt(output, claim=claim)
                     )
                 else:
                     completed_receipt, completed_receipt_sha = (
@@ -2623,6 +2757,151 @@ def _array_record(array: Any, *, path: str, units: str) -> tuple[dict[str, Any],
     )
 
 
+def _renameat2_noreplace_at(
+    directory_fd: int, source_name: str, destination_name: str
+) -> None:
+    """Atomically publish two names relative to one descriptor-bound directory."""
+
+    if os.name != "posix" or not sys.platform.startswith("linux"):
+        raise NotImplementedError("renameat2(RENAME_NOREPLACE) requires Linux")
+    library = ctypes.CDLL(None, use_errno=True)
+    try:
+        renameat2 = library.renameat2
+    except AttributeError as exc:
+        raise NotImplementedError("libc does not expose renameat2") from exc
+    renameat2.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
+    renameat2.restype = ctypes.c_int
+    result = renameat2(
+        directory_fd,
+        os.fsencode(source_name),
+        directory_fd,
+        os.fsencode(destination_name),
+        1,
+    )
+    if result == 0:
+        return
+    error_number = ctypes.get_errno()
+    if error_number in {errno.ENOSYS, errno.EINVAL, errno.EOPNOTSUPP}:
+        raise NotImplementedError(
+            "renameat2(RENAME_NOREPLACE) is unavailable on this filesystem"
+        )
+    if error_number in {errno.EEXIST, errno.ENOTEMPTY}:
+        raise FileExistsError(
+            error_number,
+            os.strerror(error_number),
+            destination_name,
+        )
+    raise OSError(error_number, os.strerror(error_number), destination_name)
+
+
+def _write_new_regular_at(directory_fd: int, name: str, raw: bytes) -> None:
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    descriptor = os.open(name, flags, 0o600, dir_fd=directory_fd)
+    try:
+        offset = 0
+        while offset < len(raw):
+            written = os.write(descriptor, raw[offset:])
+            if written <= 0:
+                raise OSError("diagnostic artifact write made no progress")
+            offset += written
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _publish_claimed_record_bundle(
+    claim: _OutputRootClaim,
+    output_root: Path,
+    relative_directory: Path,
+    record: dict[str, Any],
+    arrays: dict[str, tuple[Any, str]],
+) -> tuple[dict[str, Any], str]:
+    if output_root != claim.path:
+        raise ValueError("artifact bundle output root does not match its claim")
+    parts = relative_directory.parts
+    if parts == ("matrices",):
+        if claim.root_descriptor is None:
+            raise RuntimeError("diagnostic output root descriptor is unavailable")
+        parent_fd = os.dup(claim.root_descriptor)
+        destination_name = "matrices"
+        bind_destination = True
+    elif (
+        len(parts) == 2
+        and parts[0] == "points"
+        and Path(parts[1]).name == parts[1]
+        and parts[1] not in {".", ".."}
+    ):
+        parent_fd = claim.bind_artifact_directory("points", create=True)
+        destination_name = parts[1]
+        bind_destination = False
+    else:
+        raise ValueError("claimed artifact bundle path is not confined")
+    stage_name = f".{destination_name}.{os.getpid()}.{time.time_ns()}.tmp"
+    stage_fd: int | None = None
+    stage_created = False
+    published = False
+    try:
+        try:
+            os.stat(destination_name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            destination = output_root / relative_directory
+            raise FileExistsError(
+                f"durable artifact bundle already exists: {destination}"
+            )
+        os.mkdir(stage_name, mode=0o700, dir_fd=parent_fd)
+        stage_created = True
+        stage_fd = os.open(
+            stage_name, _OutputRootClaim._directory_flags(), dir_fd=parent_fd
+        )
+        artifacts = {}
+        for filename, (array, units) in arrays.items():
+            if type(filename) is not str or Path(filename).name != filename:
+                raise ValueError("artifact bundle filename is invalid")
+            relative_path = str(relative_directory / filename)
+            artifact, raw = _array_record(array, path=relative_path, units=units)
+            _write_new_regular_at(stage_fd, filename, raw)
+            artifacts[filename] = artifact
+        payload = {**record, "artifacts": artifacts}
+        receipt_raw = _json_bytes(payload)
+        _write_new_regular_at(stage_fd, "receipt.json", receipt_raw)
+        os.fsync(stage_fd)
+        claim.verify()
+        _renameat2_noreplace_at(parent_fd, stage_name, destination_name)
+        published = True
+        os.fsync(parent_fd)
+        if bind_destination:
+            bound = claim.bind_artifact_directory("matrices", create=False)
+            os.close(bound)
+        claim.verify()
+        return payload, hashlib.sha256(receipt_raw).hexdigest()
+    except BaseException:
+        if stage_fd is not None and stage_created and not published:
+            for child in os.listdir(stage_fd):
+                os.unlink(child, dir_fd=stage_fd)
+        if stage_created and not published:
+            with suppress(FileNotFoundError):
+                os.rmdir(stage_name, dir_fd=parent_fd)
+        raise
+    finally:
+        if stage_fd is not None:
+            os.close(stage_fd)
+        os.close(parent_fd)
+
+
 def _publish_record_bundle(
     output_root: Path,
     relative_directory: Path,
@@ -2634,7 +2913,9 @@ def _publish_record_bundle(
     """Atomically publish one receipt and all of its raw arrays as a directory."""
 
     if claim is not None:
-        claim.verify()
+        return _publish_claimed_record_bundle(
+            claim, output_root, relative_directory, record, arrays
+        )
     parent = output_root / relative_directory.parent
     parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     destination = output_root / relative_directory
@@ -2682,79 +2963,290 @@ def _publish_record_bundle(
         raise
 
 
+def _read_bounded_regular_snapshot_at(
+    directory_fd: int, name: str, *, label: str, maximum_bytes: int
+) -> bytes:
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        raise RuntimeError("O_NOFOLLOW is required for diagnostic artifact validation")
+    try:
+        descriptor = os.open(
+            name,
+            os.O_RDONLY | nofollow | getattr(os, "O_CLOEXEC", 0),
+            dir_fd=directory_fd,
+        )
+    except OSError as exc:
+        raise ValueError(f"{label} must be a regular file") from exc
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_size <= 0
+            or before.st_size > maximum_bytes
+        ):
+            raise ValueError(
+                f"{label} must be a nonempty regular file no larger than "
+                f"{maximum_bytes} bytes"
+            )
+        chunks = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(remaining, 64 * 1024))
+            if not chunk:
+                raise ValueError(f"{label} changed while its snapshot was read")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            raise ValueError(f"{label} grew while its snapshot was read")
+        after = os.fstat(descriptor)
+        before_identity = (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        )
+        after_identity = (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        )
+        if before_identity != after_identity:
+            raise ValueError(f"{label} changed while its snapshot was read")
+        return b"".join(chunks)
+    finally:
+        os.close(descriptor)
+
+
+def _open_claimed_record_bundle(
+    claim: _OutputRootClaim, output_root: Path, relative_directory: Path
+) -> tuple[int, int | None, str | None, tuple[int, int] | None]:
+    if output_root != claim.path:
+        raise ValueError("artifact bundle output root does not match its claim")
+    parts = relative_directory.parts
+    if parts == ("matrices",):
+        return claim.bind_artifact_directory("matrices", create=False), None, None, None
+    if (
+        len(parts) != 2
+        or parts[0] != "points"
+        or Path(parts[1]).name != parts[1]
+        or parts[1] in {".", ".."}
+    ):
+        raise ValueError("claimed artifact bundle path is not confined")
+    parent_fd = claim.bind_artifact_directory("points", create=False)
+    try:
+        entry_stat = os.stat(parts[1], dir_fd=parent_fd, follow_symlinks=False)
+        if not stat.S_ISDIR(entry_stat.st_mode):
+            raise ValueError(
+                f"artifact bundle must be a regular directory: {relative_directory}"
+            )
+        entry_identity = (entry_stat.st_dev, entry_stat.st_ino)
+        bundle_fd = os.open(
+            parts[1], _OutputRootClaim._directory_flags(), dir_fd=parent_fd
+        )
+    except OSError as exc:
+        os.close(parent_fd)
+        raise ValueError(
+            f"artifact bundle must be a regular directory: {relative_directory}"
+        ) from exc
+    except BaseException:
+        os.close(parent_fd)
+        raise
+    bundle_stat = os.fstat(bundle_fd)
+    if (
+        not stat.S_ISDIR(bundle_stat.st_mode)
+        or (bundle_stat.st_dev, bundle_stat.st_ino) != entry_identity
+    ):
+        os.close(bundle_fd)
+        os.close(parent_fd)
+        raise RuntimeError("artifact bundle directory changed while it was bound")
+    return bundle_fd, parent_fd, parts[1], entry_identity
+
+
+def _load_claimed_record_bundle_header(
+    claim: _OutputRootClaim, output_root: Path, relative_directory: Path
+) -> tuple[
+    dict[str, Any],
+    bytes,
+    set[str],
+    int,
+    int | None,
+    str | None,
+    tuple[int, int] | None,
+]:
+    directory_fd, parent_fd, entry_name, entry_identity = _open_claimed_record_bundle(
+        claim, output_root, relative_directory
+    )
+    try:
+        receipt_raw = _read_bounded_regular_snapshot_at(
+            directory_fd,
+            "receipt.json",
+            label=f"{relative_directory} receipt",
+            maximum_bytes=1024 * 1024,
+        )
+        try:
+            receipt = json.loads(receipt_raw)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ValueError(f"malformed {relative_directory} receipt") from exc
+        if not isinstance(receipt, dict) or _json_bytes(receipt) != receipt_raw:
+            raise ValueError(f"{relative_directory} receipt is not canonical JSON")
+        return (
+            receipt,
+            receipt_raw,
+            set(os.listdir(directory_fd)),
+            directory_fd,
+            parent_fd,
+            entry_name,
+            entry_identity,
+        )
+    except BaseException:
+        os.close(directory_fd)
+        if parent_fd is not None:
+            os.close(parent_fd)
+        raise
+
+
 def _read_record_bundle(
     output_root: Path,
     relative_directory: Path,
     *,
     expected_receipt_keys: set[str] | None = None,
     expected_artifacts: dict[str, tuple[tuple[int, ...], str]] | None = None,
+    claim: _OutputRootClaim | None = None,
 ) -> tuple[dict[str, Any], str, dict[str, np.ndarray]]:
     directory = output_root / relative_directory
-    if directory.is_symlink() or not directory.is_dir():
-        raise ValueError(f"artifact bundle must be a regular directory: {directory}")
-    receipt, receipt_raw = campaign._read_json_object(
-        directory / "receipt.json",
-        label=f"{relative_directory} receipt",
-        max_bytes=1024 * 1024,
-    )
-    artifacts = receipt.get("artifacts")
-    if type(artifacts) is not dict or not artifacts:
-        raise ValueError(f"{relative_directory} artifact inventory is invalid")
-    if expected_receipt_keys is not None and set(receipt) != expected_receipt_keys:
-        raise ValueError(f"{relative_directory} receipt schema is not exact")
-    if expected_artifacts is not None and set(artifacts) != set(expected_artifacts):
-        raise ValueError(f"{relative_directory} artifact inventory is not exact")
-    arrays = {}
-    expected_children = {"receipt.json"}
-    for filename, artifact in artifacts.items():
-        if type(filename) is not str or Path(filename).name != filename:
-            raise ValueError(f"{relative_directory} artifact filename is invalid")
-        if type(artifact) is not dict or set(artifact) != {
-            "path",
-            "dtype",
-            "shape",
-            "units",
-            "sha256",
-        }:
-            raise ValueError(f"{relative_directory}/{filename} metadata is invalid")
-        expected_path = str(relative_directory / filename)
-        if (
-            artifact.get("path") != expected_path
-            or artifact.get("dtype") != "little-endian float64"
-            or type(artifact.get("shape")) is not list
-            or type(artifact.get("units")) is not str
-            or type(artifact.get("sha256")) is not str
-        ):
-            raise ValueError(f"{relative_directory}/{filename} metadata is invalid")
-        shape = artifact["shape"]
-        if not shape or any(type(size) is not int or size < 1 for size in shape):
-            raise ValueError(f"{relative_directory}/{filename} shape is invalid")
-        if expected_artifacts is not None:
-            expected_shape, expected_units = expected_artifacts[filename]
-            if shape != list(expected_shape) or artifact["units"] != expected_units:
-                raise ValueError(
-                    f"{relative_directory}/{filename} shape or units mismatch"
-                )
-        path = directory / filename
-        if path.is_symlink() or not path.is_file():
-            raise ValueError(f"{relative_directory}/{filename} must be a regular file")
-        raw = campaign._read_bounded_regular_snapshot(
-            path,
-            label=f"{relative_directory}/{filename}",
-            maximum_bytes=16 * 1024 * 1024,
+    directory_fd: int | None = None
+    parent_fd: int | None = None
+    entry_name: str | None = None
+    entry_identity: tuple[int, int] | None = None
+    if claim is None:
+        if directory.is_symlink() or not directory.is_dir():
+            raise ValueError(
+                f"artifact bundle must be a regular directory: {directory}"
+            )
+        receipt, receipt_raw = campaign._read_json_object(
+            directory / "receipt.json",
+            label=f"{relative_directory} receipt",
+            max_bytes=1024 * 1024,
         )
-        if hashlib.sha256(raw).hexdigest() != artifact["sha256"]:
-            raise ValueError(f"{relative_directory}/{filename} hash mismatch")
-        if len(raw) != math.prod(shape) * 8:
-            raise ValueError(f"{relative_directory}/{filename} byte length mismatch")
-        array = np.frombuffer(raw, dtype="<f8").reshape(shape)
-        if not np.all(np.isfinite(array)):
-            raise ValueError(f"{relative_directory}/{filename} is non-finite")
-        arrays[filename] = array
-        expected_children.add(filename)
-    if {child.name for child in directory.iterdir()} != expected_children:
-        raise ValueError(f"{relative_directory} contains unexpected artifacts")
-    return receipt, hashlib.sha256(receipt_raw).hexdigest(), arrays
+        children = {child.name for child in directory.iterdir()}
+
+        def read_artifact(filename: str) -> bytes:
+            path = directory / filename
+            if path.is_symlink() or not path.is_file():
+                raise ValueError(
+                    f"{relative_directory}/{filename} must be a regular file"
+                )
+            return campaign._read_bounded_regular_snapshot(
+                path,
+                label=f"{relative_directory}/{filename}",
+                maximum_bytes=16 * 1024 * 1024,
+            )
+
+    else:
+        claim.verify()
+        (
+            receipt,
+            receipt_raw,
+            children,
+            directory_fd,
+            parent_fd,
+            entry_name,
+            entry_identity,
+        ) = _load_claimed_record_bundle_header(claim, output_root, relative_directory)
+
+        def read_artifact(filename: str) -> bytes:
+            assert directory_fd is not None
+            return _read_bounded_regular_snapshot_at(
+                directory_fd,
+                filename,
+                label=f"{relative_directory}/{filename}",
+                maximum_bytes=16 * 1024 * 1024,
+            )
+
+    try:
+        artifacts = receipt.get("artifacts")
+        if type(artifacts) is not dict or not artifacts:
+            raise ValueError(f"{relative_directory} artifact inventory is invalid")
+        if expected_receipt_keys is not None and set(receipt) != expected_receipt_keys:
+            raise ValueError(f"{relative_directory} receipt schema is not exact")
+        if expected_artifacts is not None and set(artifacts) != set(expected_artifacts):
+            raise ValueError(f"{relative_directory} artifact inventory is not exact")
+        arrays = {}
+        expected_children = {"receipt.json"}
+        for filename, artifact in artifacts.items():
+            if type(filename) is not str or Path(filename).name != filename:
+                raise ValueError(f"{relative_directory} artifact filename is invalid")
+            if type(artifact) is not dict or set(artifact) != {
+                "path",
+                "dtype",
+                "shape",
+                "units",
+                "sha256",
+            }:
+                raise ValueError(f"{relative_directory}/{filename} metadata is invalid")
+            expected_path = str(relative_directory / filename)
+            if (
+                artifact.get("path") != expected_path
+                or artifact.get("dtype") != "little-endian float64"
+                or type(artifact.get("shape")) is not list
+                or type(artifact.get("units")) is not str
+                or type(artifact.get("sha256")) is not str
+            ):
+                raise ValueError(f"{relative_directory}/{filename} metadata is invalid")
+            shape = artifact["shape"]
+            if not shape or any(type(size) is not int or size < 1 for size in shape):
+                raise ValueError(f"{relative_directory}/{filename} shape is invalid")
+            if expected_artifacts is not None:
+                expected_shape, expected_units = expected_artifacts[filename]
+                if shape != list(expected_shape) or artifact["units"] != expected_units:
+                    raise ValueError(
+                        f"{relative_directory}/{filename} shape or units mismatch"
+                    )
+            raw = read_artifact(filename)
+            if hashlib.sha256(raw).hexdigest() != artifact["sha256"]:
+                raise ValueError(f"{relative_directory}/{filename} hash mismatch")
+            if len(raw) != math.prod(shape) * 8:
+                raise ValueError(
+                    f"{relative_directory}/{filename} byte length mismatch"
+                )
+            array = np.frombuffer(raw, dtype="<f8").reshape(shape)
+            if not np.all(np.isfinite(array)):
+                raise ValueError(f"{relative_directory}/{filename} is non-finite")
+            arrays[filename] = array
+            expected_children.add(filename)
+        observed_children = (
+            set(os.listdir(directory_fd)) if directory_fd is not None else children
+        )
+        if observed_children != expected_children:
+            raise ValueError(f"{relative_directory} contains unexpected artifacts")
+        if claim is not None:
+            if parent_fd is not None:
+                assert entry_name is not None and entry_identity is not None
+                try:
+                    entry_stat = os.stat(
+                        entry_name, dir_fd=parent_fd, follow_symlinks=False
+                    )
+                except FileNotFoundError as exc:
+                    raise RuntimeError(
+                        "artifact bundle directory was removed during validation"
+                    ) from exc
+                if (
+                    not stat.S_ISDIR(entry_stat.st_mode)
+                    or (entry_stat.st_dev, entry_stat.st_ino) != entry_identity
+                ):
+                    raise RuntimeError(
+                        "artifact bundle directory was replaced during validation"
+                    )
+            claim.verify()
+        return receipt, hashlib.sha256(receipt_raw).hexdigest(), arrays
+    finally:
+        if directory_fd is not None:
+            os.close(directory_fd)
+        if parent_fd is not None:
+            os.close(parent_fd)
 
 
 def _fd_settings(base_settings: Any) -> Any:
@@ -5187,21 +5679,28 @@ def _resume_half_step_points(
 ) -> dict[str, tuple[dict[str, Any], dict[str, np.ndarray], str]]:
     expected_keys = [item["key"] for item in plan]
     definitions = {item["key"]: item for item in plan}
-    points_root = output_root / "points"
     existing_names: set[str] = set()
-    if points_root.exists() or points_root.is_symlink():
-        if points_root.is_symlink() or not points_root.is_dir():
-            raise ValueError("half-step points root must be a regular directory")
-        for child in points_root.iterdir():
-            if (
-                child.is_symlink()
-                or not child.is_dir()
-                or child.name not in expected_keys
-            ):
-                raise ValueError(
-                    "half-step points root contains an unexpected artifact"
-                )
-            existing_names.add(child.name)
+    try:
+        points_fd = claim.bind_artifact_directory("points", create=False)
+    except FileNotFoundError:
+        points_fd = None
+    if points_fd is not None:
+        try:
+            for child_name in os.listdir(points_fd):
+                try:
+                    child = os.stat(child_name, dir_fd=points_fd, follow_symlinks=False)
+                except FileNotFoundError as exc:
+                    raise RuntimeError(
+                        "half-step point artifact was removed during inventory"
+                    ) from exc
+                if not stat.S_ISDIR(child.st_mode) or child_name not in expected_keys:
+                    raise ValueError(
+                        "half-step points root contains an unexpected artifact"
+                    )
+                existing_names.add(child_name)
+            claim.verify()
+        finally:
+            os.close(points_fd)
     prefix = []
     for key in expected_keys:
         if key not in existing_names:
@@ -5248,6 +5747,7 @@ def _resume_half_step_points(
                 "gradient.f64": ((6, 3), "hartree / bohr"),
                 "density.f64": (density_shape, "electrons"),
             },
+            claim=claim,
         )
         if (
             point.get("schema") != HALF_STEP_SCHEMA
@@ -5609,6 +6109,7 @@ def _run_half_step_locked(
                 Path("matrices"),
                 expected_receipt_keys=set(aggregate_record) | {"artifacts"},
                 expected_artifacts=matrix_contract,
+                claim=claim,
             )
             campaign._strict_json_equal(
                 {key: aggregate[key] for key in aggregate_record},
@@ -5679,7 +6180,7 @@ def _run_half_step_locked(
         }
         receipt_raw = _json_bytes(receipt)
         receipt_sha = hashlib.sha256(receipt_raw).hexdigest()
-        _claimed_write(claim, output_root / "receipt.json", receipt_raw)
+        _claimed_write_noreplace(claim, output_root / "receipt.json", receipt_raw)
         status.update(
             {
                 "state": "completed",
@@ -5718,6 +6219,34 @@ def _run_half_step_locked(
         raise
 
 
+def _require_half_step_output_separation(prior: Path, output: Path) -> None:
+    protected_roots = (
+        prior,
+        campaign._safe_absolute_root(Path(PRIOR_FD_PREFLIGHT_ROOT)),
+        campaign._safe_absolute_root(Path(PRIOR_FD_REFERENCE_ROOT)),
+    )
+    if any(output == root or root in output.parents for root in protected_roots):
+        raise ValueError(
+            "half-step extension requires a separate fresh output root outside all "
+            "half-step source roots"
+        )
+
+
+def _require_regular_existing_artifact(claim: _OutputRootClaim, name: str) -> bool:
+    if Path(name).name != name or claim.root_descriptor is None:
+        raise ValueError("half-step artifact name is not root-confined")
+    claim.verify()
+    try:
+        artifact = os.stat(name, dir_fd=claim.root_descriptor, follow_symlinks=False)
+    except FileNotFoundError:
+        claim.verify()
+        return False
+    if not stat.S_ISREG(artifact.st_mode):
+        raise ValueError(f"half-step {name} must be a regular file")
+    claim.verify()
+    return True
+
+
 def run_half_step_extension(prior_root: Path, output_root: Path) -> dict[str, Any]:
     """Run or resume the exact immutable +/-0.005 Bohr extension."""
 
@@ -5725,9 +6254,10 @@ def run_half_step_extension(prior_root: Path, output_root: Path) -> dict[str, An
     output = campaign._safe_absolute_root(output_root)
     if str(prior) != PRIOR_FD_ROOT:
         raise ValueError("half-step extension requires the exact prior FD receipt root")
-    if output == prior:
-        raise ValueError("half-step extension requires a separate fresh output root")
+    _require_half_step_output_separation(prior, output)
     with _exclusive_output_claim(output) as claim:
+        _require_regular_existing_artifact(claim, TERMINAL)
+        _require_regular_existing_artifact(claim, "receipt.json")
         status_path = output / "status.json"
         if not claim.root_created and not (
             status_path.exists() or status_path.is_symlink()
