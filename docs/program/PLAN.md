@@ -45,7 +45,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A1f-acid-neutral-water-attacker-relay](cards/A1f-acid-neutral-water-attacker-relay.md) | A | P1 | workstation | done | exact donor migrated to relay |
 | [A1g-acid-bridge-side-hydronium-neutral-attacker](cards/A1g-acid-bridge-side-hydronium-neutral-attacker.md) | A | P1 | workstation | done | conclusive product-family rejection |
 | [A1i-acid-production-tier-bridge-side-revisit](cards/A1i-acid-production-tier-bridge-side-revisit.md) | A | P1 | workstation | blocked: A2 | A1g ✅, A2 |
-| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | blocked: A3i/A3j | CALC-005 design passed; only one Si i=1 pilot + verification authorized |
+| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | blocked: A3j | A3i terminal optimizer failure; independent adjudication required |
 | [A3a-reactant-minimum-recovery](cards/A3a-reactant-minimum-recovery.md) | A | P1 | workstation | done | terminal microstate rejection; no minimum promoted |
 | [A3b-osa-neutral-n1-proton-microstate-stability](cards/A3b-osa-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; H52 became third mobile owner |
 | [A3c-osa-neutral-n1-mobile-proton-triad-conditioning](cards/A3c-osa-neutral-n1-mobile-proton-triad-conditioning.md) | A | P1 | workstation | done | verified triad-conditioning failure; owners retained, projected gradients red |
@@ -54,8 +54,8 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A3f-oss-neutral-n1-terminal-adjudication](cards/A3f-oss-neutral-n1-terminal-adjudication.md) | A | P1 | any | done | verified terminal rejection; no global no-basin claim |
 | [A3g-oaa-neutral-n2-proton-microstate-stability](cards/A3g-oaa-neutral-n2-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; conditioning nonstationary/owner-changing, production not run |
 | [A3h-calc005-si-attachment-protocol](cards/A3h-calc005-si-attachment-protocol.md) | A | P1 | any | done | live state-205 cycle + state-expanded C/V proof; no energy emitted |
-| [A3i-calc005-si-n1-pilot](cards/A3i-calc005-si-n1-pilot.md) | A | P1 | workstation | ready | implement/run only `(x=1,y=0), i=1` minimum pilot |
-| [A3j-calc005-si-n1-verification](cards/A3j-calc005-si-n1-verification.md) | A | P1 | workstation | blocked: A3i | different-worker optimizer-free artifact verification |
+| [A3i-calc005-si-n1-pilot](cards/A3i-calc005-si-n1-pilot.md) | A | P1 | workstation | done | terminal C-optimizer failure; no value emitted |
+| [A3j-calc005-si-n1-verification](cards/A3j-calc005-si-n1-verification.md) | A | P1 | workstation | ready | independently adjudicate failure receipt and artifact absence |
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
 | [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: A2b/A2c/A2d | final banked-reaction table, ranking, Petra/CALCULATIONS closeout |
 | [A2a-si-neutral-production-path-rebuild](cards/A2a-si-neutral-production-path-rebuild.md) | A | P1 | workstation | done | exact r2SCAN-3c minima + A2 infrastructure ✅ |
@@ -106,12 +106,13 @@ D2a-astro-rate-reproduction (PR #31 — verdict: GO gas-phase /
 NO-GO surface-LH), A7-kinetics-database (PR #27 — 36 minerals, 74
 mechanisms, validator green). **Blocked closeout branch**:
 `agents/A1b-acid-microsolvation` for A1b-acid-mechanisms.
-A3-barrier-ladder is BLOCKED on READY A3i and then A3j. A3h independently
+A3-barrier-ladder is BLOCKED on READY A3j. A3h independently
 reviewed and fixed the live fully hydrolyzed 200s-Si cycle, exact
 environment-to-Petra mapping, state-expanded C/V proof, and fail-closed
-numerical/evidence contract without a calculator call. A3i may implement and run
-only `(x=1,y=0), i=1`; A3j must independently verify its artifacts before any
-next rung. A3g
+numerical/evidence contract without a calculator call. A3i executed only
+`(x=1,y=0), i=1` and terminated when the sole `C` optimizer's DFRKS scanner
+failed to converge nuclear gradients; it emitted no endpoint, Store, or value.
+A3j must independently adjudicate that zero-retry failure before any next rung. A3g
 independently verified `inconclusive terminal failure` for exact Oaa-neutral n=2:
 the one owner-conditioning call remained nonstationary, changed three other proton
 owners, and failed both projected-gradient gates. Constrained B3LYP, release, PHVA,

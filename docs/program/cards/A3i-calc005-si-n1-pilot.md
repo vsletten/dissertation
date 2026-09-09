@@ -1,6 +1,6 @@
 # A3i-calc005-si-n1-pilot — implement and run the balanced Si attachment pilot
 
-- status: active
+- status: done
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
@@ -74,8 +74,10 @@ CALC-005 value.
 
 ## Progress
 
+- 2026-09-09 02:22 PDT — The bounded production unit reached its atomic terminal failure at exact execution source `8c6cad747f1dbc6c8fd9486b9bf96d636ad2df55`: the sole `C` r2SCAN-3c optimizer call failed because the DFRKS scanner's nuclear gradients did not converge. `C` spent one 150-step budget with zero retries; `V` and `SiOH4` spent zero calls. No accepted/raw endpoint, immutable generation, Store, CALC-005 value, Petra fragment, or CALCULATIONS value was emitted. The QI2 lease is absent and the terminal now carries the independently checked restoration receipt. (hermes-custom-build-001; profile=workstation)
+- 2026-09-09 02:22 PDT — Two context-cold adversarial reviews were reconciled before PR: final implementation head hardens production-only API authority, optimizer-entry crash accounting, post-promotion quarantine, terminal-after-restoration publication, live legacy `Check200`/Si-transition binding, and the verifier's own systemd/QI2 envelope. Fresh focused closeout is 72 passed plus Ruff, Ruff format, compileall, and diff checks; no scientific budget was replayed. (hermes-custom-build-001; profile=workstation)
 - 2026-09-08 23:59 PDT — Implemented the dedicated fixed-`i=1` CALC-005 minima driver, hash-bound immutable evidence generation, read-only Store validator, optimizer-free verifier, and Petra semantic/refusal gates. A cold adversarial pass found and regression-closed false greens in heavy-atom topology, mode cardinality, Store acceptance, verifier independence, Petra selector binding, source/envelope provenance, zero-retry crash timing, and atomic publication. Pre-production gates pass: 114 focused QM tests; 913 passed/1 skipped full QM tests; whole-QM Ruff/format/compile; focused and full Petra workspace; and `git diff --check`. No production calculator call or scientific value is claimed yet. (hermes-custom-build-001; profile=workstation)
 
 ## Result
 
-Pending.
+- 2026-09-09 02:22 PDT — **Terminal outcome: `incomplete-computational-failure`; no scientific value.** The exact authorized `(x=1,y=0), i=1` run failed inside the first and only `C` optimizer call with `RuntimeError: Nuclear gradients of <pyscf.scf.hf.DFRKS_Scanner ...> not converged`. The zero-retry ledger is `C=1`, `V=0`, `SiOH4=0`; no endpoint survived the calculator exception and no generation, Store, Petra fragment, or CALCULATIONS value exists. The final terminal SHA-256 is `b8e9da71bc4a98dd2e07250af4750b4c6aee253a17ac37c8dba78eaa2521c169` (pre-restoration terminal `b9ced238a034f80f9333a7e58d44c8c0b51f2c133d793395a2747a9295c9e259`), executor log SHA-256 is `4f443d7b76bc3ef26cfe4d2f8944c3ea2e4053b07c1fd026435ae9261acc7c91`, QI2 is released, and the bounded unit has no live PID. A3j must independently adjudicate this terminal failure; replay and surrogate publication remain prohibited. (hermes-custom-build-001; profile=workstation)

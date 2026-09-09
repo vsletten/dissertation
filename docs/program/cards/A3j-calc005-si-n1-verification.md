@@ -1,6 +1,6 @@
 # A3j-calc005-si-n1-verification — independently verify the Si pilot
 
-- status: blocked
+- status: ready
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
@@ -58,4 +58,4 @@ releases a narrowly scoped next decision or terminally rejects the pilot.
 
 ## Result
 
-Pending A3i.
+Pending independent adjudication of A3i's terminal optimizer failure. A3i emitted no accepted endpoint or value, so A3j must verify the exact failure receipt, zero-retry ledger, artifact absence, source/legacy/Petra boundary, and restoration without replaying any optimizer or inventing missing raw evidence.
