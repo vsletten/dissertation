@@ -4,7 +4,7 @@
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaigns; cluster-builder code is machine-any)
-- depends: A3i-calc005-si-n1-pilot; A3j-calc005-si-n1-verification
+- depends: A3j-calc005-si-n1-verification
 - claimed-by: hermes-custom-build-001
 
 ## Constraints
@@ -68,6 +68,7 @@ produce accepted reactant minima — never via closed OSS or Oaa neutral rungs.
 
 ## Result — CALC-005 pre-launch design gate
 
+- 2026-09-09 02:22 PDT (hermes-custom-build-001; profile=workstation) — A3i is DONE with an unverified terminal computational failure: the sole authorized `C` r2SCAN-3c optimizer call failed when the DFRKS scanner's nuclear gradients did not converge. The zero-retry ledger is `C=1`, `V=0`, `SiOH4=0`; no endpoint, generation, Store, Petra fragment, CALCULATIONS entry, or scientific value was emitted. Parent A3 remains BLOCKED on READY A3j for independent evidence-only adjudication; no replay or next rung is authorized.
 - 2026-09-06 22:46 PDT (hermes-macbot-zero; profile=laptop) — A3h is DONE after
   context-cold scientific/KMC review corrected the candidate cycle to the live
   fully hydrolyzed state-205 exchange `C_xy -> V_xy + Si(OH)4`, separated the
