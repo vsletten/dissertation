@@ -35,6 +35,9 @@ MIN_OWNER_MARGIN_A = 0.15
 ACID_OFFSET_A = 2.8
 R_J_MOL_K = 8.31446261815324
 R_KJ_MOL_K = R_J_MOL_K / 1000.0
+TEMPERATURE_K = 298.15
+STANDARD_STATE_CORRECTION_KJ_MOL = 7.958500693927389
+STOICHIOMETRY = {"C": -1, "V": 1, "SiOH4": 1}
 EXPECTED_FORMULAS = {
     1: ("Al6H36O29Si", "Al6H38O30Si", "Al6H34O26"),
     2: ("Al6H38O36Si4", "Al6H42O38Si4", "Al6H38O34Si3"),
@@ -111,6 +114,90 @@ def detailed_balance_rates(
 
 def _origin_key(origin: AtomOrigin) -> tuple[str, Node, int | None]:
     return origin.kind, origin.node, origin.ordinal
+
+
+def compose_thermochemistry(
+    components: dict[str, dict[str, float]],
+    *,
+    temperature_k: float = TEMPERATURE_K,
+) -> dict[str, float]:
+    """Compose the fixed C -> V + SiOH4 pilot without a water term."""
+
+    if set(components) != set(STOICHIOMETRY):
+        raise ValueError(
+            "CALC-005 requires exactly C, V, and SiOH4; water is forbidden"
+        )
+    temperature_k = _finite_number("temperature_k", temperature_k, positive=True)
+    if temperature_k != TEMPERATURE_K:
+        raise ValueError(
+            f"CALC-005 is fixed at exactly {TEMPERATURE_K} K; got {temperature_k} K"
+        )
+    required = {
+        "electronic_kj_mol",
+        "zpe_kj_mol",
+        "thermal_kj_mol",
+        "entropy_kj_mol_k",
+    }
+    normalized: dict[str, dict[str, float]] = {}
+    for role in STOICHIOMETRY:
+        values = components[role]
+        if set(values) != required:
+            raise ValueError(f"{role} thermochemical term set is incomplete")
+        normalized[role] = {
+            key: _finite_number(f"{role}.{key}", value) for key, value in values.items()
+        }
+
+    def delta(key: str) -> float:
+        return math.fsum(
+            STOICHIOMETRY[role] * normalized[role][key] for role in ("C", "V", "SiOH4")
+        )
+
+    electronic = delta("electronic_kj_mol")
+    zpe = delta("zpe_kj_mol")
+    thermal = delta("thermal_kj_mol")
+    minus_t_delta_s = -temperature_k * delta("entropy_kj_mol_k")
+    terms = (
+        electronic,
+        zpe,
+        thermal,
+        minus_t_delta_s,
+        STANDARD_STATE_CORRECTION_KJ_MOL,
+    )
+    recomposed = math.fsum(terms)
+    independent = (
+        math.fsum(
+            STOICHIOMETRY[role]
+            * math.fsum(
+                (
+                    normalized[role]["electronic_kj_mol"],
+                    normalized[role]["zpe_kj_mol"],
+                    normalized[role]["thermal_kj_mol"],
+                    -temperature_k * normalized[role]["entropy_kj_mol_k"],
+                )
+            )
+            for role in ("C", "V", "SiOH4")
+        )
+        + STANDARD_STATE_CORRECTION_KJ_MOL
+    )
+    error = abs(recomposed - independent)
+    if not all(
+        math.isfinite(value) for value in (*terms, recomposed, independent, error)
+    ):
+        raise ValueError("CALC-005 thermochemistry produced non-finite output")
+    if error > 1.0e-8:
+        raise RuntimeError(
+            f"CALC-005 independent recomposition drifted by {error} kJ/mol"
+        )
+    return {
+        "electronic_kj_mol": electronic,
+        "zpe_kj_mol": zpe,
+        "thermal_kj_mol": thermal,
+        "minus_t_delta_s_kj_mol": minus_t_delta_s,
+        "standard_state_kj_mol": STANDARD_STATE_CORRECTION_KJ_MOL,
+        "s_10_kj_mol": recomposed,
+        "independent_s_10_kj_mol": independent,
+        "recomposition_error_kj_mol": error,
+    }
 
 
 def _nearest_oxygen_metrics(cluster: Cluster) -> tuple[float, float]:
@@ -373,6 +460,19 @@ class Calc005Pair:
             and bool(free_metal_radius)
             and float(np.mean(frozen_radius)) > float(np.mean(free_metal_radius)),
         }
+
+
+def atom_map_sha256(pair: Calc005Pair) -> str:
+    """Hash the ordered C -> V + SiOH4 atom-identity bijection."""
+
+    payload = {
+        "occupied": [_origin_key(origin) for origin in pair.occupied_origins],
+        "vacancy": [_origin_key(origin) for origin in pair.vacancy_origins],
+        "silicic_acid": [_origin_key(origin) for origin in pair.silicic_acid_origins],
+    }
+    return hashlib.sha256(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()
 
 
 def _support_hydrogen(

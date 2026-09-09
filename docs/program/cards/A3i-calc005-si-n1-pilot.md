@@ -1,11 +1,11 @@
 # A3i-calc005-si-n1-pilot — implement and run the balanced Si attachment pilot
 
-- status: ready
+- status: active
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
 - depends: A3h ✅
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## Objective
 
@@ -71,6 +71,10 @@ A3j performs the required different-worker optimizer-free scientific/KMC
 verification from raw artifacts and the live Petra reactions. Until A3j passes,
 report only the executor's typed pilot outcome; do not authorize or publish a
 CALC-005 value.
+
+## Progress
+
+- 2026-09-08 23:59 PDT — Implemented the dedicated fixed-`i=1` CALC-005 minima driver, hash-bound immutable evidence generation, read-only Store validator, optimizer-free verifier, and Petra semantic/refusal gates. A cold adversarial pass found and regression-closed false greens in heavy-atom topology, mode cardinality, Store acceptance, verifier independence, Petra selector binding, source/envelope provenance, zero-retry crash timing, and atomic publication. Pre-production gates pass: 114 focused QM tests; 913 passed/1 skipped full QM tests; whole-QM Ruff/format/compile; focused and full Petra workspace; and `git diff --check`. No production calculator call or scientific value is claimed yet. (hermes-custom-build-001; profile=workstation)
 
 ## Result
 
