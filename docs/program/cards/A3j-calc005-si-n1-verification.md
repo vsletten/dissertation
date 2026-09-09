@@ -59,3 +59,17 @@ releases a narrowly scoped next decision or terminally rejects the pilot.
 ## Result
 
 Pending independent adjudication of A3i's terminal optimizer failure. A3i emitted no accepted endpoint or value, so A3j must verify the exact failure receipt, zero-retry ledger, artifact absence, source/legacy/Petra boundary, and restoration without replaying any optimizer or inventing missing raw evidence.
+
+## Progress
+
+- 2026-09-09 04:03 PDT — CONTINUATION: implemented an optimizer-free terminal-
+  failure adjudication path and four focused tests, but a context-cold adversarial
+  review correctly rejected completion. A3i's executor and this queue worker are
+  both `hermes-custom-build-001`; changing only a caller-supplied identity suffix
+  does not satisfy the required different-worker edge. The review also found that
+  the draft receipt was not bound to the verifier implementation, coordinated
+  signature tampering could false-green, and current-source reconstruction was
+  not isolated from the pinned executor commit. Card remains READY and parent A3
+  remains BLOCKED. A genuinely separate worker must harden those edges and perform
+  the final receipt-emitting run; no optimizer/calculator replay is authorized.
+  (hermes-custom-build-001; profile=workstation)

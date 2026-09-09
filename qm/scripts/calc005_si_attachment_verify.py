@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import math
@@ -14,7 +15,10 @@ import sys
 import tempfile
 import time
 import tomllib
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, replace
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -28,18 +32,6 @@ EXPECTED_NICE = 10
 EXPECTED_THREADS = 16
 EXPECTED_RUNTIME_MAX_SECONDS = 43200
 EXPECTED_GPU_OWNER = "calc005_si_attachment_verify"
-
-if __name__ == "__main__":
-    from quarry.etiquette import bootstrap_cli
-
-    bootstrap_cli(
-        "calc005_si_attachment_verify",
-        default_run_root=Path(
-            "/mnt/data/vsletten/dissertation-data/a3h-calc005-si-n1-pilot/logs"
-        ),
-        gpu_owner="calc005_si_attachment_verify",
-        gpu_ttl_hours=GPU_TTL_HOURS,
-    )
 
 import numpy as np  # noqa: E402
 
@@ -63,6 +55,7 @@ from quarry.rates import (  # noqa: E402
     surface_thermo_from_frequencies,
     thermo_from_frequencies,
 )
+from quarry.store import geometry_hash  # noqa: E402
 
 GRADIENT_RMS_MAX = 3.0e-4
 GRADIENT_MAX_MAX = 4.5e-4
@@ -143,6 +136,11 @@ def atomic_json(path: Path, payload: dict[str, Any]) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         temporary.replace(path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -897,6 +895,507 @@ def _validate_production_envelope(envelope: Any) -> None:
         )
 
 
+def _json_object(path: Path) -> dict[str, Any]:
+    if path.is_symlink() or not path.is_file():
+        raise RuntimeError(f"required regular JSON artifact is absent: {path}")
+    payload = json.loads(path.read_text())
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"JSON artifact is not an object: {path}")
+    return payload
+
+
+def _exact_xyz(cluster: Cluster) -> str:
+    lines = [str(len(cluster.symbols)), cluster.name]
+    lines.extend(
+        f"{symbol} {x:.17g} {y:.17g} {z:.17g}"
+        for symbol, (x, y, z) in zip(cluster.symbols, cluster.coords, strict=True)
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _origin_value(origin: Any) -> dict[str, Any]:
+    return {
+        "kind": origin.kind,
+        "node": [origin.node[0], list(origin.node[1])],
+        "ordinal": origin.ordinal,
+    }
+
+
+def _node_value(node: tuple[int, tuple[int, int, int]]) -> list[Any]:
+    return [node[0], list(node[1])]
+
+
+def _pilot_identity(pair: Calc005Pair) -> dict[str, Any]:
+    return {
+        "center_node": [4, [0, 0, 0]],
+        "metal_shells": 2,
+        "x": pair.x,
+        "y": pair.y,
+        "environment_index": pair.environment_index,
+        "occupied_states": pair.occupied_states,
+        "vacancy_states": pair.vacancy_states,
+        "occupied_frozen_origins": [
+            _origin_value(pair.occupied_origins[index])
+            for index in pair.occupied.frozen_indices
+        ],
+        "vacancy_frozen_origins": [
+            _origin_value(pair.vacancy_origins[index])
+            for index in pair.vacancy.frozen_indices
+        ],
+        "condensed_topology_mask": {
+            "center_bridges": [
+                _node_value(node) for node in pair.condensed.center_bridges
+            ],
+            "kept_center_bridges": [
+                _node_value(node) for node in pair.condensed.kept_center_bridges
+            ],
+            "termination_log": pair.condensed.termination_log,
+        },
+        "hydrolysis_water_origins": [
+            _origin_value(origin)
+            for origin in pair.occupied_origins
+            if origin.kind.startswith("hydrolysis-water-")
+        ],
+    }
+
+
+def _git_blob(repo: Path, commit: str, relative: str) -> bytes:
+    return subprocess.run(
+        ["git", "-C", str(repo), "show", f"{commit}:{relative}"],
+        check=True,
+        capture_output=True,
+    ).stdout
+
+
+def _default_restoration_probe(restoration: dict[str, Any]) -> dict[str, Any]:
+    lease_path = Path(str(restoration.get("lease_path", ""))).expanduser()
+    unit = str(restoration.get("unit", ""))
+    output = subprocess.run(
+        [
+            "systemctl",
+            "--user",
+            "show",
+            unit,
+            "--property=ActiveState",
+            "--property=SubState",
+            "--property=Result",
+            "--property=MainPID",
+            "--property=ExecMainStatus",
+            "--no-pager",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    unit_state = dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
+    return {"lease_present": lease_path.exists(), "unit": unit_state}
+
+
+@contextmanager
+def _locked_evidence(output_root: Path) -> Iterator[None]:
+    lock_path = output_root / "run.lock"
+    if lock_path.is_symlink() or not lock_path.is_file():
+        raise RuntimeError("executor run.lock is absent or not a regular file")
+    with lock_path.open("r") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_SH)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _verify_failure_source(
+    source: dict[str, Any],
+    source_commit: str,
+    deck: Path,
+    pair: Calc005Pair,
+    repo: Path,
+    blob_reader: Callable[[Path, str, str], bytes],
+) -> dict[str, str]:
+    if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+        raise RuntimeError("executor source commit is not a full lowercase Git SHA")
+    if source.get("source_commit") != source_commit:
+        raise RuntimeError("source map commit differs from terminal commit")
+    paths = {
+        "deck_sha256": "petra/examples/kaolinite.toml",
+        "driver_sha256": "qm/scripts/calc005_si_attachment.py",
+        "calc005_sha256": "qm/quarry/calc005.py",
+        "calc005_store_sha256": "qm/quarry/calc005_store.py",
+        "verifier_sha256": "qm/scripts/calc005_si_attachment_verify.py",
+        "calculations_sha256": "qm/CALCULATIONS.md",
+        "legacy_actions_cpp_sha256": "legacy/cpp-model/actions.cpp",
+        "legacy_envrn_cpp_sha256": "legacy/cpp-model/envrn.cpp",
+    }
+    pinned = {
+        field: hashlib.sha256(blob_reader(repo, source_commit, relative)).hexdigest()
+        for field, relative in paths.items()
+    }
+    independently_pinned = {
+        "legacy_actions_cpp_sha256",
+        "legacy_envrn_cpp_sha256",
+    }
+    for field, digest in pinned.items():
+        if field not in independently_pinned and source.get(field) != digest:
+            raise RuntimeError(f"pinned source hash differs: {field}")
+        if field in source and source[field] != digest:
+            raise RuntimeError(f"recorded source hash differs: {field}")
+    current_paths = {
+        "deck_sha256": deck,
+        "calculations_sha256": repo / "qm/CALCULATIONS.md",
+        "legacy_actions_cpp_sha256": repo / "legacy/cpp-model/actions.cpp",
+        "legacy_envrn_cpp_sha256": repo / "legacy/cpp-model/envrn.cpp",
+    }
+    for field, path in current_paths.items():
+        if sha256_path(path) != pinned[field]:
+            raise RuntimeError(f"live source drifted from execution source: {field}")
+    git = source.get("git")
+    tracked = git.get("tracked_source_files") if isinstance(git, dict) else None
+    core_tracked = {
+        "petra/examples/kaolinite.toml",
+        "qm/CALCULATIONS.md",
+        "qm/quarry/calc005.py",
+        "qm/quarry/calc005_store.py",
+        "qm/scripts/calc005_si_attachment.py",
+        "qm/scripts/calc005_si_attachment_verify.py",
+    }
+    allowed_tracked = core_tracked | {
+        "legacy/cpp-model/actions.cpp",
+        "legacy/cpp-model/envrn.cpp",
+    }
+    if (
+        not isinstance(git, dict)
+        or git.get("clean") is not True
+        or git.get("head") != source_commit
+        or git.get("origin_head") != source_commit
+        or not git.get("branch")
+        or not isinstance(tracked, list)
+        or len(tracked) != len(set(tracked))
+        or not core_tracked.issubset(tracked)
+        or not set(tracked).issubset(allowed_tracked)
+    ):
+        raise RuntimeError("executor Git source provenance is not exact")
+    if source.get("atom_map_sha256") != _atom_map_hash(pair):
+        raise RuntimeError("reconstructed atom map differs from executor source")
+    if source.get("condensed_geometry_hash") != geometry_hash(
+        _exact_xyz(pair.condensed.cluster)
+    ):
+        raise RuntimeError("reconstructed condensed geometry differs")
+    if source.get("pilot_identity") != _pilot_identity(pair):
+        raise RuntimeError("reconstructed physical-state identity differs")
+    return pinned
+
+
+def _verify_failure_namespace(output_root: Path) -> dict[str, str]:
+    component_root = output_root / "components"
+    c_root = component_root / "C"
+    required = {"reservation.json", "optimizer-entered.json", "receipt.json"}
+    observed = {path.name for path in c_root.iterdir()}
+    if observed != required or any(
+        path.is_symlink() or not path.is_file() for path in c_root.iterdir()
+    ):
+        raise RuntimeError("failed C checkpoint namespace is not exact")
+    for role in ("V", "SiOH4"):
+        if (component_root / role).exists():
+            raise RuntimeError(f"unspent component unexpectedly exists: {role}")
+    forbidden_names = {
+        "raw-endpoint.xyz",
+        "endpoint.xyz",
+        "calc005-result.json",
+        "calculation-receipt.json",
+        "store.sqlite",
+    }
+    for path in output_root.rglob("*"):
+        if path.is_symlink():
+            raise RuntimeError(f"evidence namespace contains a symlink: {path}")
+        if path.name in forbidden_names or path.name.startswith(".staging-"):
+            raise RuntimeError(f"forbidden executor artifact exists: {path}")
+    generations = output_root / "generations"
+    if generations.exists():
+        raise RuntimeError("executor generation namespace exists after failed pilot")
+    return {name: sha256_path(c_root / name) for name in sorted(required)}
+
+
+def _verify_failure_restoration(
+    terminal: dict[str, Any],
+    probe: Callable[[dict[str, Any]], dict[str, Any]],
+) -> dict[str, Any]:
+    restoration = terminal.get("restoration")
+    if not isinstance(restoration, dict):
+        raise RuntimeError("failure terminal lacks restoration evidence")
+    required = {
+        "status": "verified-restored",
+        "bootstrap_session_closed": True,
+        "qi2_lease_released": True,
+        "unit_active_state": "failed",
+        "unit_result": "exit-code",
+        "unit_exec_main_status": 2,
+        "unit_main_pid": 0,
+    }
+    if any(restoration.get(key) != value for key, value in required.items()):
+        raise RuntimeError("recorded executor restoration state is not exact")
+    if not restoration.get("unit") or not restoration.get("lease_path"):
+        raise RuntimeError("restoration unit or lease path is missing")
+    prior = dict(terminal)
+    prior.pop("restoration")
+    prior_bytes = (json.dumps(prior, indent=2, sort_keys=True) + "\n").encode()
+    prior_hash = hashlib.sha256(prior_bytes).hexdigest()
+    if restoration.get("prior_terminal_sha256") != prior_hash:
+        raise RuntimeError("pre-restoration terminal hash does not reproduce")
+    if datetime.fromisoformat(restoration["checked_at"]) < datetime.fromisoformat(
+        terminal["written_at"]
+    ):
+        raise RuntimeError("restoration predates the terminal failure")
+    live = probe(restoration)
+    expected_unit = {
+        "MainPID": "0",
+        "Result": "exit-code",
+        "ExecMainStatus": "2",
+        "ActiveState": "failed",
+        "SubState": "failed",
+    }
+    if live != {"lease_present": False, "unit": expected_unit}:
+        raise RuntimeError("live executor restoration state differs from receipt")
+    return {"prior_terminal_sha256": prior_hash, **live}
+
+
+def verify_failed_pilot(
+    output_root: Path,
+    deck: Path,
+    *,
+    verifier_identity: str,
+    repo: Path | None = None,
+    blob_reader: Callable[[Path, str, str], bytes] = _git_blob,
+    restoration_probe: Callable[[dict[str, Any]], dict[str, Any]] = (
+        _default_restoration_probe
+    ),
+) -> dict[str, Any]:
+    """Adjudicate a terminal executor failure without calculator or optimizer calls."""
+
+    output_root = output_root.resolve()
+    deck = deck.resolve()
+    repo = (repo or Path(__file__).resolve().parents[2]).resolve()
+    result: dict[str, Any]
+    with _locked_evidence(output_root):
+        try:
+            terminal_path = output_root / "terminal-receipt.json"
+            terminal = _json_object(terminal_path)
+            terminal_keys = {
+                "schema",
+                "written_at",
+                "verdict",
+                "failed_component",
+                "detail",
+                "executor_identity",
+                "source_commit",
+                "source",
+                "components",
+                "optimizer_budget",
+                "quarantine",
+                "canonical_value_exposed",
+                "forbidden_outputs_emitted",
+                "independent_verification_required",
+                "restoration",
+            }
+            if set(terminal) != terminal_keys:
+                raise RuntimeError("failure terminal field set is not exact")
+            executor = terminal.get("executor_identity")
+            if not verifier_identity or verifier_identity == executor:
+                raise RuntimeError(
+                    "verifier identity must differ from executor identity"
+                )
+            if (
+                terminal.get("schema") != "calc005-terminal-receipt-v1"
+                or terminal.get("verdict") != "incomplete-computational-failure"
+                or terminal.get("failed_component") != "C"
+                or terminal.get("quarantine") != "spent-checkpoint-retained-in-place"
+                or terminal.get("canonical_value_exposed") is not False
+                or terminal.get("forbidden_outputs_emitted") is not False
+                or terminal.get("independent_verification_required") is not True
+            ):
+                raise RuntimeError("executor failure terminal identity is invalid")
+            expected_budget = {
+                "C": {"calls": 1, "max_steps": 150, "retries": 0},
+                "V": {"calls": 0, "max_steps": 150, "retries": 0},
+                "SiOH4": {"calls": 0, "max_steps": 150, "retries": 0},
+            }
+            if terminal.get("optimizer_budget") != expected_budget:
+                raise RuntimeError("executor optimizer budget is not exact")
+
+            checkpoint_hashes = _verify_failure_namespace(output_root)
+            c_root = output_root / "components/C"
+            reservation = _json_object(c_root / "reservation.json")
+            entered = _json_object(c_root / "optimizer-entered.json")
+            receipt = _json_object(c_root / "receipt.json")
+            signature = receipt.get("signature")
+            if (
+                set(reservation) != {"schema", "status", "reserved_at", "signature"}
+                or set(entered) != {"schema", "status", "entered_at", "signature"}
+                or set(receipt)
+                != {"schema", "status", "signature", "optimizer", "detail"}
+                or reservation.get("schema") != "calc005-component-reservation-v1"
+                or reservation.get("status") != "optimizer-budget-reserved"
+                or entered.get("schema") != "calc005-optimizer-entered-v1"
+                or entered.get("status") != "optimizer-entered"
+                or receipt.get("schema") != "calc005-component-receipt-v1"
+                or receipt.get("status") != "optimizer-failed"
+                or not isinstance(signature, dict)
+                or reservation.get("signature") != signature
+                or entered.get("signature") != signature
+                or terminal.get("components") != {"C": receipt}
+            ):
+                raise RuntimeError("failed component checkpoint chain is invalid")
+            if receipt.get("optimizer") != {
+                "converged": False,
+                "observed_calls": 1,
+                "observed_retries": 0,
+                "observed_max_steps": 150,
+            } or signature.get("optimizer") != {
+                "max_steps": 150,
+                "retry_allowed": False,
+            }:
+                raise RuntimeError("failed component optimizer ledger is invalid")
+            if "Nuclear gradients" not in receipt.get("detail", "") or (
+                "not converged" not in receipt.get("detail", "")
+            ):
+                raise RuntimeError(
+                    "failed component does not preserve the SCF-gradient failure"
+                )
+
+            source_settings = _json_object(output_root / "source-settings.json")
+            source = terminal.get("source")
+            if (
+                not isinstance(source, dict)
+                or source_settings.get("source") != source
+                or signature.get("source") != source
+            ):
+                raise RuntimeError("source provenance copies differ")
+            geometry_settings, production_settings = _settings(True)
+            expected_settings = {
+                "geometry": asdict(geometry_settings),
+                "geometry_method": R2SCAN3C_METHOD,
+                "geometry_sha256": _canonical_hash(asdict(geometry_settings)),
+                "geometry_fingerprint": frequency_settings_fingerprint(
+                    geometry_settings
+                ),
+                "production": asdict(production_settings),
+                "production_method": PRODUCTION_METHOD,
+                "production_sha256": _canonical_hash(asdict(production_settings)),
+                "production_fingerprint": frequency_settings_fingerprint(
+                    production_settings
+                ),
+                "temperature_k": TEMPERATURE_K,
+            }
+            if source_settings.get("settings") != expected_settings:
+                raise RuntimeError("executor settings receipt drifted")
+            if signature.get("settings") != {
+                "geometry": expected_settings["geometry"],
+                "geometry_sha256": expected_settings["geometry_sha256"],
+                "production": expected_settings["production"],
+                "production_sha256": expected_settings["production_sha256"],
+            }:
+                raise RuntimeError("component settings differ from source settings")
+
+            pair = build_calc005_pair(deck, environment_index=1, metal_shells=2)
+            validation = pair.validate()
+            if any(
+                value is not True
+                for value in validation.values()
+                if isinstance(value, bool)
+            ):
+                raise RuntimeError(
+                    "reconstructed CALC-005 pair failed a physical-state gate"
+                )
+            if (
+                pair.condensed.cluster.formula != "Al6H36O29Si"
+                or pair.occupied.formula != "Al6H38O30Si"
+                or pair.vacancy.formula != "Al6H34O26"
+                or pair.silicic_acid.formula != "H4O4Si"
+                or signature.get("formula") != pair.occupied.formula
+                or signature.get("charge") != 0
+                or signature.get("spin") != 0
+                or signature.get("frozen_indices") != pair.occupied.frozen_indices
+                or signature.get("seed_geometry_fingerprint")
+                != frequency_geometry_fingerprint(pair.occupied)
+            ):
+                raise RuntimeError("reconstructed component identity differs")
+            pinned_hashes = _verify_failure_source(
+                source,
+                str(terminal["source_commit"]),
+                deck,
+                pair,
+                repo,
+                blob_reader,
+            )
+            petra = validate_petra_boundary(repo)
+
+            log_path = output_root / "logs/a3i-executor.log"
+            if log_path.is_symlink() or not log_path.is_file():
+                raise RuntimeError("canonical executor log is absent")
+            log_text = log_path.read_text()
+            step_lines = re.findall(r"^Step\s+\d+\s*:", log_text, flags=re.MULTILINE)
+            if (
+                log_text.count("geomeTRIC started.") != 1
+                or log_text.count("maxiter                   150") != 1
+                or step_lines != ["Step    0 :"]
+            ):
+                raise RuntimeError(
+                    "executor log does not prove one step-0 optimizer entry"
+                )
+            json_start = log_text.rfind("\n{")
+            if json_start < 0 or json.loads(log_text[json_start + 1 :]) != {
+                key: value for key, value in terminal.items() if key != "restoration"
+            }:
+                raise RuntimeError("executor log terminal payload differs")
+
+            restoration = _verify_failure_restoration(terminal, restoration_probe)
+            result = {
+                "schema": "calc005-verified-terminal-v2",
+                "written_at": now(),
+                "status": "verified-pass",
+                "pilot_disposition": "terminally-rejected",
+                "executor_verdict": terminal["verdict"],
+                "executor_identity": executor,
+                "verifier_identity": verifier_identity,
+                "executor_terminal_sha256": sha256_path(terminal_path),
+                "checkpoint_sha256": checkpoint_hashes,
+                "executor_log_sha256": sha256_path(log_path),
+                "source_commit": terminal["source_commit"],
+                "pinned_source_sha256": pinned_hashes,
+                "physical_state": {
+                    "condensed_state": 204,
+                    "live_states": pair.occupied_states,
+                    "vacancy_states": pair.vacancy_states,
+                    "cycle": "Al6H38O30Si -> Al6H34O26 + H4O4Si",
+                    "water_thermochemical_coefficient": 0,
+                    "pair_validation": validation,
+                },
+                "optimizer_budget": expected_budget,
+                "optimizer_calls": 0,
+                "calculator_calls": 0,
+                "petra_boundary": petra,
+                "restoration": restoration,
+                "canonical_value_exposed": False,
+                "forbidden_outputs_emitted": False,
+                "failed_edges": [],
+                "artifact_writes": ["verified-terminal.json"],
+            }
+        except Exception as exc:
+            result = {
+                "schema": "calc005-verified-terminal-v2",
+                "written_at": now(),
+                "status": "verified-fail",
+                "pilot_disposition": "evidence-rejected",
+                "verifier_identity": verifier_identity,
+                "detail": f"{type(exc).__name__}: {exc}",
+                "failed_edges": [f"{type(exc).__name__}: {exc}"],
+                "optimizer_calls": 0,
+                "calculator_calls": 0,
+                "artifact_writes": ["verified-terminal.json"],
+            }
+        atomic_json(output_root / "verified-terminal.json", result)
+    return result
+
+
 def measure_production_envelope() -> dict[str, Any]:
     """Measure the verifier's own process, cgroup, unit, threads, and QI2 lease."""
 
@@ -1204,12 +1703,38 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--nice", type=int, default=10)
     parser.add_argument("--log")
     args = parser.parse_args(argv)
+    terminal_path = args.output_root.resolve() / "terminal-receipt.json"
+    try:
+        terminal = _json_object(terminal_path)
+    except (OSError, json.JSONDecodeError, RuntimeError) as exc:
+        parser.error(f"cannot inspect executor terminal receipt: {exc}")
+    if terminal.get("schema") == "calc005-terminal-receipt-v1" and terminal.get(
+        "verdict"
+    ) in {"incomplete-computational-failure", "rejected-physical-state"}:
+        result = verify_failed_pilot(
+            args.output_root,
+            args.deck,
+            verifier_identity=args.verifier_identity,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0 if result["status"] == "verified-pass" else 1
     if not args.gpu:
         parser.error("production evidence recomputation requires --gpu")
     if args.threads != EXPECTED_THREADS or args.nice != 0:
         parser.error(
             "production verification requires --threads 16 --nice 0 "
             "inside a Nice=10 unit"
+        )
+    if argv is None:
+        from quarry.etiquette import bootstrap_cli
+
+        bootstrap_cli(
+            "calc005_si_attachment_verify",
+            default_run_root=Path(
+                "/mnt/data/vsletten/dissertation-data/a3h-calc005-si-n1-pilot/logs"
+            ),
+            gpu_owner="calc005_si_attachment_verify",
+            gpu_ttl_hours=GPU_TTL_HOURS,
         )
     execution_envelope = measure_production_envelope()
     result = verify_pilot(
