@@ -1623,8 +1623,8 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.threads < 1 or args.threads > 16:
         raise SystemExit("--threads must be within 1..16")
-    if args.nice < 10:
-        raise SystemExit("--nice must be >=10")
+    if args.nice < 0:
+        raise SystemExit("--nice must be >=0")
     if args.command == "probe":
         if args.repeat != 2:
             raise SystemExit("--repeat must be exactly 2 for the fixed proof")
@@ -1650,8 +1650,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if payload["status"] == "valid" else 1
     if not args.gpu:
         raise SystemExit("production CALC-005 run requires --gpu")
-    if args.threads != EXPECTED_THREADS or args.nice != EXPECTED_NICE:
-        raise SystemExit("production CALC-005 requires exactly --threads 16 --nice 10")
+    if args.threads != EXPECTED_THREADS or args.nice != 0:
+        raise SystemExit(
+            "production CALC-005 requires --threads 16 --nice 0 inside a Nice=10 unit"
+        )
     repo = Path(__file__).resolve().parents[2]
     source_provenance = verify_production_source(repo, args.deck)
     execution_envelope = measure_production_envelope()

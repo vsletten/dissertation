@@ -184,6 +184,8 @@ def test_run_and_validate_cli_surfaces_remain_backend_mockable(
             "--output-root",
             str(tmp_path),
             "--gpu",
+            "--nice",
+            "0",
         ]
     )
     run_payload = json.loads(capsys.readouterr().out)
