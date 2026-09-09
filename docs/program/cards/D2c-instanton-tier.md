@@ -341,3 +341,23 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   SCT/literature verdict, D2b gate flip, D3b table, or PR is authorized; the next
   bounded continuation must choose and predeclare a scientifically different
   route rather than replaying this rejected Hessian policy.
+- 2026-09-08 19:22 PDT (hermes-custom-build-001; profile=workstation) —
+  DISTINCT ENERGY-DIAGNOSTIC CHECKPOINT, REVIEW-RED / VICTOR-GATED: pushed exact
+  implementation head `9fccb291ac465bc7e43f840a349df8ffbef86f21` adds an evidence-only,
+  one-route scalar-energy probe along the independently verified unstable and
+  lowest-positive FD modes. Its fixed contract uses one center plus +/-0.05 and
+  +/-0.10 Bohr*sqrt(amu) for exactly nine CPU PWB6K-D3BJ/def2-SVP/grid-5 SCFs,
+  preserves the rejected analytic/FD ancestry and unchanged curvature gates, and
+  can never authorize TS qualification, IRC, SCT, a D2b gate flip, or D3b.
+  Implementation verification is green (`46 passed`; whole-QM independently
+  reported `1288 passed`; Ruff/format/diff clean), but two cold re-reviews remain
+  RED: the PySCF `dft.UKS` constructor and transitive module helpers are not fully
+  resident-attested, source receipts/bundle are not reloaded after the nine SCFs,
+  preflight timestamp ordering is enforced only during finalization, and directory
+  fan-out plus center-density finalizer bounds remain incomplete. Every displaced
+  point also intentionally fails the unavailable robust electronic-root metric,
+  so the probe is non-decisive by design. No calculator or output root was launched.
+  Mission-control queue-health separately parked TASK-300 at its 18-claim/42-hour
+  no-delivery ceiling on `blocked-on: victor`; do not run or merge this checkpoint
+  until Victor rules whether to narrow/split/close D2c and a later worker closes
+  these review findings.
