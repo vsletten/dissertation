@@ -799,11 +799,19 @@ def test_production_envelope_records_actual_exact_limits_and_lease(
         return real_read_text(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", measured_read_text)
-    monkeypatch.setattr(
-        driver.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(stdout="12h\n"),
-    )
+
+    def systemctl_run(command, **_kwargs):
+        assert command == [
+            "systemctl",
+            "--user",
+            "show",
+            "calc005.service",
+            "--property=RuntimeMaxUSec",
+            "--value",
+        ]
+        return SimpleNamespace(stdout="12h\n")
+
+    monkeypatch.setattr(driver.subprocess, "run", systemctl_run)
     monkeypatch.setattr(driver.os, "getpriority", lambda *_args: 10)
     monkeypatch.setattr(driver.os, "getpid", lambda: 4242)
     monkeypatch.setenv("GPU_LEASE_PATH", str(lease_path))

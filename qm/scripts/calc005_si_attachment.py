@@ -1555,7 +1555,14 @@ def measure_production_envelope() -> dict[str, Any]:
         raise RuntimeError("CALC-005 requires a finite cpu.max quota")
     cpu_percent = int(round(int(cpu_fields[0]) / int(cpu_fields[1]) * 100))
     runtime_text = subprocess.run(
-        ["systemctl", "show", unit, "--property=RuntimeMaxUSec", "--value"],
+        [
+            "systemctl",
+            "--user",
+            "show",
+            unit,
+            "--property=RuntimeMaxUSec",
+            "--value",
+        ],
         check=True,
         capture_output=True,
         text=True,
