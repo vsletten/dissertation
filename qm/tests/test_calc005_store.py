@@ -216,3 +216,18 @@ def test_store_rejects_forged_production_envelope_even_when_rehashed(tmp_path):
             coordinated,
             build_calc005_pair(DECK, environment_index=1),
         )
+
+
+def test_store_rejects_production_backend_labeled_in_process(tmp_path):
+    receipt = _accepted(tmp_path)
+
+    def production_backend_lie(calculation):
+        calculation["backend_kind"] = "production"
+
+    coordinated = _coordinated_receipt_tamper(receipt, production_backend_lie)
+    with pytest.raises(RuntimeError, match="execution envelope"):
+        validate_calc005_store(
+            _store_path(coordinated),
+            coordinated,
+            build_calc005_pair(DECK, environment_index=1),
+        )

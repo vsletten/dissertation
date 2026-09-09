@@ -458,9 +458,15 @@ def _read_xyz_coords(path: Path, symbols: list[str]) -> np.ndarray:
     return coords
 
 
-def _validate_execution_envelope(envelope: Any) -> None:
+def _validate_execution_envelope(envelope: Any, backend_kind: Any) -> None:
     if envelope == {"mode": "in-process-test"}:
+        if backend_kind != "test":
+            raise RuntimeError(
+                "production backend cannot use an in-process-test execution envelope"
+            )
         return
+    if backend_kind != "production":
+        raise RuntimeError("test backend cannot claim a production execution envelope")
     if not isinstance(envelope, dict):
         raise RuntimeError("production execution envelope is missing")
     threads = envelope.get("thread_environment")
@@ -508,7 +514,9 @@ def validate_calculation_receipt(receipt: dict[str, Any], pair: Calc005Pair) -> 
         or receipt.get("independent_verification_required") is not True
     ):
         raise RuntimeError("calculation receipt identity/classification drifted")
-    _validate_execution_envelope(receipt.get("execution_envelope"))
+    _validate_execution_envelope(
+        receipt.get("execution_envelope"), receipt.get("backend_kind")
+    )
     components = receipt.get("components")
     if not isinstance(components, dict) or set(components) != set(STOICHIOMETRY):
         raise RuntimeError("calculation receipt component set drifted")
@@ -1139,6 +1147,24 @@ def validate_calc005_store(
     try:
         calculation, _ = _load_calculation_from_terminal(terminal, path)
         validate_calculation_receipt(calculation, pair)
+        restoration = terminal.get("restoration")
+        if calculation.get("backend_kind") == "production":
+            lease_path = str(
+                calculation.get("execution_envelope", {})
+                .get("qi2_lease", {})
+                .get("path", "")
+            )
+            if (
+                not isinstance(restoration, dict)
+                or restoration.get("status") != "verified-restored"
+                or not restoration.get("checked_at")
+                or restoration.get("bootstrap_session_closed") is not True
+                or restoration.get("qi2_lease_released") is not True
+                or restoration.get("lease_path") != lease_path
+            ):
+                raise RuntimeError("CALC-005 successful restoration receipt drifted")
+        elif restoration != {"status": "not-applicable-in-process-test"}:
+            raise RuntimeError("CALC-005 in-process restoration receipt drifted")
         uri = f"{path.as_uri()}?mode=ro&immutable=1"
         with sqlite3.connect(uri, uri=True) as connection:
             connection.row_factory = sqlite3.Row

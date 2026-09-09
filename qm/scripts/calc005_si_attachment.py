@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -43,10 +44,11 @@ EXPECTED_THREADS = 16
 EXPECTED_RUNTIME_MAX_SECONDS = 43200
 EXPECTED_GPU_OWNER = "calc005_si_attachment"
 
+_ETIQUETTE_SESSION = None
 if __name__ == "__main__":
     from quarry.etiquette import bootstrap_cli
 
-    bootstrap_cli(
+    _ETIQUETTE_SESSION = bootstrap_cli(
         "calc005_si_attachment",
         default_run_root=DEFAULT_OUTPUT_ROOT / "logs",
         gpu_owner="calc005_si_attachment",
@@ -90,6 +92,8 @@ from quarry.store import geometry_hash  # noqa: E402
 class CalculatorBackend(Protocol):
     """Mockable electronic-structure boundary; production is the default CLI backend."""
 
+    production_backend: bool
+
     def optimize(
         self,
         role: str,
@@ -97,6 +101,7 @@ class CalculatorBackend(Protocol):
         settings: DftSettings,
         *,
         max_steps: int,
+        on_optimizer_enter: Callable[[], None],
     ) -> OptimizationResult: ...
 
     def gradient(
@@ -114,8 +119,10 @@ class PipelineBackend:
     """Production PySCF/GPU4PySCF implementation of the calculator boundary."""
 
     name = "gpu4pyscf/pyscf"
+    production_backend = True
 
-    def optimize(self, role, cluster, settings, *, max_steps):
+    def optimize(self, role, cluster, settings, *, max_steps, on_optimizer_enter):
+        on_optimizer_enter()
         from quarry.pipeline import optimize_bounded
 
         return optimize_bounded(cluster, settings, max_steps=max_steps)
@@ -140,8 +147,10 @@ class AnalyticalBackend:
     """Deterministic no-QM fixture backend; never selected by the CLI."""
 
     name = "analytical-test-backend"
+    production_backend = False
 
-    def optimize(self, role, cluster, settings, *, max_steps):
+    def optimize(self, role, cluster, settings, *, max_steps, on_optimizer_enter):
+        on_optimizer_enter()
         return OptimizationResult(cluster, True, max_steps)
 
     def gradient(self, role, cluster, settings):
@@ -164,12 +173,27 @@ class AnalyticalBackend:
         return {"C": -300.0, "V": -200.0, "SiOH4": -100.02}[role]
 
 
+def _is_production_backend(backend: CalculatorBackend) -> bool:
+    pipeline_type = PipelineBackend
+    return backend.production_backend is True or (
+        isinstance(pipeline_type, type) and isinstance(backend, pipeline_type)
+    )
+
+
 class ComputationalFailure(RuntimeError):
     """A bounded calculator call failed or exhausted its declared budget."""
 
 
 class PhysicalStateFailure(RuntimeError):
     """An endpoint failed an independent physical or numerical acceptance gate."""
+
+
+class PublicationFailure(RuntimeError):
+    """A promoted generation was quarantined before terminal publication."""
+
+    def __init__(self, detail: str, quarantine: str):
+        super().__init__(detail)
+        self.quarantine = quarantine
 
 
 def now() -> str:
@@ -750,18 +774,34 @@ def _run_component(
         "signature": signature,
     }
     atomic_json(directory / "reservation.json", reservation)
-    atomic_json(
-        directory / "optimizer-entered.json",
-        {
-            "schema": "calc005-optimizer-entered-v1",
-            "status": "optimizer-entered",
-            "entered_at": now(),
-            "signature": signature,
-        },
-    )
+    optimizer_entered = False
+
+    def mark_optimizer_entered() -> None:
+        nonlocal optimizer_entered
+        if optimizer_entered:
+            raise ComputationalFailure(f"{role} optimizer entry callback repeated")
+        atomic_json(
+            directory / "optimizer-entered.json",
+            {
+                "schema": "calc005-optimizer-entered-v1",
+                "status": "optimizer-entered",
+                "entered_at": now(),
+                "signature": signature,
+            },
+        )
+        optimizer_entered = True
+
     try:
-        optimized = backend.optimize(role, seed, geometry_settings, max_steps=MAX_STEPS)
+        optimized = backend.optimize(
+            role,
+            seed,
+            geometry_settings,
+            max_steps=MAX_STEPS,
+            on_optimizer_enter=mark_optimizer_entered,
+        )
     except Exception as exc:
+        if not optimizer_entered:
+            raise
         receipt = {
             "schema": "calc005-component-receipt-v1",
             "status": "optimizer-failed",
@@ -777,6 +817,8 @@ def _run_component(
         atomic_json(directory / "receipt.json", receipt)
         raise ComputationalFailure(f"{role} optimizer failed: {exc}") from exc
 
+    if not optimizer_entered:
+        raise RuntimeError(f"{role} backend returned without optimizer entry callback")
     raw_path = directory / "raw-endpoint.xyz"
     atomic_xyz(raw_path, optimized.cluster)
     receipt: dict[str, Any] = {
@@ -849,6 +891,8 @@ def _source_map(
     repo = Path(__file__).resolve().parents[2]
     verifier = Path(__file__).with_name("calc005_si_attachment_verify.py")
     calculations = repo / "qm/CALCULATIONS.md"
+    legacy_actions = repo / "legacy/cpp-model/actions.cpp"
+    legacy_envrn = repo / "legacy/cpp-model/envrn.cpp"
 
     def node_value(node: tuple[int, tuple[int, int, int]]) -> list[Any]:
         return [node[0], list(node[1])]
@@ -874,6 +918,8 @@ def _source_map(
         "calc005_store_sha256": sha256_path(repo / "qm/quarry/calc005_store.py"),
         "verifier_sha256": sha256_path(verifier) if verifier.is_file() else None,
         "calculations_sha256": sha256_path(calculations),
+        "legacy_actions_cpp_sha256": sha256_path(legacy_actions),
+        "legacy_envrn_cpp_sha256": sha256_path(legacy_envrn),
         "atom_map_sha256": atom_map_sha256(pair),
         "condensed_geometry_hash": geometry_hash(exact_xyz(pair.condensed.cluster)),
         "pilot_identity": {
@@ -932,6 +978,33 @@ def _quarantine_canonical(output_root: Path) -> str | None:
     return str(target)
 
 
+def _quarantine_generation(output_root: Path, generation: Path) -> str:
+    """Remove one failed promoted generation from the visible namespace."""
+
+    target = output_root / "quarantine" / f"publication-{time.time_ns()}"
+    target.mkdir(parents=True, exist_ok=False)
+    if generation.is_dir():
+        generation.replace(target / generation.name)
+    return str(target)
+
+
+def _validate_successful_restoration(
+    restoration: Any, execution_envelope: dict[str, Any]
+) -> None:
+    lease = execution_envelope.get("qi2_lease", {})
+    lease_path = Path(str(lease.get("path", ""))).expanduser()
+    if (
+        not isinstance(restoration, dict)
+        or restoration.get("status") != "verified-restored"
+        or not restoration.get("checked_at")
+        or restoration.get("bootstrap_session_closed") is not True
+        or restoration.get("qi2_lease_released") is not True
+        or restoration.get("lease_path") != str(lease_path)
+        or lease_path.exists()
+    ):
+        raise RuntimeError("production restoration was not independently verified")
+
+
 def _budget(records: dict[str, dict[str, Any]]) -> dict[str, dict[str, int]]:
     result = {}
     for role in ("C", "V", "SiOH4"):
@@ -986,8 +1059,10 @@ def _publish_success(
     source: dict[str, Any],
     settings_receipt: dict[str, Any],
     engine: str,
+    production_backend: bool,
     quarantine: str | None,
     execution_envelope: dict[str, Any],
+    restoration_check: Callable[[dict[str, Any]], dict[str, Any]] | None,
 ) -> dict[str, Any]:
     public_components = {
         role: _public_component(record) for role, record in records.items()
@@ -1019,6 +1094,7 @@ def _publish_success(
         "source": source,
         "settings": settings_receipt,
         "engine": engine,
+        "backend_kind": "production" if production_backend else "test",
         "physical_state": {
             "center_node": [4, [0, 0, 0]],
             "metal_shells": 2,
@@ -1051,10 +1127,18 @@ def _publish_success(
         store_hash = sha256_path(staged_store)
         if generation.exists():
             raise RuntimeError(f"immutable generation already exists: {generation}")
-        staging.replace(generation)
         result_path = generation / "calc005-result.json"
         calculation_path = generation / "calculation-receipt.json"
         store_path = generation / "store.sqlite"
+        if production_backend:
+            if restoration_check is None:
+                raise RuntimeError(
+                    "production success requires a restoration_check callback"
+                )
+            restoration = restoration_check(execution_envelope)
+            _validate_successful_restoration(restoration, execution_envelope)
+        else:
+            restoration = {"status": "not-applicable-in-process-test"}
         receipt = {
             "schema": "calc005-terminal-receipt-v2",
             "written_at": now(),
@@ -1066,7 +1150,7 @@ def _publish_success(
             "artifacts": {
                 "result": {
                     "path": str(result_path),
-                    "sha256": sha256_path(result_path),
+                    "sha256": sha256_path(staged_result),
                 },
                 "calculation_receipt": {
                     "path": str(calculation_path),
@@ -1075,12 +1159,29 @@ def _publish_success(
                 },
                 "store": {"path": str(store_path), "sha256": store_hash},
             },
+            "restoration": restoration,
             "canonical_value_exposed": True,
             "forbidden_outputs_emitted": False,
             "independent_verification_required": True,
         }
         receipt["receipt_payload_sha256"] = receipt_payload_sha256(receipt)
-        validate_calc005_store(store_path, receipt, pair)
+        if receipt["receipt_payload_sha256"] != receipt_payload_sha256(receipt):
+            raise RuntimeError("terminal receipt payload hash is unstable")
+        promoted = False
+        try:
+            staging.replace(generation)
+            promoted = True
+            atomic_json(output_root / "terminal-receipt.json", receipt)
+        except BaseException as exc:
+            (output_root / "terminal-receipt.json").unlink(missing_ok=True)
+            if not promoted:
+                raise
+            quarantine_path = _quarantine_generation(output_root, generation)
+            raise PublicationFailure(
+                "terminal promotion failed; exact generation quarantined at "
+                f"{quarantine_path}: {exc}",
+                quarantine_path,
+            ) from exc
         return receipt
     finally:
         shutil.rmtree(staging, ignore_errors=True)
@@ -1097,6 +1198,7 @@ def _run_pilot_locked(
     use_gpu: bool = False,
     execution_envelope: dict[str, Any] | None = None,
     source_provenance: dict[str, Any] | None = None,
+    restoration_check: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run only the exact C_10/V_10/SiOH4 pilot, once per component."""
 
@@ -1302,11 +1404,17 @@ def _run_pilot_locked(
             source=source,
             settings_receipt=settings_receipt,
             engine=getattr(backend, "name", type(backend).__name__),
+            production_backend=_is_production_backend(backend),
             quarantine=quarantine,
             execution_envelope=execution_envelope or {"mode": "in-process-test"},
+            restoration_check=restoration_check,
         )
     except Exception as exc:
-        publication_quarantine = _quarantine_canonical(output_root)
+        publication_quarantine = (
+            exc.quarantine
+            if isinstance(exc, PublicationFailure)
+            else _quarantine_canonical(output_root)
+        )
         receipt = _failure_receipt(
             verdict="incomplete-computational-failure",
             failed_component="evidence-graph-publication",
@@ -1317,7 +1425,8 @@ def _run_pilot_locked(
             records=records,
             quarantine=publication_quarantine or quarantine,
         )
-    atomic_json(existing_terminal, receipt)
+    if receipt["verdict"] != "passed-protocol-pilot":
+        atomic_json(existing_terminal, receipt)
     return receipt
 
 
@@ -1349,6 +1458,7 @@ def run_pilot(
     use_gpu: bool = False,
     execution_envelope: dict[str, Any] | None = None,
     source_provenance: dict[str, Any] | None = None,
+    restoration_check: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if type(environment_index) is not int or environment_index != 1:
         raise ValueError(
@@ -1360,6 +1470,22 @@ def run_pilot(
         or any(character not in "0123456789abcdef" for character in source_commit)
     ):
         raise ValueError("source_commit must be a 40-character lowercase Git revision")
+    if _is_production_backend(backend):
+        if use_gpu is not True:
+            raise RuntimeError("production backend requires use_gpu=True")
+        _validate_production_authority(
+            deck,
+            source_commit,
+            source_provenance,
+            execution_envelope,
+            restoration_check,
+        )
+    elif execution_envelope is not None and execution_envelope != {
+        "mode": "in-process-test"
+    }:
+        raise RuntimeError(
+            "test backend must use the explicit in-process-test envelope"
+        )
     with exclusive_run(output_root):
         return _run_pilot_locked(
             output_root,
@@ -1371,6 +1497,7 @@ def run_pilot(
             use_gpu=use_gpu,
             execution_envelope=execution_envelope,
             source_provenance=source_provenance,
+            restoration_check=restoration_check,
         )
 
 
@@ -1462,6 +1589,26 @@ def _git(repo: Path, *arguments: str) -> str:
     ).stdout.strip()
 
 
+def _required_production_sources(deck: Path) -> list[str]:
+    repo = Path(__file__).resolve().parents[2]
+    try:
+        deck_relative = deck.resolve().relative_to(repo)
+    except ValueError as exc:
+        raise RuntimeError(
+            "production deck must be inside the source repository"
+        ) from exc
+    return [
+        deck_relative.as_posix(),
+        "legacy/cpp-model/actions.cpp",
+        "legacy/cpp-model/envrn.cpp",
+        "qm/CALCULATIONS.md",
+        "qm/quarry/calc005.py",
+        "qm/quarry/calc005_store.py",
+        "qm/scripts/calc005_si_attachment.py",
+        "qm/scripts/calc005_si_attachment_verify.py",
+    ]
+
+
 def verify_production_source(repo: Path, deck: Path) -> dict[str, Any]:
     """Require a clean, committed, origin-bound branch and tracked source set."""
 
@@ -1470,12 +1617,7 @@ def verify_production_source(repo: Path, deck: Path) -> dict[str, Any]:
     if repo != expected_repo:
         raise RuntimeError("production source must be this driver's repository")
     deck = deck.resolve()
-    try:
-        deck_relative = deck.relative_to(repo)
-    except ValueError as exc:
-        raise RuntimeError(
-            "production deck must be inside the source repository"
-        ) from exc
+    _required_production_sources(deck)
     dirty = _git(repo, "status", "--porcelain=v1", "--untracked-files=all")
     if dirty:
         raise RuntimeError("production CALC-005 refuses a dirty source worktree")
@@ -1486,14 +1628,7 @@ def verify_production_source(repo: Path, deck: Path) -> dict[str, Any]:
     origin_head = _git(repo, "rev-parse", f"origin/{branch}")
     if head != origin_head:
         raise RuntimeError("production HEAD must exactly equal origin/<current-branch>")
-    required = [
-        deck_relative.as_posix(),
-        "qm/CALCULATIONS.md",
-        "qm/quarry/calc005.py",
-        "qm/quarry/calc005_store.py",
-        "qm/scripts/calc005_si_attachment.py",
-        "qm/scripts/calc005_si_attachment_verify.py",
-    ]
+    required = _required_production_sources(deck)
     _git(repo, "ls-files", "--error-unmatch", "--", *required)
     for relative in required:
         _git(repo, "cat-file", "-e", f"HEAD:{relative}")
@@ -1524,6 +1659,76 @@ def _timespan_seconds(value: str) -> int:
         else:
             raise RuntimeError(f"unrecognized systemd timespan: {value}")
     return int(total)
+
+
+def _validate_production_envelope_payload(envelope: Any) -> None:
+    if not isinstance(envelope, dict):
+        raise RuntimeError("production execution_envelope is missing")
+    threads = envelope.get("thread_environment")
+    lease = envelope.get("qi2_lease")
+    checks = {
+        "measured": envelope.get("measured") is True,
+        "unit": str(envelope.get("systemd_unit", "")).endswith((".service", ".scope")),
+        "cgroup": str(envelope.get("cgroup_path", "")).startswith("/sys/fs/cgroup/"),
+        "runtime": envelope.get("runtime_max_seconds") == EXPECTED_RUNTIME_MAX_SECONDS,
+        "memory": envelope.get("memory_max_bytes") == EXPECTED_MEMORY_MAX_BYTES,
+        "swap": envelope.get("memory_swap_max_bytes") == EXPECTED_MEMORY_SWAP_MAX_BYTES,
+        "cpu": envelope.get("cpu_quota_percent") == EXPECTED_CPU_QUOTA_PERCENT,
+        "nice": envelope.get("nice") == EXPECTED_NICE,
+        "threads": threads
+        == {
+            "OMP_NUM_THREADS": EXPECTED_THREADS,
+            "MKL_NUM_THREADS": EXPECTED_THREADS,
+            "OPENBLAS_NUM_THREADS": EXPECTED_THREADS,
+        },
+        "lease_owner": isinstance(lease, dict)
+        and lease.get("owner") == EXPECTED_GPU_OWNER,
+        "lease_pid": isinstance(lease, dict) and lease.get("pid") == os.getpid(),
+        "lease_ttl": isinstance(lease, dict)
+        and lease.get("ttl_hours") == GPU_TTL_HOURS,
+        "lease_memory": isinstance(lease, dict)
+        and lease.get("expected_gb") == 16.0
+        and lease.get("maximum_gb") == 18.0,
+        "lease_path": isinstance(lease, dict) and bool(lease.get("path")),
+        "shared_service_mutation": envelope.get("shared_service_mutation") is False,
+        "restoration": envelope.get("restoration") == "pending-process-exit",
+    }
+    failed = [name for name, passed in checks.items() if not passed]
+    if failed:
+        raise RuntimeError(
+            "production execution_envelope is not exact: " + ", ".join(failed)
+        )
+
+
+def _validate_production_authority(
+    deck: Path,
+    source_commit: str,
+    source_provenance: Any,
+    execution_envelope: Any,
+    restoration_check: Any,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    if not isinstance(source_provenance, dict):
+        raise RuntimeError("production source_provenance is missing")
+    expected_source = {
+        "repository": str(repo),
+        "branch": source_provenance.get("branch"),
+        "head": source_commit,
+        "origin_head": source_commit,
+        "clean": True,
+        "tracked_source_files": _required_production_sources(deck),
+    }
+    if not source_provenance.get("branch") or source_provenance != expected_source:
+        raise RuntimeError("production source_provenance is not exact")
+    _validate_production_envelope_payload(execution_envelope)
+    if not callable(restoration_check):
+        raise RuntimeError("production restoration_check is required")
+    observed_source = verify_production_source(repo, deck)
+    if observed_source != source_provenance:
+        raise RuntimeError("production source_provenance does not match live source")
+    observed_envelope = measure_production_envelope()
+    if observed_envelope != execution_envelope:
+        raise RuntimeError("production execution_envelope does not match live process")
 
 
 def measure_production_envelope() -> dict[str, Any]:
@@ -1579,24 +1784,7 @@ def measure_production_envelope() -> dict[str, Any]:
         )
     ).expanduser()
     lease = json.loads(lease_path.read_text())
-    expected = {
-        "runtime": runtime_seconds == EXPECTED_RUNTIME_MAX_SECONDS,
-        "memory": memory_max == EXPECTED_MEMORY_MAX_BYTES,
-        "swap": swap_max == EXPECTED_MEMORY_SWAP_MAX_BYTES,
-        "cpu": cpu_percent == EXPECTED_CPU_QUOTA_PERCENT,
-        "nice": niceness == EXPECTED_NICE,
-        "threads": all(value == EXPECTED_THREADS for value in thread_values.values()),
-        "lease_owner": lease.get("owner") == EXPECTED_GPU_OWNER,
-        "lease_pid": lease.get("pid") == os.getpid(),
-        "lease_ttl": lease.get("ttl") == GPU_TTL_HOURS,
-        "lease_memory": lease.get("expected_gb") == 16.0,
-    }
-    failed = [name for name, passed in expected.items() if not passed]
-    if failed:
-        raise RuntimeError(
-            "production execution envelope is not exact: " + ", ".join(failed)
-        )
-    return {
+    envelope = {
         "measured": True,
         "systemd_unit": unit,
         "cgroup_path": str(cgroup),
@@ -1617,6 +1805,33 @@ def measure_production_envelope() -> dict[str, Any]:
         "shared_service_mutation": False,
         "restoration": "pending-process-exit",
     }
+    try:
+        _validate_production_envelope_payload(envelope)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"production execution envelope is not exact: {exc}"
+        ) from exc
+    return envelope
+
+
+def _close_and_verify_production_restoration(
+    execution_envelope: dict[str, Any],
+) -> dict[str, Any]:
+    session = _ETIQUETTE_SESSION
+    if session is None:
+        raise RuntimeError("production bootstrap session is unavailable")
+    session.close()
+    lease_path = Path(execution_envelope["qi2_lease"]["path"]).expanduser()
+    lease = session.gpu_lease
+    restoration = {
+        "status": "verified-restored",
+        "checked_at": now(),
+        "bootstrap_session_closed": session._closed is True,
+        "qi2_lease_released": lease is not None and lease._released is True,
+        "lease_path": str(lease_path),
+    }
+    _validate_successful_restoration(restoration, execution_envelope)
+    return restoration
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1666,7 +1881,20 @@ def main(argv: list[str] | None = None) -> int:
         use_gpu=True,
         execution_envelope=execution_envelope,
         source_provenance=source_provenance,
+        restoration_check=_close_and_verify_production_restoration,
     )
+    if result["verdict"] != "passed-protocol-pilot":
+        try:
+            result["restoration"] = _close_and_verify_production_restoration(
+                execution_envelope
+            )
+        except Exception as exc:
+            result["restoration"] = {
+                "status": "restoration-verification-failed",
+                "checked_at": now(),
+                "detail": f"{type(exc).__name__}: {exc}",
+            }
+        atomic_json(args.output_root / "terminal-receipt.json", result)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result["verdict"] == "passed-protocol-pilot" else 2
 

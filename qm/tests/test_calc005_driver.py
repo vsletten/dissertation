@@ -60,6 +60,8 @@ def _production_envelope(pid=4242):
 
 
 class FakeBackend:
+    production_backend = False
+
     def __init__(
         self, *, converged: bool = True, imaginary: dict[str, list[float]] | None = None
     ):
@@ -68,7 +70,8 @@ class FakeBackend:
         self.optimize_calls: list[tuple[str, int]] = []
         self.energy_calls: list[tuple[str, str]] = []
 
-    def optimize(self, role, cluster, settings, *, max_steps):
+    def optimize(self, role, cluster, settings, *, max_steps, on_optimizer_enter):
+        on_optimizer_enter()
         self.optimize_calls.append((role, max_steps))
         return OptimizationResult(
             cluster=cluster, converged=self.converged, max_steps=max_steps
@@ -164,6 +167,7 @@ def test_run_and_validate_cli_surfaces_remain_backend_mockable(
     tmp_path, monkeypatch, capsys
 ):
     backend = FakeBackend()
+    backend.production_backend = True
     monkeypatch.setattr(driver, "PipelineBackend", lambda: backend)
     provenance = {
         "repository": str(REPO),
@@ -171,10 +175,22 @@ def test_run_and_validate_cli_surfaces_remain_backend_mockable(
         "head": "4" * 40,
         "origin_head": "4" * 40,
         "clean": True,
-        "tracked_source_files": [],
+        "tracked_source_files": driver._required_production_sources(DECK),
     }
     monkeypatch.setattr(driver, "verify_production_source", lambda *_args: provenance)
     monkeypatch.setattr(driver, "measure_production_envelope", _production_envelope)
+    monkeypatch.setattr(driver.os, "getpid", lambda: 4242)
+    monkeypatch.setattr(
+        driver,
+        "_close_and_verify_production_restoration",
+        lambda _envelope: {
+            "status": "verified-restored",
+            "checked_at": "2026-09-09T00:00:00+0000",
+            "bootstrap_session_closed": True,
+            "qi2_lease_released": True,
+            "lease_path": "/tmp/lease.json",
+        },
+    )
 
     run_status = driver.main(
         [
@@ -206,6 +222,54 @@ def test_run_and_validate_cli_surfaces_remain_backend_mockable(
     assert validate_payload["status"] == "valid"
     assert validate_payload["optimizer_calls"] == 0
     assert backend.optimize_calls == [("C", 150), ("V", 150), ("SiOH4", 150)]
+
+
+def test_failure_cli_records_externally_verified_release(tmp_path, monkeypatch, capsys):
+    backend = FakeBackend(converged=False)
+    backend.production_backend = True
+    monkeypatch.setattr(driver, "PipelineBackend", lambda: backend)
+    provenance = {
+        "repository": str(REPO),
+        "branch": "test",
+        "head": "d" * 40,
+        "origin_head": "d" * 40,
+        "clean": True,
+        "tracked_source_files": driver._required_production_sources(DECK),
+    }
+    monkeypatch.setattr(driver, "verify_production_source", lambda *_args: provenance)
+    monkeypatch.setattr(driver, "measure_production_envelope", _production_envelope)
+    monkeypatch.setattr(driver.os, "getpid", lambda: 4242)
+    events = []
+
+    def restored(envelope):
+        events.append("released")
+        return {
+            "status": "verified-restored",
+            "checked_at": "2026-09-09T00:00:00+0000",
+            "bootstrap_session_closed": True,
+            "qi2_lease_released": True,
+            "lease_path": envelope["qi2_lease"]["path"],
+        }
+
+    monkeypatch.setattr(driver, "_close_and_verify_production_restoration", restored)
+    status = driver.main(
+        [
+            "run",
+            "--deck",
+            str(DECK),
+            "--output-root",
+            str(tmp_path),
+            "--gpu",
+            "--nice",
+            "0",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    persisted = json.loads((tmp_path / "terminal-receipt.json").read_text())
+    assert status == 2
+    assert events == ["released"]
+    assert payload["restoration"]["status"] == "verified-restored"
+    assert persisted == payload
 
 
 def test_optimizer_exhaustion_is_terminal_zero_retry_and_preserves_raw(tmp_path):
@@ -280,8 +344,14 @@ def test_independent_numerical_evidence_fails_closed(tmp_path, defect):
 @pytest.mark.parametrize("defect", ["owner", "nonfinite", "nonminimum"])
 def test_physical_and_numerical_gates_reject_after_raw_persistence(tmp_path, defect):
     class Defective(FakeBackend):
-        def optimize(self, role, cluster, settings, *, max_steps):
-            result = super().optimize(role, cluster, settings, max_steps=max_steps)
+        def optimize(self, role, cluster, settings, *, max_steps, on_optimizer_enter):
+            result = super().optimize(
+                role,
+                cluster,
+                settings,
+                max_steps=max_steps,
+                on_optimizer_enter=on_optimizer_enter,
+            )
             if role != "C":
                 return result
             coords = cluster.coords.copy()
@@ -399,7 +469,8 @@ def test_tampered_accepted_checkpoint_is_terminal_without_reoptimization(tmp_pat
 
 def test_optimizer_interruption_is_recorded_and_never_replayed(tmp_path):
     class Interrupted(FakeBackend):
-        def optimize(self, role, cluster, settings, *, max_steps):
+        def optimize(self, role, cluster, settings, *, max_steps, on_optimizer_enter):
+            on_optimizer_enter()
             self.optimize_calls.append((role, max_steps))
             raise KeyboardInterrupt("simulated stop")
 
@@ -459,6 +530,7 @@ def test_cold_verifier_recomputes_every_gate_without_optimizing(tmp_path):
         DECK,
         backend,
         verifier_identity="different-worker",
+        execution_envelope={"mode": "in-process-test"},
     )
 
     assert result["status"] == "verified-pass"
@@ -485,6 +557,7 @@ def test_cold_verifier_fails_closed_on_endpoint_tampering(tmp_path):
         DECK,
         backend,
         verifier_identity="different-worker",
+        execution_envelope={"mode": "in-process-test"},
     )
 
     assert result["status"] == "verified-fail"
@@ -494,8 +567,14 @@ def test_cold_verifier_fails_closed_on_endpoint_tampering(tmp_path):
 
 def test_structural_gate_rejects_moved_center_si_and_destroyed_heavy_topology(tmp_path):
     class BrokenTopology(FakeBackend):
-        def optimize(self, role, cluster, settings, *, max_steps):
-            result = super().optimize(role, cluster, settings, max_steps=max_steps)
+        def optimize(self, role, cluster, settings, *, max_steps, on_optimizer_enter):
+            result = super().optimize(
+                role,
+                cluster,
+                settings,
+                max_steps=max_steps,
+                on_optimizer_enter=on_optimizer_enter,
+            )
             if role == "C":
                 coords = cluster.coords.copy()
                 center = cluster.symbols.index("Si")
@@ -562,21 +641,13 @@ def test_compose_thermochemistry_refuses_nonprotocol_temperature():
         compose_thermochemistry(terms, temperature_k=298.15000000000003)
 
 
-def test_precall_reservation_crash_is_recoverable_without_spending(
-    tmp_path, monkeypatch
-):
-    original = driver.atomic_json
-    interrupted = {"done": False}
+def test_backend_crash_before_optimizer_entry_is_recoverable_without_spending(tmp_path):
+    class CrashBeforeEntry(FakeBackend):
+        def optimize(self, role, cluster, settings, *, max_steps, on_optimizer_enter):
+            raise KeyboardInterrupt("before optimizer entry")
 
-    def crash_before_entered(path, payload):
-        if path.name == "optimizer-entered.json" and not interrupted["done"]:
-            interrupted["done"] = True
-            raise KeyboardInterrupt("before entered marker promotion")
-        original(path, payload)
-
-    monkeypatch.setattr(driver, "atomic_json", crash_before_entered)
-    first = FakeBackend()
-    with pytest.raises(KeyboardInterrupt, match="before entered"):
+    first = CrashBeforeEntry()
+    with pytest.raises(KeyboardInterrupt, match="before optimizer entry"):
         driver.run_pilot(
             tmp_path,
             DECK,
@@ -602,7 +673,8 @@ def test_precall_reservation_crash_is_recoverable_without_spending(
 
 def test_crash_after_optimizer_entered_marker_spends_budget(tmp_path):
     class CrashAfterEntered(FakeBackend):
-        def optimize(self, role, cluster, settings, *, max_steps):
+        def optimize(self, role, cluster, settings, *, max_steps, on_optimizer_enter):
+            on_optimizer_enter()
             self.optimize_calls.append((role, max_steps))
             raise KeyboardInterrupt("process died after optimizer entry")
 
@@ -740,7 +812,11 @@ def test_cold_verifier_uses_tolerances_for_one_ulp_numerical_differences(tmp_pat
             return np.nextafter(super().energy(role, cluster, settings), math.inf)
 
     result = verifier.verify_pilot(
-        tmp_path, DECK, OneUlp(), verifier_identity="different-worker"
+        tmp_path,
+        DECK,
+        OneUlp(),
+        verifier_identity="different-worker",
+        execution_envelope={"mode": "in-process-test"},
     )
     assert result["status"] == "verified-pass", result
 
@@ -771,6 +847,273 @@ def test_atomic_publication_exposes_no_partial_canonical_generation(
     assert json.loads((tmp_path / "terminal-receipt.json").read_text())["verdict"] == (
         "incomplete-computational-failure"
     )
+
+
+def test_terminal_write_failure_quarantines_exact_promoted_generation(
+    tmp_path, monkeypatch
+):
+    original = driver.atomic_json
+
+    def fail_terminal(path, payload):
+        if path.name == "terminal-receipt.json" and payload.get("verdict") == (
+            "passed-protocol-pilot"
+        ):
+            raise RuntimeError("simulated terminal promotion failure")
+        original(path, payload)
+
+    monkeypatch.setattr(driver, "atomic_json", fail_terminal)
+    receipt = driver.run_pilot(
+        tmp_path,
+        DECK,
+        FakeBackend(),
+        executor_identity="executor-a",
+        source_commit="9" * 40,
+    )
+    assert receipt["verdict"] == "incomplete-computational-failure"
+    assert "terminal promotion failure" in receipt["detail"]
+    quarantine = Path(receipt["quarantine"])
+    assert quarantine.is_dir()
+    quarantined = list(quarantine.iterdir())
+    assert len(quarantined) == 1
+    assert quarantined[0].name.startswith("generation-")
+    assert list((tmp_path / "generations").iterdir()) == []
+    assert not (tmp_path / "calc005-result.json").exists()
+    assert not (tmp_path / "store.sqlite").exists()
+
+
+def test_direct_production_backend_requires_exact_authority_before_output(tmp_path):
+    with pytest.raises(RuntimeError, match="source_provenance"):
+        driver.run_pilot(
+            tmp_path,
+            DECK,
+            driver.PipelineBackend(),
+            source_commit="a" * 40,
+            use_gpu=True,
+        )
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_production_backend_refuses_in_process_store_envelope(tmp_path):
+    class ProductionFake(FakeBackend):
+        production_backend = True
+
+    provenance = {
+        "repository": str(REPO),
+        "branch": "test",
+        "head": "a" * 40,
+        "origin_head": "a" * 40,
+        "clean": True,
+        "tracked_source_files": driver._required_production_sources(DECK),
+    }
+    with pytest.raises(RuntimeError, match="execution_envelope"):
+        driver.run_pilot(
+            tmp_path,
+            DECK,
+            ProductionFake(),
+            source_commit="a" * 40,
+            use_gpu=True,
+            source_provenance=provenance,
+            execution_envelope={"mode": "in-process-test"},
+        )
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_production_backend_refuses_supplied_envelope_not_matching_live_process(
+    tmp_path, monkeypatch
+):
+    class ProductionFake(FakeBackend):
+        production_backend = True
+
+    monkeypatch.setattr(driver.os, "getpid", lambda: 4242)
+    provenance = {
+        "repository": str(REPO),
+        "branch": "test",
+        "head": "a" * 40,
+        "origin_head": "a" * 40,
+        "clean": True,
+        "tracked_source_files": driver._required_production_sources(DECK),
+    }
+    supplied = _production_envelope()
+    measured = _production_envelope()
+    measured["systemd_unit"] = "different.service"
+    monkeypatch.setattr(driver, "verify_production_source", lambda *_args: provenance)
+    monkeypatch.setattr(driver, "measure_production_envelope", lambda: measured)
+    with pytest.raises(RuntimeError, match="does not match live process"):
+        driver.run_pilot(
+            tmp_path,
+            DECK,
+            ProductionFake(),
+            source_commit="a" * 40,
+            use_gpu=True,
+            source_provenance=provenance,
+            execution_envelope=supplied,
+            restoration_check=lambda _envelope: {},
+        )
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_production_success_publishes_only_after_verified_restoration(
+    tmp_path, monkeypatch
+):
+    class ProductionFake(FakeBackend):
+        production_backend = True
+
+    monkeypatch.setattr(driver.os, "getpid", lambda: 4242)
+    provenance = {
+        "repository": str(REPO),
+        "branch": "test",
+        "head": "b" * 40,
+        "origin_head": "b" * 40,
+        "clean": True,
+        "tracked_source_files": driver._required_production_sources(DECK),
+    }
+    monkeypatch.setattr(driver, "verify_production_source", lambda *_args: provenance)
+    monkeypatch.setattr(driver, "measure_production_envelope", _production_envelope)
+    events = []
+
+    def restored(envelope):
+        assert not (tmp_path / "terminal-receipt.json").exists()
+        events.append("restored")
+        return {
+            "status": "verified-restored",
+            "checked_at": "2026-09-09T00:00:00+0000",
+            "bootstrap_session_closed": True,
+            "qi2_lease_released": True,
+            "lease_path": envelope["qi2_lease"]["path"],
+        }
+
+    receipt = driver.run_pilot(
+        tmp_path,
+        DECK,
+        ProductionFake(),
+        source_commit="b" * 40,
+        use_gpu=True,
+        source_provenance=provenance,
+        execution_envelope=_production_envelope(),
+        restoration_check=restored,
+    )
+    assert events == ["restored"]
+    assert receipt["restoration"]["status"] == "verified-restored"
+    assert (tmp_path / "terminal-receipt.json").is_file()
+
+
+def test_production_restoration_crash_leaves_no_success_or_visible_generation(
+    tmp_path, monkeypatch
+):
+    class ProductionFake(FakeBackend):
+        production_backend = True
+
+    monkeypatch.setattr(driver.os, "getpid", lambda: 4242)
+    provenance = {
+        "repository": str(REPO),
+        "branch": "test",
+        "head": "c" * 40,
+        "origin_head": "c" * 40,
+        "clean": True,
+        "tracked_source_files": driver._required_production_sources(DECK),
+    }
+    monkeypatch.setattr(driver, "verify_production_source", lambda *_args: provenance)
+    monkeypatch.setattr(driver, "measure_production_envelope", _production_envelope)
+
+    def crash_during_restoration(_envelope):
+        raise KeyboardInterrupt("crashed while releasing bootstrap session")
+
+    with pytest.raises(KeyboardInterrupt, match="releasing bootstrap"):
+        driver.run_pilot(
+            tmp_path,
+            DECK,
+            ProductionFake(),
+            source_commit="c" * 40,
+            use_gpu=True,
+            source_provenance=provenance,
+            execution_envelope=_production_envelope(),
+            restoration_check=crash_during_restoration,
+        )
+    assert not (tmp_path / "terminal-receipt.json").exists()
+    assert list((tmp_path / "generations").iterdir()) == []
+    assert (tmp_path / "components/C/optimizer-entered.json").is_file()
+
+
+def test_fake_verifier_requires_explicit_in_process_envelope(tmp_path):
+    with pytest.raises(RuntimeError, match="explicitly in-process"):
+        verifier.verify_pilot(
+            tmp_path,
+            DECK,
+            FakeBackend(),
+            verifier_identity="different-worker",
+        )
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_production_verifier_fails_closed_without_measured_own_envelope(tmp_path):
+    with pytest.raises(RuntimeError, match="execution envelope is missing"):
+        verifier.verify_pilot(
+            tmp_path,
+            DECK,
+            verifier.PipelineBackend(),
+            verifier_identity="different-worker",
+        )
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_production_verifier_cli_avoids_double_nicing_the_nice10_unit():
+    with pytest.raises(SystemExit) as failure:
+        verifier.main(
+            [
+                "--verifier-identity",
+                "different-worker",
+                "--gpu",
+                "--nice",
+                "10",
+            ]
+        )
+    assert failure.value.code == 2
+
+
+def test_production_verifier_measures_and_enforces_own_envelope(tmp_path, monkeypatch):
+    lease_path = tmp_path / "verifier-lease.json"
+    lease = {
+        "owner": verifier.EXPECTED_GPU_OWNER,
+        "pid": 5252,
+        "started": "2026-09-09T00:00:00Z",
+        "ttl": verifier.GPU_TTL_HOURS,
+        "expected_gb": 16.0,
+    }
+    real_read_text = Path.read_text
+
+    def measured_read_text(path, *args, **kwargs):
+        value = str(path)
+        if value == "/proc/self/cgroup":
+            return "0::/user.slice/calc005-verify.service\n"
+        if value.endswith("/memory.max"):
+            return f"{verifier.EXPECTED_MEMORY_MAX_BYTES}\n"
+        if value.endswith("/memory.swap.max"):
+            return f"{verifier.EXPECTED_MEMORY_SWAP_MAX_BYTES}\n"
+        if value.endswith("/cpu.max"):
+            return "1600000 100000\n"
+        if path == lease_path:
+            return json.dumps(lease)
+        return real_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", measured_read_text)
+    monkeypatch.setattr(
+        verifier.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(stdout="12h\n"),
+    )
+    monkeypatch.setattr(verifier.os, "getpriority", lambda *_args: 10)
+    monkeypatch.setattr(verifier.os, "getpid", lambda: 5252)
+    monkeypatch.setenv("GPU_LEASE_PATH", str(lease_path))
+    for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+        monkeypatch.setenv(name, "16")
+
+    measured = verifier.measure_production_envelope()
+    assert measured["runtime_max_seconds"] == 43200
+    assert measured["nice"] == 10
+    assert measured["qi2_lease"]["owner"] == verifier.EXPECTED_GPU_OWNER
+    measured["nice"] = 0
+    with pytest.raises(RuntimeError, match="nice"):
+        verifier._validate_production_envelope(measured)
 
 
 def test_production_envelope_records_actual_exact_limits_and_lease(

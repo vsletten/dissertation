@@ -8,6 +8,8 @@ import hashlib
 import json
 import math
 import os
+import re
+import subprocess
 import sys
 import tempfile
 import time
@@ -19,6 +21,13 @@ from typing import Any, Protocol
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 GPU_TTL_HOURS = 13.0
+EXPECTED_MEMORY_MAX_BYTES = 32 * 1024**3
+EXPECTED_MEMORY_SWAP_MAX_BYTES = 4 * 1024**3
+EXPECTED_CPU_QUOTA_PERCENT = 1600
+EXPECTED_NICE = 10
+EXPECTED_THREADS = 16
+EXPECTED_RUNTIME_MAX_SECONDS = 43200
+EXPECTED_GPU_OWNER = "calc005_si_attachment_verify"
 
 if __name__ == "__main__":
     from quarry.etiquette import bootstrap_cli
@@ -68,6 +77,8 @@ PRODUCTION_METHOD = "wb97m-v/def2-tzvpd/smd(water)"
 
 
 class CalculatorBackend(Protocol):
+    production_backend: bool
+
     def gradient(
         self, role: str, cluster: Cluster, settings: DftSettings
     ) -> np.ndarray: ...
@@ -81,6 +92,8 @@ class CalculatorBackend(Protocol):
 
 class PipelineBackend:
     """Verifier calculator boundary; deliberately has no optimizer method."""
+
+    production_backend = True
 
     def gradient(self, role, cluster, settings):
         from quarry.pipeline import gradient
@@ -96,6 +109,13 @@ class PipelineBackend:
         from quarry.pipeline import energy
 
         return energy(cluster, settings)
+
+
+def _is_production_backend(backend: CalculatorBackend) -> bool:
+    pipeline_type = PipelineBackend
+    return backend.production_backend is True or (
+        isinstance(pipeline_type, type) and isinstance(backend, pipeline_type)
+    )
 
 
 def now() -> str:
@@ -487,12 +507,93 @@ def _reaction(document: dict[str, Any], name: str) -> dict[str, Any]:
     return rows[0]
 
 
+def _cpp_function(source: str, signature: str) -> str:
+    start = source.find(signature)
+    if start < 0:
+        raise RuntimeError(f"legacy source lacks {signature}")
+    opening = source.find("{", start + len(signature))
+    if opening < 0:
+        raise RuntimeError(f"legacy source has malformed {signature}")
+    depth = 0
+    for index in range(opening, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[opening + 1 : index]
+    raise RuntimeError(f"legacy source has unterminated {signature}")
+
+
+def _legacy_case_transitions(body: str) -> dict[int, int]:
+    pairs = re.findall(
+        r"case\s+(\d+)\s*:\s*"
+        r"this->lattice->sites\[nbr\]\.state\s*=\s*(\d+)\s*;",
+        body,
+    )
+    transitions = {int(source): int(target) for source, target in pairs}
+    if len(transitions) != len(pairs):
+        raise RuntimeError("legacy Si transitions contain duplicate switch cases")
+    return transitions
+
+
+def _validate_legacy_si_boundary(actions_source: str, envrn_source: str) -> None:
+    adsorb = _cpp_function(actions_source, "bool Actions::AdsorbSi(int site)")
+    desorb = _cpp_function(actions_source, "void Actions::DesorbSi(int site)")
+    adsorb_center_updates = re.findall(r"sites\[site\]\.state\s*=\s*([^;]+);", adsorb)
+    desorb_center_updates = re.findall(r"sites\[site\]\.state\s*=\s*([^;]+);", desorb)
+    if (
+        adsorb_center_updates != ["205", "100 + WRONG"]
+        or "if (ISSI(this->lattice->sites[site]))" not in adsorb
+        or "for (i = 0; i < 4; i++)" not in adsorb
+        or [int(value) for value in re.findall(r"case\s+(\d+)\s*:", adsorb)]
+        != [300, 303, 404, 405, 409, 400]
+        or _legacy_case_transitions(adsorb)
+        != {300: 303, 303: 302, 404: 402, 405: 403, 409: 407, 400: 408}
+        or desorb_center_updates != ["200", "100"]
+        or "if (ISSI(this->lattice->sites[site]))" not in desorb
+        or "for (i = 0; i < 4; i++)" not in desorb
+        or [int(value) for value in re.findall(r"case\s+(\d+)\s*:", desorb)]
+        != [303, 302, 402, 403, 407, 408]
+        or _legacy_case_transitions(desorb)
+        != {303: 300, 302: 303, 402: 404, 403: 405, 407: 409, 408: 400}
+    ):
+        raise RuntimeError("legacy Si transitions drifted")
+
+    check200 = _cpp_function(envrn_source, "int Environment::Check200(int site)")
+    compact = re.sub(r"\s+", " ", check200).strip()
+    required = (
+        "y = 0; x = 1;",
+        "for (i = 0; i < 4; i++)",
+        "if (this->lattice->sites[nbr].state == EDGE)",
+        "case 408: x = 0; break;",
+        "case 302: y++; break;",
+        "return (x + y);",
+    )
+    assignments = re.findall(r"\b([xy])\s*(=|\+\+|--|\+=|-=)\s*(\d*)\s*;", compact)
+    cases = [int(value) for value in re.findall(r"case\s+(\d+)\s*:", compact)]
+    returns = re.findall(r"return\s+([^;]+);", compact)
+    if (
+        any(fragment not in compact for fragment in required)
+        or assignments
+        != [("y", "=", "0"), ("x", "=", "1"), ("x", "=", "0"), ("y", "++", "")]
+        or cases != [408, 302]
+        or returns != ["-1", "(x + y)"]
+    ):
+        raise RuntimeError("legacy Check200 ladder drifted")
+
+
 def validate_petra_boundary(repo_root: Path) -> dict[str, Any]:
     """Bind exact source selectors/effects/modifiers and prove non-publication."""
 
     repo_root = repo_root.resolve()
     deck_path = repo_root / "petra/examples/kaolinite.toml"
     calculations_path = repo_root / "qm/CALCULATIONS.md"
+    actions_path = repo_root / "legacy/cpp-model/actions.cpp"
+    envrn_path = repo_root / "legacy/cpp-model/envrn.cpp"
+    actions_source = actions_path.read_text()
+    envrn_source = envrn_path.read_text()
+    _validate_legacy_si_boundary(actions_source, envrn_source)
     document = tomllib.loads(deck_path.read_text())
     adsorb = _reaction(document, "adsorb-si")
     desorb = _reaction(document, "desorb-si")
@@ -687,6 +788,8 @@ def validate_petra_boundary(repo_root: Path) -> dict[str, Any]:
     return {
         "deck_sha256": sha256_path(deck_path),
         "calculations_sha256": sha256_path(calculations_path),
+        "legacy_actions_cpp_sha256": sha256_path(actions_path),
+        "legacy_envrn_cpp_sha256": sha256_path(envrn_path),
         "adsorb_si": {"center_transition": "200->205", "osa_transition": "404->402"},
         "desorb_si": {"center_transition": "205->200", "osa_transition": "402->404"},
         "legacy_si_ladder_kcal_mol": [0.0, 6.0, 12.0, 18.0, 24.0],
@@ -720,6 +823,8 @@ def _verify_source(source: dict[str, Any], deck: Path, pair: Calc005Pair) -> Non
         "calc005_store_sha256": sha256_path(repo / "qm/quarry/calc005_store.py"),
         "verifier_sha256": sha256_path(Path(__file__)),
         "calculations_sha256": sha256_path(repo / "qm/CALCULATIONS.md"),
+        "legacy_actions_cpp_sha256": sha256_path(repo / "legacy/cpp-model/actions.cpp"),
+        "legacy_envrn_cpp_sha256": sha256_path(repo / "legacy/cpp-model/envrn.cpp"),
         "atom_map_sha256": _atom_map_hash(pair),
     }
     for key, value in expected.items():
@@ -735,15 +840,151 @@ def _verify_source(source: dict[str, Any], deck: Path, pair: Calc005Pair) -> Non
         raise RuntimeError("committed Git provenance is internally inconsistent")
 
 
+def _timespan_seconds(value: str) -> int:
+    value = value.strip()
+    if value.isdigit():
+        return int(value) // 1_000_000
+    units = {"d": 86400, "h": 3600, "min": 60, "s": 1}
+    total = 0.0
+    remaining = value
+    while remaining:
+        for suffix in ("min", "d", "h", "s"):
+            marker = remaining.find(suffix)
+            if marker > 0:
+                total += float(remaining[:marker]) * units[suffix]
+                remaining = remaining[marker + len(suffix) :].strip()
+                break
+        else:
+            raise RuntimeError(f"unrecognized systemd timespan: {value}")
+    return int(total)
+
+
+def _validate_production_envelope(envelope: Any) -> None:
+    if not isinstance(envelope, dict):
+        raise RuntimeError("production verifier execution envelope is missing")
+    threads = envelope.get("thread_environment")
+    lease = envelope.get("qi2_lease")
+    checks = {
+        "measured": envelope.get("measured") is True,
+        "unit": str(envelope.get("systemd_unit", "")).endswith((".service", ".scope")),
+        "cgroup": str(envelope.get("cgroup_path", "")).startswith("/sys/fs/cgroup/"),
+        "runtime": envelope.get("runtime_max_seconds") == EXPECTED_RUNTIME_MAX_SECONDS,
+        "memory": envelope.get("memory_max_bytes") == EXPECTED_MEMORY_MAX_BYTES,
+        "swap": envelope.get("memory_swap_max_bytes") == EXPECTED_MEMORY_SWAP_MAX_BYTES,
+        "cpu": envelope.get("cpu_quota_percent") == EXPECTED_CPU_QUOTA_PERCENT,
+        "nice": envelope.get("nice") == EXPECTED_NICE,
+        "threads": threads
+        == {
+            "OMP_NUM_THREADS": EXPECTED_THREADS,
+            "MKL_NUM_THREADS": EXPECTED_THREADS,
+            "OPENBLAS_NUM_THREADS": EXPECTED_THREADS,
+        },
+        "lease_owner": isinstance(lease, dict)
+        and lease.get("owner") == EXPECTED_GPU_OWNER,
+        "lease_pid": isinstance(lease, dict) and lease.get("pid") == os.getpid(),
+        "lease_ttl": isinstance(lease, dict)
+        and lease.get("ttl_hours") == GPU_TTL_HOURS,
+        "lease_memory": isinstance(lease, dict)
+        and lease.get("expected_gb") == 16.0
+        and lease.get("maximum_gb") == 18.0,
+        "lease_path": isinstance(lease, dict) and bool(lease.get("path")),
+        "shared_service_mutation": envelope.get("shared_service_mutation") is False,
+    }
+    failed = [name for name, passed in checks.items() if not passed]
+    if failed:
+        raise RuntimeError(
+            "production verifier execution envelope is not exact: " + ", ".join(failed)
+        )
+
+
+def measure_production_envelope() -> dict[str, Any]:
+    """Measure the verifier's own process, cgroup, unit, threads, and QI2 lease."""
+
+    cgroup_lines = Path("/proc/self/cgroup").read_text().splitlines()
+    unified = [line.split("::", 1)[1] for line in cgroup_lines if "::" in line]
+    if len(unified) != 1:
+        raise RuntimeError("CALC-005 verifier requires one cgroup-v2 systemd unit")
+    relative = unified[0].lstrip("/")
+    cgroup = Path("/sys/fs/cgroup") / relative
+    units = [
+        part for part in Path(relative).parts if part.endswith((".service", ".scope"))
+    ]
+    if not units:
+        raise RuntimeError("CALC-005 verifier must run inside a systemd service/scope")
+    unit = units[-1]
+
+    def integer_limit(name: str) -> int:
+        value = (cgroup / name).read_text().strip()
+        if value == "max":
+            raise RuntimeError(f"CALC-005 verifier requires a finite {name}")
+        return int(value)
+
+    cpu_fields = (cgroup / "cpu.max").read_text().split()
+    if len(cpu_fields) != 2 or cpu_fields[0] == "max":
+        raise RuntimeError("CALC-005 verifier requires a finite cpu.max quota")
+    runtime_text = subprocess.run(
+        [
+            "systemctl",
+            "--user",
+            "show",
+            unit,
+            "--property=RuntimeMaxUSec",
+            "--value",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    lease_path = Path(
+        os.environ.get(
+            "GPU_LEASE_PATH", str(Path.home() / ".local/state/gpu-lease/lease.json")
+        )
+    ).expanduser()
+    lease = json.loads(lease_path.read_text())
+    envelope = {
+        "measured": True,
+        "systemd_unit": unit,
+        "cgroup_path": str(cgroup),
+        "runtime_max_seconds": _timespan_seconds(runtime_text),
+        "memory_max_bytes": integer_limit("memory.max"),
+        "memory_swap_max_bytes": integer_limit("memory.swap.max"),
+        "cpu_quota_percent": int(round(int(cpu_fields[0]) / int(cpu_fields[1]) * 100)),
+        "nice": os.getpriority(os.PRIO_PROCESS, 0),
+        "thread_environment": {
+            name: int(os.environ.get(name, "0"))
+            for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS")
+        },
+        "qi2_lease": {
+            "path": str(lease_path),
+            "owner": lease["owner"],
+            "pid": lease["pid"],
+            "ttl_hours": lease["ttl"],
+            "expected_gb": lease["expected_gb"],
+            "maximum_gb": 18.0,
+        },
+        "shared_service_mutation": False,
+    }
+    _validate_production_envelope(envelope)
+    return envelope
+
+
 def verify_pilot(
     output_root: Path,
     deck: Path,
     backend: CalculatorBackend,
     *,
     verifier_identity: str,
+    execution_envelope: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Recompute all scientific gates from raw artifacts without executor helpers."""
 
+    if _is_production_backend(backend):
+        _validate_production_envelope(execution_envelope)
+        verified_envelope = execution_envelope
+    else:
+        if execution_envelope != {"mode": "in-process-test"}:
+            raise RuntimeError("fake verifier backend must run explicitly in-process")
+        verified_envelope = execution_envelope
     output_root = output_root.resolve()
     try:
         terminal_path = output_root / "terminal-receipt.json"
@@ -928,6 +1169,7 @@ def verify_pilot(
             "petra_boundary": petra,
             "optimizer_calls": 0,
             "artifact_writes": ["verified-terminal.json"],
+            "execution_envelope": verified_envelope,
         }
     except Exception as exc:
         result = {
@@ -938,6 +1180,7 @@ def verify_pilot(
             "detail": f"{type(exc).__name__}: {exc}",
             "optimizer_calls": 0,
             "artifact_writes": ["verified-terminal.json"],
+            "execution_envelope": verified_envelope,
         }
     atomic_json(output_root / "verified-terminal.json", result)
     return result
@@ -963,13 +1206,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not args.gpu:
         parser.error("production evidence recomputation requires --gpu")
-    if args.threads != 16 or args.nice != 10:
-        parser.error("production verification requires exactly --threads 16 --nice 10")
+    if args.threads != EXPECTED_THREADS or args.nice != 0:
+        parser.error(
+            "production verification requires --threads 16 --nice 0 "
+            "inside a Nice=10 unit"
+        )
+    execution_envelope = measure_production_envelope()
     result = verify_pilot(
         args.output_root,
         args.deck,
         PipelineBackend(),
         verifier_identity=args.verifier_identity,
+        execution_envelope=execution_envelope,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result["status"] == "verified-pass" else 1
