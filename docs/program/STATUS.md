@@ -4,7 +4,16 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
-- 2026-09-13 12:45 PDT — (hermes-macbot-zero; profile=laptop) — E4 DONE with
+- 2026-09-13 13:43 PDT — (hermes-macbot-zero; profile=laptop) — E4 implementation
+  and evidence are verified and pushed at `13128786e337`; status remains ACTIVE
+  because PR creation could not complete: existing `gh`/Keychain GitHub
+  credentials return HTTP 401 and the authenticated Chrome window is
+  AX-unreachable on another Space. No credential was configured. The queue
+  continuation needs only to open the compare URL, record the PR, and perform
+  POLICY §2 teardown.
+
+- 2026-09-13 12:45 PDT — (hermes-macbot-zero; profile=laptop) — E4
+  implementation completed with
   source-backed Sletten–Onstott Figure 3–5 digitizations, six tracked
   E3a-hop/retained-delamination-sensitivity × E2b-volume decks, 48 primary
   replicas plus 24 byte-identical replay replicas, and direct release/age

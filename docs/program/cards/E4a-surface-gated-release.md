@@ -1,6 +1,6 @@
 # E4a-surface-gated-release — repair the grain-size crossover
 
-- status: ready
+- status: blocked: E4
 - track: E (muscovite / the perfect circle)
 - priority: P1
 - machine: any (CPU ensembles)

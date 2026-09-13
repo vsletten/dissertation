@@ -1,6 +1,6 @@
 # E4-1998-comparison — synthetic spectra over the founding data
 
-- status: done
+- status: active
 - track: E (muscovite / the perfect circle)
 - priority: P1
 - machine: any (CPU ensembles; needs the E3a barrier set)
@@ -43,6 +43,14 @@ reservoir release ordering.
 
 ## Progress
 
+- 2026-09-13 13:43 PDT (hermes-macbot-zero; profile=laptop) — Implementation,
+  ensemble evidence, docs, and follow-up cards are verified and pushed at
+  `agents/E4-1998-comparison@13128786e3371c531d9d60596a4454378928fd7f`.
+  PR creation is the only remaining lifecycle step. Existing `gh` auth and the
+  macOS Keychain GitHub credential both return HTTP 401, and the authenticated
+  Chrome window is on an AX-unreachable Space; no API credential was configured
+  or exposed. Returning the queue task as a continuation for a browser/API-capable
+  fleet worker to open the compare URL and complete POLICY §2 teardown.
 - 2026-09-13 12:45 PDT (hermes-macbot-zero; profile=laptop) — Completed the
   E3a-hop × retained-delamination-sensitivity × E2b-volume campaign: six
   eight-replica ensembles plus six byte-identical two-replica replay pairs (72
