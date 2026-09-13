@@ -60,5 +60,8 @@ fn tiny_real_cli_run_reaches_typed_zero_analysis() {
     assert!(payload.contains("\"outcome\": \"no-dissolution\""));
     assert!(payload.contains("\"acceptance_passed\": false"));
     assert!(payload.contains("\"upper_95_mol_m2_s\":"));
+    assert!(payload.contains("\"propensity_estimator_basis\": \"integrated_ctmc_hazard\""));
+    assert!(payload.contains("\"expected_gross_si_flux_from_propensity_mol_m2_s\":"));
+    assert!(payload.contains("not observed event release"));
     std::fs::remove_dir_all(root).expect("temporary cleanup");
 }

@@ -18,6 +18,13 @@ or incomplete.  Only steady-positive is acceptance; steady-zero is complete
 evidence for a typed no-dissolution outcome.  Population inventory trend/range
 is emitted as a diagnostic but is not required to be static during genuine
 steady dissolution.
+
+Separately, the analyzer trapezoidally integrates Petra's sampled total CTMC
+propensity for desorb-si and desorb-al over that same tail.  Dividing the
+expected event count by Avogadro's constant and integrated geometric area gives
+an explicitly labeled expected-gross propensity flux used only for sensitivity
+ranking.  It is not observed release, an observed rate, or net dissolution and
+cannot change the observed-event acceptance verdict.
 """
 
 from __future__ import annotations
@@ -54,14 +61,34 @@ BOOTSTRAP_RESAMPLES = 2_000
 DEFAULT_SEEDS = (90401, 90403, 90407, 90409, 90413, 90419, 90421, 90427)
 RAW_SCHEMA = "a9-raw-campaign-v2"
 CHECKPOINT_SCHEMA = "a9-checkpoint-v2"
-VERIFICATION_SCHEMA = "a9-verification-v2"
+VERIFICATION_SCHEMA = "a9-verification-v3"
 POISSON_ZERO_EVENT_UPPER_COUNT_95 = -math.log(0.05)
 REQUIRED_OBSERVABLES = frozenset(
     {"state_counts", "event_rates", "rate_spectra", "surface_area", "exposure_age"}
 )
 PROVENANCE_CLASSES = frozenset({"computed", "literature", "heuristic"})
 PERTURBATIONS = ("ea-minus-3", "ea-plus-3", "prefactor-x0.1", "prefactor-x10")
-SENSITIVITY_RESPONSE = "combined_gross_dissolution_flux_mol_m2_s"
+SENSITIVITY_RESPONSE = (
+    "combined_si_plus_al_expected_gross_flux_from_propensity_mol_m2_s"
+)
+PROPENSITY_RATE_BASIS = "expected_gross_from_propensity"
+PROPENSITY_ESTIMATOR_BASIS = "integrated_ctmc_hazard"
+PROPENSITY_INTERPRETATION = (
+    "Trapezoidally integrated instantaneous total CTMC desorption propensity, "
+    "converted to expected gross event-equivalent flux; not observed event release, "
+    "not an observed rate, and not net dissolution."
+)
+PROPENSITY_INTEGRAL = (
+    "trapezoidal integral of instantaneous total CTMC desorb-si/desorb-al "
+    "propensity over the selected observable tail"
+)
+OBSERVED_EVENT_ACCEPTANCE_BASIS = (
+    "observed desorption event counts only; propensity estimates do not pass acceptance"
+)
+SENSITIVITY_STATISTIC = (
+    "same-seed paired linear deltas; reported delta_log10 is log10(arithmetic mean "
+    "perturbed response) minus log10(arithmetic mean nominal response)"
+)
 
 FAMILY_REACTIONS: dict[str, tuple[str, ...]] = {
     "siloxane-neutral": (
@@ -429,6 +456,15 @@ class ObservableSample:
 
 
 @dataclass(frozen=True)
+class PropensityExpectedGross:
+    area_time_a2_s: float
+    expected_gross_si_events_from_propensity: float
+    expected_gross_al_events_from_propensity: float
+    expected_gross_si_flux_from_propensity_mol_m2_s: float
+    expected_gross_al_flux_from_propensity_mol_m2_s: float
+
+
+@dataclass(frozen=True)
 class SteadyPoint:
     step: int
     time_s: float
@@ -507,6 +543,8 @@ class ReplicaRate:
     net_si_flux_mol_m2_s: float | None
     gross_al_flux_mol_m2_s: float | None
     net_al_flux_mol_m2_s: float | None
+    expected_gross_si_flux_from_propensity_mol_m2_s: float | None
+    expected_gross_al_flux_from_propensity_mol_m2_s: float | None
     gross_si_upper_95_mol_m2_s: float | None
     gross_al_upper_95_mol_m2_s: float | None
     si_al_net_ratio_dimensionless: float | None
@@ -1315,6 +1353,115 @@ def integrate_area(times: Sequence[float], areas: Sequence[float]) -> float:
     return integral
 
 
+def integrate_expected_gross_dissolution_from_propensity(
+    samples: Sequence[ObservableSample],
+    reaction_names: Sequence[str],
+    expected_steps: Sequence[int],
+) -> PropensityExpectedGross:
+    """Integrate sampled Si/Al desorption hazards over one selected tail.
+
+    ``event_rates`` is Petra's instantaneous total CTMC propensity per reaction,
+    ordered exactly as the deck reaction table.  Its physical-time integral is an
+    expected event count, not evidence that any event fired.
+    """
+
+    canonical_reactions = tuple(entry.name for entry in REACTION_REGISTRY)
+    if tuple(reaction_names) != canonical_reactions:
+        raise ValueError(
+            "propensity reaction index mapping must exactly match the deck"
+        )
+    if len(samples) < 2:
+        raise ValueError("propensity integration requires at least two samples")
+    sample_steps = [sample.step for sample in samples]
+    if sample_steps != list(expected_steps):
+        raise ValueError("propensity sample step alignment mismatch")
+    if any(type(step) is not int or step < 0 for step in sample_steps):
+        raise ValueError("propensity sample steps must be nonnegative integers")
+
+    reaction_indices = {
+        species: canonical_reactions.index(f"desorb-{species}")
+        for species in ("si", "al")
+    }
+    if len(set(reaction_indices.values())) != 2:
+        raise AssertionError("Si and Al desorption reaction indices must be distinct")
+
+    times: list[float] = []
+    areas: list[float] = []
+    species_propensities: dict[str, list[float]] = {"si": [], "al": []}
+    previous_step = -1
+    previous_time = -math.inf
+    for sample in samples:
+        try:
+            sample_time = _finite_number(sample.time_s, "propensity sample time")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "propensity samples require finite, strictly increasing times"
+            ) from exc
+        if sample.step <= previous_step or sample_time <= previous_time:
+            raise ValueError(
+                "propensity samples require aligned, strictly increasing steps and finite times"
+            )
+        raw_rates = sample.values.get("event_rates")
+        if not isinstance(raw_rates, list) or len(raw_rates) != len(
+            canonical_reactions
+        ):
+            raise ValueError(
+                "propensity vector cardinality does not match reaction mapping"
+            )
+        rates: list[float] = []
+        for raw_rate in raw_rates:
+            try:
+                rate = _finite_number(raw_rate, "CTMC propensity")
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "CTMC propensities must be finite and nonnegative"
+                ) from exc
+            if rate < 0.0:
+                raise ValueError("CTMC propensities must be finite and nonnegative")
+            rates.append(rate)
+        raw_area = sample.values.get("surface_area")
+        if not isinstance(raw_area, list) or not raw_area:
+            raise ValueError("propensity samples require geometric surface area")
+        try:
+            area = _finite_number(raw_area[0], "propensity geometric area")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "propensity geometric areas must be finite and nonnegative"
+            ) from exc
+        if area < 0.0:
+            raise ValueError(
+                "propensity geometric areas must be finite and nonnegative"
+            )
+        times.append(sample_time)
+        areas.append(area)
+        for species, reaction_index in reaction_indices.items():
+            species_propensities[species].append(rates[reaction_index])
+        previous_step = sample.step
+        previous_time = sample_time
+
+    area_time = integrate_area(times, areas)
+    expected_events: dict[str, float] = {}
+    for species, propensities in species_propensities.items():
+        integral = sum(
+            0.5 * (left + right) * (right_time - left_time)
+            for left_time, right_time, left, right in zip(
+                times[:-1], times[1:], propensities[:-1], propensities[1:], strict=True
+            )
+        )
+        if not math.isfinite(integral) or integral < 0.0:
+            raise ValueError(
+                "integrated CTMC propensity must be finite and nonnegative"
+            )
+        expected_events[species] = integral
+    return PropensityExpectedGross(
+        area_time,
+        expected_events["si"],
+        expected_events["al"],
+        _amount_to_flux(expected_events["si"], area_time),
+        _amount_to_flux(expected_events["al"], area_time),
+    )
+
+
 def _amount_to_flux(amount: float, area_time_a2_s: float) -> float:
     amount = _finite_number(amount, "event-equivalent amount")
     area_time = _finite_number(area_time_a2_s, "area-time denominator")
@@ -1655,6 +1802,7 @@ def _analyze_replica(
     start = points[-7] if len(points) >= 7 else points[0]
     end = points[-1]
     area_time: float | None = None
+    propensity_estimate: PropensityExpectedGross | None = None
     accounting = {
         "gross_si": 0,
         "adsorb_si": 0,
@@ -1664,13 +1812,16 @@ def _analyze_replica(
         "net_al": 0,
     }
     if len(points) >= 2 and end.step > start.step:
-        try:
-            area_time = integrate_area(
-                [point.time_s for point in points[-7:]],
-                [point.area_a2 for point in points[-7:]],
-            )
-        except ValueError:
-            area_time = None
+        selected_points = points[-7:]
+        selected_samples = [observables[point.step] for point in selected_points]
+        propensity_estimate = integrate_expected_gross_dissolution_from_propensity(
+            selected_samples,
+            events.reaction_names,
+            [point.step for point in selected_points],
+        )
+        area_time = propensity_estimate.area_time_a2_s
+        if gate.area_time_a2_s is not None and area_time != gate.area_time_a2_s:
+            raise ValueError(f"{run_dir}: propensity and observed area-time disagree")
         accounting = dissolution_event_counts(events, start.step, end.step)
     gross_si = accounting["gross_si"]
     adsorb_si = accounting["adsorb_si"]
@@ -1684,29 +1835,43 @@ def _analyze_replica(
         return event_count_to_flux(count, area_time) if area_time is not None else None
 
     rate = ReplicaRate(
-        scenario,
-        replica,
-        seed,
-        start.step if area_time is not None else None,
-        end.step if area_time is not None else None,
-        start.time_s if area_time is not None else None,
-        end.time_s if area_time is not None else None,
-        area_time,
-        gross_si,
-        adsorb_si,
-        net_si,
-        gross_al,
-        adsorb_al,
-        net_al,
-        flux(gross_si),
-        flux(net_si),
-        flux(gross_al),
-        flux(net_al),
-        gate.si.upper_95_mol_m2_s if gate.si is not None else None,
-        gate.al.upper_95_mol_m2_s if gate.al is not None else None,
-        ratio,
-        gate.status,
-        gate.acceptance_passed,
+        scenario=scenario,
+        replica=replica,
+        seed=seed,
+        window_start_step=start.step if area_time is not None else None,
+        window_end_step=end.step if area_time is not None else None,
+        window_start_time_s=start.time_s if area_time is not None else None,
+        window_end_time_s=end.time_s if area_time is not None else None,
+        area_time_a2_s=area_time,
+        gross_si_events=gross_si,
+        adsorb_si_events=adsorb_si,
+        net_si_events=net_si,
+        gross_al_events=gross_al,
+        adsorb_al_events=adsorb_al,
+        net_al_events=net_al,
+        gross_si_flux_mol_m2_s=flux(gross_si),
+        net_si_flux_mol_m2_s=flux(net_si),
+        gross_al_flux_mol_m2_s=flux(gross_al),
+        net_al_flux_mol_m2_s=flux(net_al),
+        expected_gross_si_flux_from_propensity_mol_m2_s=(
+            propensity_estimate.expected_gross_si_flux_from_propensity_mol_m2_s
+            if propensity_estimate is not None
+            else None
+        ),
+        expected_gross_al_flux_from_propensity_mol_m2_s=(
+            propensity_estimate.expected_gross_al_flux_from_propensity_mol_m2_s
+            if propensity_estimate is not None
+            else None
+        ),
+        gross_si_upper_95_mol_m2_s=(
+            gate.si.upper_95_mol_m2_s if gate.si is not None else None
+        ),
+        gross_al_upper_95_mol_m2_s=(
+            gate.al.upper_95_mol_m2_s if gate.al is not None else None
+        ),
+        si_al_net_ratio_dimensionless=ratio,
+        steady_state_status=gate.status,
+        acceptance_passed=gate.acceptance_passed,
     )
     return rate, gate, populations
 
@@ -2010,7 +2175,7 @@ def _validate_raw_campaign(
 def _write_provenance(path: Path) -> None:
     rows: list[dict[str, object]] = []
     for entry in REACTION_REGISTRY:
-        row = {field: "" for field in PROVENANCE_FIELDS}
+        row: dict[str, object] = {field: "" for field in PROVENANCE_FIELDS}
         row.update(
             {
                 "record_type": "reaction",
@@ -2053,16 +2218,38 @@ def _write_provenance(path: Path) -> None:
             }
         )
         rows.append(row)
+    for record_type, name, value, unit, expression, rationale in (
+        (
+            "estimator",
+            "expected_gross_flux_from_propensity",
+            "trapezoidal",
+            "mol m^-2 s^-1",
+            "expected_flux_species = integral(lambda_desorb_species(t) dt) / N_A / (integral(A_geometric(t) dt) * 1e-20)",
+            PROPENSITY_INTERPRETATION,
+        ),
+        (
+            "sensitivity-response",
+            "sensitivity_response",
+            SENSITIVITY_RESPONSE,
+            "mol m^-2 s^-1",
+            "combined response = expected_gross_si_flux_from_propensity + expected_gross_al_flux_from_propensity; delta_log10 = log10(mean paired perturbed response) - log10(mean paired nominal response)",
+            "Same-seed pairs are used for every perturbation; nonpositive means are censored and no Poisson bound enters the ranking.",
+        ),
+    ):
+        row = {field: "" for field in PROVENANCE_FIELDS}
+        row.update(
+            {
+                "record_type": record_type,
+                "observable_type": PROPENSITY_ESTIMATOR_BASIS,
+                "rationale": rationale,
+                "constant_name": name,
+                "constant_value": value,
+                "constant_unit": unit,
+                "conversion_expression": expression,
+            }
+        )
+        rows.append(row)
     _write_csv_atomic(path, PROVENANCE_FIELDS, rows)
-
-
-def _aggregate_zero_upper(members: Sequence[ReplicaRate]) -> float | None:
-    if any(member.area_time_a2_s is None for member in members):
-        return None
-    if sum(member.gross_si_events + member.gross_al_events for member in members) != 0:
-        return None
-    exposure = sum(float(member.area_time_a2_s) for member in members)
-    return poisson_zero_upper_flux_95(exposure)
 
 
 def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
@@ -2134,6 +2321,8 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
         "log10_net_si_flux_mol_m2_s",
         "log10_gross_al_flux_mol_m2_s",
         "log10_net_al_flux_mol_m2_s",
+        "log10_expected_gross_si_flux_from_propensity_mol_m2_s",
+        "log10_expected_gross_al_flux_from_propensity_mol_m2_s",
     ]
     rate_rows: list[dict[str, object]] = []
     for rate in rates:
@@ -2147,6 +2336,16 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
                 row[f"log10_{basis}_{species}_flux_mol_m2_s"] = _display(
                     math.log10(value) if value is not None and value > 0 else None
                 )
+            propensity_value = getattr(
+                rate, f"expected_gross_{species}_flux_from_propensity_mol_m2_s"
+            )
+            row[f"log10_expected_gross_{species}_flux_from_propensity_mol_m2_s"] = (
+                _display(
+                    math.log10(propensity_value)
+                    if propensity_value is not None and propensity_value > 0
+                    else None
+                )
+            )
         rate_rows.append(row)
     _write_csv_atomic(
         out_dir / "per-replica-rates.csv", [*rate_fields, *log_fields], rate_rows
@@ -2209,6 +2408,44 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
                         ),
                     }
                 )
+            propensity_values = [
+                getattr(
+                    member,
+                    f"expected_gross_{species}_flux_from_propensity_mol_m2_s",
+                )
+                for member in members
+            ]
+            defined_propensities = [
+                value for value in propensity_values if value is not None
+            ]
+            if len(defined_propensities) == len(propensity_values):
+                mean, low, high = bootstrap_summary(
+                    defined_propensities,
+                    f"{scenario_name}:{species}:{PROPENSITY_RATE_BASIS}",
+                )
+                status = (
+                    "estimated-positive"
+                    if mean > 0.0
+                    else "censored-nonpositive-propensity"
+                )
+            else:
+                mean = low = high = None
+                status = "incomplete"
+            ensemble_rows.append(
+                {
+                    "scenario": scenario_name,
+                    "species": species,
+                    "rate_basis": PROPENSITY_RATE_BASIS,
+                    "status": status,
+                    "mean_mol_m2_s": _display(mean),
+                    "ci95_low_mol_m2_s": _display(low),
+                    "ci95_high_mol_m2_s": _display(high),
+                    "poisson_zero_upper_95_mol_m2_s": "undefined",
+                    "log10_mean_mol_m2_s": _display(
+                        math.log10(mean) if mean is not None and mean > 0 else None
+                    ),
+                }
+            )
     _write_csv_atomic(out_dir / "ensemble-rates.csv", ensemble_fields, ensemble_rows)
 
     stoichiometry_fields = [
@@ -2285,20 +2522,56 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
     )
 
     nominal_by_seed = {rate.seed: rate for rate in by_scenario["nominal"]}
+
+    def combined_propensity_response(rate: ReplicaRate) -> float | None:
+        si = rate.expected_gross_si_flux_from_propensity_mol_m2_s
+        al = rate.expected_gross_al_flux_from_propensity_mol_m2_s
+        if si is None or al is None:
+            return None
+        value = si + al
+        if not math.isfinite(value) or value < 0.0:
+            raise ValueError(
+                "combined expected-gross propensity flux must be finite and nonnegative"
+            )
+        return value
+
+    nominal_responses = {
+        seed: combined_propensity_response(nominal_by_seed[seed]) for seed in seeds
+    }
+    nominal_defined = [
+        value for value in nominal_responses.values() if value is not None
+    ]
+    nominal_mean = (
+        statistics.fmean(nominal_defined)
+        if len(nominal_defined) == len(nominal_responses)
+        else None
+    )
+    nominal_status = (
+        "estimated-positive"
+        if nominal_mean is not None and nominal_mean > 0.0
+        else (
+            "censored-nonpositive-propensity"
+            if nominal_mean is not None
+            else "incomplete"
+        )
+    )
     sensitivity_fields = [
         "rank",
         "family",
         "declared_response",
         "status",
-        "max_abs_paired_mean_delta_log10",
-        "nominal_zero_upper_95_mol_m2_s",
+        "max_abs_paired_delta_log10",
+        "nominal_status",
+        "nominal_mean_mol_m2_s",
         *[
             field
             for perturbation in PERTURBATIONS
             for field in (
                 f"{perturbation}_status",
-                f"{perturbation}_paired_mean_delta_log10",
-                f"{perturbation}_zero_upper_95_mol_m2_s",
+                f"{perturbation}_paired_replica_count",
+                f"{perturbation}_perturbed_mean_mol_m2_s",
+                f"{perturbation}_paired_mean_delta_mol_m2_s",
+                f"{perturbation}_paired_delta_log10",
             )
         ],
     ]
@@ -2309,68 +2582,82 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
             "family": family,
             "declared_response": SENSITIVITY_RESPONSE,
             "status": "estimated",
-            "nominal_zero_upper_95_mol_m2_s": _display(
-                _aggregate_zero_upper(by_scenario["nominal"])
-            ),
+            "nominal_status": nominal_status,
+            "nominal_mean_mol_m2_s": _display(nominal_mean),
         }
         responses: list[float] = []
+        perturbation_statuses: list[str] = []
         for perturbation in PERTURBATIONS:
             scenario_name = f"{family}__{perturbation}"
             perturbed = {rate.seed: rate for rate in by_scenario[scenario_name]}
-            deltas: list[float] = []
-            censored_zero = False
-            for seed in seeds:
-                before_rate = nominal_by_seed[seed]
-                after_rate = perturbed[seed]
-                before = (
-                    before_rate.gross_si_flux_mol_m2_s
-                    + before_rate.gross_al_flux_mol_m2_s
-                    if before_rate.gross_si_flux_mol_m2_s is not None
-                    and before_rate.gross_al_flux_mol_m2_s is not None
-                    else None
-                )
-                after = (
-                    after_rate.gross_si_flux_mol_m2_s
-                    + after_rate.gross_al_flux_mol_m2_s
-                    if after_rate.gross_si_flux_mol_m2_s is not None
-                    and after_rate.gross_al_flux_mol_m2_s is not None
-                    else None
-                )
-                if before == 0 or after == 0:
-                    censored_zero = True
-                if before is None or after is None or before <= 0 or after <= 0:
-                    deltas = []
-                    break
-                deltas.append(math.log10(after) - math.log10(before))
-            if deltas:
-                value = statistics.fmean(deltas)
-                row[f"{perturbation}_status"] = "estimated"
-                row[f"{perturbation}_paired_mean_delta_log10"] = value
-                responses.append(abs(value))
+            pairs = [
+                (nominal_responses[seed], combined_propensity_response(perturbed[seed]))
+                for seed in seeds
+            ]
+            complete_pairs = [
+                (before, after)
+                for before, after in pairs
+                if before is not None and after is not None
+            ]
+            pair_count = len(complete_pairs)
+            row[f"{perturbation}_paired_replica_count"] = pair_count
+            if pair_count != len(seeds):
+                status = "incomplete"
+                perturbed_mean = None
+                paired_mean_delta = None
+                delta_log10 = None
             else:
-                status = "censored-zero-gross" if censored_zero else "incomplete"
-                row[f"{perturbation}_status"] = status
-                row[f"{perturbation}_paired_mean_delta_log10"] = "undefined"
-                row["status"] = status
-            row[f"{perturbation}_zero_upper_95_mol_m2_s"] = _display(
-                _aggregate_zero_upper(by_scenario[scenario_name])
+                before_values = [float(before) for before, _ in complete_pairs]
+                after_values = [float(after) for _, after in complete_pairs]
+                paired_linear_deltas = [
+                    after - before
+                    for before, after in zip(before_values, after_values, strict=True)
+                ]
+                before_mean = statistics.fmean(before_values)
+                perturbed_mean = statistics.fmean(after_values)
+                paired_mean_delta = statistics.fmean(paired_linear_deltas)
+                reconstructed_after_mean = before_mean + paired_mean_delta
+                if not math.isclose(
+                    perturbed_mean,
+                    reconstructed_after_mean,
+                    rel_tol=1.0e-14,
+                    abs_tol=0.0,
+                ):
+                    raise AssertionError(
+                        "paired sensitivity arithmetic is inconsistent"
+                    )
+                if before_mean <= 0.0 or perturbed_mean <= 0.0:
+                    status = "censored-nonpositive-propensity"
+                    delta_log10 = None
+                else:
+                    status = "estimated"
+                    delta_log10 = math.log10(perturbed_mean) - math.log10(before_mean)
+                    responses.append(abs(delta_log10))
+            row[f"{perturbation}_status"] = status
+            row[f"{perturbation}_perturbed_mean_mol_m2_s"] = _display(perturbed_mean)
+            row[f"{perturbation}_paired_mean_delta_mol_m2_s"] = _display(
+                paired_mean_delta
             )
-        row["max_abs_paired_mean_delta_log10"] = (
-            max(responses) if len(responses) == len(PERTURBATIONS) else "undefined"
-        )
+            row[f"{perturbation}_paired_delta_log10"] = _display(delta_log10)
+            perturbation_statuses.append(status)
+        if "incomplete" in perturbation_statuses:
+            row["status"] = "incomplete"
+        elif any(status != "estimated" for status in perturbation_statuses):
+            row["status"] = "partially-censored"
+        row["max_abs_paired_delta_log10"] = max(responses) if responses else "undefined"
         sensitivity_rows.append(row)
     sensitivity_rows.sort(
         key=lambda row: (
-            row["max_abs_paired_mean_delta_log10"] == "undefined",
-            -float(row["max_abs_paired_mean_delta_log10"])
-            if row["max_abs_paired_mean_delta_log10"] != "undefined"
+            row["max_abs_paired_delta_log10"] == "undefined",
+            -float(row["max_abs_paired_delta_log10"])
+            if row["max_abs_paired_delta_log10"] != "undefined"
             else 0.0,
             str(row["family"]),
         )
     )
     next_rank = 1
     for row in sensitivity_rows:
-        if row["max_abs_paired_mean_delta_log10"] != "undefined":
+        if row["max_abs_paired_delta_log10"] != "undefined":
             row["rank"] = next_rank
             next_rank += 1
     _write_csv_atomic(
@@ -2411,9 +2698,22 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
         "poisson_zero_event_upper_count_95": POISSON_ZERO_EVENT_UPPER_COUNT_95,
         "flux_denominator": "trapezoidal integral of emitted geometric area_A2 over observable time_s",
         "event_window": "(window_start_step,window_end_step]",
+        "observed_event_acceptance_basis": OBSERVED_EVENT_ACCEPTANCE_BASIS,
+        "propensity_estimator_basis": PROPENSITY_ESTIMATOR_BASIS,
+        "propensity_integral": PROPENSITY_INTEGRAL,
+        "propensity_interpretation": PROPENSITY_INTERPRETATION,
+        "propensity_reaction_index_mapping": {
+            species: list(EXPECTED_REACTIONS).index(f"desorb-{species}")
+            for species in ("si", "al")
+        },
         "sensitivity_response": SENSITIVITY_RESPONSE,
+        "sensitivity_statistic": SENSITIVITY_STATISTIC,
         "sensitivity_complete": len(sensitivity_rows) == len(FAMILY_REACTIONS)
-        and {row["family"] for row in sensitivity_rows} == set(FAMILY_REACTIONS),
+        and {row["family"] for row in sensitivity_rows} == set(FAMILY_REACTIONS)
+        and {row["declared_response"] for row in sensitivity_rows}
+        == {SENSITIVITY_RESPONSE}
+        and {row["rank"] for row in sensitivity_rows}
+        == set(range(1, len(FAMILY_REACTIONS) + 1)),
         "sensitivity_families": list(FAMILY_REACTIONS),
         "scenario_count": len(scenario_records),
         "expected_scenarios": [asdict(value) for value in scenarios()],
@@ -2462,6 +2762,8 @@ def _validate_derived_schemas(
         "log10_net_si_flux_mol_m2_s",
         "log10_gross_al_flux_mol_m2_s",
         "log10_net_al_flux_mol_m2_s",
+        "log10_expected_gross_si_flux_from_propensity_mol_m2_s",
+        "log10_expected_gross_al_flux_from_propensity_mol_m2_s",
     ]
     rate_rows = _read_csv_exact(
         out_dir / "per-replica-rates.csv", rate_fields, expected_runs
@@ -2470,6 +2772,28 @@ def _validate_derived_schemas(
         (row["scenario"], row["replica"], row["seed"]) for row in rate_rows
     } != expected_identities:
         raise ValueError("per-replica rate identity coverage mismatch")
+    for row in rate_rows:
+        for species in ("si", "al"):
+            value_field = f"expected_gross_{species}_flux_from_propensity_mol_m2_s"
+            log_field = f"log10_expected_gross_{species}_flux_from_propensity_mol_m2_s"
+            if row[value_field] == "undefined":
+                if row[log_field] != "undefined":
+                    raise ValueError(
+                        "undefined propensity flux must have undefined log10"
+                    )
+                continue
+            value = float(row[value_field])
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(
+                    "per-replica propensity flux must be finite and nonnegative"
+                )
+            if value == 0.0:
+                if row[log_field] != "undefined":
+                    raise ValueError("zero propensity flux must have undefined log10")
+            elif not math.isclose(
+                float(row[log_field]), math.log10(value), rel_tol=1.0e-14
+            ):
+                raise ValueError("per-replica propensity log10 mismatch")
     ensemble_rows = _read_csv_exact(
         out_dir / "ensemble-rates.csv",
         [
@@ -2483,7 +2807,7 @@ def _validate_derived_schemas(
             "poisson_zero_upper_95_mol_m2_s",
             "log10_mean_mol_m2_s",
         ],
-        len(scenarios()) * 4,
+        len(scenarios()) * 6,
     )
     if {
         (row["scenario"], row["species"], row["rate_basis"]) for row in ensemble_rows
@@ -2491,9 +2815,50 @@ def _validate_derived_schemas(
         (scenario.name, species, basis)
         for scenario in scenarios()
         for species in ("si", "al")
-        for basis in ("gross", "net")
+        for basis in ("gross", "net", PROPENSITY_RATE_BASIS)
     }:
         raise ValueError("ensemble rate identity coverage mismatch")
+    for row in ensemble_rows:
+        if row["rate_basis"] != PROPENSITY_RATE_BASIS:
+            continue
+        if (
+            row["status"]
+            not in {
+                "estimated-positive",
+                "censored-nonpositive-propensity",
+                "incomplete",
+            }
+            or row["poisson_zero_upper_95_mol_m2_s"] != "undefined"
+        ):
+            raise ValueError("propensity ensemble status/schema mismatch")
+        summary_fields = (
+            "mean_mol_m2_s",
+            "ci95_low_mol_m2_s",
+            "ci95_high_mol_m2_s",
+        )
+        if row["status"] == "incomplete":
+            if any(row[field] != "undefined" for field in summary_fields):
+                raise ValueError("incomplete propensity ensemble must be undefined")
+            continue
+        summary = [float(row[field]) for field in summary_fields]
+        if any(not math.isfinite(value) or value < 0.0 for value in summary):
+            raise ValueError(
+                "propensity ensemble values must be finite and nonnegative"
+            )
+        mean, low, high = summary
+        if low > high:
+            raise ValueError("propensity ensemble bootstrap band is reversed")
+        if row["status"] == "estimated-positive":
+            if mean <= 0.0 or not math.isclose(
+                float(row["log10_mean_mol_m2_s"]),
+                math.log10(mean),
+                rel_tol=1.0e-14,
+            ):
+                raise ValueError("positive propensity ensemble log10 mismatch")
+        elif mean != 0.0 or row["log10_mean_mol_m2_s"] != "undefined":
+            raise ValueError(
+                "nonpositive propensity ensemble must be zero and censored"
+            )
     stoichiometry_rows = _read_csv_exact(
         out_dir / "stoichiometry.csv",
         [
@@ -2518,15 +2883,18 @@ def _validate_derived_schemas(
             "family",
             "declared_response",
             "status",
-            "max_abs_paired_mean_delta_log10",
-            "nominal_zero_upper_95_mol_m2_s",
+            "max_abs_paired_delta_log10",
+            "nominal_status",
+            "nominal_mean_mol_m2_s",
             *[
                 field
                 for perturbation in PERTURBATIONS
                 for field in (
                     f"{perturbation}_status",
-                    f"{perturbation}_paired_mean_delta_log10",
-                    f"{perturbation}_zero_upper_95_mol_m2_s",
+                    f"{perturbation}_paired_replica_count",
+                    f"{perturbation}_perturbed_mean_mol_m2_s",
+                    f"{perturbation}_paired_mean_delta_mol_m2_s",
+                    f"{perturbation}_paired_delta_log10",
                 )
             ],
         ],
@@ -2534,15 +2902,97 @@ def _validate_derived_schemas(
     )
     if {row["family"] for row in sensitivity} != set(FAMILY_REACTIONS):
         raise ValueError("sensitivity family coverage mismatch")
+    if {row["declared_response"] for row in sensitivity} != {SENSITIVITY_RESPONSE}:
+        raise ValueError("sensitivity declared response mismatch")
+    if {row["rank"] for row in sensitivity} != {
+        str(rank) for rank in range(1, len(FAMILY_REACTIONS) + 1)
+    }:
+        raise ValueError("sensitivity rank coverage mismatch")
+    for row in sensitivity:
+        if row["status"] not in {"estimated", "partially-censored", "incomplete"}:
+            raise ValueError("sensitivity status mismatch")
+        nominal_status = row["nominal_status"]
+        nominal_value = row["nominal_mean_mol_m2_s"]
+        if nominal_status == "estimated-positive":
+            if not math.isfinite(float(nominal_value)) or float(nominal_value) <= 0.0:
+                raise ValueError(
+                    "nominal propensity sensitivity response must be positive"
+                )
+        elif nominal_status == "censored-nonpositive-propensity":
+            if float(nominal_value) != 0.0:
+                raise ValueError("censored nominal propensity response must be zero")
+        elif nominal_status != "incomplete" or nominal_value != "undefined":
+            raise ValueError("nominal propensity sensitivity status mismatch")
+        finite_deltas: list[float] = []
+        for perturbation in PERTURBATIONS:
+            pair_count = int(row[f"{perturbation}_paired_replica_count"])
+            if not 0 <= pair_count <= REPLICA_COUNT:
+                raise ValueError("sensitivity paired-replica coverage mismatch")
+            status = row[f"{perturbation}_status"]
+            if status != "incomplete" and pair_count != REPLICA_COUNT:
+                raise ValueError("sensitivity paired-replica coverage mismatch")
+            delta = row[f"{perturbation}_paired_delta_log10"]
+            paired_mean_delta = row[f"{perturbation}_paired_mean_delta_mol_m2_s"]
+            perturbed_mean: float | None = None
+            if status != "incomplete":
+                perturbed_mean = float(row[f"{perturbation}_perturbed_mean_mol_m2_s"])
+                linear_delta = float(paired_mean_delta)
+                if (
+                    not math.isfinite(perturbed_mean)
+                    or not math.isfinite(linear_delta)
+                    or not math.isclose(
+                        perturbed_mean,
+                        float(nominal_value) + linear_delta,
+                        rel_tol=1.0e-14,
+                        abs_tol=0.0,
+                    )
+                ):
+                    raise ValueError("paired sensitivity linear delta mismatch")
+            if status == "estimated":
+                if (
+                    perturbed_mean is None
+                    or perturbed_mean <= 0.0
+                    or not math.isfinite(float(delta))
+                ):
+                    raise ValueError("sensitivity delta must be finite")
+                finite_deltas.append(abs(float(delta)))
+            elif status == "censored-nonpositive-propensity":
+                if delta != "undefined":
+                    raise ValueError("censored sensitivity delta must be undefined")
+            elif status == "incomplete":
+                if (
+                    row[f"{perturbation}_perturbed_mean_mol_m2_s"] != "undefined"
+                    or paired_mean_delta != "undefined"
+                ):
+                    raise ValueError(
+                        "incomplete sensitivity response must be undefined"
+                    )
+            else:
+                raise ValueError("sensitivity perturbation status mismatch")
+        if not finite_deltas or not math.isclose(
+            float(row["max_abs_paired_delta_log10"]),
+            max(finite_deltas),
+            rel_tol=1.0e-14,
+        ):
+            raise ValueError("sensitivity ranking magnitude mismatch")
     provenance = _read_csv_exact(
         out_dir / "provenance-conversions.csv",
         PROVENANCE_FIELDS,
-        len(REACTION_REGISTRY) + 2,
+        len(REACTION_REGISTRY) + 4,
     )
     if [row["reaction"] for row in provenance[:22]] != [
         entry.name for entry in REACTION_REGISTRY
     ]:
         raise ValueError("provenance reaction coverage/order mismatch")
+    if (
+        provenance[-2]["record_type"] != "estimator"
+        or provenance[-2]["observable_type"] != PROPENSITY_ESTIMATOR_BASIS
+        or "not observed event release" not in provenance[-2]["rationale"]
+        or provenance[-1]["record_type"] != "sensitivity-response"
+        or provenance[-1]["constant_value"] != SENSITIVITY_RESPONSE
+        or "no Poisson bound" not in provenance[-1]["rationale"]
+    ):
+        raise ValueError("propensity provenance records mismatch")
     state_names = [
         f"{kind['name']}.{state['name']}"
         for kind in nominal.parsed["kinds"]
@@ -2645,7 +3095,13 @@ def verify_campaign(raw_root: Path, out_dir: Path) -> dict:
             "poisson_zero_event_upper_count_95",
             "flux_denominator",
             "event_window",
+            "observed_event_acceptance_basis",
+            "propensity_estimator_basis",
+            "propensity_integral",
+            "propensity_interpretation",
+            "propensity_reaction_index_mapping",
             "sensitivity_response",
+            "sensitivity_statistic",
             "sensitivity_complete",
             "sensitivity_families",
             "scenario_count",
@@ -2672,7 +3128,18 @@ def verify_campaign(raw_root: Path, out_dir: Path) -> dict:
         or verification["poisson_zero_event_upper_count_95"]
         != POISSON_ZERO_EVENT_UPPER_COUNT_95
         or verification["event_window"] != "(window_start_step,window_end_step]"
+        or verification["observed_event_acceptance_basis"]
+        != OBSERVED_EVENT_ACCEPTANCE_BASIS
+        or verification["propensity_estimator_basis"] != PROPENSITY_ESTIMATOR_BASIS
+        or verification["propensity_integral"] != PROPENSITY_INTEGRAL
+        or verification["propensity_interpretation"] != PROPENSITY_INTERPRETATION
+        or verification["propensity_reaction_index_mapping"]
+        != {
+            species: list(EXPECTED_REACTIONS).index(f"desorb-{species}")
+            for species in ("si", "al")
+        }
         or verification["sensitivity_response"] != SENSITIVITY_RESPONSE
+        or verification["sensitivity_statistic"] != SENSITIVITY_STATISTIC
         or verification["sensitivity_complete"] is not True
         or verification["sensitivity_families"] != list(FAMILY_REACTIONS)
         or verification["scenario_count"] != len(scenarios())
@@ -2712,11 +3179,14 @@ def analyze_single_run(
     contract = validate_deck(deck_path)
     rate, gate, _ = _analyze_replica("nominal", 0, seed, run_dir, contract)
     payload = {
-        "schema": "a9-single-run-analysis-v2",
+        "schema": "a9-single-run-analysis-v3",
         "survey_tier": True,
         "acceptance_passed": gate.acceptance_passed,
         "outcome": gate.dissolution_outcome,
         "steady_state_status": gate.status,
+        "observed_event_acceptance_basis": OBSERVED_EVENT_ACCEPTANCE_BASIS,
+        "propensity_estimator_basis": PROPENSITY_ESTIMATOR_BASIS,
+        "propensity_interpretation": PROPENSITY_INTERPRETATION,
         "rate": asdict(rate),
         "gate": asdict(gate),
     }

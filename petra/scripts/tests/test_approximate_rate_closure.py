@@ -92,6 +92,18 @@ def _build_synthetic_campaign(root: Path) -> tuple[Path, Path]:
     receipts = []
 
     for scenario in closure.scenarios():
+        family_index = (
+            list(closure.FAMILY_REACTIONS).index(scenario.family) + 1
+            if scenario.family is not None
+            else 0
+        )
+        propensity_multiplier = {
+            None: 1.0,
+            "ea-minus-3": 1.0 + 0.10 * family_index,
+            "ea-plus-3": 1.0 / (1.0 + 0.05 * family_index),
+            "prefactor-x0.1": 1.0 / (1.0 + 0.20 * family_index),
+            "prefactor-x10": 1.0 + 0.20 * family_index,
+        }[scenario.perturbation]
         text = (
             contract.text
             if scenario.family is None
@@ -174,6 +186,12 @@ def _build_synthetic_campaign(root: Path) -> tuple[Path, Path]:
                     "surface_area": [100.0, 1.0, 1.0],
                     "exposure_age": [observable_time],
                 }
+                values["event_rates"][reaction_ids["desorb-si"]] = (
+                    2.0 + 0.1 * replica
+                ) * propensity_multiplier
+                values["event_rates"][reaction_ids["desorb-al"]] = (
+                    1.0 + 0.05 * replica
+                ) * propensity_multiplier
                 for kind, kind_values in values.items():
                     for value_index, value in enumerate(kind_values):
                         observable_rows.append(
@@ -520,6 +538,81 @@ class EventAndUnitTests(unittest.TestCase):
             75.0,
         )
 
+    def test_propensity_integral_uses_trapezoids_and_exact_species_mapping(
+        self,
+    ) -> None:
+        names = tuple(entry.name for entry in closure.REACTION_REGISTRY)
+        si_index = names.index("desorb-si")
+        al_index = names.index("desorb-al")
+        samples = []
+        for step, sample_time, area, si, al in (
+            (100, 0.0, 10.0, 2.0, 1.0),
+            (200, 1.0, 20.0, 4.0, 1.0),
+            (300, 3.0, 40.0, 8.0, 3.0),
+        ):
+            rates = [0.0] * len(names)
+            rates[si_index] = si
+            rates[al_index] = al
+            samples.append(
+                closure.ObservableSample(
+                    step,
+                    sample_time,
+                    {"event_rates": rates, "surface_area": [area, 0.0, 0.0]},
+                )
+            )
+        estimate = closure.integrate_expected_gross_dissolution_from_propensity(
+            samples, names, [100, 200, 300]
+        )
+        self.assertEqual(estimate.area_time_a2_s, 75.0)
+        self.assertEqual(estimate.expected_gross_si_events_from_propensity, 15.0)
+        self.assertEqual(estimate.expected_gross_al_events_from_propensity, 5.0)
+        self.assertAlmostEqual(
+            estimate.expected_gross_si_flux_from_propensity_mol_m2_s,
+            closure._amount_to_flux(15.0, 75.0),
+        )
+        self.assertAlmostEqual(
+            estimate.expected_gross_al_flux_from_propensity_mol_m2_s,
+            closure._amount_to_flux(5.0, 75.0),
+        )
+
+    def test_invalid_propensity_and_reaction_mapping_are_rejected(self) -> None:
+        names = tuple(entry.name for entry in closure.REACTION_REGISTRY)
+
+        def samples(value: float) -> list:
+            result = []
+            for step, sample_time in ((100, 0.0), (200, 1.0)):
+                rates = [0.0] * len(names)
+                rates[names.index("desorb-si")] = value
+                result.append(
+                    closure.ObservableSample(
+                        step,
+                        sample_time,
+                        {"event_rates": rates, "surface_area": [10.0, 0.0, 0.0]},
+                    )
+                )
+            return result
+
+        for invalid in (-1.0, float("nan")):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(
+                    ValueError, "propensit.*finite and nonnegative"
+                ):
+                    closure.integrate_expected_gross_dissolution_from_propensity(
+                        samples(invalid), names, [100, 200]
+                    )
+        swapped = list(names)
+        si_index = swapped.index("desorb-si")
+        al_index = swapped.index("desorb-al")
+        swapped[si_index], swapped[al_index] = swapped[al_index], swapped[si_index]
+        with self.assertRaisesRegex(ValueError, "reaction index mapping"):
+            closure.integrate_expected_gross_dissolution_from_propensity(
+                samples(1.0), swapped, [100, 200]
+            )
+        with self.assertRaisesRegex(ValueError, "sample step alignment"):
+            closure.integrate_expected_gross_dissolution_from_propensity(
+                samples(1.0), names, [100, 300]
+            )
+
 
 class SteadyStateGateTests(unittest.TestCase):
     def test_constant_two_species_tail_passes(self) -> None:
@@ -626,6 +719,48 @@ class CampaignEndToEndTests(unittest.TestCase):
             )
             verified = closure.verify_campaign(raw, derived)
             self.assertEqual(verified, analysis)
+            self.assertEqual(
+                analysis["propensity_estimator_basis"], "integrated_ctmc_hazard"
+            )
+            self.assertIn(
+                "not observed event release", analysis["propensity_interpretation"]
+            )
+            with (derived / "per-replica-rates.csv").open(
+                newline="", encoding="utf-8"
+            ) as handle:
+                replica_rates = list(csv.DictReader(handle))
+            self.assertTrue(
+                all(
+                    row["steady_state_status"] == "steady-zero" for row in replica_rates
+                )
+            )
+            self.assertTrue(
+                all(row["acceptance_passed"] == "False" for row in replica_rates)
+            )
+            for row in replica_rates:
+                self.assertGreater(
+                    float(row["expected_gross_si_flux_from_propensity_mol_m2_s"]), 0.0
+                )
+                self.assertGreater(
+                    float(row["expected_gross_al_flux_from_propensity_mol_m2_s"]), 0.0
+                )
+                self.assertNotEqual(
+                    row["log10_expected_gross_si_flux_from_propensity_mol_m2_s"],
+                    "undefined",
+                )
+            with (derived / "ensemble-rates.csv").open(
+                newline="", encoding="utf-8"
+            ) as handle:
+                ensemble = list(csv.DictReader(handle))
+            propensity_rows = [
+                row
+                for row in ensemble
+                if row["rate_basis"] == "expected_gross_from_propensity"
+            ]
+            self.assertEqual(len(propensity_rows), 29 * 2)
+            self.assertTrue(
+                all(row["status"] == "estimated-positive" for row in propensity_rows)
+            )
             with (derived / "sensitivity-ranking.csv").open(
                 newline="", encoding="utf-8"
             ) as handle:
@@ -636,9 +771,28 @@ class CampaignEndToEndTests(unittest.TestCase):
                 set(closure.FAMILY_REACTIONS),
             )
             self.assertEqual(
-                {row["status"] for row in sensitivity}, {"censored-zero-gross"}
+                {row["declared_response"] for row in sensitivity},
+                {closure.SENSITIVITY_RESPONSE},
             )
-            self.assertTrue(all(row["rank"] == "undefined" for row in sensitivity))
+            self.assertEqual({row["status"] for row in sensitivity}, {"estimated"})
+            self.assertEqual(
+                {int(row["rank"]) for row in sensitivity}, set(range(1, 8))
+            )
+            for row in sensitivity:
+                for perturbation in closure.PERTURBATIONS:
+                    self.assertEqual(row[f"{perturbation}_status"], "estimated")
+                    self.assertEqual(
+                        int(row[f"{perturbation}_paired_replica_count"]),
+                        closure.REPLICA_COUNT,
+                    )
+                    self.assertTrue(
+                        math.isfinite(float(row[f"{perturbation}_paired_delta_log10"]))
+                    )
+                    self.assertTrue(
+                        math.isfinite(
+                            float(row[f"{perturbation}_paired_mean_delta_mol_m2_s"])
+                        )
+                    )
 
             changed = root / "derived-changed"
             shutil.copytree(derived, changed)
@@ -648,6 +802,55 @@ class CampaignEndToEndTests(unittest.TestCase):
                 handle.write("forged\n")
             with self.assertRaisesRegex(ValueError, "hash mismatch"):
                 closure.verify_campaign(raw, changed)
+
+            changed_propensity = root / "derived-changed-propensity"
+            shutil.copytree(derived, changed_propensity)
+            propensity_path = changed_propensity / "per-replica-rates.csv"
+            with propensity_path.open(newline="", encoding="utf-8") as handle:
+                reader = csv.DictReader(handle)
+                fields = reader.fieldnames
+                propensity_rows = list(reader)
+            assert fields is not None
+            field = "expected_gross_si_flux_from_propensity_mol_m2_s"
+            changed_value = float(propensity_rows[0][field]) * 2.0
+            propensity_rows[0][field] = str(changed_value)
+            propensity_rows[0][
+                "log10_expected_gross_si_flux_from_propensity_mol_m2_s"
+            ] = str(math.log10(changed_value))
+            closure._write_csv_atomic(propensity_path, fields, propensity_rows)
+            propensity_receipt_path = changed_propensity / "verification.json"
+            propensity_receipt = json.loads(
+                propensity_receipt_path.read_text(encoding="utf-8")
+            )
+            propensity_receipt["output_sha256"]["per-replica-rates.csv"] = (
+                closure.sha256_file(propensity_path)
+            )
+            closure.write_json_atomic(propensity_receipt_path, propensity_receipt)
+            with self.assertRaisesRegex(ValueError, "not reproducible"):
+                closure.verify_campaign(raw, changed_propensity)
+
+            changed_response = root / "derived-changed-response"
+            shutil.copytree(derived, changed_response)
+            response_path = changed_response / "sensitivity-ranking.csv"
+            response_text = response_path.read_text(encoding="utf-8")
+            self.assertEqual(
+                response_text.count(closure.SENSITIVITY_RESPONSE),
+                len(closure.FAMILY_REACTIONS),
+            )
+            response_path.write_text(
+                response_text.replace(closure.SENSITIVITY_RESPONSE, "forged_response"),
+                encoding="utf-8",
+            )
+            response_receipt_path = changed_response / "verification.json"
+            response_receipt = json.loads(
+                response_receipt_path.read_text(encoding="utf-8")
+            )
+            response_receipt["output_sha256"]["sensitivity-ranking.csv"] = (
+                closure.sha256_file(response_path)
+            )
+            closure.write_json_atomic(response_receipt_path, response_receipt)
+            with self.assertRaisesRegex(ValueError, "declared response"):
+                closure.verify_campaign(raw, changed_response)
 
             missing_family = root / "derived-missing-family"
             shutil.copytree(derived, missing_family)
