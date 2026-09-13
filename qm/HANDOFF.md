@@ -7,16 +7,35 @@ minimum); the work ledger is `qm/CALCULATIONS.md` (CALC-002..005 are this
 phase); the claimable card is `docs/program/cards/A3-barrier-ladder.md`
 (claim per `docs/program/PROTOCOL.md` before starting).*
 
-## 0. Mission
+**A3 campaign authority (2026-09-13):** Victor's TASK-298 ruling on
+`docs/program/cards/A3-barrier-ladder.md` **supersedes this document as
+launch instructions** for A3. The card lists this file under Context —
+read it for platform state, hard rules, and historical protocol — then
+**must not launch that protocol**. Follow the card's Constraints /
+Objective / Acceptance. Sections below that still narrate crystallographic
+clusters, home-grown protonation, frozen shells, a 300s pilot, the old
+ladder campaign, or the old CALC-005 minima-only attachment/detachment
+workflow are historical context only.
 
-Compute the **connectivity- and protonation-resolved barrier ladder** for
-the five KMC site families (100s Al, 200s Si, 300s Si–O–Si, 400s
-Si–O–Al₂, 500s Al–OH–Al) on terminated, constrained cluster models cut
-from kaolinite crystallography, and emit them as petra `by_count`/`when`
-ΔEa tables with per-number provenance. This is the scientific payload the
-whole platform was built for: the *non-flat environment tables the legacy
-model never had* (its `data.rxn` gives every environment variant of a
-reaction the same number).
+## 0. Mission (live: published-cluster replication)
+
+**Live A3 work is reproduce-first.** Confirm what existing research has
+already established; copy their setups. A3 **stops** constructing hydrated
+crystallographic cells with home-grown proton-owner assignment.
+
+For every remaining family named on the A3 card, identify the closest
+published cluster calculation, rebuild *their* cluster (their atoms,
+termination, constraints/frozen atoms, charge state, and level of theory),
+and satisfy **the card's** acceptance gate. Then re-tier the **same**
+cluster with the A2 production protocol as the card states. One family per
+PR. Do not invent a basin-construction protocol, proton-owner enumeration,
+or frozen shells the selected paper did not use.
+
+The scientific destination is still petra `by_count`/`when` ΔEa tables with
+per-number provenance — the *non-flat environment tables the legacy model
+never had* (its `data.rxn` gives every environment variant of a reaction
+the same number). How those numbers are obtained for A3 is the card, not
+the 2026-08-19 crystallographic ladder below.
 
 ## 1. State of the world (what already works — do not rebuild)
 
@@ -63,18 +82,23 @@ authoring/validation for the emission step). Also
 `.claude/learnings/` (debugging.md: the five TS-hunt traps, each
 measured live; gotchas.md; performance.md).
 
-## 2. What Phase 2 actually builds
+## 2. What Phase 2 built (historical protocol — do not launch)
 
-Two genuinely new pieces, then a big campaign:
+**Superseded as A3 launch instructions.** The two pieces below were the
+2026-08-19 plan. Code from that plan (`quarry/crystal.py`,
+`scripts/phase2_ladder.py`) may exist; do not start a new campaign on it.
+Do not build crystallographic clusters, assign protonation states from the
+pKa table, or freeze shells the selected paper did not use.
 
-### 2a. Crystallographic cluster builder (`quarry/clusters.py` extension)
+### 2a. Crystallographic cluster builder (`quarry/clusters.py` extension) — historical; do not launch
 
-Phase 1 used hand-built dimers. Phase 2 cuts clusters from the real
-mineral. **The crystallography is already machine-readable**:
+Phase 1 used hand-built dimers. The retired Phase 2 plan cut clusters from
+the real mineral. **The crystallography is already machine-readable**:
 `petra/examples/kaolinite.toml` `[cell]` carries the 26-site unit cell
 (fractional coords, cell parameters, full bond list with `dcell` image
 offsets, site kinds matching the five families) — parse it with stdlib
-`tomllib`; cross-check against `legacy/cpp-model/data.cell`. Build:
+`tomllib`; cross-check against `legacy/cpp-model/data.cell`. Historical
+builder contract (do not launch):
 
 - `from_deck_cell(deck_path, site_kind, ...)`: replicate the cell,
   pick a center site of the requested family at an edge, walk the bond
@@ -92,10 +116,10 @@ offsets, site kinds matching the five families) — parse it with stdlib
   shell actually peripheral, cluster matches the deck's site taxonomy.
   All testable CPU-only without DFT.
 
-### 2b. Ladder campaign driver (`scripts/phase2_ladder.py`)
+### 2b. Ladder campaign driver (`scripts/phase2_ladder.py`) — historical; do not launch
 
-Generalize the Phase-1 driver from "one reaction" to "one (family,
-connectivity n, protonation state) cell of the ladder":
+The retired plan generalized the Phase-1 driver from "one reaction" to
+"one (family, connectivity n, protonation state) cell of the ladder":
 
 - Reuse the whole proven stage machinery (pre-opt → opt → approach scan
   → proton scan → product construction → CI-NEB → Sella → in-channel +
@@ -115,21 +139,27 @@ connectivity n, protonation state) cell of the ladder":
 
 ### 2c. Emission + ledger closure
 
-- For each reaction family: baseline barrier at the reference
-  connectivity → petra `rate = {eyring = ...}`; ΔEa(n) relative to
-  baseline → `by_count = {dea = [...]}` tables; protonation variants →
-  separate `[[reactions]]` entries gated by `when`/state vocabulary
-  (state names documented in the kaolinite deck header). Emit with
-  `quarry.emit` (provenance comments are mandatory — method, geometry
-  hash, date); splice-test against the template and compile with
-  petra-cli (the round-trip test pattern exists; `petra-deck` skill).
+This still applies **after** a family is accepted under the card's gate.
+
+- For each reaction family: baseline at the reference connectivity →
+  petra `rate = {eyring = ...}`; ΔEa(n) relative to baseline →
+  `by_count = {dea = [...]}` tables; protonation variants → separate
+  `[[reactions]]` entries gated by `when`/state vocabulary (state names
+  documented in the kaolinite deck header). Emit with `quarry.emit`
+  (provenance comments are mandatory — method, geometry hash, date);
+  splice-test against the template and compile with petra-cli (the
+  round-trip test pattern exists; `petra-deck` skill).
 - Update `qm/CALCULATIONS.md` rows CALC-002..005 (`needed` → `computed`
   with the value/provenance pointer) in the same PR as each batch of
   numbers — invariant: merged means ledger updated.
 - Regenerating legacy `data.rxn` stays Phase 3 (needs the full 28-slot
   table); don't block the ladder on it.
 
-## 3. Suggested execution order
+## 3. Execution order (historical — do not launch)
+
+**Superseded.** Do not treat this section as a launch checklist.
+
+Historical 2026-08-19 order (**do not execute**):
 
 1. Claim `A3-barrier-ladder` per PROTOCOL (branch push = atomic claim),
    worktree `agents/A3-barrier-ladder`.
@@ -146,6 +176,13 @@ connectivity n, protonation state) cell of the ladder":
    detachment ladders (CALC-005, these are minima-only — no TS hunt,
    much cheaper) → 100s/200s adsorption sites.
 5. Emit + ledger PR per completed family, not one giant PR at the end.
+
+**Live order:** claim `A3-barrier-ladder` per PROTOCOL, then follow the
+card. CALC-005 **remains minima-only (no TS hunt)**; that definition is
+unchanged. The old crystallographic attachment/detachment campaign in
+historical step 4 is **not authorized from this handoff**. Any remaining
+CALC-005 work is the card's published energy/minimum replication gate,
+not a TS hunt and not a replay of those crystallographic constructions.
 
 ## 4. Hard rules (unchanged, learned the hard way)
 
@@ -168,7 +205,11 @@ connectivity n, protonation state) cell of the ladder":
 - Big outputs stay out of git (`runs/` is gitignored); derived numbers +
   provenance go in the store and the ledger.
 
-## 5. Open questions a session may hit (decide, log, proceed)
+## 5. Open questions a session may hit (historical crystallographic protocol)
+
+These applied to the retired hydrated-cell / proton-owner protocol. For
+live A3 replication, use the selected paper's answers, not this pKa /
+termination table as launch authority.
 
 - Cluster termination chemistry at Al edges (OH vs H₂O vs OH₂⁺) sets the
   cluster charge — follow the pKa table for the target pH regime and
