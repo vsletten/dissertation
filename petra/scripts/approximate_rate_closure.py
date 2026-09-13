@@ -5,14 +5,19 @@ This is survey-tier platform testing, not calibrated or production kinetics.
 
 Steady-state criterion (identical for nominal and every sensitivity scenario):
 for each replica, require at least eight cadence samples, completion of the
-configured step limit, a strictly increasing finite clock, and a final solid
-cation inventory and geometric area each above 10% of their initial values.
-Over the final six cadence intervals, require at least 12 gross cation-
-desorption events, at least four nonzero interval fluxes, an absolute fitted
-end-to-end log10-flux trend <= 0.35 decade, and an absolute first-half versus
-second-half log10 mean-flux change <= 0.35 decade.  The gate is evaluated per
-replica, never on an ensemble average, so opposite trends cannot cancel.  The
-inventory/area floors reject an absorbing fully dissolved finite slab.
+configured step limit, strictly increasing sample steps and finite physical
+exposure times, and final solid-cation inventory and geometric area each above
+10% of their initial values.  Over the final six cadence intervals, evaluate
+Si and Al separately.  A positive species needs at least 12 gross-desorption
+events, four nonzero intervals, an absolute fitted end-to-end log10-flux trend
+<= 0.35 decade, and an absolute first-half versus second-half log10 mean-flux
+change <= 0.35 decade.  Zero observed events produce a one-sided Poisson 95%
+upper rate bound from integrated area-time, never a fabricated log rate.
+Replica verdicts are exactly steady-positive, steady-zero, nonsteady, absorbed,
+or incomplete.  Only steady-positive is acceptance; steady-zero is complete
+evidence for a typed no-dissolution outcome.  Population inventory trend/range
+is emitted as a diagnostic but is not required to be static during genuine
+steady dissolution.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ import argparse
 import bisect
 import csv
 import hashlib
+import itertools
 import json
 import math
 import os
@@ -28,28 +34,34 @@ import random
 import re
 import statistics
 import subprocess
+import tempfile
 import threading
 import time
-import tomllib
+from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
+
+import tomllib
 
 AVOGADRO_EXACT = 6.02214076e23
 ANGSTROM2_TO_M2 = 1.0e-20
 ARRHENIUS_PREFACTOR = 1.0e13
-MIN_REPLICAS = 8
+REPLICA_COUNT = 8
 MAX_WORKERS = 4
 MAX_TIMEOUT_SECONDS = 1_800
 BOOTSTRAP_RESAMPLES = 2_000
 DEFAULT_SEEDS = (90401, 90403, 90407, 90409, 90413, 90419, 90421, 90427)
+RAW_SCHEMA = "a9-raw-campaign-v2"
+CHECKPOINT_SCHEMA = "a9-checkpoint-v2"
+VERIFICATION_SCHEMA = "a9-verification-v2"
+POISSON_ZERO_EVENT_UPPER_COUNT_95 = -math.log(0.05)
 REQUIRED_OBSERVABLES = frozenset(
     {"state_counts", "event_rates", "rate_spectra", "surface_area", "exposure_age"}
 )
 PROVENANCE_CLASSES = frozenset({"computed", "literature", "heuristic"})
 PERTURBATIONS = ("ea-minus-3", "ea-plus-3", "prefactor-x0.1", "prefactor-x10")
-SENSITIVITY_RESPONSE = "net_release_flux"
+SENSITIVITY_RESPONSE = "combined_gross_dissolution_flux_mol_m2_s"
 
 FAMILY_REACTIONS: dict[str, tuple[str, ...]] = {
     "siloxane-neutral": (
@@ -86,18 +98,290 @@ FAMILY_REACTIONS: dict[str, tuple[str, ...]] = {
 EXPECTED_REACTIONS = tuple(
     name for names in FAMILY_REACTIONS.values() for name in names
 )
-ANNOTATION_RE = re.compile(
-    r'^name = "(?P<name>[^"]+)"\n'
-    r'# a9-family = "(?P<family>[^"]+)"\n'
-    r'# a9-provenance = "(?P<provenance>[^"]+)"$',
-    re.MULTILINE,
-)
 REACTION_BLOCK_RE = re.compile(
     r"(?ms)^\[\[reactions\]\]\n(?P<body>.*?)(?=^\[\[reactions\]\]\n|\Z)"
 )
 RATE_RE = re.compile(
     r"rate = \{ arrhenius = \{ prefactor = (?P<prefactor>[^,]+), ea = (?P<ea>[^}]+) \} \}"
 )
+
+
+@dataclass(frozen=True)
+class ReactionRegistryEntry:
+    name: str
+    ea_kcal_mol: float
+    family: str
+    provenance_class: str
+    source: str
+    method: str
+    observable_type: str
+    rationale: str
+
+
+REACTION_REGISTRY = (
+    ReactionRegistryEntry(
+        "R0-sio-si-hydrolysis",
+        27.019,
+        "siloxane-neutral",
+        "computed",
+        "qm/ si-neutral CALC-001",
+        "B3LYP/def2-SVP/DF",
+        "activation_free_energy",
+        "Direct Si-neutral survey free-energy barrier; not r2SCAN-3c.",
+    ),
+    ReactionRegistryEntry(
+        "R1-sio-si-condensation",
+        24.419,
+        "siloxane-neutral",
+        "heuristic",
+        "R0 plus legacy Si reverse gap",
+        "anchor minus 2.6 kcal/mol",
+        "heuristic_reverse_barrier",
+        "Preserves only the legacy Si forward/reverse gap.",
+    ),
+    ReactionRegistryEntry(
+        "R2-sioal2-si-hydrolysis",
+        27.019,
+        "sioal-si-neutral",
+        "computed",
+        "qm/ si-neutral CALC-001",
+        "B3LYP/def2-SVP/DF analogue",
+        "activation_free_energy_analogue",
+        "Explicit Si-neutral analogue; not r2SCAN-3c.",
+    ),
+    ReactionRegistryEntry(
+        "R3-sioal2-si-condensation",
+        24.419,
+        "sioal-si-neutral",
+        "heuristic",
+        "R2 plus legacy Si reverse gap",
+        "anchor minus 2.6 kcal/mol",
+        "heuristic_reverse_barrier",
+        "Preserves only the legacy Si forward/reverse gap.",
+    ),
+    ReactionRegistryEntry(
+        "R4-sioal2-al-hydrolysis",
+        32.221,
+        "sioal-al-neutral",
+        "computed",
+        "qm/ al-neutral CALC-002",
+        "B3LYP/def2-SVP/DF",
+        "activation_free_energy",
+        "Direct Al-neutral survey free-energy barrier; not r2SCAN-3c.",
+    ),
+    ReactionRegistryEntry(
+        "R5a-sioal2-al-condensation",
+        27.421,
+        "sioal-al-neutral",
+        "heuristic",
+        "R4 plus legacy Al reverse gap",
+        "anchor minus 4.8 kcal/mol",
+        "heuristic_reverse_barrier",
+        "Preserves only the legacy Al forward/reverse gap.",
+    ),
+    ReactionRegistryEntry(
+        "R5b-sioal2-al-condensation",
+        27.421,
+        "sioal-al-neutral",
+        "heuristic",
+        "R4 plus legacy Al reverse gap",
+        "anchor minus 4.8 kcal/mol",
+        "heuristic_reverse_barrier",
+        "Preserves only the legacy Al forward/reverse gap.",
+    ),
+    ReactionRegistryEntry(
+        "R6-second-stage-hydrolysis",
+        16.969,
+        "connectivity-ladder",
+        "literature",
+        "Liu & Ruiz Pestana 2024 Q2",
+        "71 kJ/mol divided by 4.184",
+        "electronic_barrier_analogue",
+        "Literature Q2 connectivity analogue; pH catalysis is not encoded.",
+    ),
+    ReactionRegistryEntry(
+        "R7-second-stage-condensation",
+        12.169,
+        "connectivity-ladder",
+        "heuristic",
+        "R6 plus legacy Al reverse gap",
+        "anchor minus 4.8 kcal/mol",
+        "heuristic_reverse_barrier",
+        "Preserves only the legacy Al forward/reverse gap.",
+    ),
+    ReactionRegistryEntry(
+        "R8a-sioha-hydrolysis",
+        19.359,
+        "connectivity-ladder",
+        "literature",
+        "Liu & Ruiz Pestana 2024 Q3",
+        "81 kJ/mol divided by 4.184",
+        "electronic_barrier_analogue",
+        "Literature Q3 connectivity analogue; pH catalysis is not encoded.",
+    ),
+    ReactionRegistryEntry(
+        "R8b-sioha-hydrolysis",
+        19.359,
+        "connectivity-ladder",
+        "literature",
+        "Liu & Ruiz Pestana 2024 Q3",
+        "81 kJ/mol divided by 4.184",
+        "electronic_barrier_analogue",
+        "Literature Q3 connectivity analogue; pH catalysis is not encoded.",
+    ),
+    ReactionRegistryEntry(
+        "R9-sioha-condensation",
+        16.759,
+        "connectivity-ladder",
+        "heuristic",
+        "R8 plus legacy Si reverse gap",
+        "anchor minus 2.6 kcal/mol",
+        "heuristic_reverse_barrier",
+        "Preserves only the legacy Si forward/reverse gap.",
+    ),
+    ReactionRegistryEntry(
+        "R10-sial-hydrolysis",
+        27.019,
+        "sioal-si-neutral",
+        "computed",
+        "qm/ si-neutral CALC-001",
+        "B3LYP/def2-SVP/DF analogue",
+        "activation_free_energy_analogue",
+        "Explicit Si-neutral analogue; not r2SCAN-3c.",
+    ),
+    ReactionRegistryEntry(
+        "R11-sial-condensation",
+        24.419,
+        "sioal-si-neutral",
+        "heuristic",
+        "R10 plus legacy Si reverse gap",
+        "anchor minus 2.6 kcal/mol",
+        "heuristic_reverse_barrier",
+        "Preserves only the legacy Si forward/reverse gap.",
+    ),
+    ReactionRegistryEntry(
+        "R12-albr-hydrolysis",
+        32.221,
+        "sioal-al-neutral",
+        "computed",
+        "qm/ al-neutral CALC-002",
+        "B3LYP/def2-SVP/DF analogue",
+        "activation_free_energy_analogue",
+        "Explicit Al-neutral analogue; not r2SCAN-3c.",
+    ),
+    ReactionRegistryEntry(
+        "R13-albr-condensation",
+        27.421,
+        "sioal-al-neutral",
+        "heuristic",
+        "R12 plus legacy Al reverse gap",
+        "anchor minus 4.8 kcal/mol",
+        "heuristic_reverse_barrier",
+        "Preserves only the legacy Al forward/reverse gap.",
+    ),
+    ReactionRegistryEntry(
+        "R14-alohal-hydrolysis",
+        19.0,
+        "al-o-al-analogue",
+        "literature",
+        "Xiao & Lasaga 1994/1996",
+        "base-scale literature analogue",
+        "activation_energy_analogue",
+        "Scale analogue only; pH catalysis is not encoded.",
+    ),
+    ReactionRegistryEntry(
+        "R15-alohal-condensation",
+        14.2,
+        "al-o-al-analogue",
+        "heuristic",
+        "R14 plus legacy Al reverse gap",
+        "anchor minus 4.8 kcal/mol",
+        "heuristic_reverse_barrier",
+        "Preserves only the legacy Al forward/reverse gap.",
+    ),
+    ReactionRegistryEntry(
+        "adsorb-al",
+        14.5,
+        "adsorption",
+        "heuristic",
+        "legacy kaolinite attachment bucket",
+        "legacy sign converted to Arrhenius Ea",
+        "heuristic_attachment_barrier",
+        "Retains the legacy 14.5 kcal/mol Al attachment bucket.",
+    ),
+    ReactionRegistryEntry(
+        "adsorb-si",
+        6.4,
+        "adsorption",
+        "heuristic",
+        "legacy kaolinite attachment bucket",
+        "legacy sign converted to Arrhenius Ea",
+        "heuristic_attachment_barrier",
+        "Retains the legacy 6.4 kcal/mol Si attachment bucket.",
+    ),
+    ReactionRegistryEntry(
+        "desorb-al",
+        32.221,
+        "cation-desorption",
+        "heuristic",
+        "CALC-002 anchor plus legacy environment ladder",
+        "mixed computed anchor and heuristic modifiers",
+        "mixed_desorption_proxy",
+        "CALC-005 is unavailable; this is not a computed desorption barrier.",
+    ),
+    ReactionRegistryEntry(
+        "desorb-si",
+        30.053,
+        "cation-desorption",
+        "heuristic",
+        "r2SCAN-3c Si-neutral electronic value plus legacy environment ladder",
+        "mixed electronic anchor and heuristic modifiers",
+        "mixed_desorption_proxy",
+        "30.053 is electronic and CALC-005 is unavailable; this is not a computed desorption barrier.",
+    ),
+)
+REGISTRY_BY_NAME = {entry.name: entry for entry in REACTION_REGISTRY}
+
+PROVENANCE_FIELDS = (
+    "record_type",
+    "reaction",
+    "ea_kcal_mol",
+    "family",
+    "provenance_class",
+    "source",
+    "method",
+    "observable_type",
+    "rationale",
+    "constant_name",
+    "constant_value",
+    "constant_unit",
+    "conversion_expression",
+)
+DERIVED_FILES = frozenset(
+    {
+        "per-replica-rates.csv",
+        "ensemble-rates.csv",
+        "stoichiometry.csv",
+        "state-populations.csv",
+        "results-dat-equivalent.csv",
+        "sensitivity-ranking.csv",
+        "provenance-conversions.csv",
+        "steady-state-gates.json",
+        "verification.json",
+    }
+)
+
+
+def _registry_comment(entry: ReactionRegistryEntry) -> str:
+    values = (
+        ("family", entry.family),
+        ("provenance", entry.provenance_class),
+        ("source", entry.source),
+        ("method", entry.method),
+        ("observable", entry.observable_type),
+        ("rationale", entry.rationale),
+    )
+    return "\n".join(f"# a9-{key} = {json.dumps(value)}" for key, value in values)
 
 
 @dataclass(frozen=True)
@@ -122,7 +406,9 @@ class Scenario:
 @dataclass(frozen=True)
 class EventData:
     seed: int
+    n_sites: int
     reaction_names: tuple[str, ...]
+    steps: tuple[int, ...]
     times: tuple[float, ...]
     names: tuple[str, ...]
     counts: dict[str, int]
@@ -131,29 +417,74 @@ class EventData:
 @dataclass(frozen=True)
 class PopulationRow:
     step: int
-    time: float
+    time_s: float
     states: dict[str, int]
+
+
+@dataclass(frozen=True)
+class ObservableSample:
+    step: int
+    time_s: float
+    values: dict[str, list[float]]
 
 
 @dataclass(frozen=True)
 class SteadyPoint:
     step: int
-    time: float
-    gross_events: int
+    time_s: float
+    gross_si_events: int
+    gross_al_events: int
     area_a2: float
-    solid_cations: int
+    solid_si_cations: int
+    solid_al_cations: int
+
+    @property
+    def solid_cations(self) -> int:
+        return self.solid_si_cations + self.solid_al_cations
 
 
 @dataclass(frozen=True)
-class SteadyStateGate:
-    passed: bool
-    reasons: tuple[str, ...]
-    window_start_step: int | None
-    window_end_step: int | None
+class SpeciesSteadyDiagnostic:
+    status: str
     gross_events: int
     positive_intervals: int
     trend_decades: float | None
     half_change_decades: float | None
+    upper_95_mol_m2_s: float | None
+
+
+@dataclass(frozen=True)
+class PopulationSteadyDiagnostic:
+    initial_solid_cations: int
+    final_solid_cations: int
+    final_fraction: float | None
+    tail_relative_range: float | None
+    tail_fractional_trend: float | None
+    stability_status: str
+
+
+@dataclass(frozen=True)
+class SteadyStateGate:
+    status: str
+    acceptance_passed: bool
+    evidence_complete: bool
+    dissolution_outcome: str
+    reasons: tuple[str, ...]
+    window_start_step: int | None
+    window_end_step: int | None
+    window_start_time_s: float | None
+    window_end_time_s: float | None
+    area_time_a2_s: float | None
+    si: SpeciesSteadyDiagnostic | None
+    al: SpeciesSteadyDiagnostic | None
+    si_population: PopulationSteadyDiagnostic
+    al_population: PopulationSteadyDiagnostic
+    population_initial_solid_cations: int
+    population_final_solid_cations: int
+    population_final_fraction: float | None
+    population_tail_relative_range: float | None
+    population_tail_fractional_trend: float | None
+    population_stability_status: str
 
 
 @dataclass(frozen=True)
@@ -161,28 +492,31 @@ class ReplicaRate:
     scenario: str
     replica: int
     seed: int
-    window_start_step: int
-    window_end_step: int
-    window_start_time_s: float
-    window_end_time_s: float
-    area_time_a2_s: float
+    window_start_step: int | None
+    window_end_step: int | None
+    window_start_time_s: float | None
+    window_end_time_s: float | None
+    area_time_a2_s: float | None
     gross_si_events: int
     adsorb_si_events: int
     net_si_events: int
     gross_al_events: int
     adsorb_al_events: int
     net_al_events: int
-    gross_si_flux: float
-    net_si_flux: float
-    gross_al_flux: float
-    net_al_flux: float
-    si_al_net_ratio: float | None
-    gate_passed: bool
+    gross_si_flux_mol_m2_s: float | None
+    net_si_flux_mol_m2_s: float | None
+    gross_al_flux_mol_m2_s: float | None
+    net_al_flux_mol_m2_s: float | None
+    gross_si_upper_95_mol_m2_s: float | None
+    gross_al_upper_95_mol_m2_s: float | None
+    si_al_net_ratio_dimensionless: float | None
+    steady_state_status: str
+    acceptance_passed: bool
 
 
 def _finite_number(value: object, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{label} must be numeric")
+        raise TypeError(f"{label} must be numeric")
     result = float(value)
     if not math.isfinite(result):
         raise ValueError(f"{label} must be finite")
@@ -243,8 +577,8 @@ def parse_seeds(text: str) -> tuple[int, ...]:
 
 def validate_seeds(seeds: Sequence[int]) -> tuple[int, ...]:
     normalized = tuple(seeds)
-    if len(normalized) < MIN_REPLICAS:
-        raise ValueError(f"campaign requires at least {MIN_REPLICAS} replicas")
+    if len(normalized) != REPLICA_COUNT:
+        raise ValueError(f"campaign requires exactly {REPLICA_COUNT} replicas")
     if any(type(seed) is not int or seed < 0 for seed in normalized):
         raise ValueError("every seed must be a non-negative integer")
     if len(set(normalized)) != len(normalized):
@@ -279,47 +613,38 @@ def validate_deck(path: Path, seeds: Sequence[int] = DEFAULT_SEEDS) -> DeckContr
 
     reactions = parsed.get("reactions")
     if not isinstance(reactions, list):
-        raise ValueError("deck must declare reactions")
+        raise TypeError("deck must declare reactions as a list")
     names = [reaction.get("name") for reaction in reactions]
-    if len(names) != len(set(names)):
-        raise ValueError("reaction names must be unique")
-    if len(names) != 22 or set(names) != set(EXPECTED_REACTIONS):
-        missing = sorted(set(EXPECTED_REACTIONS) - set(names))
-        extra = sorted(set(names) - set(EXPECTED_REACTIONS))
+    registry_names = [entry.name for entry in REACTION_REGISTRY]
+    if names != registry_names:
         raise ValueError(
-            f"reaction coverage must be exactly 22 names; missing={missing}, extra={extra}"
+            "reaction coverage/order must exactly match the authoritative 22-reaction registry"
         )
 
-    matches = list(ANNOTATION_RE.finditer(text))
-    annotations = {
-        match.group("name"): (match.group("family"), match.group("provenance"))
-        for match in matches
-    }
-    if len(matches) != 22 or set(annotations) != set(names):
-        raise ValueError(
-            "every reaction needs adjacent a9-family/a9-provenance comments"
-        )
+    blocks = list(REACTION_BLOCK_RE.finditer(text))
+    if len(blocks) != len(REACTION_REGISTRY):
+        raise ValueError("deck must contain exactly 22 reaction blocks")
+    annotations: dict[str, tuple[str, str]] = {}
+    for block, entry in zip(blocks, REACTION_REGISTRY, strict=True):
+        body = block.group("body")
+        prefix = f'name = "{entry.name}"\n{_registry_comment(entry)}\n'
+        if not body.startswith(prefix):
+            raise ValueError(f"{entry.name}: provenance comments do not match registry")
+        annotations[entry.name] = (entry.family, entry.provenance_class)
+    if set(REGISTRY_BY_NAME) != set(EXPECTED_REACTIONS):
+        raise AssertionError("family partition and reaction registry disagree")
     if any(
-        provenance not in PROVENANCE_CLASSES for _, provenance in annotations.values()
+        entry.provenance_class not in PROVENANCE_CLASSES for entry in REACTION_REGISTRY
     ):
-        raise ValueError("provenance must be computed, literature, or heuristic")
+        raise AssertionError("reaction registry has an invalid provenance class")
     for family, expected in FAMILY_REACTIONS.items():
-        actual = {
-            name for name, annotation in annotations.items() if annotation[0] == family
-        }
+        actual = {entry.name for entry in REACTION_REGISTRY if entry.family == family}
         if actual != set(expected):
-            raise ValueError(
-                f"family {family!r} is incomplete or contains unrelated reactions"
-            )
-    unknown_families = {family for family, _ in annotations.values()} - set(
-        FAMILY_REACTIONS
-    )
-    if unknown_families:
-        raise ValueError(f"unknown barrier families: {sorted(unknown_families)}")
+            raise AssertionError(f"registry family {family!r} is incomplete")
 
     barriers: dict[str, float] = {}
     prefactors: dict[str, float] = {}
-    for reaction in reactions:
+    for reaction, entry in zip(reactions, REACTION_REGISTRY, strict=True):
         name = reaction["name"]
         try:
             arrhenius = reaction["rate"]["arrhenius"]
@@ -327,10 +652,16 @@ def validate_deck(path: Path, seeds: Sequence[int] = DEFAULT_SEEDS) -> DeckContr
             barrier = _finite_number(arrhenius["ea"], f"{name} barrier")
         except (KeyError, TypeError) as exc:
             raise ValueError(f"{name} must have an Arrhenius rate") from exc
+        if set(arrhenius) != {"prefactor", "ea"}:
+            raise ValueError(
+                f"{name} Arrhenius schema must contain only prefactor and ea"
+            )
         if prefactor != ARRHENIUS_PREFACTOR:
             raise ValueError(f"{name} prefactor must be exactly 1e13 s^-1")
-        if barrier < 0.0:
-            raise ValueError(f"{name} barrier must be nonnegative")
+        if barrier != entry.ea_kcal_mol:
+            raise ValueError(
+                f"{name} Ea must exactly match registry value {entry.ea_kcal_mol} kcal/mol"
+            )
         barriers[name] = barrier
         prefactors[name] = prefactor
 
@@ -507,12 +838,17 @@ def _run_one(
         "observables.csv",
         "snapshot.pgif.json",
     )
-    missing = [name for name in required if not (output / name).is_file()]
+    missing = [
+        name
+        for name in required
+        if not (output / name).is_file() or (output / name).stat().st_size == 0
+    ]
     if missing:
         raise RuntimeError(f"seed {seed} missing Petra outputs: {missing}")
     hashes = {name: sha256_file(output / name) for name in required}
     hashes["log"] = sha256_file(log_path)
     return {
+        "schema": "a9-run-receipt-v2",
         "seed": seed,
         "elapsed_seconds": elapsed,
         "command": command,
@@ -569,7 +905,7 @@ def run_campaign(
             }
         )
     manifest = {
-        "schema": 1,
+        "schema": RAW_SCHEMA,
         "status": "running",
         "survey_tier": True,
         "temperature_k": 298.0,
@@ -580,12 +916,15 @@ def run_campaign(
         "timeout_seconds": timeout,
         "source_deck": str(deck_path.resolve()),
         "source_deck_sha256": sha256_file(deck_path),
+        "petra_binary": str(petra_bin),
+        "petra_binary_sha256": sha256_file(petra_bin),
         "scenarios": scenario_records,
     }
     write_json_atomic(raw_root / "manifest.json", manifest)
     receipts: list[dict] = []
     write_json_atomic(
-        raw_root / "checkpoint.json", {"status": "running", "receipts": receipts}
+        raw_root / "checkpoint.json",
+        {"schema": CHECKPOINT_SCHEMA, "status": "running", "receipts": receipts},
     )
 
     env = os.environ.copy()
@@ -619,7 +958,7 @@ def run_campaign(
                     for index, seed in enumerate(seeds)
                 }
                 for future in as_completed(futures):
-                    index, seed = futures[future]
+                    index, _seed = futures[future]
                     receipt = future.result()
                     receipt.update({"scenario": scenario_name, "replica": index})
                     with lock:
@@ -629,11 +968,16 @@ def run_campaign(
                         )
                         write_json_atomic(
                             raw_root / "checkpoint.json",
-                            {"status": "running", "receipts": receipts},
+                            {
+                                "schema": CHECKPOINT_SCHEMA,
+                                "status": "running",
+                                "receipts": receipts,
+                            },
                         )
     except BaseException:
         write_json_atomic(
-            raw_root / "checkpoint.json", {"status": "failed", "receipts": receipts}
+            raw_root / "checkpoint.json",
+            {"schema": CHECKPOINT_SCHEMA, "status": "failed", "receipts": receipts},
         )
         raise
     manifest["status"] = "complete"
@@ -641,7 +985,8 @@ def run_campaign(
     manifest["checkpoint_sha256"] = sha256_file(raw_root / "checkpoint.json")
     write_json_atomic(raw_root / "manifest.json", manifest)
     write_json_atomic(
-        raw_root / "checkpoint.json", {"status": "complete", "receipts": receipts}
+        raw_root / "checkpoint.json",
+        {"schema": CHECKPOINT_SCHEMA, "status": "complete", "receipts": receipts},
     )
     # Rewrite after the final checkpoint so the manifest binds its final bytes.
     manifest["checkpoint_sha256"] = sha256_file(raw_root / "checkpoint.json")
@@ -679,8 +1024,22 @@ def parse_events(
         if not first:
             raise ValueError(f"{path}: empty event log")
         header = json.loads(first)
+        _exact_keys(
+            header,
+            {
+                "petra_traj",
+                "deck",
+                "seed",
+                "n_sites",
+                "states",
+                "state_types",
+                "reactions",
+            },
+            f"{path} event header",
+        )
         reaction_names = header.get("reactions")
         states = header.get("states")
+        state_types = header.get("state_types")
         seed = header.get("seed")
         n_sites = header.get("n_sites")
         if reaction_names != [
@@ -694,6 +1053,13 @@ def parse_events(
         ]
         if states != expected_states:
             raise ValueError(f"{path}: state table does not match deck")
+        expected_state_types = [
+            state["occupant"]
+            for kind in contract.parsed["kinds"]
+            for state in kind["states"]
+        ]
+        if state_types != expected_state_types:
+            raise ValueError(f"{path}: state-type table does not match deck")
         if (
             header.get("petra_traj") != 1
             or header.get("deck") != contract.parsed["deck"]["name"]
@@ -724,6 +1090,7 @@ def parse_events(
                     {state_ids[value] for value in new_names},
                 )
 
+        steps: list[int] = []
         times: list[float] = []
         names: list[str] = []
         counts = {name: 0 for name in reaction_names}
@@ -735,13 +1102,15 @@ def parse_events(
             if not isinstance(row, list) or len(row) != 4:
                 raise ValueError(f"{path}:{line_number}: invalid event row")
             step, event_time, reaction_id, changes = row
-            if type(step) is not int or step != previous_step + 1:
+            if type(step) is not int or step <= previous_step:
                 raise ValueError(
-                    f"{path}:{line_number}: event steps must be contiguous"
+                    f"{path}:{line_number}: event steps must be strictly increasing"
                 )
             event_time = _finite_number(event_time, f"{path}:{line_number} time")
-            if event_time <= previous_time:
-                raise ValueError(f"{path}:{line_number}: event time must increase")
+            if event_time < previous_time:
+                raise ValueError(
+                    f"{path}:{line_number}: event times must be finite and nondecreasing"
+                )
             if type(reaction_id) is not int or not 0 <= reaction_id < len(
                 reaction_names
             ):
@@ -784,10 +1153,19 @@ def parse_events(
                 last_seen_state[site] = new
             previous_step = step
             previous_time = event_time
+            steps.append(step)
             times.append(event_time)
             names.append(name)
             counts[name] += 1
-    return EventData(seed, tuple(reaction_names), tuple(times), tuple(names), counts)
+    return EventData(
+        seed,
+        n_sites,
+        tuple(reaction_names),
+        tuple(steps),
+        tuple(times),
+        tuple(names),
+        counts,
+    )
 
 
 def parse_populations(
@@ -803,7 +1181,7 @@ def parse_populations(
         for line_number, row in enumerate(reader, start=2):
             try:
                 step = int(row["step"])
-                sample_time = _finite_number(
+                sample_time_s = _finite_number(
                     float(row["time"]), f"{path}:{line_number} time"
                 )
                 states = {state: int(row[state]) for state in expected_states}
@@ -811,32 +1189,35 @@ def parse_populations(
                 raise ValueError(
                     f"{path}:{line_number}: invalid population row"
                 ) from exc
-            if step <= previous_step or sample_time < previous_time:
+            if step <= previous_step or sample_time_s < previous_time:
                 raise ValueError(
                     f"{path}:{line_number}: nonmonotonic population sample"
                 )
             if any(value < 0 for value in states.values()):
                 raise ValueError(f"{path}:{line_number}: negative population")
-            result.append(PopulationRow(step, sample_time, states))
-            previous_step, previous_time = step, sample_time
+            result.append(PopulationRow(step, sample_time_s, states))
+            previous_step, previous_time = step, sample_time_s
     if not result:
         raise ValueError(f"{path}: no population samples")
     return result
 
 
 def parse_observables(
-    path: Path, expected_seed: int | None = None
-) -> dict[tuple[int, float], dict[str, list[float]]]:
-    grouped: dict[tuple[int, float], dict[str, dict[int, float]]] = {}
+    path: Path,
+    expected_state_count: int,
+    expected_reaction_count: int,
+    expected_seed: int | None = None,
+) -> dict[int, ObservableSample]:
+    columns = ["replica", "seed", "step", "time", "kind", "index", "value"]
+    grouped: dict[int, dict[str, object]] = {}
     with path.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
-        required_columns = {"replica", "seed", "step", "time", "kind", "index", "value"}
-        if reader.fieldnames is None or set(reader.fieldnames) != required_columns:
+        if reader.fieldnames != columns:
             raise ValueError(f"{path}: invalid observables columns")
         for line_number, row in enumerate(reader, start=2):
             try:
                 step = int(row["step"])
-                sample_time = _finite_number(
+                sample_time_s = _finite_number(
                     float(row["time"]), f"{path}:{line_number} time"
                 )
                 index = int(row["index"])
@@ -853,38 +1234,65 @@ def parse_observables(
                 replica != 0
                 or (expected_seed is not None and seed != expected_seed)
                 or step < 0
-                or sample_time < 0
+                or sample_time_s < 0
                 or index < 0
+                or row["kind"] not in REQUIRED_OBSERVABLES
             ):
                 raise ValueError(
                     f"{path}:{line_number}: invalid direct-run observable identity"
                 )
-            kind = row["kind"]
-            indices = grouped.setdefault((step, sample_time), {}).setdefault(kind, {})
+            sample = grouped.setdefault(step, {"time_s": sample_time_s, "kinds": {}})
+            if sample["time_s"] != sample_time_s:
+                raise ValueError(
+                    f"{path}:{line_number}: inconsistent time within sample"
+                )
+            kinds = sample["kinds"]
+            assert isinstance(kinds, dict)
+            indices = kinds.setdefault(row["kind"], {})
             if index in indices:
                 raise ValueError(f"{path}:{line_number}: duplicate observable index")
             indices[index] = value
     if not grouped:
         raise ValueError(f"{path}: no observable samples")
-    result = {}
-    previous = (-1, -math.inf)
-    for key in sorted(grouped):
-        if key[0] <= previous[0] or key[1] < previous[1]:
+    result: dict[int, ObservableSample] = {}
+    previous_step = -1
+    previous_time = -math.inf
+    for step in sorted(grouped):
+        raw_sample = grouped[step]
+        sample_time_s = float(raw_sample["time_s"])
+        if step <= previous_step or sample_time_s < previous_time:
             raise ValueError(f"{path}: nonmonotonic observable cadence")
-        kinds = grouped[key]
-        missing = REQUIRED_OBSERVABLES - kinds.keys()
-        if missing:
+        raw_kinds = raw_sample["kinds"]
+        assert isinstance(raw_kinds, dict)
+        if set(raw_kinds) != REQUIRED_OBSERVABLES:
+            missing = REQUIRED_OBSERVABLES - raw_kinds.keys()
+            extra = raw_kinds.keys() - REQUIRED_OBSERVABLES
             raise ValueError(
-                f"{path}: sample {key} missing observables {sorted(missing)}"
+                f"{path}: sample {step} observable mismatch; missing={sorted(missing)}, extra={sorted(extra)}"
             )
-        result[key] = {}
-        for kind, indexed in kinds.items():
+        values: dict[str, list[float]] = {}
+        for kind, indexed in raw_kinds.items():
             if set(indexed) != set(range(len(indexed))):
-                raise ValueError(f"{path}: sparse {kind} indices at sample {key}")
-            result[key][kind] = [indexed[index] for index in range(len(indexed))]
-        if not result[key]["surface_area"] or result[key]["surface_area"][0] < 0:
+                raise ValueError(f"{path}: sparse {kind} indices at step {step}")
+            values[kind] = [indexed[index] for index in range(len(indexed))]
+        cardinalities = {
+            "state_counts": expected_state_count,
+            "event_rates": expected_reaction_count,
+            "surface_area": 3,
+        }
+        for kind, expected in cardinalities.items():
+            if len(values[kind]) != expected:
+                raise ValueError(
+                    f"{path}: {kind} cardinality at step {step} must be {expected}"
+                )
+        if not values["rate_spectra"] or not values["exposure_age"]:
+            raise ValueError(
+                f"{path}: variable observables must be nonempty at step {step}"
+            )
+        if values["surface_area"][0] < 0:
             raise ValueError(f"{path}: invalid geometric surface area")
-        previous = key
+        result[step] = ObservableSample(step, sample_time_s, values)
+        previous_step, previous_time = step, sample_time_s
     return result
 
 
@@ -907,13 +1315,22 @@ def integrate_area(times: Sequence[float], areas: Sequence[float]) -> float:
     return integral
 
 
-def event_count_to_flux(events: int, area_time_a2_s: float) -> float:
-    if type(events) is not int:
-        raise ValueError("event count must be an integer")
+def _amount_to_flux(amount: float, area_time_a2_s: float) -> float:
+    amount = _finite_number(amount, "event-equivalent amount")
     area_time = _finite_number(area_time_a2_s, "area-time denominator")
     if area_time <= 0.0:
         raise ValueError("area-time denominator must be positive")
-    return (events / AVOGADRO_EXACT) / (area_time * ANGSTROM2_TO_M2)
+    return (amount / AVOGADRO_EXACT) / (area_time * ANGSTROM2_TO_M2)
+
+
+def event_count_to_flux(events: int, area_time_a2_s: float) -> float:
+    if type(events) is not int:
+        raise TypeError("event count must be an integer")
+    return _amount_to_flux(float(events), area_time_a2_s)
+
+
+def poisson_zero_upper_flux_95(area_time_a2_s: float) -> float:
+    return _amount_to_flux(POISSON_ZERO_EVENT_UPPER_COUNT_95, area_time_a2_s)
 
 
 def _linear_trend(values: Sequence[float]) -> float:
@@ -928,124 +1345,250 @@ def _linear_trend(values: Sequence[float]) -> float:
     return slope * (len(values) - 1)
 
 
+def _population_diagnostics(
+    points: Sequence[SteadyPoint], tail: Sequence[SteadyPoint], attribute: str
+) -> PopulationSteadyDiagnostic:
+    initial = getattr(points[0], attribute) if points else 0
+    final = getattr(points[-1], attribute) if points else 0
+    final_fraction = final / initial if initial > 0 else None
+    tail_values = [getattr(point, attribute) for point in tail]
+    tail_range = (
+        (max(tail_values) - min(tail_values)) / tail_values[0]
+        if tail_values and tail_values[0] > 0
+        else None
+    )
+    tail_trend = (
+        _linear_trend([value / tail_values[0] for value in tail_values])
+        if len(tail_values) >= 2 and tail_values[0] > 0
+        else None
+    )
+    stable = (
+        final_fraction is not None
+        and tail_range is not None
+        and tail_trend is not None
+        and abs(1.0 - final_fraction) <= 0.05
+        and tail_range <= 0.05
+        and abs(tail_trend) <= 0.05
+    )
+    return PopulationSteadyDiagnostic(
+        initial,
+        final,
+        final_fraction,
+        tail_range,
+        tail_trend,
+        ("stable" if stable else "evolving"),
+    )
+
+
+def _species_diagnostic(
+    species: str,
+    tail: Sequence[SteadyPoint],
+    area_time_a2_s: float,
+    reasons: list[str],
+) -> SpeciesSteadyDiagnostic:
+    attribute = f"gross_{species}_events"
+    interval_fluxes: list[float] = []
+    interval_events: list[int] = []
+    for left, right in itertools.pairwise(tail):
+        count = getattr(right, attribute) - getattr(left, attribute)
+        if count < 0:
+            reasons.append(f"{species} gross event counter decreased")
+            count = 0
+        interval_events.append(count)
+        denominator = integrate_area(
+            [left.time_s, right.time_s], [left.area_a2, right.area_a2]
+        )
+        interval_fluxes.append(
+            event_count_to_flux(count, denominator) if count > 0 else 0.0
+        )
+    gross_events = sum(interval_events)
+    positive = [value for value in interval_fluxes if value > 0.0]
+    if gross_events == 0:
+        return SpeciesSteadyDiagnostic(
+            "zero-upper-bound",
+            0,
+            0,
+            None,
+            None,
+            poisson_zero_upper_flux_95(area_time_a2_s),
+        )
+    if gross_events < 12 or len(positive) < 4:
+        reasons.append(
+            f"{species} has insufficient gross dissolution evidence "
+            f"({gross_events} events, {len(positive)} positive intervals)"
+        )
+        return SpeciesSteadyDiagnostic(
+            "censored-insufficient-events",
+            gross_events,
+            len(positive),
+            None,
+            None,
+            None,
+        )
+    logs = [math.log10(value) for value in positive]
+    trend = _linear_trend(logs)
+    first = statistics.fmean(positive[: len(positive) // 2])
+    second = statistics.fmean(positive[len(positive) // 2 :])
+    half_change = math.log10(second / first)
+    status = "steady-positive"
+    if abs(trend) > 0.35:
+        reasons.append(f"{species} fitted dissolution trend exceeds 0.35 decade")
+        status = "nonsteady"
+    if abs(half_change) > 0.35:
+        reasons.append(f"{species} half-window dissolution shift exceeds 0.35 decade")
+        status = "nonsteady"
+    return SpeciesSteadyDiagnostic(
+        status, gross_events, len(positive), trend, half_change, None
+    )
+
+
 def assess_steady_state(
     points: Sequence[SteadyPoint], expected_steps: int
 ) -> SteadyStateGate:
     reasons: list[str] = []
-    if len(points) < 8:
+    tail = points[-7:] if len(points) >= 7 else points
+    si_population = _population_diagnostics(points, tail, "solid_si_cations")
+    al_population = _population_diagnostics(points, tail, "solid_al_cations")
+    population = _population_diagnostics(points, tail, "solid_cations")
+
+    def early(status: str, reason: str) -> SteadyStateGate:
         return SteadyStateGate(
+            status,
             False,
-            ("insufficient cadence: need at least eight samples",),
+            False,
+            "unresolved",
+            (reason,),
+            tail[0].step if tail else None,
+            tail[-1].step if tail else None,
+            tail[0].time_s if tail else None,
+            tail[-1].time_s if tail else None,
             None,
             None,
-            0,
-            0,
             None,
-            None,
+            si_population,
+            al_population,
+            population.initial_solid_cations,
+            population.final_solid_cations,
+            population.final_fraction,
+            population.tail_relative_range,
+            population.tail_fractional_trend,
+            population.stability_status,
         )
+
+    if len(points) < 8:
+        return early("incomplete", "insufficient cadence: need at least eight samples")
     if points[-1].step < expected_steps:
-        reasons.append("run stopped early before configured step limit")
-    for left, right in zip(points, points[1:]):
+        return early("incomplete", "run stopped early before configured step limit")
+    for left, right in itertools.pairwise(points):
         if (
             right.step <= left.step
-            or not math.isfinite(right.time)
-            or right.time <= left.time
+            or not math.isfinite(left.time_s)
+            or not math.isfinite(right.time_s)
+            or right.time_s <= left.time_s
         ):
-            reasons.append("sample steps/times are not strictly increasing and finite")
-            break
+            return early(
+                "incomplete",
+                "sample steps and exposure times must be strictly increasing and finite",
+            )
     initial = points[0]
     final = points[-1]
     if (
-        initial.solid_cations <= 0
-        or final.solid_cations <= 0.10 * initial.solid_cations
+        initial.solid_si_cations <= 0
+        or initial.solid_al_cations <= 0
+        or final.solid_si_cations <= 0.10 * initial.solid_si_cations
+        or final.solid_al_cations <= 0.10 * initial.solid_al_cations
+        or initial.area_a2 <= 0.0
+        or final.area_a2 <= 0.10 * initial.area_a2
     ):
-        reasons.append("solid inventory reached the absorbing/dissolved floor")
-    if initial.area_a2 <= 0.0 or final.area_a2 <= 0.10 * initial.area_a2:
-        reasons.append("geometric area reached the absorbing/dissolved floor")
+        return early("absorbed", "solid inventory or area reached the absorbing floor")
 
-    tail = points[-7:]
-    interval_fluxes = []
-    interval_events = []
-    for left, right in zip(tail, tail[1:]):
-        count = right.gross_events - left.gross_events
-        interval_events.append(count)
-        try:
-            denominator = integrate_area(
-                [left.time, right.time], [left.area_a2, right.area_a2]
-            )
-        except ValueError:
-            denominator = math.nan
-        interval_fluxes.append(
-            count / denominator if count > 0 and denominator > 0 else 0.0
-        )
-    gross_events = sum(interval_events)
-    positive = [
-        value for value in interval_fluxes if value > 0.0 and math.isfinite(value)
-    ]
-    if gross_events < 12:
-        reasons.append("too few gross dissolution events in the steady-state window")
-    if len(positive) < 4:
-        reasons.append("insufficient nonzero dissolution-event cadence")
-    trend = None
-    half_change = None
-    if len(positive) >= 4:
-        logs = [math.log10(value) for value in positive]
-        trend = _linear_trend(logs)
-        if abs(trend) > 0.35:
-            reasons.append("per-replica fitted dissolution trend exceeds 0.35 decade")
-        first = statistics.fmean(positive[: len(positive) // 2])
-        second = statistics.fmean(positive[len(positive) // 2 :])
-        half_change = math.log10(second / first)
-        if abs(half_change) > 0.35:
-            reasons.append(
-                "per-replica half-window dissolution shift exceeds 0.35 decade"
-            )
+    area_time = integrate_area(
+        [point.time_s for point in tail], [point.area_a2 for point in tail]
+    )
+    si = _species_diagnostic("si", tail, area_time, reasons)
+    al = _species_diagnostic("al", tail, area_time, reasons)
+    species_statuses = {si.status, al.status}
+    if (
+        "nonsteady" in species_statuses
+        or "censored-insufficient-events" in species_statuses
+    ):
+        status = "nonsteady"
+        outcome = "unresolved"
+    elif species_statuses == {"zero-upper-bound"}:
+        status = "steady-zero"
+        outcome = "no-dissolution"
+    elif "zero-upper-bound" in species_statuses:
+        status = "steady-zero"
+        outcome = "species-zero-upper-bound"
+    else:
+        status = "steady-positive"
+        outcome = "positive-dissolution"
     return SteadyStateGate(
-        not reasons,
+        status,
+        status == "steady-positive",
+        status in {"steady-positive", "steady-zero"},
+        outcome,
         tuple(reasons),
         tail[0].step,
         tail[-1].step,
-        gross_events,
-        len(positive),
-        trend,
-        half_change,
+        tail[0].time_s,
+        tail[-1].time_s,
+        area_time,
+        si,
+        al,
+        si_population,
+        al_population,
+        population.initial_solid_cations,
+        population.final_solid_cations,
+        population.final_fraction,
+        population.tail_relative_range,
+        population.tail_fractional_trend,
+        population.stability_status,
     )
 
 
-def _counts_through(events: EventData, time_s: float, names: set[str]) -> int:
-    end = bisect.bisect_right(events.times, time_s)
+def _counts_through_step(events: EventData, step: int, names: set[str]) -> int:
+    end = bisect.bisect_right(events.steps, step)
     return sum(1 for name in events.names[:end] if name in names)
 
 
-def _counts_between(events: EventData, start: float, end: float, name: str) -> int:
-    left = bisect.bisect_right(events.times, start)
-    right = bisect.bisect_right(events.times, end)
+def _counts_between_steps(
+    events: EventData, start_step: int, end_step: int, name: str
+) -> int:
+    left = bisect.bisect_right(events.steps, start_step)
+    right = bisect.bisect_right(events.steps, end_step)
     return sum(1 for value in events.names[left:right] if value == name)
 
 
 def dissolution_event_counts(
-    events: EventData, start: float, end: float
+    events: EventData, start_step: int, end_step: int
 ) -> dict[str, int]:
-    """Return gross desorption, adsorption, and net release for Si and Al."""
+    """Count Si/Al events in the exact event-step window (start, end]."""
 
-    if not math.isfinite(start) or not math.isfinite(end) or end <= start:
-        raise ValueError("event-accounting window must be finite and increasing")
+    if (
+        type(start_step) is not int
+        or type(end_step) is not int
+        or start_step < 0
+        or end_step <= start_step
+    ):
+        raise ValueError("event-accounting steps must define an increasing window")
     result: dict[str, int] = {}
     for species in ("si", "al"):
-        gross = _counts_between(events, start, end, f"desorb-{species}")
-        adsorbed = _counts_between(events, start, end, f"adsorb-{species}")
+        gross = _counts_between_steps(events, start_step, end_step, f"desorb-{species}")
+        adsorbed = _counts_between_steps(
+            events, start_step, end_step, f"adsorb-{species}"
+        )
         result[f"gross_{species}"] = gross
         result[f"adsorb_{species}"] = adsorbed
         result[f"net_{species}"] = gross - adsorbed
     return result
 
 
-def _solid_cations(row: PopulationRow) -> int:
+def _solid_cations(row: PopulationRow, species: str) -> int:
     return sum(
         count
         for state, count in row.states.items()
-        if (state.startswith("Si.") or state.startswith("Al."))
-        and not state.endswith(".empty")
+        if state.startswith(f"{species}.") and not state.endswith(".empty")
     )
 
 
@@ -1063,55 +1606,72 @@ def _analyze_replica(
     ]
     events = parse_events(run_dir / "events.jsonl", contract, seed)
     populations = parse_populations(run_dir / "populations.csv", state_names)
-    observables = parse_observables(run_dir / "observables.csv", seed)
-    if populations[-1].step != len(events.times):
-        raise ValueError(f"{run_dir}: event count disagrees with final population step")
+    if any(sum(row.states.values()) != events.n_sites for row in populations):
+        raise ValueError(
+            f"{run_dir}: population cardinality disagrees with event header"
+        )
+    observables = parse_observables(
+        run_dir / "observables.csv", len(state_names), len(REACTION_REGISTRY), seed
+    )
+    final_event_step = events.steps[-1] if events.steps else 0
+    if populations[-1].step != final_event_step:
+        raise ValueError(f"{run_dir}: final event step disagrees with population step")
     expected_sample_steps = list(
         range(0, populations[-1].step + 1, contract.report_every)
     )
     if not expected_sample_steps or expected_sample_steps[-1] != populations[-1].step:
         expected_sample_steps.append(populations[-1].step)
-    if [row.step for row in populations] != expected_sample_steps:
+    population_steps = [row.step for row in populations]
+    if population_steps != expected_sample_steps:
         raise ValueError(f"{run_dir}: population cadence does not match deck")
-    observable_keys = list(observables)
-    population_keys = [(row.step, row.time) for row in populations]
-    if len(observable_keys) != len(population_keys):
-        raise ValueError(f"{run_dir}: population/observable cadence length mismatch")
-    aligned = []
-    for row, key in zip(populations, observable_keys, strict=True):
-        if row.step != key[0] or not math.isclose(
-            row.time, key[1], rel_tol=2e-6, abs_tol=1e-15
-        ):
-            raise ValueError(f"{run_dir}: population/observable cadence mismatch")
-        sample = observables[key]
-        state_counts = sample["state_counts"]
-        if len(state_counts) != len(state_names) or any(
-            int(value) != row.states[name]
+    if list(observables) != population_steps:
+        raise ValueError(
+            f"{run_dir}: observables/populations must align exactly by step"
+        )
+
+    points: list[SteadyPoint] = []
+    for row in populations:
+        sample = observables[row.step]
+        state_counts = sample.values["state_counts"]
+        if any(
+            not value.is_integer() or int(value) != row.states[name]
             for name, value in zip(state_names, state_counts, strict=True)
         ):
             raise ValueError(
                 f"{run_dir}: state-count observable disagrees with populations"
             )
-        aligned.append((row, sample["surface_area"][0]))
-    gross_names = {"desorb-si", "desorb-al"}
-    points = [
-        SteadyPoint(
-            row.step,
-            row.time,
-            _counts_through(events, row.time, gross_names),
-            area,
-            _solid_cations(row),
+        points.append(
+            SteadyPoint(
+                row.step,
+                sample.time_s,
+                _counts_through_step(events, row.step, {"desorb-si"}),
+                _counts_through_step(events, row.step, {"desorb-al"}),
+                sample.values["surface_area"][0],
+                _solid_cations(row, "Si"),
+                _solid_cations(row, "Al"),
+            )
         )
-        for row, area in aligned
-    ]
     gate = assess_steady_state(points, contract.step_limit)
-    start_index = len(points) - 7
-    start, end = points[start_index], points[-1]
-    area_time = integrate_area(
-        [point.time for point in points[start_index:]],
-        [point.area_a2 for point in points[start_index:]],
-    )
-    accounting = dissolution_event_counts(events, start.time, end.time)
+    start = points[-7] if len(points) >= 7 else points[0]
+    end = points[-1]
+    area_time: float | None = None
+    accounting = {
+        "gross_si": 0,
+        "adsorb_si": 0,
+        "net_si": 0,
+        "gross_al": 0,
+        "adsorb_al": 0,
+        "net_al": 0,
+    }
+    if len(points) >= 2 and end.step > start.step:
+        try:
+            area_time = integrate_area(
+                [point.time_s for point in points[-7:]],
+                [point.area_a2 for point in points[-7:]],
+            )
+        except ValueError:
+            area_time = None
+        accounting = dissolution_event_counts(events, start.step, end.step)
     gross_si = accounting["gross_si"]
     adsorb_si = accounting["adsorb_si"]
     net_si = accounting["net_si"]
@@ -1119,14 +1679,18 @@ def _analyze_replica(
     adsorb_al = accounting["adsorb_al"]
     net_al = accounting["net_al"]
     ratio = net_si / net_al if net_si > 0 and net_al > 0 else None
+
+    def flux(count: int) -> float | None:
+        return event_count_to_flux(count, area_time) if area_time is not None else None
+
     rate = ReplicaRate(
         scenario,
         replica,
         seed,
-        start.step,
-        end.step,
-        start.time,
-        end.time,
+        start.step if area_time is not None else None,
+        end.step if area_time is not None else None,
+        start.time_s if area_time is not None else None,
+        end.time_s if area_time is not None else None,
         area_time,
         gross_si,
         adsorb_si,
@@ -1134,12 +1698,15 @@ def _analyze_replica(
         gross_al,
         adsorb_al,
         net_al,
-        event_count_to_flux(gross_si, area_time),
-        event_count_to_flux(net_si, area_time),
-        event_count_to_flux(gross_al, area_time),
-        event_count_to_flux(net_al, area_time),
+        flux(gross_si),
+        flux(net_si),
+        flux(gross_al),
+        flux(net_al),
+        gate.si.upper_95_mol_m2_s if gate.si is not None else None,
+        gate.al.upper_95_mol_m2_s if gate.al is not None else None,
         ratio,
-        gate.passed,
+        gate.status,
+        gate.acceptance_passed,
     )
     return rate, gate, populations
 
@@ -1194,71 +1761,325 @@ def _scenario_deck_contract(path: Path, nominal: DeckContract) -> DeckContract:
     )
 
 
+def _exact_keys(value: object, expected: set[str], label: str) -> dict:
+    if not isinstance(value, dict) or set(value) != expected:
+        actual = sorted(value) if isinstance(value, dict) else type(value).__name__
+        raise ValueError(f"{label} schema mismatch: {actual}")
+    return value
+
+
+def _valid_sha256(value: object) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def _campaign_outcome(gates: Sequence[dict[str, object]]) -> str:
+    statuses = {str(gate["status"]) for gate in gates}
+    for status in ("incomplete", "absorbed", "nonsteady"):
+        if status in statuses:
+            return status
+    if "steady-zero" in statuses:
+        outcomes = {str(gate["dissolution_outcome"]) for gate in gates}
+        return (
+            "no-dissolution"
+            if outcomes == {"no-dissolution"}
+            else "species-or-replica-zero-upper-bound"
+        )
+    return "steady-positive"
+
+
+def _validate_raw_campaign(
+    raw_root: Path,
+) -> tuple[dict, tuple[int, ...], list[dict], DeckContract, dict[str, str]]:
+    raw_root = raw_root.resolve()
+    manifest_path = raw_root / "manifest.json"
+    checkpoint_path = raw_root / "checkpoint.json"
+    manifest = _exact_keys(
+        json.loads(manifest_path.read_text(encoding="utf-8")),
+        {
+            "schema",
+            "status",
+            "survey_tier",
+            "temperature_k",
+            "units",
+            "seeds",
+            "replicas",
+            "workers",
+            "timeout_seconds",
+            "source_deck",
+            "source_deck_sha256",
+            "petra_binary",
+            "petra_binary_sha256",
+            "scenarios",
+            "completed_runs",
+            "checkpoint_sha256",
+        },
+        "campaign manifest",
+    )
+    if (
+        manifest["schema"] != RAW_SCHEMA
+        or manifest["status"] != "complete"
+        or manifest["survey_tier"] is not True
+        or manifest["temperature_k"] != 298.0
+        or manifest["units"] != "kcal/mol"
+    ):
+        raise ValueError("campaign manifest constants/status mismatch")
+    seeds = validate_seeds(manifest["seeds"])
+    if manifest["replicas"] != REPLICA_COUNT:
+        raise ValueError("campaign manifest replica count mismatch")
+    if (
+        type(manifest["workers"]) is not int
+        or not 1 <= manifest["workers"] <= MAX_WORKERS
+        or type(manifest["timeout_seconds"]) is not int
+        or not 1 <= manifest["timeout_seconds"] <= MAX_TIMEOUT_SECONDS
+    ):
+        raise ValueError("campaign execution bounds are invalid")
+
+    source_deck = Path(manifest["source_deck"])
+    petra_binary = Path(manifest["petra_binary"])
+    for path, expected_hash, label in (
+        (source_deck, manifest["source_deck_sha256"], "source deck"),
+        (petra_binary, manifest["petra_binary_sha256"], "Petra binary"),
+    ):
+        if not _valid_sha256(expected_hash) or not path.is_file():
+            raise ValueError(f"{label} binding is missing")
+        if sha256_file(path) != expected_hash:
+            raise ValueError(f"{label} hash mismatch")
+    source_contract = validate_deck(source_deck, seeds)
+
+    scenario_records = manifest["scenarios"]
+    if not isinstance(scenario_records, list) or len(scenario_records) != len(
+        scenarios()
+    ):
+        raise ValueError("campaign must contain exactly 29 scenarios")
+    expected_scenarios = [asdict(value) for value in scenarios()]
+    for record, expected in zip(scenario_records, expected_scenarios, strict=True):
+        _exact_keys(
+            record,
+            {"name", "family", "perturbation", "deck", "deck_sha256"},
+            "scenario record",
+        )
+        if {key: record[key] for key in expected} != expected:
+            raise ValueError("campaign scenario coverage/order is incomplete")
+        deck_path = raw_root / "decks" / f"{record['name']}.toml"
+        if Path(record["deck"]).resolve() != deck_path or not _valid_sha256(
+            record["deck_sha256"]
+        ):
+            raise ValueError(f"scenario deck binding mismatch: {record['name']}")
+        if sha256_file(deck_path) != record["deck_sha256"]:
+            raise ValueError(f"scenario deck hash mismatch: {record['name']}")
+        expected_text = (
+            source_contract.text
+            if record["family"] is None
+            else perturb_deck(source_contract, record["family"], record["perturbation"])
+        )
+        if deck_path.read_text(encoding="utf-8") != expected_text:
+            raise ValueError(f"scenario deck bytes mismatch: {record['name']}")
+
+    if not _valid_sha256(manifest["checkpoint_sha256"]):
+        raise ValueError("checkpoint hash is empty or malformed")
+    if sha256_file(checkpoint_path) != manifest["checkpoint_sha256"]:
+        raise ValueError("campaign checkpoint hash mismatch")
+    checkpoint = _exact_keys(
+        json.loads(checkpoint_path.read_text(encoding="utf-8")),
+        {"schema", "status", "receipts"},
+        "campaign checkpoint",
+    )
+    if checkpoint["schema"] != CHECKPOINT_SCHEMA or checkpoint["status"] != "complete":
+        raise ValueError("campaign checkpoint constants/status mismatch")
+    receipts = checkpoint["receipts"]
+    expected_identities = {
+        (scenario.name, replica, seed)
+        for scenario in scenarios()
+        for replica, seed in enumerate(seeds)
+    }
+    if not isinstance(receipts, list) or len(receipts) != len(expected_identities):
+        raise ValueError("checkpoint receipt count mismatch")
+    identities: set[tuple[object, object, object]] = set()
+    required_run_files = {
+        "events.jsonl",
+        "populations.csv",
+        "observables.csv",
+        "snapshot.pgif.json",
+    }
+    for receipt in receipts:
+        _exact_keys(
+            receipt,
+            {
+                "schema",
+                "seed",
+                "elapsed_seconds",
+                "command",
+                "output",
+                "log",
+                "sha256",
+                "scenario",
+                "replica",
+            },
+            "run receipt",
+        )
+        if receipt["schema"] != "a9-run-receipt-v2":
+            raise ValueError("run receipt schema mismatch")
+        identity = (receipt["scenario"], receipt["replica"], receipt["seed"])
+        identities.add(identity)
+        if identity not in expected_identities:
+            raise ValueError(f"unexpected run identity: {identity}")
+        scenario_name, replica, seed = identity
+        expected_run = (
+            raw_root
+            / "runs"
+            / str(scenario_name)
+            / f"replica-{replica:02d}-seed-{seed}"
+        )
+        expected_log = (
+            raw_root
+            / "logs"
+            / str(scenario_name)
+            / f"replica-{replica:02d}-seed-{seed}.log"
+        )
+        expected_deck = raw_root / "decks" / f"{scenario_name}.toml"
+        if (
+            Path(receipt["output"]).resolve() != expected_run
+            or Path(receipt["log"]).resolve() != expected_log
+        ):
+            raise ValueError(f"run path mismatch: {identity}")
+        expected_command = [
+            "nice",
+            "-n",
+            "10",
+            str(petra_binary.resolve()),
+            str(expected_deck.resolve()),
+            "--seed",
+            str(seed),
+            "--ensemble",
+            "1",
+            "--out",
+            str(expected_run),
+            "--viz",
+            "--paranoid",
+        ]
+        if receipt["command"] != expected_command:
+            raise ValueError(f"run command mismatch: {identity}")
+        elapsed = _finite_number(receipt["elapsed_seconds"], "elapsed_seconds")
+        if elapsed < 0:
+            raise ValueError("run elapsed_seconds must be nonnegative")
+        hashes = _exact_keys(
+            receipt["sha256"], required_run_files | {"log"}, "run hashes"
+        )
+        for filename, expected_hash in hashes.items():
+            if not _valid_sha256(expected_hash):
+                raise ValueError(f"empty/malformed run hash: {identity} {filename}")
+            artifact = expected_log if filename == "log" else expected_run / filename
+            if not artifact.is_file() or artifact.stat().st_size == 0:
+                raise ValueError(f"missing/empty run artifact: {artifact}")
+            if sha256_file(artifact) != expected_hash:
+                raise ValueError(f"run artifact hash mismatch: {artifact}")
+    if identities != expected_identities:
+        raise ValueError("checkpoint has duplicate or missing scenario/replica seeds")
+    if manifest["completed_runs"] != len(expected_identities):
+        raise ValueError("manifest completed-run count mismatch")
+
+    expected_files = {"manifest.json", "checkpoint.json"}
+    expected_files.update(f"decks/{scenario.name}.toml" for scenario in scenarios())
+    for scenario in scenarios():
+        for replica, seed in enumerate(seeds):
+            stem = f"{scenario.name}/replica-{replica:02d}-seed-{seed}"
+            expected_files.add(f"logs/{stem}.log")
+            expected_files.update(
+                f"runs/{stem}/{filename}" for filename in required_run_files
+            )
+    actual_files = {
+        path.relative_to(raw_root).as_posix()
+        for path in raw_root.rglob("*")
+        if path.is_file()
+    }
+    if actual_files != expected_files:
+        raise ValueError(
+            f"raw file inventory mismatch: missing={sorted(expected_files - actual_files)}, "
+            f"extra={sorted(actual_files - expected_files)}"
+        )
+    if any(path.is_symlink() for path in raw_root.rglob("*")):
+        raise ValueError("raw campaign may not contain symlinks")
+    raw_hashes = {
+        relative: sha256_file(raw_root / relative)
+        for relative in sorted(expected_files)
+    }
+    nominal = validate_deck(raw_root / "decks" / "nominal.toml", seeds)
+    return manifest, seeds, scenario_records, nominal, raw_hashes
+
+
+def _write_provenance(path: Path) -> None:
+    rows: list[dict[str, object]] = []
+    for entry in REACTION_REGISTRY:
+        row = {field: "" for field in PROVENANCE_FIELDS}
+        row.update(
+            {
+                "record_type": "reaction",
+                "reaction": entry.name,
+                "ea_kcal_mol": entry.ea_kcal_mol,
+                "family": entry.family,
+                "provenance_class": entry.provenance_class,
+                "source": entry.source,
+                "method": entry.method,
+                "observable_type": entry.observable_type,
+                "rationale": entry.rationale,
+            }
+        )
+        rows.append(row)
+    for name, value, unit, expression, rationale in (
+        (
+            "avogadro_constant",
+            AVOGADRO_EXACT,
+            "mol^-1",
+            "mol = dissolved_cation_events / N_A",
+            "One desorbed Si or Al cation is one atom-equivalent event.",
+        ),
+        (
+            "angstrom2_to_m2",
+            ANGSTROM2_TO_M2,
+            "m2/A2",
+            "area_m2 = geometric_area_A2 * 1e-20",
+            "Petra geometric surface area uses squared deck-cell length units (A2).",
+        ),
+    ):
+        row = {field: "" for field in PROVENANCE_FIELDS}
+        row.update(
+            {
+                "record_type": "conversion",
+                "rationale": rationale,
+                "constant_name": name,
+                "constant_value": value,
+                "constant_unit": unit,
+                "conversion_expression": expression,
+            }
+        )
+        rows.append(row)
+    _write_csv_atomic(path, PROVENANCE_FIELDS, rows)
+
+
+def _aggregate_zero_upper(members: Sequence[ReplicaRate]) -> float | None:
+    if any(member.area_time_a2_s is None for member in members):
+        return None
+    if sum(member.gross_si_events + member.gross_al_events for member in members) != 0:
+        return None
+    exposure = sum(float(member.area_time_a2_s) for member in members)
+    return poisson_zero_upper_flux_95(exposure)
+
+
 def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
     if out_dir.exists():
         raise ValueError(f"refusing to overwrite analysis directory: {out_dir}")
-    manifest = json.loads((raw_root / "manifest.json").read_text(encoding="utf-8"))
-    if manifest.get("status") != "complete":
-        raise ValueError("campaign manifest is not complete")
-    seeds = validate_seeds(manifest.get("seeds", []))
-    scenario_records = manifest.get("scenarios", [])
-    expected_scenarios = [asdict(value) for value in scenarios()]
-    if [
-        {key: record.get(key) for key in ("name", "family", "perturbation")}
-        for record in scenario_records
-    ] != expected_scenarios:
-        raise ValueError("campaign scenario coverage/order is incomplete")
-    checkpoint_path = raw_root / "checkpoint.json"
-    if sha256_file(checkpoint_path) != manifest.get("checkpoint_sha256"):
-        raise ValueError("campaign checkpoint hash mismatch")
-    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-    if checkpoint.get("status") != "complete":
-        raise ValueError("campaign checkpoint is not complete")
-    receipts = checkpoint.get("receipts")
-    expected_identities = {
-        (scenario["name"], replica, seed)
-        for scenario in scenario_records
-        for replica, seed in enumerate(seeds)
-    }
-    if (
-        not isinstance(receipts, list)
-        or {
-            (receipt.get("scenario"), receipt.get("replica"), receipt.get("seed"))
-            for receipt in receipts
-            if isinstance(receipt, dict)
-        }
-        != expected_identities
-    ):
-        raise ValueError("checkpoint has duplicate or missing scenario/replica seeds")
-    if len(receipts) != len(expected_identities):
-        raise ValueError("checkpoint receipt count includes duplicate runs")
-    for receipt in receipts:
-        run_dir = Path(receipt["output"])
-        for filename, expected_hash in receipt["sha256"].items():
-            artifact = Path(receipt["log"]) if filename == "log" else run_dir / filename
-            if sha256_file(artifact) != expected_hash:
-                raise ValueError(f"checkpoint artifact hash mismatch: {artifact}")
-    nominal_path = Path(scenario_records[0]["deck"])
-    nominal = validate_deck(nominal_path, seeds)
+    _, seeds, scenario_records, nominal, raw_hashes = _validate_raw_campaign(raw_root)
+    raw_root = raw_root.resolve()
     out_dir.mkdir(parents=True)
 
     rates: list[ReplicaRate] = []
     gates: list[dict[str, object]] = []
     population_rows: list[dict[str, object]] = []
     legacy_rows: list[dict[str, object]] = []
-    raw_hashes: dict[str, str] = {}
     for scenario_record in scenario_records:
         scenario_name = scenario_record["name"]
         deck_path = Path(scenario_record["deck"])
-        if sha256_file(deck_path) != scenario_record["deck_sha256"]:
-            raise ValueError(f"scenario deck hash mismatch: {scenario_name}")
         contract = _scenario_deck_contract(deck_path, nominal)
-        if scenario_record["family"] is not None:
-            expected = perturb_deck(
-                nominal, scenario_record["family"], scenario_record["perturbation"]
-            )
-            if expected != contract.text:
-                raise ValueError(f"scenario isolation mismatch: {scenario_name}")
         for replica, seed in enumerate(seeds):
             run_dir = (
                 raw_root / "runs" / scenario_name / f"replica-{replica:02d}-seed-{seed}"
@@ -1284,7 +2105,7 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
                         "replica": replica,
                         "seed": seed,
                         "step": population.step,
-                        "time": population.time,
+                        "time_s": population.time_s,
                         **population.states,
                     }
                 )
@@ -1294,7 +2115,7 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
                         "replica": replica,
                         "seed": seed,
                         "step": population.step,
-                        "time": population.time,
+                        "time_s": population.time_s,
                         "Si_total": sum(si_bins),
                         **{
                             f"Si_oh{index}": value
@@ -1306,96 +2127,124 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
                         },
                     }
                 )
-            for filename in (
-                "events.jsonl",
-                "populations.csv",
-                "observables.csv",
-                "snapshot.pgif.json",
-            ):
-                relative = (run_dir / filename).relative_to(raw_root).as_posix()
-                raw_hashes[relative] = sha256_file(run_dir / filename)
 
     rate_fields = list(ReplicaRate.__dataclass_fields__)
-    rate_rows = []
+    log_fields = [
+        "log10_gross_si_flux_mol_m2_s",
+        "log10_net_si_flux_mol_m2_s",
+        "log10_gross_al_flux_mol_m2_s",
+        "log10_net_al_flux_mol_m2_s",
+    ]
+    rate_rows: list[dict[str, object]] = []
     for rate in rates:
-        row = asdict(rate)
-        row["si_al_net_ratio"] = _display(rate.si_al_net_ratio)
-        row["log10_gross_si_flux"] = _display(
-            math.log10(rate.gross_si_flux) if rate.gross_si_flux > 0 else None
-        )
-        row["log10_net_si_flux"] = _display(
-            math.log10(rate.net_si_flux) if rate.net_si_flux > 0 else None
-        )
-        row["log10_gross_al_flux"] = _display(
-            math.log10(rate.gross_al_flux) if rate.gross_al_flux > 0 else None
-        )
-        row["log10_net_al_flux"] = _display(
-            math.log10(rate.net_al_flux) if rate.net_al_flux > 0 else None
-        )
+        row = {
+            key: _display(value) if value is None else value
+            for key, value in asdict(rate).items()
+        }
+        for species in ("si", "al"):
+            for basis in ("gross", "net"):
+                value = getattr(rate, f"{basis}_{species}_flux_mol_m2_s")
+                row[f"log10_{basis}_{species}_flux_mol_m2_s"] = _display(
+                    math.log10(value) if value is not None and value > 0 else None
+                )
         rate_rows.append(row)
     _write_csv_atomic(
-        out_dir / "per-replica-rates.csv",
-        [
-            *rate_fields,
-            "log10_gross_si_flux",
-            "log10_net_si_flux",
-            "log10_gross_al_flux",
-            "log10_net_al_flux",
-        ],
-        rate_rows,
+        out_dir / "per-replica-rates.csv", [*rate_fields, *log_fields], rate_rows
     )
 
-    ensemble_rows = []
     by_scenario = {
         scenario.name: [rate for rate in rates if rate.scenario == scenario.name]
         for scenario in scenarios()
     }
-    metrics = ("gross_si_flux", "net_si_flux", "gross_al_flux", "net_al_flux")
+    ensemble_fields = [
+        "scenario",
+        "species",
+        "rate_basis",
+        "status",
+        "mean_mol_m2_s",
+        "ci95_low_mol_m2_s",
+        "ci95_high_mol_m2_s",
+        "poisson_zero_upper_95_mol_m2_s",
+        "log10_mean_mol_m2_s",
+    ]
+    ensemble_rows: list[dict[str, object]] = []
     for scenario_name, members in by_scenario.items():
-        for metric in metrics:
-            values = [getattr(member, metric) for member in members]
-            mean, low, high = bootstrap_summary(values, f"{scenario_name}:{metric}")
-            ensemble_rows.append(
-                {
-                    "scenario": scenario_name,
-                    "metric": metric,
-                    "mean": mean,
-                    "ci95_low": low,
-                    "ci95_high": high,
-                    "log10_mean": _display(math.log10(mean) if mean > 0 else None),
-                }
-            )
-        ratios = [member.si_al_net_ratio for member in members]
-        defined_ratios = [value for value in ratios if value is not None]
-        if len(defined_ratios) == len(ratios):
+        for species in ("si", "al"):
+            for basis in ("gross", "net"):
+                values = [
+                    getattr(member, f"{basis}_{species}_flux_mol_m2_s")
+                    for member in members
+                ]
+                defined = [value for value in values if value is not None]
+                if len(defined) == len(values):
+                    mean, low, high = bootstrap_summary(
+                        defined, f"{scenario_name}:{species}:{basis}"
+                    )
+                    status = (
+                        "zero-upper-bound"
+                        if basis == "gross" and mean == 0
+                        else "estimated"
+                    )
+                    upper = None
+                    if status == "zero-upper-bound":
+                        exposure = sum(
+                            float(member.area_time_a2_s) for member in members
+                        )
+                        upper = poisson_zero_upper_flux_95(exposure)
+                else:
+                    mean = low = high = upper = None
+                    status = "incomplete"
+                ensemble_rows.append(
+                    {
+                        "scenario": scenario_name,
+                        "species": species,
+                        "rate_basis": basis,
+                        "status": status,
+                        "mean_mol_m2_s": _display(mean),
+                        "ci95_low_mol_m2_s": _display(low),
+                        "ci95_high_mol_m2_s": _display(high),
+                        "poisson_zero_upper_95_mol_m2_s": _display(upper),
+                        "log10_mean_mol_m2_s": _display(
+                            math.log10(mean) if mean is not None and mean > 0 else None
+                        ),
+                    }
+                )
+    _write_csv_atomic(out_dir / "ensemble-rates.csv", ensemble_fields, ensemble_rows)
+
+    stoichiometry_fields = [
+        "scenario",
+        "status",
+        "si_al_net_ratio_dimensionless_mean",
+        "si_al_net_ratio_dimensionless_ci95_low",
+        "si_al_net_ratio_dimensionless_ci95_high",
+        "net_si_events",
+        "net_al_events",
+    ]
+    stoichiometry_rows: list[dict[str, object]] = []
+    for scenario_name, members in by_scenario.items():
+        ratios = [member.si_al_net_ratio_dimensionless for member in members]
+        defined = [value for value in ratios if value is not None]
+        if len(defined) == len(ratios):
             mean, low, high = bootstrap_summary(
-                defined_ratios, f"{scenario_name}:si_al_net_ratio"
+                defined, f"{scenario_name}:si_al_net_ratio_dimensionless"
             )
-            ensemble_rows.append(
-                {
-                    "scenario": scenario_name,
-                    "metric": "si_al_net_ratio",
-                    "mean": mean,
-                    "ci95_low": low,
-                    "ci95_high": high,
-                    "log10_mean": _display(math.log10(mean) if mean > 0 else None),
-                }
-            )
+            status = "estimated"
         else:
-            ensemble_rows.append(
-                {
-                    "scenario": scenario_name,
-                    "metric": "si_al_net_ratio",
-                    "mean": "undefined",
-                    "ci95_low": "undefined",
-                    "ci95_high": "undefined",
-                    "log10_mean": "undefined",
-                }
-            )
+            mean = low = high = None
+            status = "undefined-nonpositive-net"
+        stoichiometry_rows.append(
+            {
+                "scenario": scenario_name,
+                "status": status,
+                "si_al_net_ratio_dimensionless_mean": _display(mean),
+                "si_al_net_ratio_dimensionless_ci95_low": _display(low),
+                "si_al_net_ratio_dimensionless_ci95_high": _display(high),
+                "net_si_events": sum(member.net_si_events for member in members),
+                "net_al_events": sum(member.net_al_events for member in members),
+            }
+        )
     _write_csv_atomic(
-        out_dir / "ensemble-rates.csv",
-        ["scenario", "metric", "mean", "ci95_low", "ci95_high", "log10_mean"],
-        ensemble_rows,
+        out_dir / "stoichiometry.csv", stoichiometry_fields, stoichiometry_rows
     )
 
     state_names = [
@@ -1405,7 +2254,7 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
     ]
     _write_csv_atomic(
         out_dir / "state-populations.csv",
-        ["scenario", "replica", "seed", "step", "time", *state_names],
+        ["scenario", "replica", "seed", "step", "time_s", *state_names],
         population_rows,
     )
     legacy_fields = [
@@ -1413,7 +2262,7 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
         "replica",
         "seed",
         "step",
-        "time",
+        "time_s",
         "Si_total",
         "Si_oh0",
         "Si_oh1",
@@ -1436,38 +2285,78 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
     )
 
     nominal_by_seed = {rate.seed: rate for rate in by_scenario["nominal"]}
-    sensitivity_rows = []
+    sensitivity_fields = [
+        "rank",
+        "family",
+        "declared_response",
+        "status",
+        "max_abs_paired_mean_delta_log10",
+        "nominal_zero_upper_95_mol_m2_s",
+        *[
+            field
+            for perturbation in PERTURBATIONS
+            for field in (
+                f"{perturbation}_status",
+                f"{perturbation}_paired_mean_delta_log10",
+                f"{perturbation}_zero_upper_95_mol_m2_s",
+            )
+        ],
+    ]
+    sensitivity_rows: list[dict[str, object]] = []
     for family in FAMILY_REACTIONS:
         row: dict[str, object] = {
+            "rank": "undefined",
             "family": family,
             "declared_response": SENSITIVITY_RESPONSE,
+            "status": "estimated",
+            "nominal_zero_upper_95_mol_m2_s": _display(
+                _aggregate_zero_upper(by_scenario["nominal"])
+            ),
         }
-        responses = []
-        undefined = False
+        responses: list[float] = []
         for perturbation in PERTURBATIONS:
             scenario_name = f"{family}__{perturbation}"
             perturbed = {rate.seed: rate for rate in by_scenario[scenario_name]}
-            for species in ("si", "al"):
-                deltas = []
-                for seed in seeds:
-                    before = getattr(nominal_by_seed[seed], f"net_{species}_flux")
-                    after = getattr(perturbed[seed], f"net_{species}_flux")
-                    if before <= 0.0 or after <= 0.0:
-                        undefined = True
-                        deltas = []
-                        break
-                    deltas.append(math.log10(after) - math.log10(before))
-                key = f"{perturbation}_{species}_paired_mean_delta_log10"
-                if deltas:
-                    value = statistics.fmean(deltas)
-                    row[key] = value
-                    responses.append(abs(value))
-                else:
-                    row[key] = "undefined"
+            deltas: list[float] = []
+            censored_zero = False
+            for seed in seeds:
+                before_rate = nominal_by_seed[seed]
+                after_rate = perturbed[seed]
+                before = (
+                    before_rate.gross_si_flux_mol_m2_s
+                    + before_rate.gross_al_flux_mol_m2_s
+                    if before_rate.gross_si_flux_mol_m2_s is not None
+                    and before_rate.gross_al_flux_mol_m2_s is not None
+                    else None
+                )
+                after = (
+                    after_rate.gross_si_flux_mol_m2_s
+                    + after_rate.gross_al_flux_mol_m2_s
+                    if after_rate.gross_si_flux_mol_m2_s is not None
+                    and after_rate.gross_al_flux_mol_m2_s is not None
+                    else None
+                )
+                if before == 0 or after == 0:
+                    censored_zero = True
+                if before is None or after is None or before <= 0 or after <= 0:
+                    deltas = []
+                    break
+                deltas.append(math.log10(after) - math.log10(before))
+            if deltas:
+                value = statistics.fmean(deltas)
+                row[f"{perturbation}_status"] = "estimated"
+                row[f"{perturbation}_paired_mean_delta_log10"] = value
+                responses.append(abs(value))
+            else:
+                status = "censored-zero-gross" if censored_zero else "incomplete"
+                row[f"{perturbation}_status"] = status
+                row[f"{perturbation}_paired_mean_delta_log10"] = "undefined"
+                row["status"] = status
+            row[f"{perturbation}_zero_upper_95_mol_m2_s"] = _display(
+                _aggregate_zero_upper(by_scenario[scenario_name])
+            )
         row["max_abs_paired_mean_delta_log10"] = (
-            "undefined"
-            if undefined or len(responses) != len(PERTURBATIONS) * 2
-            else max(responses)
+            max(responses) if len(responses) == len(PERTURBATIONS) else "undefined"
         )
         sensitivity_rows.append(row)
     sensitivity_rows.sort(
@@ -1476,76 +2365,363 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
             -float(row["max_abs_paired_mean_delta_log10"])
             if row["max_abs_paired_mean_delta_log10"] != "undefined"
             else 0.0,
-            row["family"],
+            str(row["family"]),
         )
     )
-    for rank, row in enumerate(sensitivity_rows, start=1):
-        row["rank"] = (
-            rank
-            if row["max_abs_paired_mean_delta_log10"] != "undefined"
-            else "undefined"
-        )
-    sensitivity_fields = [
-        "rank",
-        "family",
-        "declared_response",
-        "max_abs_paired_mean_delta_log10",
-        *[
-            f"{perturbation}_{species}_paired_mean_delta_log10"
-            for perturbation in PERTURBATIONS
-            for species in ("si", "al")
-        ],
-    ]
+    next_rank = 1
+    for row in sensitivity_rows:
+        if row["max_abs_paired_mean_delta_log10"] != "undefined":
+            row["rank"] = next_rank
+            next_rank += 1
     _write_csv_atomic(
         out_dir / "sensitivity-ranking.csv", sensitivity_fields, sensitivity_rows
     )
-    write_json_atomic(out_dir / "steady-state-gates.json", gates)
+    write_json_atomic(
+        out_dir / "steady-state-gates.json",
+        {"schema": "a9-steady-state-gates-v2", "gates": gates},
+    )
+    _write_provenance(out_dir / "provenance-conversions.csv")
 
+    status_counts = {
+        status: sum(gate["status"] == status for gate in gates)
+        for status in (
+            "steady-positive",
+            "steady-zero",
+            "nonsteady",
+            "absorbed",
+            "incomplete",
+        )
+    }
+    outcome = _campaign_outcome(gates)
     output_hashes = {
         path.name: sha256_file(path)
         for path in sorted(out_dir.iterdir())
         if path.is_file() and path.name != "verification.json"
     }
     verification = {
-        "schema": 1,
-        "passed": all(gate["passed"] for gate in gates),
+        "schema": VERIFICATION_SCHEMA,
+        "acceptance_passed": outcome == "steady-positive",
+        "campaign_outcome": outcome,
         "survey_tier": True,
         "temperature_k": 298.0,
+        "energy_unit": "kcal/mol",
+        "flux_unit": "mol_m2_s",
         "avogadro_mol_inverse_exact": AVOGADRO_EXACT,
         "angstrom2_to_m2": ANGSTROM2_TO_M2,
-        "flux_denominator": "trapezoidal integral of emitted geometric area over physical time",
+        "poisson_zero_event_upper_count_95": POISSON_ZERO_EVENT_UPPER_COUNT_95,
+        "flux_denominator": "trapezoidal integral of emitted geometric area_A2 over observable time_s",
+        "event_window": "(window_start_step,window_end_step]",
         "sensitivity_response": SENSITIVITY_RESPONSE,
-        "steady_state_criterion": (__doc__ or "")
-        .split("Steady-state criterion", 1)[1]
-        .strip(),
+        "sensitivity_complete": len(sensitivity_rows) == len(FAMILY_REACTIONS)
+        and {row["family"] for row in sensitivity_rows} == set(FAMILY_REACTIONS),
+        "sensitivity_families": list(FAMILY_REACTIONS),
         "scenario_count": len(scenario_records),
+        "expected_scenarios": [asdict(value) for value in scenarios()],
         "replicas_per_scenario": len(seeds),
         "seeds": list(seeds),
+        "status_counts": status_counts,
+        "raw_file_inventory": sorted(raw_hashes),
+        "derived_file_inventory": sorted(DERIVED_FILES),
         "raw_sha256": raw_hashes,
         "output_sha256": output_hashes,
-        "failed_gates": [gate for gate in gates if not gate["passed"]],
+        "nonpositive_gates": [
+            gate for gate in gates if gate["status"] != "steady-positive"
+        ],
     }
     write_json_atomic(out_dir / "verification.json", verification)
-    return verification
+    return json.loads((out_dir / "verification.json").read_text(encoding="utf-8"))
+
+
+def _read_csv_exact(
+    path: Path, fields: Sequence[str], expected_rows: int | None = None
+) -> list[dict[str, str]]:
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        if reader.fieldnames != list(fields):
+            raise ValueError(f"{path.name} CSV schema mismatch")
+        rows = list(reader)
+    if expected_rows is not None and len(rows) != expected_rows:
+        raise ValueError(f"{path.name} row count mismatch")
+    return rows
+
+
+def _validate_derived_schemas(
+    out_dir: Path,
+    expected_runs: int,
+    nominal: DeckContract,
+    seeds: Sequence[int],
+) -> None:
+    expected_identities = {
+        (scenario.name, str(replica), str(seed))
+        for scenario in scenarios()
+        for replica, seed in enumerate(seeds)
+    }
+    rate_fields = [
+        *ReplicaRate.__dataclass_fields__,
+        "log10_gross_si_flux_mol_m2_s",
+        "log10_net_si_flux_mol_m2_s",
+        "log10_gross_al_flux_mol_m2_s",
+        "log10_net_al_flux_mol_m2_s",
+    ]
+    rate_rows = _read_csv_exact(
+        out_dir / "per-replica-rates.csv", rate_fields, expected_runs
+    )
+    if {
+        (row["scenario"], row["replica"], row["seed"]) for row in rate_rows
+    } != expected_identities:
+        raise ValueError("per-replica rate identity coverage mismatch")
+    ensemble_rows = _read_csv_exact(
+        out_dir / "ensemble-rates.csv",
+        [
+            "scenario",
+            "species",
+            "rate_basis",
+            "status",
+            "mean_mol_m2_s",
+            "ci95_low_mol_m2_s",
+            "ci95_high_mol_m2_s",
+            "poisson_zero_upper_95_mol_m2_s",
+            "log10_mean_mol_m2_s",
+        ],
+        len(scenarios()) * 4,
+    )
+    if {
+        (row["scenario"], row["species"], row["rate_basis"]) for row in ensemble_rows
+    } != {
+        (scenario.name, species, basis)
+        for scenario in scenarios()
+        for species in ("si", "al")
+        for basis in ("gross", "net")
+    }:
+        raise ValueError("ensemble rate identity coverage mismatch")
+    stoichiometry_rows = _read_csv_exact(
+        out_dir / "stoichiometry.csv",
+        [
+            "scenario",
+            "status",
+            "si_al_net_ratio_dimensionless_mean",
+            "si_al_net_ratio_dimensionless_ci95_low",
+            "si_al_net_ratio_dimensionless_ci95_high",
+            "net_si_events",
+            "net_al_events",
+        ],
+        len(scenarios()),
+    )
+    if {row["scenario"] for row in stoichiometry_rows} != {
+        scenario.name for scenario in scenarios()
+    }:
+        raise ValueError("stoichiometry scenario coverage mismatch")
+    sensitivity = _read_csv_exact(
+        out_dir / "sensitivity-ranking.csv",
+        [
+            "rank",
+            "family",
+            "declared_response",
+            "status",
+            "max_abs_paired_mean_delta_log10",
+            "nominal_zero_upper_95_mol_m2_s",
+            *[
+                field
+                for perturbation in PERTURBATIONS
+                for field in (
+                    f"{perturbation}_status",
+                    f"{perturbation}_paired_mean_delta_log10",
+                    f"{perturbation}_zero_upper_95_mol_m2_s",
+                )
+            ],
+        ],
+        len(FAMILY_REACTIONS),
+    )
+    if {row["family"] for row in sensitivity} != set(FAMILY_REACTIONS):
+        raise ValueError("sensitivity family coverage mismatch")
+    provenance = _read_csv_exact(
+        out_dir / "provenance-conversions.csv",
+        PROVENANCE_FIELDS,
+        len(REACTION_REGISTRY) + 2,
+    )
+    if [row["reaction"] for row in provenance[:22]] != [
+        entry.name for entry in REACTION_REGISTRY
+    ]:
+        raise ValueError("provenance reaction coverage/order mismatch")
+    state_names = [
+        f"{kind['name']}.{state['name']}"
+        for kind in nominal.parsed["kinds"]
+        for state in kind["states"]
+    ]
+    population_rows = _read_csv_exact(
+        out_dir / "state-populations.csv",
+        ["scenario", "replica", "seed", "step", "time_s", *state_names],
+    )
+    legacy_rows = _read_csv_exact(
+        out_dir / "results-dat-equivalent.csv",
+        [
+            "scenario",
+            "replica",
+            "seed",
+            "step",
+            "time_s",
+            "Si_total",
+            "Si_oh0",
+            "Si_oh1",
+            "Si_oh2",
+            "Si_oh3",
+            "Si_oh4",
+            "Al_total",
+            "Al_l0",
+            "Al_l1",
+            "Al_l2",
+            "Al_l3",
+            "Al_l4",
+            "Al_l5",
+            "Al_l6",
+        ],
+    )
+    if not population_rows or len(population_rows) != len(legacy_rows):
+        raise ValueError("population/legacy series cardinality mismatch")
+    population_keys = [
+        (row["scenario"], row["replica"], row["seed"], row["step"])
+        for row in population_rows
+    ]
+    legacy_keys = [
+        (row["scenario"], row["replica"], row["seed"], row["step"])
+        for row in legacy_rows
+    ]
+    if (
+        population_keys != legacy_keys
+        or {(scenario, replica, seed) for scenario, replica, seed, _ in population_keys}
+        != expected_identities
+    ):
+        raise ValueError("population/legacy identity coverage mismatch")
+    gate_payload = _exact_keys(
+        json.loads((out_dir / "steady-state-gates.json").read_text()),
+        {"schema", "gates"},
+        "steady-state gates",
+    )
+    if (
+        gate_payload["schema"] != "a9-steady-state-gates-v2"
+        or len(gate_payload["gates"]) != expected_runs
+    ):
+        raise ValueError("steady-state gate schema/cardinality mismatch")
+    gate_keys = {"scenario", "replica", "seed", *SteadyStateGate.__dataclass_fields__}
+    gate_identities = set()
+    for gate in gate_payload["gates"]:
+        _exact_keys(gate, gate_keys, "steady-state gate")
+        if gate["status"] not in {
+            "steady-positive",
+            "steady-zero",
+            "nonsteady",
+            "absorbed",
+            "incomplete",
+        }:
+            raise ValueError("unknown steady-state status")
+        gate_identities.add((gate["scenario"], str(gate["replica"]), str(gate["seed"])))
+    if gate_identities != expected_identities:
+        raise ValueError("steady-state gate identity coverage mismatch")
 
 
 def verify_campaign(raw_root: Path, out_dir: Path) -> dict:
-    verification_path = out_dir / "verification.json"
-    verification = json.loads(verification_path.read_text(encoding="utf-8"))
-    seeds = validate_seeds(verification.get("seeds", []))
-    if verification.get("scenario_count") != len(scenarios()):
-        raise ValueError("verification scenario count mismatch")
-    if verification.get("replicas_per_scenario") != len(seeds):
-        raise ValueError("verification replica count mismatch")
-    for relative, expected in verification.get("raw_sha256", {}).items():
-        if sha256_file(raw_root / relative) != expected:
-            raise ValueError(f"raw artifact hash mismatch: {relative}")
-    for filename, expected in verification.get("output_sha256", {}).items():
-        if sha256_file(out_dir / filename) != expected:
+    _, seeds, _, nominal, raw_hashes = _validate_raw_campaign(raw_root)
+    actual_files = {
+        path.relative_to(out_dir).as_posix()
+        for path in out_dir.rglob("*")
+        if path.is_file()
+    }
+    if actual_files != DERIVED_FILES or any(
+        path.is_symlink() for path in out_dir.rglob("*")
+    ):
+        raise ValueError("derived file inventory mismatch")
+    verification = _exact_keys(
+        json.loads((out_dir / "verification.json").read_text(encoding="utf-8")),
+        {
+            "schema",
+            "acceptance_passed",
+            "campaign_outcome",
+            "survey_tier",
+            "temperature_k",
+            "energy_unit",
+            "flux_unit",
+            "avogadro_mol_inverse_exact",
+            "angstrom2_to_m2",
+            "poisson_zero_event_upper_count_95",
+            "flux_denominator",
+            "event_window",
+            "sensitivity_response",
+            "sensitivity_complete",
+            "sensitivity_families",
+            "scenario_count",
+            "expected_scenarios",
+            "replicas_per_scenario",
+            "seeds",
+            "status_counts",
+            "raw_file_inventory",
+            "derived_file_inventory",
+            "raw_sha256",
+            "output_sha256",
+            "nonpositive_gates",
+        },
+        "verification",
+    )
+    if (
+        verification["schema"] != VERIFICATION_SCHEMA
+        or verification["survey_tier"] is not True
+        or verification["temperature_k"] != 298.0
+        or verification["energy_unit"] != "kcal/mol"
+        or verification["flux_unit"] != "mol_m2_s"
+        or verification["avogadro_mol_inverse_exact"] != AVOGADRO_EXACT
+        or verification["angstrom2_to_m2"] != ANGSTROM2_TO_M2
+        or verification["poisson_zero_event_upper_count_95"]
+        != POISSON_ZERO_EVENT_UPPER_COUNT_95
+        or verification["event_window"] != "(window_start_step,window_end_step]"
+        or verification["sensitivity_response"] != SENSITIVITY_RESPONSE
+        or verification["sensitivity_complete"] is not True
+        or verification["sensitivity_families"] != list(FAMILY_REACTIONS)
+        or verification["scenario_count"] != len(scenarios())
+        or verification["expected_scenarios"]
+        != [asdict(value) for value in scenarios()]
+        or verification["replicas_per_scenario"] != REPLICA_COUNT
+        or verification["seeds"] != list(seeds)
+        or verification["raw_file_inventory"] != sorted(raw_hashes)
+        or verification["derived_file_inventory"] != sorted(DERIVED_FILES)
+        or verification["raw_sha256"] != raw_hashes
+        or set(verification["output_sha256"]) != DERIVED_FILES - {"verification.json"}
+        or any(
+            not _valid_sha256(value) for value in verification["output_sha256"].values()
+        )
+    ):
+        raise ValueError("verification constants, coverage, or hashes are invalid")
+    for filename, expected_hash in verification["output_sha256"].items():
+        if sha256_file(out_dir / filename) != expected_hash:
             raise ValueError(f"derived artifact hash mismatch: {filename}")
-    if not verification.get("passed") or verification.get("failed_gates"):
-        raise ValueError("one or more per-replica steady-state gates failed")
+    _validate_derived_schemas(out_dir, len(scenarios()) * REPLICA_COUNT, nominal, seeds)
+    with tempfile.TemporaryDirectory(prefix="a9-verify-") as directory:
+        regenerated = Path(directory) / "derived"
+        analyze_campaign(raw_root, regenerated)
+        for filename in DERIVED_FILES:
+            if (out_dir / filename).read_bytes() != (
+                regenerated / filename
+            ).read_bytes():
+                raise ValueError(f"derived artifact is not reproducible: {filename}")
     return verification
+
+
+def analyze_single_run(
+    deck_path: Path, run_dir: Path, out_path: Path, seed: int
+) -> dict[str, object]:
+    if out_path.exists():
+        raise ValueError(f"refusing to overwrite single-run analysis: {out_path}")
+    contract = validate_deck(deck_path)
+    rate, gate, _ = _analyze_replica("nominal", 0, seed, run_dir, contract)
+    payload = {
+        "schema": "a9-single-run-analysis-v2",
+        "survey_tier": True,
+        "acceptance_passed": gate.acceptance_passed,
+        "outcome": gate.dissolution_outcome,
+        "steady_state_status": gate.status,
+        "rate": asdict(rate),
+        "gate": asdict(gate),
+    }
+    write_json_atomic(out_path, payload)
+    return payload
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1569,6 +2745,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     analyze = subparsers.add_parser("analyze", help="derive A9 campaign products")
     analyze.add_argument("raw_root", type=Path)
     analyze.add_argument("out_dir", type=Path)
+
+    analyze_run = subparsers.add_parser(
+        "analyze-run",
+        help="analyze one bounded direct Petra run without campaign acceptance",
+    )
+    analyze_run.add_argument("deck", type=Path)
+    analyze_run.add_argument("run_dir", type=Path)
+    analyze_run.add_argument("out_path", type=Path)
+    analyze_run.add_argument("--seed", type=int, required=True)
 
     verify = subparsers.add_parser("verify", help="verify hashes, coverage, and gates")
     verify.add_argument("raw_root", type=Path)
@@ -1595,13 +2780,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(
             f"analyzed: scenarios={verification['scenario_count']} "
             f"replicas={verification['replicas_per_scenario']} "
-            f"steady_state_passed={verification['passed']}"
+            f"outcome={verification['campaign_outcome']} "
+            f"acceptance_passed={verification['acceptance_passed']}"
+        )
+    elif args.command == "analyze-run":
+        payload = analyze_single_run(args.deck, args.run_dir, args.out_path, args.seed)
+        print(
+            f"analyzed-run: status={payload['steady_state_status']} "
+            f"outcome={payload['outcome']} "
+            f"acceptance_passed={payload['acceptance_passed']}"
         )
     else:
         verification = verify_campaign(args.raw_root, args.out_dir)
         print(
             f"verified: scenarios={verification['scenario_count']} "
-            f"replicas={verification['replicas_per_scenario']}"
+            f"replicas={verification['replicas_per_scenario']} "
+            f"outcome={verification['campaign_outcome']} "
+            f"acceptance_passed={verification['acceptance_passed']}"
         )
     return 0
 

@@ -718,7 +718,7 @@ guards = [{ distance = 2, kind = "Osa", frozen = true, state = ["*"], min = 1 }]
 set = "empty"
 
 # --- reactions ------------------------------------------------------------
-# Approximate survey closure only; these are not production-quality kinetics.
+# Approximate survey-tier platform-testing closure; these kinetics are not calibrated.
 # Every base rate is Arrhenius A = 1e13 s^-1 at the exactly validated 298.0 K.
 # Provenance is attached machine-readably to every reaction. The direct
 # computed free-energy anchors 27.019 and 32.221 kcal/mol are B3LYP/def2-SVP/DF,
@@ -740,6 +740,10 @@ set = "empty"
 name = "R0-sio-si-hydrolysis"
 # a9-family = "siloxane-neutral"
 # a9-provenance = "computed"
+# a9-source = "qm/ si-neutral CALC-001"
+# a9-method = "B3LYP/def2-SVP/DF"
+# a9-observable = "activation_free_energy"
+# a9-rationale = "Direct Si-neutral survey free-energy barrier; not r2SCAN-3c."
 # 27.019 kcal/mol: B3LYP/def2-SVP/DF activation free energy (Si-neutral).
 center = { kind = "Oss", state = ["br"] }
 guards = [{ distance = 2, state = ["@hydrolyzed"], frozen = false, min = 1 }]
@@ -758,6 +762,10 @@ shift = 1
 name = "R1-sio-si-condensation"
 # a9-family = "siloxane-neutral"
 # a9-provenance = "heuristic"
+# a9-source = "R0 plus legacy Si reverse gap"
+# a9-method = "anchor minus 2.6 kcal/mol"
+# a9-observable = "heuristic_reverse_barrier"
+# a9-rationale = "Preserves only the legacy Si forward/reverse gap."
 center = { kind = "Oss", state = ["hy"] }
 rate = { arrhenius = { prefactor = 1.0e13, ea = 24.419 } }
 
@@ -774,6 +782,10 @@ shift = -1
 name = "R2-sioal2-si-hydrolysis"
 # a9-family = "sioal-si-neutral"
 # a9-provenance = "computed"
+# a9-source = "qm/ si-neutral CALC-001"
+# a9-method = "B3LYP/def2-SVP/DF analogue"
+# a9-observable = "activation_free_energy_analogue"
+# a9-rationale = "Explicit Si-neutral analogue; not r2SCAN-3c."
 # 27.019 kcal/mol: B3LYP/def2-SVP/DF Si-neutral direct analogue.
 center = { kind = "Osa", state = ["br"] }
 guards = [{ distance = 2, state = ["@hydrolyzed"], frozen = false, min = 1 }]
@@ -792,6 +804,10 @@ shift = 1
 name = "R3-sioal2-si-condensation"
 # a9-family = "sioal-si-neutral"
 # a9-provenance = "heuristic"
+# a9-source = "R2 plus legacy Si reverse gap"
+# a9-method = "anchor minus 2.6 kcal/mol"
+# a9-observable = "heuristic_reverse_barrier"
+# a9-rationale = "Preserves only the legacy Si forward/reverse gap."
 center = { kind = "Osa", state = ["sih"] }
 rate = { arrhenius = { prefactor = 1.0e13, ea = 24.419 } }
 
@@ -811,6 +827,10 @@ shift = -1
 name = "R4-sioal2-al-hydrolysis"
 # a9-family = "sioal-al-neutral"
 # a9-provenance = "computed"
+# a9-source = "qm/ al-neutral CALC-002"
+# a9-method = "B3LYP/def2-SVP/DF"
+# a9-observable = "activation_free_energy"
+# a9-rationale = "Direct Al-neutral survey free-energy barrier; not r2SCAN-3c."
 # 32.221 kcal/mol: B3LYP/def2-SVP/DF Al-neutral activation free energy.
 center = { kind = "Osa", state = ["br"] }
 guards = [{ distance = 2, state = ["@hydrolyzed"], frozen = false, min = 1 }]
@@ -834,6 +854,10 @@ effects = [
 name = "R5a-sioal2-al-condensation"
 # a9-family = "sioal-al-neutral"
 # a9-provenance = "heuristic"
+# a9-source = "R4 plus legacy Al reverse gap"
+# a9-method = "anchor minus 4.8 kcal/mol"
+# a9-observable = "heuristic_reverse_barrier"
+# a9-rationale = "Preserves only the legacy Al forward/reverse gap."
 center = { kind = "Osa", state = ["pr1"] }
 rate = { arrhenius = { prefactor = 1.0e13, ea = 27.421 } }
 
@@ -850,6 +874,10 @@ shift = -1
 name = "R5b-sioal2-al-condensation"
 # a9-family = "sioal-al-neutral"
 # a9-provenance = "heuristic"
+# a9-source = "R4 plus legacy Al reverse gap"
+# a9-method = "anchor minus 4.8 kcal/mol"
+# a9-observable = "heuristic_reverse_barrier"
+# a9-rationale = "Preserves only the legacy Al forward/reverse gap."
 center = { kind = "Osa", state = ["pr2"] }
 rate = { arrhenius = { prefactor = 1.0e13, ea = 27.421 } }
 
@@ -866,6 +894,10 @@ shift = -1
 name = "R6-second-stage-hydrolysis"
 # a9-family = "connectivity-ladder"
 # a9-provenance = "literature"
+# a9-source = "Liu & Ruiz Pestana 2024 Q2"
+# a9-method = "71 kJ/mol divided by 4.184"
+# a9-observable = "electronic_barrier_analogue"
+# a9-rationale = "Literature Q2 connectivity analogue; pH catalysis is not encoded."
 # 16.969 kcal/mol = 71 kJ/mol, the Liu/Ruiz Pestana Q2 ladder analogue.
 center = { kind = "Osa", state = ["sih"] }
 guards = [{ distance = 2, state = ["@hydrolyzed"], frozen = false, min = 1 }]
@@ -884,6 +916,10 @@ shift = 1
 name = "R7-second-stage-condensation"
 # a9-family = "connectivity-ladder"
 # a9-provenance = "heuristic"
+# a9-source = "R6 plus legacy Al reverse gap"
+# a9-method = "anchor minus 4.8 kcal/mol"
+# a9-observable = "heuristic_reverse_barrier"
+# a9-rationale = "Preserves only the legacy Al forward/reverse gap."
 center = { kind = "Osa", state = ["full"] }
 rate = { arrhenius = { prefactor = 1.0e13, ea = 12.169 } }
 
@@ -902,6 +938,10 @@ shift = -1
 name = "R8a-sioha-hydrolysis"
 # a9-family = "connectivity-ladder"
 # a9-provenance = "literature"
+# a9-source = "Liu & Ruiz Pestana 2024 Q3"
+# a9-method = "81 kJ/mol divided by 4.184"
+# a9-observable = "electronic_barrier_analogue"
+# a9-rationale = "Literature Q3 connectivity analogue; pH catalysis is not encoded."
 # 19.359 kcal/mol = 81 kJ/mol, the Liu/Ruiz Pestana Q3 ladder analogue.
 center = { kind = "Osa", state = ["pr1"] }
 guards = [{ distance = 2, state = ["@hydrolyzed"], frozen = false, min = 1 }]
@@ -925,6 +965,10 @@ shift = 1
 name = "R8b-sioha-hydrolysis"
 # a9-family = "connectivity-ladder"
 # a9-provenance = "literature"
+# a9-source = "Liu & Ruiz Pestana 2024 Q3"
+# a9-method = "81 kJ/mol divided by 4.184"
+# a9-observable = "electronic_barrier_analogue"
+# a9-rationale = "Literature Q3 connectivity analogue; pH catalysis is not encoded."
 # 19.359 kcal/mol = 81 kJ/mol, the Liu/Ruiz Pestana Q3 ladder analogue.
 center = { kind = "Osa", state = ["pr2"] }
 guards = [{ distance = 2, state = ["@hydrolyzed"], frozen = false, min = 1 }]
@@ -950,6 +994,10 @@ shift = 1
 name = "R9-sioha-condensation"
 # a9-family = "connectivity-ladder"
 # a9-provenance = "heuristic"
+# a9-source = "R8 plus legacy Si reverse gap"
+# a9-method = "anchor minus 2.6 kcal/mol"
+# a9-observable = "heuristic_reverse_barrier"
+# a9-rationale = "Preserves only the legacy Si forward/reverse gap."
 center = { kind = "Osa", state = ["full"] }
 rate = { arrhenius = { prefactor = 1.0e13, ea = 16.759 } }
 
@@ -975,6 +1023,10 @@ effects = [
 name = "R10-sial-hydrolysis"
 # a9-family = "sioal-si-neutral"
 # a9-provenance = "computed"
+# a9-source = "qm/ si-neutral CALC-001"
+# a9-method = "B3LYP/def2-SVP/DF analogue"
+# a9-observable = "activation_free_energy_analogue"
+# a9-rationale = "Explicit Si-neutral analogue; not r2SCAN-3c."
 center = { kind = "Osa", state = ["sial"] }
 rate = { arrhenius = { prefactor = 1.0e13, ea = 27.019 } }
 
@@ -996,6 +1048,10 @@ shift = 1
 name = "R11-sial-condensation"
 # a9-family = "sioal-si-neutral"
 # a9-provenance = "heuristic"
+# a9-source = "R10 plus legacy Si reverse gap"
+# a9-method = "anchor minus 2.6 kcal/mol"
+# a9-observable = "heuristic_reverse_barrier"
+# a9-rationale = "Preserves only the legacy Si forward/reverse gap."
 center = { kind = "Osa", state = ["sialh"] }
 rate = { arrhenius = { prefactor = 1.0e13, ea = 24.419 } }
 
@@ -1017,6 +1073,10 @@ shift = -1
 name = "R12-albr-hydrolysis"
 # a9-family = "sioal-al-neutral"
 # a9-provenance = "computed"
+# a9-source = "qm/ al-neutral CALC-002"
+# a9-method = "B3LYP/def2-SVP/DF analogue"
+# a9-observable = "activation_free_energy_analogue"
+# a9-rationale = "Explicit Al-neutral analogue; not r2SCAN-3c."
 center = { kind = "Osa", state = ["albr"] }
 rate = { arrhenius = { prefactor = 1.0e13, ea = 32.221 } }
 
@@ -1035,6 +1095,10 @@ shift = 1
 name = "R13-albr-condensation"
 # a9-family = "sioal-al-neutral"
 # a9-provenance = "heuristic"
+# a9-source = "R12 plus legacy Al reverse gap"
+# a9-method = "anchor minus 4.8 kcal/mol"
+# a9-observable = "heuristic_reverse_barrier"
+# a9-rationale = "Preserves only the legacy Al forward/reverse gap."
 center = { kind = "Osa", state = ["alhy"] }
 rate = { arrhenius = { prefactor = 1.0e13, ea = 27.421 } }
 
@@ -1051,6 +1115,10 @@ shift = -1
 name = "R14-alohal-hydrolysis"
 # a9-family = "al-o-al-analogue"
 # a9-provenance = "literature"
+# a9-source = "Xiao & Lasaga 1994/1996"
+# a9-method = "base-scale literature analogue"
+# a9-observable = "activation_energy_analogue"
+# a9-rationale = "Scale analogue only; pH catalysis is not encoded."
 # Xiao/Lasaga base-scale analogue (~19 kcal/mol); pH catalysis is not encoded.
 center = { kind = "Oaa", state = ["br"] }
 guards = [{ distance = 2, state = ["@hydrolyzed"], frozen = false, min = 1 }]
@@ -1069,6 +1137,10 @@ shift = 1
 name = "R15-alohal-condensation"
 # a9-family = "al-o-al-analogue"
 # a9-provenance = "heuristic"
+# a9-source = "R14 plus legacy Al reverse gap"
+# a9-method = "anchor minus 4.8 kcal/mol"
+# a9-observable = "heuristic_reverse_barrier"
+# a9-rationale = "Preserves only the legacy Al forward/reverse gap."
 center = { kind = "Oaa", state = ["hy"] }
 rate = { arrhenius = { prefactor = 1.0e13, ea = 14.200 } }
 
@@ -1092,6 +1164,10 @@ shift = -1
 name = "adsorb-al"
 # a9-family = "adsorption"
 # a9-provenance = "heuristic"
+# a9-source = "legacy kaolinite attachment bucket"
+# a9-method = "legacy sign converted to Arrhenius Ea"
+# a9-observable = "heuristic_attachment_barrier"
+# a9-rationale = "Retains the legacy 14.5 kcal/mol Al attachment bucket."
 # Legacy +14.5 kcal/mol attachment bucket retained only as a heuristic.
 center = { kind = "Al", state = ["empty"] }
 guards = [{ distance = 1, state = ["@o_occ"], frozen = false, min = 1 }]
@@ -1128,6 +1204,10 @@ set = "pr2"
 name = "adsorb-si"
 # a9-family = "adsorption"
 # a9-provenance = "heuristic"
+# a9-source = "legacy kaolinite attachment bucket"
+# a9-method = "legacy sign converted to Arrhenius Ea"
+# a9-observable = "heuristic_attachment_barrier"
+# a9-rationale = "Retains the legacy 6.4 kcal/mol Si attachment bucket."
 # Legacy +6.4 kcal/mol attachment bucket retained only as a heuristic.
 center = { kind = "Si", state = ["empty"] }
 guards = [{ distance = 1, state = ["@o_occ"], frozen = false, min = 1 }]
@@ -1157,7 +1237,11 @@ map = { empty = "si1", al1 = "sialh", albr = "sih", alhy = "full" }
 [[reactions]]
 name = "desorb-al"
 # a9-family = "cation-desorption"
-# a9-provenance = "computed"
+# a9-provenance = "heuristic"
+# a9-source = "CALC-002 anchor plus legacy environment ladder"
+# a9-method = "mixed computed anchor and heuristic modifiers"
+# a9-observable = "mixed_desorption_proxy"
+# a9-rationale = "CALC-005 is unavailable; this is not a computed desorption barrier."
 # 32.221 kcal/mol Al-neutral anchor; legacy 12-kcal by_count ladder retained.
 center = { kind = "Al", state = ["l6"] }
 produces = ["Al"]
@@ -1186,7 +1270,11 @@ missing = "skip"
 [[reactions]]
 name = "desorb-si"
 # a9-family = "cation-desorption"
-# a9-provenance = "computed"
+# a9-provenance = "heuristic"
+# a9-source = "r2SCAN-3c Si-neutral electronic value plus legacy environment ladder"
+# a9-method = "mixed electronic anchor and heuristic modifiers"
+# a9-observable = "mixed_desorption_proxy"
+# a9-rationale = "30.053 is electronic and CALC-005 is unavailable; this is not a computed desorption barrier."
 # 30.053 kcal/mol is the r2SCAN-3c Si-neutral ELECTRONIC survey value;
 # legacy 6-kcal by_count/when ladder retained as a heuristic modifier.
 center = { kind = "Si", state = ["oh4"] }
