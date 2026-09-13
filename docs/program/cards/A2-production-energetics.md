@@ -1,51 +1,50 @@
-# A2-production-energetics — production-tier energies + open-source CC calibration
+# A2-production-energetics — banked survey/literature energetics ledger
 
 - status: blocked
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
-- depends: A2b-al-neutral-production-energetics, A2c-al-acid-production-energetics, A2d-oss-neutral-n4-production-energetics
-- blocked-on: A2b, A2c, A2d
+- depends: A9-approximate-rate-closure
+- blocked-on: A9
 - claimed-by: hermes-custom-build-001
 
 
 ## Objective
-Upgrade banked barriers to the survey protocol: r2SCAN-3c geometries
-(needs pyscf-dispersion — already in the venv), wB97M-V/def2-TZVPD + SMD
-single points on all stationary points, D4 dispersion; coupled-cluster
-spot calibration on si-neutral (the "which functional do we trust"
-half-day, SURVEY §6.4) via the **open-source calibration layer** —
-Psi4 1.11 DLPNO-CCSD(T) cross-validated against ByteQC canonical GPU
-CCSD(T), per `qm/CALIBRATION.md` (ORCA descoped 2026-08-23 on licensing
-grounds). Full Gonzalez-Schlegel IRC on the soft-mode saddles replaces
-quick-IRC. Report the barrier shifts SVP→production per reaction.
+Close the final reaction ledger, functional/method ranking, Petra fragments,
+and `qm/CALCULATIONS.md` from the best available survey-tier calculations and
+published-family replications. A9's approximate-rate sensitivity ranking is the
+gate: spend workstation compute only on families it identifies as consequential.
+
+POLICY v16 retires the former higher-tier workstation plan. Existing r2SCAN-3c,
+B3LYP/def2-SVP, literature-replication, and already completed comparison
+receipts remain provenance-bearing evidence, but this card does not require new
+coupled-cluster calibration, def2-TZVPD/SMD recalculation, or any result labeled
+production-quality.
 
 ## Context
 qm/SURVEY.md §6 (the tiered protocol) as amended 2026-08-23;
-**qm/CALIBRATION.md — the calibration runbook: installed environments
-(conda `calib-psi4`, `~/venvs/byteqc` + `~/opt/byteqc`), the focal-point
-CBS recipe, and the DLPNO-vs-canonical acceptance gate**; quarry
-pipeline supports solvent="smd" already. Banked stationary points exist for
+`qm/CALIBRATION.md` is retained as historical provenance for already completed
+comparison receipts, not as a current workstation execution plan. Banked
+stationary points exist for
 si-neutral (A2a), al-neutral (TASK-168/PR #29), and al-acid one-water (A1b).
 The `oss-neutral-n4` pilot result is documented by A3, but its ignored
 stationary-point directory is no longer present and no hash-pinned external
-archive was found on 2026-09-05; A2d must reconstruct it from the committed
-builder and mechanism contract before re-tiering. Large single points that OOM
-the 4090 may use rented H200/B200 capacity only through a separately authorized
-spend gate (not B300 — FP64-gutted).
+archive was found on 2026-09-05. A9 now decides whether any published-family
+replication is worth a separate bounded survey-tier card.
 
 ## Acceptance
-- Production ΔG‡ table for every target named above, including the reconstructed
-  embedded pilot, with method provenance in each run's `store.sqlite`.
-- si-neutral calibration: CCSD(T)/CBS focal-point barrier from ByteQC
-  (canonical) AND Psi4 (DLPNO, TightPNO), with the DLPNO−canonical
-  delta reported (gate: ≤ 2 kJ/mol on the barrier); functional ranking
-  stated (B3LYP-D4 vs r2SCAN-3c vs wB97M-V for Si–O chemistry).
-- IRC-verified saddles (full Gonzalez-Schlegel) for the soft-mode TSs.
-- Emitted petra fragments updated where re-tiered numbers change decks;
-  CALCULATIONS.md rows updated to the new tier.
+- A9 is done and its ranked sensitivity verdict is cited.
+- The final table uses only provenance-backed survey-tier calculations or
+  published-family replications, with method and uncertainty stated.
+- Existing comparison receipts may be reported as historical context but are
+  not new prerequisites and do not elevate the workstation tier.
+- Petra fragments and `qm/CALCULATIONS.md` use the banked values selected by the
+  A9 verdict; families below A9's relevance cutoff are explicitly left alone.
+- No workstation result is described as production-quality, and no new
+  higher-tier or coupled-cluster calculation is required by this card.
 
 ## Progress
+- 2026-09-13 12:04 PDT (hermes-custom-build-001; profile=workstation) — POLICY v16/A9 AMENDMENT: replaced the obsolete higher-tier workstation objective with a banked survey/literature ledger gated by A9's sensitivity ranking. Historical receipts remain provenance only; no new coupled-cluster or def2-TZVPD/SMD calculation is required.
 - 2026-09-05 12:25 PDT (hermes-custom-build-001; profile=workstation) —
   Receipt-level inventory found that the completed A2a/si-neutral route is the
   only banked reaction satisfying A2's exact production, full-path, and

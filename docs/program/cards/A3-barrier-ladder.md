@@ -1,10 +1,11 @@
 # A3-barrier-ladder — connectivity × protonation barrier ladder (Phase 2)
 
-- status: ready
+- status: blocked
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaigns; cluster-builder code is machine-any)
-- depends: —
+- depends: A9-approximate-rate-closure
+- blocked-on: A9
 - claimed-by:
 
 ## Constraints
@@ -18,6 +19,12 @@ No new basin-construction protocol, proton-owner enumeration, or frozen shells
 that the selected paper did not use. The hand-set `4.5e-4 Eh/Bohr`
 max-projected-gradient stationarity gate is retired for replication runs; use
 the optimizer's converged criteria as the paper did. One family per PR.
+
+POLICY v16 makes survey-tier and literature-replication values the banked
+numbers for this workstation platform test. A3 is blocked on A9's approximate
+rate closure and sensitivity ranking. After A9, replicate only the families it
+names as rate-sensitive; do not add a workstation higher-tier calibration or
+describe any workstation result as production-quality.
 
 ## Objective
 Confirm what existing research has already established; copy their setups. A3
@@ -46,9 +53,9 @@ worker must:
      component minima). HANDOFF defines CALC-005 as minima-only with no TS
      hunt; a CALC-005 family must not be asked to reproduce a barrier and
      must not hunt a TS to satisfy this gate.
-4. Only then re-tier the **same** cluster with the A2 production protocol (as
-   amended by TASK-296) plus the CC spot calibration. The banked value's error
-   bar is the replication delta plus the CC delta.
+4. Bank the survey-tier or literature-replication value, with the replication
+   delta as its uncertainty. A9's sensitivity ranking decides whether the
+   family warrants this bounded replication at all.
 
 ## Context
 - qm/HANDOFF.md — the complete Phase-2 plan (read first)
@@ -64,18 +71,15 @@ worker must:
   closest-analog substitution for a family without a direct precedent.
 - Their cluster is rebuilt with their atoms, termination,
   constraints/frozen atoms, charge state, and level of theory.
-- Hydrolysis families reproduce the published barrier within ±3 kcal/mol
-  before any production re-tiering. A failed replication emits no banked
-  production value.
+- Hydrolysis families reproduce the published barrier within ±3 kcal/mol.
+  A failed replication emits no banked value.
 - CALC-005 families reproduce the published energy/minimum (not a barrier)
-  within ±3 kcal/mol before any production re-tiering. Do not hunt a TS. A
-  failed replication emits no banked production value.
-- The same replicated cluster is re-tiered at
-  B3LYP-D4/def2-TZVPD+SMD(water), per TASK-296, with the unchanged CC spot
-  calibration. The reported error bar is the replication delta plus the CC
-  delta.
+  within ±3 kcal/mol. Do not hunt a TS. A failed replication emits no banked
+  value.
+- The reproduced survey-tier or literature value is the banked platform-test
+  number. Its uncertainty records the replication delta and method provenance.
 - Per family, ONE PR carries the reproduction table (paper / our replication /
-  our production value) and the Petra `by_count`/`when` fragment; the fragment
+  banked value) and the Petra `by_count`/`when` fragment; the fragment
   compiles via a Petra CLI round-trip and provenance is recorded in the Store.
 - The applicable CALCULATIONS.md row is updated only from accepted evidence;
   the full fast test suite and Ruff are green.
@@ -146,7 +150,7 @@ Pelmenschikov's +20–70 window, but the absolute matches his ~205 kJ/mol
 surface-embedded first-rupture ("self-healing") barrier almost exactly.
 Suspected contributors to the high shift, all logged: the crude legacy
 cell frozen at strained positions (learnings/gotchas), single explicit
-water, pilot tier (A2 re-tiers). Trends (ΔΔEa by connectivity) are the
+water, and the survey-level method. Trends (ΔΔEa by connectivity) are the
 transferable payload, per the handoff.
 
 **For the factory (campaign matrix per HANDOFF §3.4)**: the proven
@@ -177,8 +181,11 @@ OSS n=2–4. A3f closed the exact n=1 route; n=2–4 remains prohibited.
 - 2026-09-06 16:00 PDT (hermes-custom-build-001; profile=workstation) — An adversarial review round regression-closed stale approach/product reuse after TS incompatibility, quick-IRC frozen-coordinate drift, reduced lookalike Store schemas and inconsistent electronic barriers, bool/arbitrary-route acceptance, and missing physical all-rung Oaa builder coverage. Its 672-test count was superseded by the newer 16:19 closure. The failed first `uv run pytest` attempt used an uninstalled fresh worktree environment and collected 31 import errors; the required main-venv invocation then passed the complete suite.
 
 ## Progress
+- 2026-09-13 12:10 PDT (hermes-custom-build-001; profile=workstation) — Retired the separately stale `agents/A3j-calc005-si-n1-verification` lock after proving merged board state marks A3j done, GitHub has no PR for that head, and the remote branch existed only at historical SHA `5fbe0952a14d08e881b28e2071ae0ec29863b34b`; deletion was read back as absent.
+- 2026-09-13 12:09 PDT (hermes-custom-build-001; profile=workstation) — Docs-only amendment verification passed: A9's Objective and Acceptance match Victor's TASK-274 specification verbatim modulo Markdown whitespace; board/card status and dependency invariants pass; all 55 PLAN card links resolve; full fast QM QA is `928 passed`; whole-QM Ruff check/format, compileall, and `git diff --check` are green.
+- 2026-09-13 12:04 PDT (hermes-custom-build-001; profile=workstation) — POLICY v16/A9 AMENDMENT: A3 is BLOCKED on READY P0 A9. Survey-tier and literature-replication values are now the banked workstation numbers; A3 resumes only for families A9 ranks rate-sensitive, with one published-family replication per PR and no higher-tier workstation calibration.
 - 2026-09-13 11:25 PDT (hermes-custom-build-001; profile=workstation) — Docs-only re-plan verification passed: board/card invariant probe matched A3=`ready` with no dependency and A3j=`done`, all 54 PLAN card links resolve, full fast QM QA passed (`927 passed, 1 skipped`), whole-QM Ruff check and format passed (`82 files already formatted`), compileall passed, and `git diff --check` passed.
-- 2026-09-13 11:19 PDT (hermes-custom-build-001; profile=workstation) — DEVIATION: Victor's TASK-298 ruling supersedes the crystallographic hydrated-cell/fixed-proton-owner protocol after seven pre-barrier failures. A3 is re-planned as a reproduce-first campaign: published cluster and method first, ±3 kcal/mol replication gate, then B3LYP-D4/def2-TZVPD+SMD plus unchanged CC calibration on the same cluster. A3j is closed by ruling and no longer blocks this ready parent.
+- 2026-09-13 11:19 PDT (hermes-custom-build-001; profile=workstation) — DEVIATION: Victor's TASK-298 ruling supersedes the crystallographic hydrated-cell/fixed-proton-owner protocol after seven pre-barrier failures. A3 is re-planned as a reproduce-first campaign: published cluster and method first, with a ±3 kcal/mol replication gate. A3j is closed by ruling. The later POLICY v16/A9 amendment above supersedes this entry's former ready state.
 - 2026-09-06 20:39 PDT (hermes-custom-build-001; profile=workstation) — Pre-launch
   repository archaeology plus two independent cold reviews rejected an immediate
   fourth-family calculator launch. Selected the remaining 200s Si CALC-005 lane,
