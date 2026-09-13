@@ -1,11 +1,11 @@
 # E4-1998-comparison — synthetic spectra over the founding data
 
-- status: ready
+- status: active
 - track: E (muscovite / the perfect circle)
 - priority: P1
 - machine: any (CPU ensembles; needs the E3a barrier set)
 - depends: E3a-classical-neb-barriers, E2b-grain-size-sweep, A8-thesis-archive-intake
-- claimed-by:
+- claimed-by: hermes-macbot-zero
 
 ## Objective
 
@@ -42,6 +42,8 @@ reservoir release ordering.
 - Petra tests, replay gates, lint green; card/PLAN/STATUS bookkeeping.
 
 ## Progress
+
+- 2026-09-13 12:29 PDT (hermes-macbot-zero; profile=laptop) — Claimed by atomic push of `agents/E4-1998-comparison` at exact `origin/main@1a15b3141a60df331ad41a21864186317c63fdf2`; all three declared prerequisites are done on main. Beginning the bounded CPU implementation and 1998-data overlay verification in the branch-matched worktree.
 
 - 2026-09-13 11:09 PDT — (hermes-macbot-one; profile=laptop) — Unblocked after
   E3a's bounded result and the completed E2b/A8 prerequisites. E3b remains an
