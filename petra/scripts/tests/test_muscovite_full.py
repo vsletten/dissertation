@@ -80,6 +80,65 @@ class FullMechanismDeckTests(unittest.TestCase):
         )
         self.assertNotIn("modifier", delamination)
 
+    def test_surface_release_requires_local_delamination_accessibility(self) -> None:
+        kinds = {kind["name"]: kind for kind in self.deck["structure"]["kinds"]}
+        gate = kinds["Surface_gate"]
+        self.assertEqual(gate["initial"], "inert")
+        self.assertEqual(
+            {state["name"] for state in gate["states"]},
+            {"inert", "closed", "open"},
+        )
+
+        surface_initializers = [
+            item
+            for item in self.deck["structure"]["init"]
+            if item["center"]["kind"] == "Surface_gate"
+        ]
+        self.assertEqual(len(surface_initializers), 2)
+        self.assertTrue(
+            all(
+                item["center"]["state"] == ["inert"] and item["set"] == "closed"
+                for item in surface_initializers
+            )
+        )
+
+        rules = {rule["name"]: rule for rule in self.deck["dynamics"]["rules"]}
+        opening = rules["open_surface_after_delamination"]
+        self.assertEqual(
+            opening["center"], {"kind": "Surface_gate", "state": ["closed"]}
+        )
+        self.assertEqual(
+            opening["guards"],
+            [
+                {
+                    "kind": "Interface",
+                    "label": "gate_interface",
+                    "state": ["delaminated"],
+                    "min": 1,
+                }
+            ],
+        )
+        self.assertEqual(opening["effects"], [{"target": "center", "set": "open"}])
+
+        release_rules = [
+            rule for name, rule in rules.items() if name.startswith("release_")
+        ]
+        self.assertEqual(len(release_rules), 6)
+        self.assertTrue(
+            all(
+                rule["guards"]
+                == [
+                    {
+                        "kind": "Surface_gate",
+                        "label": "surface_gate",
+                        "state": ["open"],
+                        "min": 1,
+                    }
+                ]
+                for rule in release_rules
+            )
+        )
+
     def test_species_specific_release_and_zone_specific_hops_exist(self) -> None:
         names = {rule["name"] for rule in self.deck["dynamics"]["rules"]}
         for species in ("Ar40", "Ar39", "Ar36"):
@@ -153,7 +212,9 @@ class GrainSizeSweepDriverTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "strictly increasing"):
                 sweep.load_campaign_receipts(duplicate)
 
-    def test_nonnegative_integer_preserves_identity_beyond_float_precision(self) -> None:
+    def test_nonnegative_integer_preserves_identity_beyond_float_precision(
+        self,
+    ) -> None:
         sweep = load_module("muscovite_grain_size_sweep", SWEEP_PATH)
         huge = 2**53 + 1
         self.assertEqual(sweep._nonnegative_integer(str(huge), "seed"), huge)

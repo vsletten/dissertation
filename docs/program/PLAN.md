@@ -80,7 +80,8 @@ on main). Priority P0 > P1 > P2 within READY.
 | [E3a-classical-neb-barriers](cards/E3a-classical-neb-barriers.md) | E | P1 | any | done | — |
 | [E3b-periodic-dft-spot-checks](cards/E3b-periodic-dft-spot-checks.md) | E | P2 | workstation | ready | E3a ✅ |
 | [E4-1998-comparison](cards/E4-1998-comparison.md) | E | P1 | any | done | E3a ✅, E2b ✅, A8 ✅ |
-| [E4a-surface-gated-release](cards/E4a-surface-gated-release.md) | E | P1 | any | ready | E4 ✅, B5 ✅ |
+| [E4a-surface-gated-release](cards/E4a-surface-gated-release.md) | E | P1 | any | active | E4 ✅, B5 ✅ |
+| [E4a2-surface-connected-lateral-release](cards/E4a2-surface-connected-lateral-release.md) | E | P1 | any | blocked: E4a | E4a |
 | [E4b-isothermal-reservoir-discriminants](cards/E4b-isothermal-reservoir-discriminants.md) | E | P1 | any | blocked: E4a | E4a |
 
 **Done** (acceptance verified on main): E4-1998-comparison (PR #127),

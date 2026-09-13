@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="820" viewBox="0 0 1100 820">
+<rect width="1100" height="820" fill="#fbfaf7"/>
+<text x="550" y="30" text-anchor="middle" font-family="sans-serif" font-size="21" font-weight="700">E4 qualitative comparison: Sletten–Onstott 1998 vs Petra</text>
+<rect x="75" y="70" width="950" height="280" fill="white" stroke="#334155"/>
+<text x="550" y="58" text-anchor="middle" font-family="sans-serif" font-size="15">Normalized 40Ar* release (solid: Fig. 4; dashed: 53 kcal delam proxy + E3a Ar hops)</text>
+<polyline points="75.0,350.0 142.9,322.0 210.7,280.0 278.6,210.0 346.4,70.0 414.3,116.7 482.1,163.3 550.0,225.6 617.9,303.3 685.7,346.9 753.6,350.0 889.3,350.0 1025.0,350.0" fill="none" stroke="#2563eb" stroke-width="2"/>
+<polyline points="75.0,350.0 210.7,342.3 278.6,306.6 346.4,277.6 380.4,181.0 448.2,161.7 482.1,70.0 516.1,181.0 550.0,248.6 617.9,272.8 685.7,306.6 753.6,292.1 821.4,321.0 889.3,348.1 1025.0,350.0" fill="none" stroke="#d97706" stroke-width="2"/>
+<polyline points="75.0,350.0 210.7,348.2 346.4,333.5 414.3,290.3 482.1,161.8 550.0,253.6 617.9,239.8 685.7,216.9 753.6,93.0 787.5,70.0 855.4,331.6 923.2,348.2 1025.0,350.0" fill="none" stroke="#059669" stroke-width="2"/>
+<polygon points="75.0,126.0 142.9,70.0 210.7,238.0 278.6,256.7 346.4,70.0 414.3,294.0 482.1,350.0 550.0,350.0 617.9,350.0 685.7,350.0 753.6,350.0 821.4,350.0 889.3,350.0 957.1,350.0 1025.0,350.0 1025.0,350.0 957.1,350.0 889.3,350.0 821.4,350.0 753.6,350.0 685.7,350.0 617.9,350.0 550.0,350.0 482.1,350.0 414.3,350.0 346.4,238.0 278.6,350.0 210.7,350.0 142.9,163.3 75.0,312.7" fill="#2563eb" fill-opacity="0.13" stroke="none"/>
+<polyline points="75.0,219.3 142.9,70.0 210.7,312.7 278.6,312.7 346.4,126.0 414.3,331.3 482.1,350.0 550.0,350.0 617.9,350.0 685.7,350.0 753.6,350.0 821.4,350.0 889.3,350.0 957.1,350.0 1025.0,350.0" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="7 5"/>
+<polygon points="75.0,70.0 142.9,93.0 210.7,254.1 278.6,215.8 346.4,188.9 414.3,307.8 482.1,350.0 550.0,350.0 617.9,350.0 685.7,350.0 753.6,350.0 821.4,350.0 889.3,350.0 957.1,350.0 1025.0,350.0 1025.0,350.0 957.1,350.0 889.3,350.0 821.4,350.0 753.6,350.0 685.7,350.0 617.9,350.0 550.0,350.0 482.1,350.0 414.3,338.5 346.4,261.8 278.6,277.1 210.7,292.5 142.9,211.9 75.0,127.5" fill="#d97706" fill-opacity="0.13" stroke="none"/>
+<polyline points="75.0,70.0 142.9,158.2 210.7,273.3 278.6,246.4 346.4,223.4 414.3,323.2 482.1,350.0 550.0,350.0 617.9,350.0 685.7,350.0 753.6,350.0 821.4,350.0 889.3,350.0 957.1,350.0 1025.0,350.0" fill="none" stroke="#d97706" stroke-width="2" stroke-dasharray="7 5"/>
+<polygon points="75.0,70.0 142.9,111.3 210.7,252.3 278.6,241.0 346.4,216.6 414.3,314.3 482.1,350.0 550.0,350.0 617.9,350.0 685.7,350.0 753.6,350.0 821.4,350.0 889.3,350.0 957.1,350.0 1025.0,350.0 1025.0,350.0 957.1,350.0 889.3,350.0 821.4,350.0 753.6,350.0 685.7,350.0 617.9,350.0 550.0,350.0 482.1,350.0 414.3,338.7 346.4,265.4 278.6,295.5 210.7,284.2 142.9,197.8 75.0,118.9" fill="#059669" fill-opacity="0.13" stroke="none"/>
+<polyline points="75.0,70.0 142.9,150.8 210.7,269.2 278.6,273.0 346.4,239.1 414.3,327.4 482.1,350.0 550.0,350.0 617.9,350.0 685.7,350.0 753.6,350.0 821.4,350.0 889.3,350.0 957.1,350.0 1025.0,350.0" fill="none" stroke="#059669" stroke-width="2" stroke-dasharray="7 5"/>
+<rect x="75" y="450" width="950" height="280" fill="white" stroke="#334155"/>
+<text x="550" y="435" text-anchor="middle" font-family="sans-serif" font-size="15">Apparent age spectrum (black: Fig. 3d; colored: 58 ± 5 delam proxy, E3a Ar hops)</text>
+<polyline points="75.0,628.2 89.2,628.2 89.2,572.2 108.2,572.2 108.2,551.8 151.0,551.8 151.0,536.5 189.0,536.5 189.0,518.7 265.0,518.7 265.0,522.5 407.5,522.5 407.5,506.0 692.5,506.0 692.5,500.9 882.5,500.9 882.5,503.5 958.5,503.5 958.5,511.1 1025.0,511.1" fill="none" stroke="#111827" stroke-width="2"/>
+<polygon points="93.9,709.4 134.6,724.8 321.3,729.6 472.2,729.3 589.7,729.0 614.4,728.8 614.4,729.6 589.7,729.4 472.2,729.7 321.3,729.7 134.6,726.9 93.9,720.0" fill="#7c3aed" fill-opacity="0.13" stroke="none"/>
+<polyline points="93.9,715.7 134.6,725.9 321.3,729.6 472.2,729.6 589.7,729.2 614.4,729.2" fill="none" stroke="#7c3aed" stroke-width="2"/>
+<polygon points="86.4,723.7 277.6,728.1 483.3,729.4 604.0,728.9 622.3,728.7 622.3,729.2 604.0,729.4 483.3,729.6 277.6,728.6 86.4,725.9" fill="#dc2626" fill-opacity="0.13" stroke="none"/>
+<polyline points="86.4,724.7 277.6,728.4 483.3,729.5 604.0,729.2 622.3,729.0" fill="none" stroke="#dc2626" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="210.7" y="370" text-anchor="middle" font-family="sans-serif" font-size="11">600</text>
+<text x="482.1" y="370" text-anchor="middle" font-family="sans-serif" font-size="11">800</text>
+<text x="753.6" y="370" text-anchor="middle" font-family="sans-serif" font-size="11">1000</text>
+<text x="1025.0" y="370" text-anchor="middle" font-family="sans-serif" font-size="11">1200</text>
+<text x="550.0" y="390" text-anchor="middle" font-family="sans-serif" font-size="13">temperature (°C)</text>
+<text x="550.0" y="770" text-anchor="middle" font-family="sans-serif" font-size="13">cumulative fraction 39Ar released</text>
+<text x="550" y="810" text-anchor="middle" font-family="sans-serif" font-size="11">Digitized points carry plot-reading uncertainty; comparison schedule is 600 s per 50 °C increment, not a recovered furnace log.</text>
+</svg>

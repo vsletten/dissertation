@@ -424,6 +424,28 @@ def evaluate(
             <= 0.05,
             "final_cumulative_ar40_fraction": finals,
         }
+    crossover_count = sum(
+        bool(item["grain_size_crossover_reproduced"]) for item in by_barrier.values()
+    )
+    if crossover_count == len(by_barrier):
+        crossover_verdict = "reproduced"
+        crossover_mechanism = (
+            "delamination-gated basal surface accessibility recovers the monotonic "
+            "volume crossover in both retained proxy brackets"
+        )
+    elif crossover_count:
+        crossover_verdict = "partially_reproduced"
+        crossover_mechanism = (
+            "delamination-gated basal surface accessibility recovers the monotonic "
+            "volume crossover in only one retained proxy bracket"
+        )
+    else:
+        crossover_verdict = "not_reproduced"
+        crossover_mechanism = (
+            "delamination-gated basal surface accessibility leaves the volume peaks "
+            "unordered; next discriminate lateral edge access or a connected "
+            "delamination front"
+        )
     return {
         "scope": "qualitative discrimination, not fit",
         "observed": {
@@ -439,7 +461,7 @@ def evaluate(
         "section_5_claims": {
             "1_two_stage_non_fickian_loss": {
                 "verdict": "not_reproduced",
-                "mechanism": "unconditional surface release empties Ar before structural evolution",
+                "mechanism": "delamination-gated basal surface release still does not recover a resolvable late stage",
             },
             "2_distinct_reservoir_diffusivity_ratio": {
                 "verdict": "not_reproduced",
@@ -458,8 +480,8 @@ def evaluate(
                 "mechanism": "recoil distortion emerges; only one volume per sensitivity crosses the old-step gate",
             },
             "6_grain_size_delamination_fraction": {
-                "verdict": "not_reproduced",
-                "mechanism": "always-open surface gate erases the observed temperature crossover",
+                "verdict": crossover_verdict,
+                "mechanism": crossover_mechanism,
             },
             "7_hydrothermal_contrast": {
                 "verdict": "not_reproduced",

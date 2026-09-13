@@ -118,7 +118,10 @@ occupant = "Ar39"
 
 [[structure.kinds]]
 name = "Surface_gate"
-initial = "closed"
+initial = "inert"
+[[structure.kinds.states]]
+name = "inert"
+occupant = "vacant"
 [[structure.kinds.states]]
 name = "closed"
 occupant = "vacant"
@@ -233,6 +236,11 @@ j = 3
 dcell = [0, 0, -1]
 label = "delam_driver"
 [[structure.cell.bonds]]
+i = 4
+j = 7
+dcell = [0, 0, 0]
+label = "gate_interface"
+[[structure.cell.bonds]]
 i = 6
 j = 0
 dcell = [0, 0, 0]
@@ -293,16 +301,16 @@ probability = 0.35
 set = "Ar39_trapped"
 [[structure.init]]
 name = "lower-basal-surface"
-center = { kind = "Surface_gate", state = ["closed"] }
+center = { kind = "Surface_gate", state = ["inert"] }
 region = { axis = 2, min = 0, max = 0 }
 probability = 1.0
-set = "open"
+set = "closed"
 [[structure.init]]
 name = "upper-basal-surface"
-center = { kind = "Surface_gate", state = ["closed"] }
+center = { kind = "Surface_gate", state = ["inert"] }
 region = { axis = 2, min = 5, max = 5 }
 probability = 1.0
-set = "open"
+set = "closed"
 
 [dynamics.thermo]
 temperature = 773.15
@@ -334,6 +342,17 @@ rate = { eyring = { dh = 63.000, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "delaminated"
+
+# Basal release becomes accessible only after the adjacent interface delaminates.
+# Interior gate sites remain inert, preserving an explicit surface topology.
+[[dynamics.rules]]
+name = "open_surface_after_delamination"
+center = { kind = "Surface_gate", state = ["closed"] }
+guards = [{ kind = "Interface", label = "gate_interface", state = ["delaminated"], min = 1 }]
+rate = { constant = 1.0 }
+[[dynamics.rules.effects]]
+target = "center"
+set = "open"
 
 # Recoil 39Ar escape is likewise a phase-2 proxy pending phase-3 NEB.
 [[dynamics.rules]]
@@ -771,25 +790,9 @@ rate = { constant = 1.0 }
 target = "center"
 set = "vacant"
 [[dynamics.rules]]
-name = "release_Ar40_delamination_A"
-center = { kind = "K_gallery_A", state = ["Ar40"] }
-guards = [{ kind = "Interface", label = "gallery_interface", state = ["delaminated"], min = 1 }]
-rate = { constant = 1.0 }
-[[dynamics.rules.effects]]
-target = "center"
-set = "vacant"
-[[dynamics.rules]]
 name = "release_Ar40_surface_B"
 center = { kind = "K_gallery_B", state = ["Ar40"] }
 guards = [{ kind = "Surface_gate", label = "surface_gate", state = ["open"], min = 1 }]
-rate = { constant = 1.0 }
-[[dynamics.rules.effects]]
-target = "center"
-set = "vacant"
-[[dynamics.rules]]
-name = "release_Ar40_delamination_B"
-center = { kind = "K_gallery_B", state = ["Ar40"] }
-guards = [{ kind = "Interface", label = "gallery_interface", state = ["delaminated"], min = 1 }]
 rate = { constant = 1.0 }
 [[dynamics.rules.effects]]
 target = "center"
@@ -803,25 +806,9 @@ rate = { constant = 1.0 }
 target = "center"
 set = "vacant"
 [[dynamics.rules]]
-name = "release_Ar39_delamination_A"
-center = { kind = "K_gallery_A", state = ["Ar39"] }
-guards = [{ kind = "Interface", label = "gallery_interface", state = ["delaminated"], min = 1 }]
-rate = { constant = 1.0 }
-[[dynamics.rules.effects]]
-target = "center"
-set = "vacant"
-[[dynamics.rules]]
 name = "release_Ar39_surface_B"
 center = { kind = "K_gallery_B", state = ["Ar39"] }
 guards = [{ kind = "Surface_gate", label = "surface_gate", state = ["open"], min = 1 }]
-rate = { constant = 1.0 }
-[[dynamics.rules.effects]]
-target = "center"
-set = "vacant"
-[[dynamics.rules]]
-name = "release_Ar39_delamination_B"
-center = { kind = "K_gallery_B", state = ["Ar39"] }
-guards = [{ kind = "Interface", label = "gallery_interface", state = ["delaminated"], min = 1 }]
 rate = { constant = 1.0 }
 [[dynamics.rules.effects]]
 target = "center"
@@ -835,25 +822,9 @@ rate = { constant = 1.0 }
 target = "center"
 set = "vacant"
 [[dynamics.rules]]
-name = "release_Ar36_delamination_A"
-center = { kind = "K_gallery_A", state = ["Ar36"] }
-guards = [{ kind = "Interface", label = "gallery_interface", state = ["delaminated"], min = 1 }]
-rate = { constant = 1.0 }
-[[dynamics.rules.effects]]
-target = "center"
-set = "vacant"
-[[dynamics.rules]]
 name = "release_Ar36_surface_B"
 center = { kind = "K_gallery_B", state = ["Ar36"] }
 guards = [{ kind = "Surface_gate", label = "surface_gate", state = ["open"], min = 1 }]
-rate = { constant = 1.0 }
-[[dynamics.rules.effects]]
-target = "center"
-set = "vacant"
-[[dynamics.rules]]
-name = "release_Ar36_delamination_B"
-center = { kind = "K_gallery_B", state = ["Ar36"] }
-guards = [{ kind = "Interface", label = "gallery_interface", state = ["delaminated"], min = 1 }]
 rate = { constant = 1.0 }
 [[dynamics.rules.effects]]
 target = "center"
