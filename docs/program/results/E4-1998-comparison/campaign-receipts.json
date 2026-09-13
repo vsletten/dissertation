@@ -1,0 +1,146 @@
+[
+  {
+    "barrier_kcal_mol": 53.0,
+    "barrier_label": "low",
+    "dims": [
+      4,
+      4,
+      6
+    ],
+    "elapsed_seconds": 0.20422512502409518,
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19980,
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987
+    ],
+    "sites": 768,
+    "total_events": 2206
+  },
+  {
+    "barrier_kcal_mol": 53.0,
+    "barrier_label": "low",
+    "dims": [
+      8,
+      8,
+      6
+    ],
+    "elapsed_seconds": 0.20936866709962487,
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19980,
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987
+    ],
+    "sites": 3072,
+    "total_events": 8860
+  },
+  {
+    "barrier_kcal_mol": 53.0,
+    "barrier_label": "low",
+    "dims": [
+      12,
+      12,
+      6
+    ],
+    "elapsed_seconds": 0.20781904109753668,
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19980,
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987
+    ],
+    "sites": 6912,
+    "total_events": 19983
+  },
+  {
+    "barrier_kcal_mol": 63.0,
+    "barrier_label": "high",
+    "dims": [
+      4,
+      4,
+      6
+    ],
+    "elapsed_seconds": 0.2041309168562293,
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19980,
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987
+    ],
+    "sites": 768,
+    "total_events": 2247
+  },
+  {
+    "barrier_kcal_mol": 63.0,
+    "barrier_label": "high",
+    "dims": [
+      8,
+      8,
+      6
+    ],
+    "elapsed_seconds": 0.20967504219152033,
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19980,
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987
+    ],
+    "sites": 3072,
+    "total_events": 9049
+  },
+  {
+    "barrier_kcal_mol": 63.0,
+    "barrier_label": "high",
+    "dims": [
+      12,
+      12,
+      6
+    ],
+    "elapsed_seconds": 0.2094046249985695,
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19980,
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987
+    ],
+    "sites": 6912,
+    "total_events": 20364
+  }
+]

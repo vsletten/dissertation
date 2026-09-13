@@ -79,7 +79,9 @@ on main). Priority P0 > P1 > P2 within READY.
 | [E2b-grain-size-sweep](cards/E2b-grain-size-sweep.md) | E | P1 | any | done | E2 ✅, B4 ✅ |
 | [E3a-classical-neb-barriers](cards/E3a-classical-neb-barriers.md) | E | P1 | any | done | — |
 | [E3b-periodic-dft-spot-checks](cards/E3b-periodic-dft-spot-checks.md) | E | P2 | workstation | ready | E3a ✅ |
-| [E4-1998-comparison](cards/E4-1998-comparison.md) | E | P1 | any | ready | E3a ✅, E2b ✅, A8 ✅ |
+| [E4-1998-comparison](cards/E4-1998-comparison.md) | E | P1 | any | active | E3a ✅, E2b ✅, A8 ✅ |
+| [E4a-surface-gated-release](cards/E4a-surface-gated-release.md) | E | P1 | any | blocked: E4 | E4, B5 ✅ |
+| [E4b-isothermal-reservoir-discriminants](cards/E4b-isothermal-reservoir-discriminants.md) | E | P1 | any | blocked: E4a | E4a |
 
 **Done** (acceptance verified on main): A3j-calc005-si-n1-verification,
 E3a-classical-neb-barriers
