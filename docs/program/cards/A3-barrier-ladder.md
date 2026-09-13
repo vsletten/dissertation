@@ -35,9 +35,17 @@ worker must:
    published analog (likely Al–OH–Al) say so and take the closest one.
 2. Rebuild **their** cluster — their atoms, termination, constraints/frozen
    atoms, charge state, and their level of theory.
-3. Reproduce their reported barrier within ±3 kcal/mol. That replication is the
-   acceptance gate, exactly as Phase 1 did for si-neutral (27.0 vs X&L ~29) and
-   E3a did for Nteme (68.4 vs 67.6).
+3. Reproduce the paper's reported **observable** within ±3 kcal/mol. The
+   observable is family-specific:
+   - Hydrolysis families (400s Si–O–Al₂, 500s Al–OH–Al, and the acid/base
+     rungs of CALC-002/003): the published **barrier**. That is the same
+     gate Phase 1 used for si-neutral (27.0 vs X&L ~29) and E3a used for
+     Nteme (68.4 vs 67.6).
+   - CALC-005 attachment/detachment ladders: the published
+     **energy/minimum** (reaction energy or well-depth at accepted
+     component minima). HANDOFF defines CALC-005 as minima-only with no TS
+     hunt; a CALC-005 family must not be asked to reproduce a barrier and
+     must not hunt a TS to satisfy this gate.
 4. Only then re-tier the **same** cluster with the A2 production protocol (as
    amended by TASK-296) plus the CC spot calibration. The banked value's error
    bar is the replication delta plus the CC delta.
@@ -56,8 +64,12 @@ worker must:
   closest-analog substitution for a family without a direct precedent.
 - Their cluster is rebuilt with their atoms, termination,
   constraints/frozen atoms, charge state, and level of theory.
-- The published barrier is reproduced within ±3 kcal/mol before any production
-  re-tiering. A failed replication emits no banked production value.
+- Hydrolysis families reproduce the published barrier within ±3 kcal/mol
+  before any production re-tiering. A failed replication emits no banked
+  production value.
+- CALC-005 families reproduce the published energy/minimum (not a barrier)
+  within ±3 kcal/mol before any production re-tiering. Do not hunt a TS. A
+  failed replication emits no banked production value.
 - The same replicated cluster is re-tiered at
   B3LYP-D4/def2-TZVPD+SMD(water), per TASK-296, with the unchanged CC spot
   calibration. The reported error bar is the replication delta plus the CC
