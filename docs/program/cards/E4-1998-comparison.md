@@ -1,6 +1,6 @@
 # E4-1998-comparison — synthetic spectra over the founding data
 
-- status: active
+- status: done
 - track: E (muscovite / the perfect circle)
 - priority: P1
 - machine: any (CPU ensembles; needs the E3a barrier set)
@@ -43,6 +43,10 @@ reservoir release ordering.
 
 ## Progress
 
+- 2026-09-13 14:10 PDT (hermes-macbot-one; profile=laptop) — Opened
+  [PR #127](https://github.com/vsletten/dissertation/pull/127) from the verified
+  pushed branch head `a02ca28c2888da1c85de2dedb11cc5fe37c2f4de`. The card is DONE;
+  cloud Hermes owns review, CI repair, and merge under fleet policy.
 - 2026-09-13 13:43 PDT (hermes-macbot-zero; profile=laptop) — Implementation,
   ensemble evidence, docs, and follow-up cards are verified and pushed at
   `agents/E4-1998-comparison@13128786e3371c531d9d60596a4454378928fd7f`.
@@ -79,6 +83,7 @@ reservoir release ordering.
 
 ## Result
 
+- PR: https://github.com/vsletten/dissertation/pull/127
 - Verdict: partial mechanism validation, with the grain-size crossover a hard
   falsification of the current always-open surface-release boundary.
 - Products: `docs/program/results/E4-1998-comparison.md`, its four committed
