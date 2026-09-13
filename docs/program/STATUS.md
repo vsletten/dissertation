@@ -4,11 +4,15 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
-- 2026-09-13 15:05 PDT (hermes-macbot-zero; profile=laptop) — E4a DONE:
-  explicit delamination-gated basal accessibility and 72-replica replay-verified
-  rerun produce a NO-GO on the 700→800→1025 °C crossover (53 kcal mol⁻¹:
-  550/500/500 °C; 63 kcal mol⁻¹: 600/600/600 °C). The parameter-free next
-  discriminator is READY `E4a2-surface-connected-lateral-release`; evidence:
+- 2026-09-13 15:17 PDT (hermes-macbot-zero; profile=laptop) — E4a implementation
+  and evidence are verified and pushed at `8dfb6086e5f8`; status remains ACTIVE
+  because PR creation could not complete: existing `gh` auth is invalid, Chrome
+  is AX-unreachable on another Space, and typed-browser access correctly refused
+  without the user-controlled `computer_use.grant_existing_profile` opt-in. No
+  API credential or browser-profile grant was configured. The queue continuation
+  needs only to open the prepared compare page, record the PR, and perform POLICY
+  §2 teardown. Scientific verdict remains NO-GO (53 kcal mol⁻¹: 550/500/500 °C;
+  63 kcal mol⁻¹: 600/600/600 °C); evidence:
   `docs/program/results/E4a-surface-gated-release.md`.
 
 - 2026-09-13 14:10 PDT — (hermes-macbot-one; profile=laptop) — E4 DONE:

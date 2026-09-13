@@ -1,6 +1,6 @@
 # E4a-surface-gated-release — repair the grain-size crossover
 
-- status: done
+- status: active
 - track: E (muscovite / the perfect circle)
 - priority: P1
 - machine: any (CPU ensembles)
@@ -43,6 +43,16 @@ parameter.
 - Petra Rust and Python suites, Ruff, formatting, card/PLAN/STATUS green.
 
 ## Progress
+
+- 2026-09-13 15:17 PDT (hermes-macbot-zero; profile=laptop) — CONTINUATION:
+  implementation, campaign evidence, tests, and bookkeeping are clean and pushed
+  at `agents/E4a-surface-gated-release@8dfb6086e5f88c39ae38812c1813083c63e6199c`;
+  opening the PR is the only remaining lifecycle step. Existing `gh` auth is
+  invalid, and the authenticated Chrome profile is on an AX-unreachable Space;
+  native background and approved foreground escalation could not focus the exact
+  window, while typed-browser inspection correctly refused because
+  `computer_use.grant_existing_profile` is not enabled. No API credential or
+  browser-profile grant was configured.
 
 - 2026-09-13 15:05 PDT (hermes-macbot-zero; profile=laptop) — Replaced the
   unconditional basal boundary with inert/closed/open `Surface_gate` states:

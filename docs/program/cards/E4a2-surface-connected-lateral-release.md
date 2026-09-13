@@ -1,6 +1,6 @@
 # E4a2-surface-connected-lateral-release — test the missing in-plane length scale
 
-- status: ready
+- status: blocked: E4a
 - track: E (muscovite / the perfect circle)
 - priority: P1
 - machine: any (CPU ensembles)
