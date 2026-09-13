@@ -158,6 +158,8 @@ def _run(command: list[str], cwd: Path, log_path: Path) -> float:
         env[name] = "8"
     started = time.monotonic()
     with log_path.open("w", encoding="utf-8") as log:
+        # argv sequence, shell=False: trusted `nice` plus a local petra binary path.
+        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
         subprocess.run(
             command,
             cwd=cwd,
