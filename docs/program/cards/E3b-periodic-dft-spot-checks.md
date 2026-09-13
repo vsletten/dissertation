@@ -1,11 +1,10 @@
 # E3b-periodic-dft-spot-checks — route 2 calibration of the classical set
 
-- status: blocked
+- status: ready
 - track: E (muscovite / the perfect circle)
 - priority: P2
 - machine: workstation (periodic DFT; CP2K)
 - depends: E3a-classical-neb-barriers
-- blocked-on: E3a-classical-neb-barriers
 - claimed-by:
 
 ## Objective

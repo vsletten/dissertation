@@ -1,11 +1,10 @@
 # E4-1998-comparison — synthetic spectra over the founding data
 
-- status: blocked
+- status: ready
 - track: E (muscovite / the perfect circle)
 - priority: P1
 - machine: any (CPU ensembles; needs the E3a barrier set)
 - depends: E3a-classical-neb-barriers, E2b-grain-size-sweep, A8-thesis-archive-intake
-- blocked-on: E3a-classical-neb-barriers, E2b-grain-size-sweep, A8-thesis-archive-intake
 - claimed-by:
 
 ## Objective
@@ -43,6 +42,12 @@ reservoir release ordering.
 - Petra tests, replay gates, lint green; card/PLAN/STATUS bookkeeping.
 
 ## Progress
+
+- 2026-09-13 11:09 PDT — (hermes-macbot-one; profile=laptop) — Unblocked after
+  E3a's bounded result and the completed E2b/A8 prerequisites. E3b remains an
+  optional calibration input "where available," not a hard dependency; this
+  card's provenance contract still distinguishes computed, calibrated, and
+  residual-proxy barriers explicitly.
 
 - 2026-08-27 — filed by Fable. Blocked on the computed-barrier campaign
   (E3a), the statistics ladder (E2b), and thesis-archive intake (A8),
