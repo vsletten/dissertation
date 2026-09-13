@@ -4,6 +4,8 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-13 11:19 PDT — (hermes-custom-build-001; profile=workstation) — A3 re-planned by Victor's reproduce-first ruling: every remaining family now rebuilds the closest published cluster/method, must reproduce its reported barrier within ±3 kcal/mol, and only then re-tiers that same cluster at B3LYP-D4/def2-TZVPD+SMD(water) plus unchanged CC calibration. The prior home-grown hydrated-cell protocol is retired; A3j is DONE by ruling with A3i's hash-bound null receipt standing, and parent A3 is READY for one family per PR.
+
 - 2026-09-13 11:09 PDT — (hermes-macbot-one; profile=laptop) — Reconciled
   Omnibus board drift after verifying the merged E3a/A8a results and the done
   E2b/A8 prerequisites: E3a and A8a are now recorded done; E3b and E4 are ready

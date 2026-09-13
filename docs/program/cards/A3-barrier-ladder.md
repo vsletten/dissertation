@@ -1,43 +1,54 @@
 # A3-barrier-ladder — connectivity × protonation barrier ladder (Phase 2)
 
-- status: blocked
+- status: ready
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaigns; cluster-builder code is machine-any)
-- depends: A3j-calc005-si-n1-verification
-- claimed-by: hermes-custom-build-001
+- depends: —
+- claimed-by:
 
 ## Constraints
-Ready is **not** authority to continue the OSS-neutral (300s Si–O–Si)
-series. A3f terminally rejected exact `oss-neutral-n1-s2`; OSS-neutral
-n=2–4 has no accepted n=1 baseline and is **prohibited** (no A3e replay,
-threshold relaxation, or surrogate barrier/store/Petra/CALCULATIONS
-output). A3d already closed Osa-neutral n=1–4, and A3g now closes Oaa-neutral n=2/4/6
-after its one authorized n=2 owner-basin test failed independently verified
-conditioning gates before production. A worker claiming this parent must pick a
-**different** independently gated site-family / protonation campaign already in
-this card's objective. The remaining space is attachment/detachment ladders and
-100s/200s; neutral Osa, OSS, and Oaa routes are prohibited. The crystallographic
-Oaa builder's exact even-rung mapping (n=2/4/6 at centers 18/23/18) remains a
-tested implementation contract, not campaign authority. The retained OSS-neutral
-n=4 pilot below is historical/non-actionable.
+Victor's 2026-09-13 reproduce-first ruling in mission-control TASK-298
+supersedes the prior home-grown hydrated-cell campaign protocol. Preserve the
+earlier Osa/OSS/Oaa/CALC-005 terminal outcomes as historical evidence, but do not
+replay those crystallographic constructions or treat them as published-family
+replications.
+
+No new basin-construction protocol, proton-owner enumeration, or frozen shells
+that the selected paper did not use. The hand-set `4.5e-4 Eh/Bohr`
+max-projected-gradient stationarity gate is retired for replication runs; use
+the optimizer's converged criteria as the paper did. One family per PR.
 
 ## Objective
-Execute qm/HANDOFF.md (Phase 2 edition — the full build plan lives
-there): build the crystallographic cluster builder (terminated,
-peripherally-frozen edge clusters cut from the kaolinite cell in
-petra/examples/kaolinite.toml, per KMC site family and protonation
-state), generalize the Phase-1 driver into a per-ladder-cell campaign
-script, and compute connectivity- and protonation-resolved barriers for
-remaining independently gated families. The original five-family list
-is 100s Al, 200s Si, 300s Si–O–Si, 400s Si–O–Al₂, and 500s Al–OH–Al,
-but this card **excludes** OSS-neutral n=1–4 (n=1 rejected; n=2–4
-prohibited), the closed Osa-neutral series, and Oaa-neutral n=2/4/6
-(closed by A3g). Claimable next work is a different independently gated
-remaining family, not a prohibited neutral route. Emit accepted families as petra
-`by_count`/`when` tables with provenance. Closes CALCULATIONS.md rows
-CALC-002..005 from `needed` to `computed` only for families that
-produce accepted reactant minima — never via closed OSS or Oaa neutral rungs.
+Confirm what existing research has already established; copy their setups. A3
+STOPS constructing hydrated crystallographic cells with home-grown proton-owner
+assignment — that step, not the chemistry, is what killed seven experiments.
+
+For every remaining family (400s Si–O–Al₂, 500s Al–OH–Al, the CALC-005
+attachment/detachment ladders, and the acid/base rungs of CALC-002/003), the
+worker must:
+
+1. Identify the closest **published** cluster calculation — start from Xiao &
+   Lasaga 1994/1996, Pelmenschikov et al. 2000/2001 (constrained clusters),
+   Criscenti, Kubicki & Brantley 2006, Nangia & Garrison 2008/2009, Morrow,
+   Nangia & Garrison 2009; cite what you actually use, and if a family has no
+   published analog (likely Al–OH–Al) say so and take the closest one.
+2. Rebuild **their** cluster — their atoms, termination, constraints/frozen
+   atoms, charge state, and their level of theory.
+3. Reproduce the paper's reported **observable** within ±3 kcal/mol. The
+   observable is family-specific:
+   - Hydrolysis families (400s Si–O–Al₂, 500s Al–OH–Al, and the acid/base
+     rungs of CALC-002/003): the published **barrier**. That is the same
+     gate Phase 1 used for si-neutral (27.0 vs X&L ~29) and E3a used for
+     Nteme (68.4 vs 67.6).
+   - CALC-005 attachment/detachment ladders: the published
+     **energy/minimum** (reaction energy or well-depth at accepted
+     component minima). HANDOFF defines CALC-005 as minima-only with no TS
+     hunt; a CALC-005 family must not be asked to reproduce a barrier and
+     must not hunt a TS to satisfy this gate.
+4. Only then re-tier the **same** cluster with the A2 production protocol (as
+   amended by TASK-296) plus the CC spot calibration. The banked value's error
+   bar is the replication delta plus the CC delta.
 
 ## Context
 - qm/HANDOFF.md — the complete Phase-2 plan (read first)
@@ -49,22 +60,25 @@ produce accepted reactant minima — never via closed OSS or Oaa neutral rungs.
 - .claude/learnings/ — the measured TS-hunt failure modes and gates
 
 ## Acceptance
-- Cluster-builder unit gates green (CPU-only): taxonomy match against
-  the deck cell, termination/charge bookkeeping, frozen shell
-  peripheral, no collisions.
-- Historical OSS-neutral n=4 pilot thermochemistry is
-  historical/non-actionable reconstruction evidence (see Result). It
-  does **not** authorize OSS n=2–4, A3e replay, or treating 300s
-  Si–O–Si neutral as the next claimable family.
-- A worker claiming this ready parent must select a remaining independently
-  gated family — not Osa-neutral n=1–4, OSS-neutral n=1–4, or Oaa-neutral
-  n=2/4/6. The Oaa builder's exact even-rung contract remains valid but its
-  neutral serial family is terminally closed by A3g. Continue only with another
-  family already in the Objective, under a fresh reactant-minimum gate.
-- Per completed remaining family: gated barriers in runs/ + store, an
-  emitted petra fragment that compiles via petra-cli round-trip, and the
-  CALCULATIONS.md row updated — one PR per family.
-- Full fast test suite + ruff green on every PR.
+- The PR cites the published calculation actually used and records any
+  closest-analog substitution for a family without a direct precedent.
+- Their cluster is rebuilt with their atoms, termination,
+  constraints/frozen atoms, charge state, and level of theory.
+- Hydrolysis families reproduce the published barrier within ±3 kcal/mol
+  before any production re-tiering. A failed replication emits no banked
+  production value.
+- CALC-005 families reproduce the published energy/minimum (not a barrier)
+  within ±3 kcal/mol before any production re-tiering. Do not hunt a TS. A
+  failed replication emits no banked production value.
+- The same replicated cluster is re-tiered at
+  B3LYP-D4/def2-TZVPD+SMD(water), per TASK-296, with the unchanged CC spot
+  calibration. The reported error bar is the replication delta plus the CC
+  delta.
+- Per family, ONE PR carries the reproduction table (paper / our replication /
+  our production value) and the Petra `by_count`/`when` fragment; the fragment
+  compiles via a Petra CLI round-trip and provenance is recorded in the Store.
+- The applicable CALCULATIONS.md row is updated only from accepted evidence;
+  the full fast test suite and Ruff are green.
 
 ## Result — CALC-005 pre-launch design gate
 
@@ -163,6 +177,8 @@ OSS n=2–4. A3f closed the exact n=1 route; n=2–4 remains prohibited.
 - 2026-09-06 16:00 PDT (hermes-custom-build-001; profile=workstation) — An adversarial review round regression-closed stale approach/product reuse after TS incompatibility, quick-IRC frozen-coordinate drift, reduced lookalike Store schemas and inconsistent electronic barriers, bool/arbitrary-route acceptance, and missing physical all-rung Oaa builder coverage. Its 672-test count was superseded by the newer 16:19 closure. The failed first `uv run pytest` attempt used an uninstalled fresh worktree environment and collected 31 import errors; the required main-venv invocation then passed the complete suite.
 
 ## Progress
+- 2026-09-13 11:25 PDT (hermes-custom-build-001; profile=workstation) — Docs-only re-plan verification passed: board/card invariant probe matched A3=`ready` with no dependency and A3j=`done`, all 54 PLAN card links resolve, full fast QM QA passed (`927 passed, 1 skipped`), whole-QM Ruff check and format passed (`82 files already formatted`), compileall passed, and `git diff --check` passed.
+- 2026-09-13 11:19 PDT (hermes-custom-build-001; profile=workstation) — DEVIATION: Victor's TASK-298 ruling supersedes the crystallographic hydrated-cell/fixed-proton-owner protocol after seven pre-barrier failures. A3 is re-planned as a reproduce-first campaign: published cluster and method first, ±3 kcal/mol replication gate, then B3LYP-D4/def2-TZVPD+SMD plus unchanged CC calibration on the same cluster. A3j is closed by ruling and no longer blocks this ready parent.
 - 2026-09-06 20:39 PDT (hermes-custom-build-001; profile=workstation) — Pre-launch
   repository archaeology plus two independent cold reviews rejected an immediate
   fourth-family calculator launch. Selected the remaining 200s Si CALC-005 lane,
