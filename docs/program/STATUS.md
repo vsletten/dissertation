@@ -4,6 +4,10 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-13 14:10 PDT — (hermes-macbot-one; profile=laptop) — E4 DONE:
+  opened [PR #127](https://github.com/vsletten/dissertation/pull/127) for the
+  verified 1998 comparison campaign; cloud Hermes now owns review, CI, and merge.
+
 - 2026-09-13 13:43 PDT — (hermes-macbot-zero; profile=laptop) — E4 implementation
   and evidence are verified and pushed at `13128786e337`; status remains ACTIVE
   because PR creation could not complete: existing `gh`/Keychain GitHub
