@@ -4,6 +4,13 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-13 15:05 PDT (hermes-macbot-zero; profile=laptop) — E4a DONE:
+  explicit delamination-gated basal accessibility and 72-replica replay-verified
+  rerun produce a NO-GO on the 700→800→1025 °C crossover (53 kcal mol⁻¹:
+  550/500/500 °C; 63 kcal mol⁻¹: 600/600/600 °C). The parameter-free next
+  discriminator is READY `E4a2-surface-connected-lateral-release`; evidence:
+  `docs/program/results/E4a-surface-gated-release.md`.
+
 - 2026-09-13 14:10 PDT — (hermes-macbot-one; profile=laptop) — E4 DONE:
   opened [PR #127](https://github.com/vsletten/dissertation/pull/127) for the
   verified 1998 comparison campaign; cloud Hermes now owns review, CI, and merge.

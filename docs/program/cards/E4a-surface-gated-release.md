@@ -1,11 +1,11 @@
 # E4a-surface-gated-release — repair the grain-size crossover
 
-- status: blocked: E4
+- status: done
 - track: E (muscovite / the perfect circle)
 - priority: P1
 - machine: any (CPU ensembles)
 - depends: E4-1998-comparison, B5-execution-schedule
-- claimed-by: -
+- claimed-by: hermes-macbot-zero
 
 ## Objective
 
@@ -44,8 +44,30 @@ parameter.
 
 ## Progress
 
+- 2026-09-13 15:05 PDT (hermes-macbot-zero; profile=laptop) — Replaced the
+  unconditional basal boundary with inert/closed/open `Surface_gate` states:
+  only basal gates initialize closed, a bonded local delaminated interface opens
+  them, and every isotope release rule now requires that explicit open state.
+  The exact six-deck campaign completed 72 replicas and 98,264 primary events;
+  all six same-seed replay pairs are byte-identical. The grain-size verdict is
+  NO-GO: 53 kcal mol⁻¹ peaks are 550/500/500 °C and 63 kcal mol⁻¹ peaks are
+  600/600/600 °C across the volume ladder. Follow-up
+  `E4a2-surface-connected-lateral-release` owns the next parameter-free test.
+
 - 2026-09-13 12:45 PDT — (hermes-macbot-zero; profile=laptop) — Filed from E4's
   direct experimental comparison. The retained 53 kcal mol⁻¹ delamination
   sensitivity peaks at 500 °C and the 63 kcal mol⁻¹ sensitivity at 600 °C in
   all three E2b volumes, isolating unconditional `Surface_gate` access as the
   next falsifiable mechanism rather than an Ar-hop or delamination choice.
+
+## Result
+
+- Structural gate and regression: `petra/scripts/build_muscovite_full_deck.py`
+  and `petra/scripts/tests/test_muscovite_full.py`.
+- Campaign evidence: `docs/program/results/E4a-surface-gated-release/` and
+  `docs/program/results/E4a-surface-gated-release.md`.
+- Verdict: **NO-GO** on the 700→800→1025 °C grain-size trend; local basal
+  delamination gating changes release extent but produces no monotonic peak
+  ordering. The next discriminator is a surface-connected lateral release front
+  through the varying `a/b` dimensions, filed as
+  `E4a2-surface-connected-lateral-release`.

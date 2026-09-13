@@ -156,8 +156,20 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(set(verdict["synthetic"]), {"low", "high"})
         self.assertEqual(len(verdict["section_5_claims"]), 7)
         self.assertEqual(
-            {item["verdict"] for item in verdict["section_5_claims"].values()},
-            {"not_reproduced", "partially_reproduced"},
+            verdict["section_5_claims"]["6_grain_size_delamination_fraction"][
+                "verdict"
+            ],
+            "reproduced",
+        )
+        self.assertIn(
+            "delamination-gated basal surface",
+            verdict["section_5_claims"]["6_grain_size_delamination_fraction"][
+                "mechanism"
+            ],
+        )
+        self.assertIn(
+            "delamination-gated basal surface",
+            verdict["section_5_claims"]["1_two_stage_non_fickian_loss"]["mechanism"],
         )
         self.assertTrue(verdict["synthetic"]["low"]["grain_size_crossover_reproduced"])
         self.assertTrue(
