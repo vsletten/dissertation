@@ -33,7 +33,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [E1-muscovite-deck](cards/E1-muscovite-deck.md) | E | P1 | any | done | — (phase 1 isothermal) |
 | [E2-muscovite-full-mechanism](cards/E2-muscovite-full-mechanism.md) | E | P1 | any | done | B5 ✅ |
 | [A8-thesis-archive-intake](cards/A8-thesis-archive-intake.md) | A | P1 | workstation | done | — |
-| [A8a-legacy-kmc-conformance](cards/A8a-legacy-kmc-conformance.md) | A | P2 | any | ready | A8 ✅ |
+| [A8a-legacy-kmc-conformance](cards/A8a-legacy-kmc-conformance.md) | A | P2 | any | done | A8 ✅ |
 | [A8b-legacy-dft-transition-state-gap](cards/A8b-legacy-dft-transition-state-gap.md) | A | P2 | workstation | blocked: A3 | archival ledger → modern barriers |
 | [A8c-thesis-table-4-10c-erratum](cards/A8c-thesis-table-4-10c-erratum.md) | A | P2 | any | done | A8 ✅; 185.6 source-supported, 183.6 transcription error |
 | [A8d-ligand-promotion-track-scoping](cards/A8d-ligand-promotion-track-scoping.md) | A | P2 | any | done | A8 ✅; CONDITIONAL GO for bounded dual-site oxalate pilot |
@@ -76,11 +76,15 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A5p0-aging-observables](cards/A5p0-aging-observables.md) | A | P1 | any | done | B4 ✅ |
 | [A5p1-aging-study](cards/A5p1-aging-study.md) | A | P1 | any | done | A5p0 ✅ |
 | [E2b-grain-size-sweep](cards/E2b-grain-size-sweep.md) | E | P1 | any | done | E2 ✅, B4 ✅ |
-| [E3a-classical-neb-barriers](cards/E3a-classical-neb-barriers.md) | E | P1 | any | ready | — |
-| [E3b-periodic-dft-spot-checks](cards/E3b-periodic-dft-spot-checks.md) | E | P2 | workstation | blocked: E3a | E3a |
-| [E4-1998-comparison](cards/E4-1998-comparison.md) | E | P1 | any | blocked: E3a, E2b, A8 | E3a, E2b, A8 |
+| [E3a-classical-neb-barriers](cards/E3a-classical-neb-barriers.md) | E | P1 | any | done | — |
+| [E3b-periodic-dft-spot-checks](cards/E3b-periodic-dft-spot-checks.md) | E | P2 | workstation | ready | E3a ✅ |
+| [E4-1998-comparison](cards/E4-1998-comparison.md) | E | P1 | any | ready | E3a ✅, E2b ✅, A8 ✅ |
 
-**Done** (acceptance verified on main): A3g-oaa-neutral-n2-proton-microstate-stability,
+**Done** (acceptance verified on main): E3a-classical-neb-barriers
+(bounded reconstructed route-1 gate 68.414811 vs 67.644151 kcal/mol, +1.1393%;
+all six NEBs honestly `incomplete-convergence`), A8a-legacy-kmc-conformance (five replays complete;
+DEVIATION: all five behaviorally mismatch the archive, so canonical conformance
+remains red), A3g-oaa-neutral-n2-proton-microstate-stability,
 A3f-oss-neutral-n1-terminal-adjudication,
 A3d-osa-neutral-n1-triad-failure-adjudication,
 A3c-osa-neutral-n1-mobile-proton-triad-conditioning,
