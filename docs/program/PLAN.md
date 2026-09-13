@@ -45,7 +45,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A1f-acid-neutral-water-attacker-relay](cards/A1f-acid-neutral-water-attacker-relay.md) | A | P1 | workstation | done | exact donor migrated to relay |
 | [A1g-acid-bridge-side-hydronium-neutral-attacker](cards/A1g-acid-bridge-side-hydronium-neutral-attacker.md) | A | P1 | workstation | done | conclusive product-family rejection |
 | [A1i-acid-production-tier-bridge-side-revisit](cards/A1i-acid-production-tier-bridge-side-revisit.md) | A | P1 | workstation | blocked: A2 | A1g ✅, A2 |
-| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | blocked: A3j | A3i terminal optimizer failure; independent adjudication required |
+| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | ready | — |
 | [A3a-reactant-minimum-recovery](cards/A3a-reactant-minimum-recovery.md) | A | P1 | workstation | done | terminal microstate rejection; no minimum promoted |
 | [A3b-osa-neutral-n1-proton-microstate-stability](cards/A3b-osa-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; H52 became third mobile owner |
 | [A3c-osa-neutral-n1-mobile-proton-triad-conditioning](cards/A3c-osa-neutral-n1-mobile-proton-triad-conditioning.md) | A | P1 | workstation | done | verified triad-conditioning failure; owners retained, projected gradients red |
@@ -55,7 +55,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A3g-oaa-neutral-n2-proton-microstate-stability](cards/A3g-oaa-neutral-n2-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; conditioning nonstationary/owner-changing, production not run |
 | [A3h-calc005-si-attachment-protocol](cards/A3h-calc005-si-attachment-protocol.md) | A | P1 | any | done | live state-205 cycle + state-expanded C/V proof; no energy emitted |
 | [A3i-calc005-si-n1-pilot](cards/A3i-calc005-si-n1-pilot.md) | A | P1 | workstation | done | terminal C-optimizer failure; no value emitted |
-| [A3j-calc005-si-n1-verification](cards/A3j-calc005-si-n1-verification.md) | A | P1 | workstation | ready | independently adjudicate failure receipt and artifact absence |
+| [A3j-calc005-si-n1-verification](cards/A3j-calc005-si-n1-verification.md) | A | P1 | workstation | done | closed by ruling; A3i receipt stands |
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
 | [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: A2b/A2c/A2d | final banked-reaction table, ranking, Petra/CALCULATIONS closeout |
 | [A2a-si-neutral-production-path-rebuild](cards/A2a-si-neutral-production-path-rebuild.md) | A | P1 | workstation | done | exact r2SCAN-3c minima + A2 infrastructure ✅ |
@@ -80,7 +80,8 @@ on main). Priority P0 > P1 > P2 within READY.
 | [E3b-periodic-dft-spot-checks](cards/E3b-periodic-dft-spot-checks.md) | E | P2 | workstation | blocked: E3a | E3a |
 | [E4-1998-comparison](cards/E4-1998-comparison.md) | E | P1 | any | blocked: E3a, E2b, A8 | E3a, E2b, A8 |
 
-**Done** (acceptance verified on main): A3g-oaa-neutral-n2-proton-microstate-stability,
+**Done** (acceptance verified on main): A3j-calc005-si-n1-verification,
+A3g-oaa-neutral-n2-proton-microstate-stability,
 A3f-oss-neutral-n1-terminal-adjudication,
 A3d-osa-neutral-n1-triad-failure-adjudication,
 A3c-osa-neutral-n1-mobile-proton-triad-conditioning,
@@ -106,31 +107,15 @@ D2a-astro-rate-reproduction (PR #31 — verdict: GO gas-phase /
 NO-GO surface-LH), A7-kinetics-database (PR #27 — 36 minerals, 74
 mechanisms, validator green). **Blocked closeout branch**:
 `agents/A1b-acid-microsolvation` for A1b-acid-mechanisms.
-A3-barrier-ladder is BLOCKED on READY A3j. A3h independently
-reviewed and fixed the live fully hydrolyzed 200s-Si cycle, exact
-environment-to-Petra mapping, state-expanded C/V proof, and fail-closed
-numerical/evidence contract without a calculator call. A3i executed only
-`(x=1,y=0), i=1` and terminated when the sole `C` optimizer's DFRKS scanner
-failed to converge nuclear gradients; it emitted no endpoint, Store, or value.
-A3j must independently adjudicate that zero-retry failure before any next rung. A3g
-independently verified `inconclusive terminal failure` for exact Oaa-neutral n=2:
-the one owner-conditioning call remained nonstationary, changed three other proton
-owners, and failed both projected-gradient gates. Constrained B3LYP, release, PHVA,
-and downstream output did not run. Its zero-retry contract terminally closes
-Oaa-neutral n=2/4/6; no replay or surrogate output is authorized.
-A3f independently terminally rejected the exact `oss-neutral-n1-s2` route because the
-owner-retaining constrained B3LYP endpoint's maximum projected gradient
-`4.836372724428273e-4 Eh/Bohr` exceeded the fixed `4.5e-4` gate. The narrower
-RMS/residual/owner/shell/collision/finite-energy gates passed; release and all
-downstream artifacts remained absent. This is not a global no-basin claim. No
-A3e replay, threshold relaxation, OSS n=2–4 launch, or surrogate barrier/store/
-Petra/CALCULATIONS value is authorized for the rejected route.
-A3d terminally rejected the exact Osa-neutral n=1 proton assignment after A3c's
-three-owner budget retained H50/H52/H57 but failed the independent canonical-
-endpoint projected-gradient stationarity gates despite geomeTRIC convergence.
-No A3a/A3b/A3c replay or Osa-neutral n=2–4 launch is authorized, and no surrogate
-barrier/store/Petra value may represent that series. The pilot result remains
-merged in PR #67.
+A3-barrier-ladder is READY under Victor's 2026-09-13 reproduce-first ruling.
+For every remaining 400s, 500s, CALC-005, and acid/base family, rebuild the
+closest published cluster and method, reproduce its barrier within ±3 kcal/mol,
+then re-tier that same cluster at B3LYP-D4/def2-TZVPD+SMD(water) plus the
+unchanged CC spot calibration. One family per PR carries the paper/replication/
+production table and Petra fragment. The prior home-grown hydrated-cell
+Osa/OSS/Oaa/CALC-005 attempts remain historical null evidence and are not to be
+replayed. A3j is DONE by ruling; A3i's hash-bound terminal optimizer-failure
+receipt stands and no second-worker null-result ceremony remains.
 
 **Tracked elsewhere**: TASK-164 (scan-smoothness repair + al-neutral
 barrier) predates this board and lives in the mission-control queue —
