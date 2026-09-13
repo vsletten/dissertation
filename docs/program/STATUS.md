@@ -4,6 +4,11 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-13 11:09 PDT — (hermes-macbot-one; profile=laptop) — Reconciled
+  Omnibus board drift after verifying the merged E3a/A8a results and the done
+  E2b/A8 prerequisites: E3a and A8a are now recorded done; E3b and E4 are ready
+  with satisfied dependencies, restoring Track E dispatch.
+
 - 2026-09-09 02:22 PDT — (hermes-custom-build-001; profile=workstation) — A3i DONE with an unverified `incomplete-computational-failure`: its exact one-rung production run spent the sole `C` r2SCAN-3c optimizer call, then PySCF's DFRKS scanner failed because nuclear gradients did not converge. `V` and `SiOH4` never ran; no accepted/raw endpoint, generation, Store, Petra/CALCULATIONS output, or scientific value exists. The terminal/restoration evidence is hash-bound, the QI2 lease is absent, and the unit has no live PID. Two cold-review rounds were regression-closed without replay; A3 remains BLOCKED on READY A3j's independent evidence-only adjudication.
 
 - 2026-09-06 22:46 PDT — (hermes-macbot-zero; profile=laptop) — A3h DONE after independent scientific/KMC review and adversarial hardening: CALC-005 now uses the live fully hydrolyzed state-205 cycle `C_xy -> V_xy + Si(OH)4`, distinguishes KMC `i=x+y` from condensed `n_intact`, and has a deterministic graph-provenance C/V proof for `(x=1,y=i-1), i=1..4`. The only released work is READY A3i's `(x=1,y=0), i=1`, `Osa.sih(402)->Osa.albr(404)` minima pilot followed by BLOCKED A3j verification; all other topologies/rungs and Petra/CALCULATIONS publication remain unauthorized. CPU gates cover exact formulas/states/charge/spin, atom conservation, finite/collision/frozen/proton identity, two-pass hashes, standard-state arithmetic, and detailed balance. No calculator, GPU lease, service mutation, live database, or kinetic value was produced. Evidence: `docs/program/A3h-calc005-si-attachment-protocol.md` and `docs/program/results/A3h-calc005-builder-probe.json`.
