@@ -171,6 +171,28 @@ class EvaluationTests(unittest.TestCase):
             verdict["synthetic"]["high"]["high_temperature_merge_reproduced"]
         )
 
+    def test_crossover_requires_three_point_volume_ordering(self) -> None:
+        release = comparison._read_release_data(DATA / "figure4-release-rates.csv")
+        rows = self.synthetic_rows()
+        for row in rows:
+            if row["dims"] == "8x8x6":
+                row["released_ar40_mean"] = (
+                    10.0 if row["temperature_c"] == 500.0 else 0.2
+                )
+        verdict = comparison.evaluate(rows, release)
+        self.assertFalse(verdict["synthetic"]["low"]["grain_size_crossover_reproduced"])
+        self.assertTrue(verdict["observed"]["grain_size_crossover"])
+        self.assertTrue(
+            comparison._monotonic_volume_crossover(
+                {"4x4x6": 700.0, "8x8x6": 800.0, "12x12x6": 1025.0}
+            )
+        )
+        self.assertFalse(
+            comparison._monotonic_volume_crossover(
+                {"4x4x6": 700.0, "8x8x6": 600.0, "12x12x6": 1025.0}
+            )
+        )
+
     def test_svg_contains_observed_and_synthetic_layers(self) -> None:
         release = comparison._read_release_data(DATA / "figure4-release-rates.csv")
         ages = comparison._read_age_data(DATA / "figure3-and-5-age-spectra.csv")

@@ -28,6 +28,9 @@ from muscovite_grain_size_sweep import ensemble_rows
 DELAMINATION_SENSITIVITY_KCAL_MOL = {"low": 53.0, "high": 63.0}
 E3A_LOCAL_DEHYDROXYLATE_HOP_KCAL_MOL = 64.095991
 E3A_EXTENDED_ZONE_HOP_KCAL_MOL = 68.410690
+# E2b periodic comparison volumes: a finite-size ladder, not recovered physical
+# grain diameters. Overlay against the 1998 58/165/3000 µm series is qualitative;
+# E4a owns surface-gated release on this same ladder.
 COMPARISON_SIZES = ((4, 4, 6), (8, 8, 6), (12, 12, 6))
 COMPARISON_SCHEDULE = tuple(
     (temperature + 273.15, 600.0) for temperature in range(500, 1201, 50)
@@ -329,6 +332,11 @@ def _synthetic_rows(
     return rows
 
 
+def _monotonic_volume_crossover(peaks: dict[str, float]) -> bool:
+    small, medium, large = (_slug(dims) for dims in COMPARISON_SIZES)
+    return peaks[small] < peaks[medium] < peaks[large]
+
+
 def _peak_temperature(
     rows: list[dict[str, object]], dims: tuple[int, int, int]
 ) -> float:
@@ -409,8 +417,7 @@ def evaluate(
                 key: {"reproduced": value[0], "excess_ma": value[1]}
                 for key, value in old_steps.items()
             },
-            "grain_size_crossover_reproduced": peaks[_slug(COMPARISON_SIZES[0])]
-            < peaks[_slug(COMPARISON_SIZES[-1])],
+            "grain_size_crossover_reproduced": _monotonic_volume_crossover(peaks),
             "recoil_driven_distortion_reproduced": recoil,
             "high_temperature_merge_reproduced": max(finals.values())
             - min(finals.values())
@@ -421,8 +428,11 @@ def evaluate(
         "scope": "qualitative discrimination, not fit",
         "observed": {
             "peak_temperature_c": observed_peaks,
-            "grain_size_crossover": observed_peaks["500C_isothermal_small"]
-            < observed_peaks["500C_isothermal_large"],
+            "grain_size_crossover": (
+                observed_peaks["500C_isothermal_small"]
+                < observed_peaks["500C_isothermal_medium"]
+                < observed_peaks["500C_isothermal_large"]
+            ),
             "old_initial_steps": True,
             "high_temperature_merge": True,
         },
