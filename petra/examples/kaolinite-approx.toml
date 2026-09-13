@@ -577,8 +577,10 @@ boundary = ["periodic", "fixed", "periodic"]
 
 # All temperatures are Kelvin and all energy fields are kcal/mol (declared above).
 # Petra has no H+/OH- coupling in this deck: pH 3-5 is contextual and is NOT
-# encoded. The dilute dissolved-cation activities below are an open-flow,
-# far-from-equilibrium proxy; they must not be described as acid/base catalysis.
+# encoded. The explicit 1e-12 dissolved-cation activities below, combined with
+# mu = -1 kcal/mol, give each consumed cation an effective thermodynamic factor
+# a*exp(mu/RT) = 1.847676567496443e-13 at 298 K. This is a dilute open-flow,
+# far-from-equilibrium proxy; it must not be described as acid/base catalysis.
 [thermo]
 temperature = 298.0
 
@@ -740,7 +742,7 @@ set = "empty"
 name = "R0-sio-si-hydrolysis"
 # a9-family = "siloxane-neutral"
 # a9-provenance = "computed"
-# a9-source = "qm/ si-neutral CALC-001"
+# a9-source = "qm/ si-neutral CALC-002"
 # a9-method = "B3LYP/def2-SVP/DF"
 # a9-observable = "activation_free_energy"
 # a9-rationale = "Direct Si-neutral survey free-energy barrier; not r2SCAN-3c."
@@ -782,7 +784,7 @@ shift = -1
 name = "R2-sioal2-si-hydrolysis"
 # a9-family = "sioal-si-neutral"
 # a9-provenance = "computed"
-# a9-source = "qm/ si-neutral CALC-001"
+# a9-source = "qm/ si-neutral CALC-002"
 # a9-method = "B3LYP/def2-SVP/DF analogue"
 # a9-observable = "activation_free_energy_analogue"
 # a9-rationale = "Explicit Si-neutral analogue; not r2SCAN-3c."
@@ -827,7 +829,7 @@ shift = -1
 name = "R4-sioal2-al-hydrolysis"
 # a9-family = "sioal-al-neutral"
 # a9-provenance = "computed"
-# a9-source = "qm/ al-neutral CALC-002"
+# a9-source = "qm/ al-neutral CALC-003"
 # a9-method = "B3LYP/def2-SVP/DF"
 # a9-observable = "activation_free_energy"
 # a9-rationale = "Direct Al-neutral survey free-energy barrier; not r2SCAN-3c."
@@ -1023,7 +1025,7 @@ effects = [
 name = "R10-sial-hydrolysis"
 # a9-family = "sioal-si-neutral"
 # a9-provenance = "computed"
-# a9-source = "qm/ si-neutral CALC-001"
+# a9-source = "qm/ si-neutral CALC-002"
 # a9-method = "B3LYP/def2-SVP/DF analogue"
 # a9-observable = "activation_free_energy_analogue"
 # a9-rationale = "Explicit Si-neutral analogue; not r2SCAN-3c."
@@ -1073,7 +1075,7 @@ shift = -1
 name = "R12-albr-hydrolysis"
 # a9-family = "sioal-al-neutral"
 # a9-provenance = "computed"
-# a9-source = "qm/ al-neutral CALC-002"
+# a9-source = "qm/ al-neutral CALC-003"
 # a9-method = "B3LYP/def2-SVP/DF analogue"
 # a9-observable = "activation_free_energy_analogue"
 # a9-rationale = "Explicit Al-neutral analogue; not r2SCAN-3c."
@@ -1238,7 +1240,7 @@ map = { empty = "si1", al1 = "sialh", albr = "sih", alhy = "full" }
 name = "desorb-al"
 # a9-family = "cation-desorption"
 # a9-provenance = "heuristic"
-# a9-source = "CALC-002 anchor plus legacy environment ladder"
+# a9-source = "CALC-003 anchor plus legacy environment ladder"
 # a9-method = "mixed computed anchor and heuristic modifiers"
 # a9-observable = "mixed_desorption_proxy"
 # a9-rationale = "CALC-005 is unavailable; this is not a computed desorption barrier."

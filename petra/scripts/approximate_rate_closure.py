@@ -151,7 +151,7 @@ REACTION_REGISTRY = (
         27.019,
         "siloxane-neutral",
         "computed",
-        "qm/ si-neutral CALC-001",
+        "qm/ si-neutral CALC-002",
         "B3LYP/def2-SVP/DF",
         "activation_free_energy",
         "Direct Si-neutral survey free-energy barrier; not r2SCAN-3c.",
@@ -171,7 +171,7 @@ REACTION_REGISTRY = (
         27.019,
         "sioal-si-neutral",
         "computed",
-        "qm/ si-neutral CALC-001",
+        "qm/ si-neutral CALC-002",
         "B3LYP/def2-SVP/DF analogue",
         "activation_free_energy_analogue",
         "Explicit Si-neutral analogue; not r2SCAN-3c.",
@@ -191,7 +191,7 @@ REACTION_REGISTRY = (
         32.221,
         "sioal-al-neutral",
         "computed",
-        "qm/ al-neutral CALC-002",
+        "qm/ al-neutral CALC-003",
         "B3LYP/def2-SVP/DF",
         "activation_free_energy",
         "Direct Al-neutral survey free-energy barrier; not r2SCAN-3c.",
@@ -271,7 +271,7 @@ REACTION_REGISTRY = (
         27.019,
         "sioal-si-neutral",
         "computed",
-        "qm/ si-neutral CALC-001",
+        "qm/ si-neutral CALC-002",
         "B3LYP/def2-SVP/DF analogue",
         "activation_free_energy_analogue",
         "Explicit Si-neutral analogue; not r2SCAN-3c.",
@@ -291,7 +291,7 @@ REACTION_REGISTRY = (
         32.221,
         "sioal-al-neutral",
         "computed",
-        "qm/ al-neutral CALC-002",
+        "qm/ al-neutral CALC-003",
         "B3LYP/def2-SVP/DF analogue",
         "activation_free_energy_analogue",
         "Explicit Al-neutral analogue; not r2SCAN-3c.",
@@ -351,7 +351,7 @@ REACTION_REGISTRY = (
         32.221,
         "cation-desorption",
         "heuristic",
-        "CALC-002 anchor plus legacy environment ladder",
+        "CALC-003 anchor plus legacy environment ladder",
         "mixed computed anchor and heuristic modifiers",
         "mixed_desorption_proxy",
         "CALC-005 is unavailable; this is not a computed desorption barrier.",
@@ -643,9 +643,18 @@ def validate_deck(path: Path, seeds: Sequence[int] = DEFAULT_SEEDS) -> DeckContr
     deck_meta = parsed.get("deck", {})
     if deck_meta.get("units") != "kcal/mol":
         raise ValueError("deck energy units must be explicit kcal/mol")
-    temperature = parsed.get("thermo", {}).get("temperature")
+    thermo = parsed.get("thermo", {})
+    temperature = thermo.get("temperature")
     if type(temperature) is not float or temperature != 298.0:
         raise ValueError("thermo.temperature must be exactly the TOML float 298.0")
+    if thermo.get("activity") != {"Al": 1.0e-12, "Si": 1.0e-12}:
+        raise ValueError(
+            "thermo.activity must fix the dilute Al/Si reservoir at exactly 1.0e-12"
+        )
+    if thermo.get("mu") != {"Al": -1.0, "Si": -1.0}:
+        raise ValueError(
+            "thermo.mu must fix the far-from-equilibrium Al/Si reservoir at exactly -1.0 kcal/mol"
+        )
     if _schedule_present(parsed) or re.search(r"(?m)^\s*\[+[^]]*schedule", text):
         raise ValueError("execution schedules are forbidden for A9")
 

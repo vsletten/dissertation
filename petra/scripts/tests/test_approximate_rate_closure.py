@@ -336,6 +336,18 @@ class DeckContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "exactly.*298.0"):
                 closure.validate_deck(path)
 
+    def test_dilute_reservoir_sabotage_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            activity = _write_sabotage(root, ("Al = 1.0e-12", "Al = 1.0"))
+            with self.assertRaisesRegex(ValueError, "dilute.*reservoir"):
+                closure.validate_deck(activity)
+            chemical_potential = _write_sabotage(
+                root, ("Al = -1.0\nSi = -1.0", "Al = 0.0\nSi = -1.0")
+            )
+            with self.assertRaisesRegex(ValueError, "far-from-equilibrium"):
+                closure.validate_deck(chemical_potential)
+
     def test_schedule_and_wrong_prefactor_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -593,13 +605,13 @@ class EventAndUnitTests(unittest.TestCase):
             return result
 
         for invalid in (-1.0, float("nan")):
-            with self.subTest(invalid=invalid):
-                with self.assertRaisesRegex(
-                    ValueError, "propensit.*finite and nonnegative"
-                ):
-                    closure.integrate_expected_gross_dissolution_from_propensity(
-                        samples(invalid), names, [100, 200]
-                    )
+            with (
+                self.subTest(invalid=invalid),
+                self.assertRaisesRegex(ValueError, "propensit.*finite and nonnegative"),
+            ):
+                closure.integrate_expected_gross_dissolution_from_propensity(
+                    samples(invalid), names, [100, 200]
+                )
         swapped = list(names)
         si_index = swapped.index("desorb-si")
         al_index = swapped.index("desorb-al")
