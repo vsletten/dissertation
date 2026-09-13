@@ -45,7 +45,8 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A1f-acid-neutral-water-attacker-relay](cards/A1f-acid-neutral-water-attacker-relay.md) | A | P1 | workstation | done | exact donor migrated to relay |
 | [A1g-acid-bridge-side-hydronium-neutral-attacker](cards/A1g-acid-bridge-side-hydronium-neutral-attacker.md) | A | P1 | workstation | done | conclusive product-family rejection |
 | [A1i-acid-production-tier-bridge-side-revisit](cards/A1i-acid-production-tier-bridge-side-revisit.md) | A | P1 | workstation | blocked: A2 | A1g ✅, A2 |
-| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | ready | — |
+| [A9-approximate-rate-closure](cards/A9-approximate-rate-closure.md) | A | P0 | any | ready | — |
+| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | blocked: A9 | A9 |
 | [A3a-reactant-minimum-recovery](cards/A3a-reactant-minimum-recovery.md) | A | P1 | workstation | done | terminal microstate rejection; no minimum promoted |
 | [A3b-osa-neutral-n1-proton-microstate-stability](cards/A3b-osa-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; H52 became third mobile owner |
 | [A3c-osa-neutral-n1-mobile-proton-triad-conditioning](cards/A3c-osa-neutral-n1-mobile-proton-triad-conditioning.md) | A | P1 | workstation | done | verified triad-conditioning failure; owners retained, projected gradients red |
@@ -57,9 +58,9 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A3i-calc005-si-n1-pilot](cards/A3i-calc005-si-n1-pilot.md) | A | P1 | workstation | done | terminal C-optimizer failure; no value emitted |
 | [A3j-calc005-si-n1-verification](cards/A3j-calc005-si-n1-verification.md) | A | P1 | workstation | done | closed by ruling; A3i receipt stands |
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
-| [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: A2b/A2c/A2d | final banked-reaction table, ranking, Petra/CALCULATIONS closeout |
+| [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: A9 | A9; final banked survey/literature table, ranking, Petra/CALCULATIONS closeout |
 | [A2a-si-neutral-production-path-rebuild](cards/A2a-si-neutral-production-path-rebuild.md) | A | P1 | workstation | done | exact r2SCAN-3c minima + A2 infrastructure ✅ |
-| [A2b-al-neutral-production-energetics](cards/A2b-al-neutral-production-energetics.md) | A | P1 | workstation | blocked: terminal reactant SCF failure | A2a ✅; all three authorized wB97M-V reactant routes failed |
+| [A2b-al-neutral-production-energetics](cards/A2b-al-neutral-production-energetics.md) | A | P1 | workstation | blocked: A9 | A9; banked r2SCAN-3c 32.2 kcal/mol survey value |
 | [A2b1-wb97mv-reactant-scf-recovery](cards/A2b1-wb97mv-reactant-scf-recovery.md) | A | P1 | workstation | done | independently verified finite SCF failure; no retry authorized |
 | [A2c-al-acid-production-energetics](cards/A2c-al-acid-production-energetics.md) | A | P1 | workstation | blocked: A2b | A1b banked one-water Al-acid route |
 | [A2d-oss-neutral-n4-production-energetics](cards/A2d-oss-neutral-n4-production-energetics.md) | A | P1 | workstation | blocked: A2c | documented embedded pilot; deterministic rebuild |
@@ -111,12 +112,13 @@ D2a-astro-rate-reproduction (PR #31 — verdict: GO gas-phase /
 NO-GO surface-LH), A7-kinetics-database (PR #27 — 36 minerals, 74
 mechanisms, validator green). **Blocked closeout branch**:
 `agents/A1b-acid-microsolvation` for A1b-acid-mechanisms.
-A3-barrier-ladder is READY under Victor's 2026-09-13 reproduce-first ruling.
-For every remaining 400s, 500s, CALC-005, and acid/base family, rebuild the
-closest published cluster and method, reproduce its barrier within ±3 kcal/mol,
-then re-tier that same cluster at B3LYP-D4/def2-TZVPD+SMD(water) plus the
-unchanged CC spot calibration. One family per PR carries the paper/replication/
-production table and Petra fragment. The prior home-grown hydrated-cell
+A9-approximate-rate-closure is READY at P0 to run the full KMC loop with
+approximate absolute rates and rank barrier-family sensitivity. A3, A2, and A2b
+are BLOCKED on that verdict. For any family A9 ranks sensitive, A3 rebuilds the
+closest published cluster and method and reproduces its observable within ±3
+kcal/mol; the survey-tier or literature-replication value is then banked. One
+family per PR carries the paper/replication/banked-value table and Petra
+fragment. The prior home-grown hydrated-cell
 Osa/OSS/Oaa/CALC-005 attempts remain historical null evidence and are not to be
 replayed. A3j is DONE by ruling; A3i's hash-bound terminal optimizer-failure
 receipt stands and no second-worker null-result ceremony remains.

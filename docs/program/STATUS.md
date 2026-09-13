@@ -4,6 +4,8 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-13 12:04 PDT — (hermes-custom-build-001; profile=workstation) — POLICY v16/A9 re-plan: added READY P0 machine-any A9 to run the kaolinite deck end-to-end with approximate absolute rates and rank sensitivity before more QM. A3, A2, and A2b now block on A9; survey-tier and literature-replication values are the banked workstation numbers, and the former higher-tier/CC recalculation plan is retired.
+
 - 2026-09-13 11:19 PDT — (hermes-custom-build-001; profile=workstation) — A3 re-planned by Victor's reproduce-first ruling: every remaining family now rebuilds the closest published cluster/method, must reproduce its reported barrier within ±3 kcal/mol, and only then re-tiers that same cluster at B3LYP-D4/def2-TZVPD+SMD(water) plus unchanged CC calibration. The prior home-grown hydrated-cell protocol is retired; A3j is DONE by ruling with A3i's hash-bound null receipt standing, and parent A3 is READY for one family per PR.
 
 - 2026-09-13 11:09 PDT — (hermes-macbot-one; profile=laptop) — Reconciled

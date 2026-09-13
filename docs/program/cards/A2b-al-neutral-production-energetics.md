@@ -1,68 +1,57 @@
-# A2b-al-neutral-production-energetics — re-tier banked Si–O–Al neutral route
+# A2b-al-neutral-production-energetics — banked Si–O–Al neutral survey route
 
 - status: blocked
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaign)
-- depends: terminal accepted wB97M-V reactant SCF (unavailable; recovery budget exhausted)
+- depends: A9-approximate-rate-closure
 - claimed-by: hermes-custom-build-001
-- blocked-on: terminal wB97M-V reactant SCF failure; no retry authorized
+- blocked-on: A9
 
 ## Objective
 
-Re-tier the accepted TASK-168 one-water neutral Si–O–Al route from
-B3LYP/def2-SVP/DF onto A2's settled production protocol. Preserve the accepted
-sequential mechanism: quasi-barrierless uphill addition into the associative
-intermediate, followed by the verified bridge-cleavage saddle. Do not resurrect
-the rejected two-imaginary-mode addition candidate as a transition state.
+Bank the accepted neutral Si–O–Al survey result for the approximate-rate loop:
+32.2 kcal/mol at r2SCAN-3c, with the TASK-168 one-water sequential mechanism and
+its provenance. Preserve the quasi-barrierless uphill addition into the
+associative intermediate followed by the verified bridge-cleavage saddle. Do
+not resurrect the rejected two-imaginary-mode addition candidate, and do not
+retry the exhausted wB97M-V reactant SCF routes.
 
 Source evidence is immutable at
 `/mnt/data/vsletten/dissertation-data/task168-al-neutral-20260823/`.
-Bind every checkpoint to the source store/geometry hashes and the exact merged
-A2 method identity.
+Use the immutable source store/geometry hashes to support the banked survey
+value. A9's sensitivity verdict decides whether a later, separately scoped
+published-family replication is warranted.
 
 ## Execution
 
-1. Generalize the resume-safe A2 production driver just enough to represent a
-   sequential route with a barrierless addition segment and one cleavage TS.
-2. Optimize the reactant, intermediate, released product, and cleavage saddle
-   on exact r2SCAN-3c (D4+gCP) surfaces; use finite-difference composite
-   Hessians and require indices `0/0/0/1` above the documented imaginary floor.
-3. Run full bidirectional Gonzalez–Schlegel IRC from the cleavage saddle and
-   require exact atom order, electronic state, physical-H ownership, and heavy
-   connectivity to match the accepted intermediate/product basins.
-4. Run wB97M-V/def2-TZVPD+SMD and B3LYP-D4/def2-TZVPD+SMD single points on all
-   accepted stationary points. Compute the reactant-referenced profile maximum
-   and SVP→r2SCAN-3c→production barrier shifts.
-5. Write one atomic terminal receipt and provenance-complete `store.sqlite`.
-   Archive ignored artifacts below `/mnt/data/vsletten/dissertation-data/` and
-   publish hashes, not large outputs, to git.
+1. Verify the existing r2SCAN-3c value, units, mechanism identity, and source
+   hashes from the accepted evidence.
+2. Record 32.2 kcal/mol as the banked A9 input with survey-tier provenance.
+3. Make no new QM call on this card. If A9 ranks this family sensitive, a
+   separate card may replicate the closest published family within POLICY v16's
+   four-hour-per-unit envelope.
 
 ## Constraints
 
 - Follow `docs/program/PROTOCOL.md` and fleet `POLICY.md`; one branch/worktree/PR.
-- GPU-first; OMP/MKL/OpenBLAS <=16; tee long runs; hold the canonical GPU lease.
-- Optimizer convergence, Hessian index, IRC basin identity, and mechanism
-  acceptance are separate fail-closed gates.
-- A finite computational failure is `incomplete-*`, never a scientific
-  rejection. No external compute spend without a separately authorized gate.
+- No QM run, GPU lease, external compute spend, or SCF retry on this card.
+- Historical branch, service, and artifact names retain their literal IDs; they
+  are provenance, not authority for a higher-tier restart.
 
 ## Acceptance
 
-- Regression coverage proves source-hash/settings binding, rejected-addition
-  refusal, checkpoint drift rejection, true-minimum/one-saddle indices,
-  typed full-IRC endpoint identity, stale-output quarantine, and atomic status.
-- A hash-valid terminal receipt has no `running` record and the output store
-  passes `PRAGMA integrity_check` with exact method/geometry provenance.
-- Production ΔG‡ and electronic barriers for SVP, r2SCAN-3c, wB97M-V, and
-  B3LYP-D4 are reported with barrier shifts; no rejected saddle contributes.
-- `qm/AL_NEUTRAL_MECHANISM.md` and `qm/CALCULATIONS.md` carry the verified tier.
-- The same PR sets A2c's card and PLAN row to `ready`, clears its `blocked-on`
-  field, and records the transition; A2c must not require a manual board edit.
-- Full QM suite, whole-tree Ruff, changed-file format, CLI smoke, diff check,
-  durable hashes, and review-ready teardown pass.
+- The 32.2 kcal/mol r2SCAN-3c value is recorded with exact source provenance and
+  identified as survey tier.
+- The accepted sequential mechanism remains unchanged and rejected saddles do
+  not contribute.
+- A9 consumes the banked value; this card remains blocked until A9's sensitivity
+  verdict determines whether any published-family replication is worth running.
+- No new higher-tier energy, SCF retry, or workstation quality claim is made.
 
 ## Progress
+
+- 2026-09-13 12:04 PDT (hermes-custom-build-001; profile=workstation) — POLICY v16/A9 AMENDMENT: the accepted 32.2 kcal/mol r2SCAN-3c result is the banked survey-tier value for A9. The exhausted wB97M-V routes are historical evidence rather than a blocker to another workstation tier; A2b now waits only on A9's sensitivity verdict and authorizes no QM retry.
 
 - 2026-09-06 12:41 PDT (hermes-custom-build-001; profile=workstation) — A2b1
   exhausted its independently reviewed, materially different Hückel → damped
