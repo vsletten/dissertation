@@ -348,6 +348,36 @@ class DeckContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "far-from-equilibrium"):
                 closure.validate_deck(chemical_potential)
 
+    def test_provenance_records_exact_thermodynamic_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "provenance.csv"
+            closure._write_provenance(path)
+            with path.open(encoding="utf-8") as handle:
+                rows = list(csv.DictReader(handle))
+        conditions = {
+            row["constant_name"]: row
+            for row in rows
+            if row["record_type"] == "condition"
+        }
+        self.assertEqual(
+            set(conditions),
+            {
+                "temperature",
+                "dissolved_cation_activity",
+                "dissolved_cation_mu",
+                "effective_consumed_cation_factor_298k",
+            },
+        )
+        self.assertEqual(conditions["temperature"]["constant_value"], "298.0")
+        self.assertEqual(
+            conditions["dissolved_cation_activity"]["constant_value"], "1e-12"
+        )
+        self.assertEqual(conditions["dissolved_cation_mu"]["constant_value"], "-1.0")
+        self.assertIn(
+            "not a measured pH-dependent activity",
+            conditions["dissolved_cation_activity"]["rationale"],
+        )
+
     def test_schedule_and_wrong_prefactor_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

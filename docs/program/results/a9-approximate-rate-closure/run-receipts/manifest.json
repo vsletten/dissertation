@@ -1,0 +1,231 @@
+{
+  "checkpoint_sha256": "48c46e3d5aa594b903e4c11c60fd85e72dee433cffe8663eb31d419723cae2a7",
+  "completed_runs": 232,
+  "petra_binary": "/home/vsletten/.hermes/cache/cargo-target/vsletten-dissertation-da68ebaefa3a/debug/petra",
+  "petra_binary_sha256": "bbedccd9b53beef113ec73cbb169fc3917c132eae93c3e51ba4bd5b45ae44043",
+  "replicas": 8,
+  "scenarios": [
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/nominal.toml",
+      "deck_sha256": "169b0b4cea9dafb00e6becfcf2ea36ca5cfaef3cc772b46e2b6c8402b13e86d6",
+      "family": null,
+      "name": "nominal",
+      "perturbation": null
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/siloxane-neutral__ea-minus-3.toml",
+      "deck_sha256": "c779419dd605db95e76c284b709302ffeca799fcf66308fe9fcd3e2a4afdee61",
+      "family": "siloxane-neutral",
+      "name": "siloxane-neutral__ea-minus-3",
+      "perturbation": "ea-minus-3"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/siloxane-neutral__ea-plus-3.toml",
+      "deck_sha256": "de5d32874a518809bec1474a5c5665b846373c0b9f14d5ab55e162c1bb894554",
+      "family": "siloxane-neutral",
+      "name": "siloxane-neutral__ea-plus-3",
+      "perturbation": "ea-plus-3"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/siloxane-neutral__prefactor-x0.1.toml",
+      "deck_sha256": "0f5cbd2ed9a6c1df57a9ec4403eb876fd536e4d53ac3503b8554d9aa4f684917",
+      "family": "siloxane-neutral",
+      "name": "siloxane-neutral__prefactor-x0.1",
+      "perturbation": "prefactor-x0.1"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/siloxane-neutral__prefactor-x10.toml",
+      "deck_sha256": "4fb0589804330b5bfae77ce74faf5b247169deea07bd052326716c6e8ef25985",
+      "family": "siloxane-neutral",
+      "name": "siloxane-neutral__prefactor-x10",
+      "perturbation": "prefactor-x10"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/sioal-si-neutral__ea-minus-3.toml",
+      "deck_sha256": "736b16e29325b4e34f1f4445a0f3110b7f4d9c1398f56798a982b3a450cde5a3",
+      "family": "sioal-si-neutral",
+      "name": "sioal-si-neutral__ea-minus-3",
+      "perturbation": "ea-minus-3"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/sioal-si-neutral__ea-plus-3.toml",
+      "deck_sha256": "3780c27cc0c403f817581d7fb920af641e33474cdb019a6e543b8ec4723ad5a7",
+      "family": "sioal-si-neutral",
+      "name": "sioal-si-neutral__ea-plus-3",
+      "perturbation": "ea-plus-3"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/sioal-si-neutral__prefactor-x0.1.toml",
+      "deck_sha256": "51a3da20e23a3efb4f4bfc576a6b669408d3ab4910cf06e236a65c6d5b59fd81",
+      "family": "sioal-si-neutral",
+      "name": "sioal-si-neutral__prefactor-x0.1",
+      "perturbation": "prefactor-x0.1"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/sioal-si-neutral__prefactor-x10.toml",
+      "deck_sha256": "cdf124fc5eaea55ccfe9d0a8c54a67010f59e2fb89d59990e676aa175392bcc3",
+      "family": "sioal-si-neutral",
+      "name": "sioal-si-neutral__prefactor-x10",
+      "perturbation": "prefactor-x10"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/sioal-al-neutral__ea-minus-3.toml",
+      "deck_sha256": "229b7fbb6fabb8eff3a30453fa3cf8b3e521acf1c26922a530a110f85387e123",
+      "family": "sioal-al-neutral",
+      "name": "sioal-al-neutral__ea-minus-3",
+      "perturbation": "ea-minus-3"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/sioal-al-neutral__ea-plus-3.toml",
+      "deck_sha256": "82cfc545335dfdcadf7a5bb2aa7290435ff40cdfbaccbce7f6b62a7653c3bcf9",
+      "family": "sioal-al-neutral",
+      "name": "sioal-al-neutral__ea-plus-3",
+      "perturbation": "ea-plus-3"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/sioal-al-neutral__prefactor-x0.1.toml",
+      "deck_sha256": "f9f2cb847a0f57cd1b5dcb86a161c41f096c2c5b7edd35ccda6b11caf81a4795",
+      "family": "sioal-al-neutral",
+      "name": "sioal-al-neutral__prefactor-x0.1",
+      "perturbation": "prefactor-x0.1"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/sioal-al-neutral__prefactor-x10.toml",
+      "deck_sha256": "d7ccb8662b55be41ac40d4b8ad8b967e5088f5a0f80d9b710abd501ec934c977",
+      "family": "sioal-al-neutral",
+      "name": "sioal-al-neutral__prefactor-x10",
+      "perturbation": "prefactor-x10"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/connectivity-ladder__ea-minus-3.toml",
+      "deck_sha256": "7a724c19148a48949f80321ccb83605a63046fedeb630bd5b9deaf9ebb3332bf",
+      "family": "connectivity-ladder",
+      "name": "connectivity-ladder__ea-minus-3",
+      "perturbation": "ea-minus-3"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/connectivity-ladder__ea-plus-3.toml",
+      "deck_sha256": "2c8619827ea2e2c010832ab8a916772a4b1737c1683462c594577c4ed5e6003f",
+      "family": "connectivity-ladder",
+      "name": "connectivity-ladder__ea-plus-3",
+      "perturbation": "ea-plus-3"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/connectivity-ladder__prefactor-x0.1.toml",
+      "deck_sha256": "e5db2d6c9d1349b5d7fceb694cc3f2b67219942dea06a5f98b53d5860c9c41cb",
+      "family": "connectivity-ladder",
+      "name": "connectivity-ladder__prefactor-x0.1",
+      "perturbation": "prefactor-x0.1"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/connectivity-ladder__prefactor-x10.toml",
+      "deck_sha256": "35dbb80c29efc71350dad99c9412f83395379bbeae2a345680d16e6c001a198f",
+      "family": "connectivity-ladder",
+      "name": "connectivity-ladder__prefactor-x10",
+      "perturbation": "prefactor-x10"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/al-o-al-analogue__ea-minus-3.toml",
+      "deck_sha256": "ce0364dc6f33bb38b94c7ebf391523e799e04e3faaf5234a60411b8c90f0f2f8",
+      "family": "al-o-al-analogue",
+      "name": "al-o-al-analogue__ea-minus-3",
+      "perturbation": "ea-minus-3"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/al-o-al-analogue__ea-plus-3.toml",
+      "deck_sha256": "574c0eaf04febfaaa883a0f451bde6d63b5aa93e6f29b8f7e5c6da2f2cdc8020",
+      "family": "al-o-al-analogue",
+      "name": "al-o-al-analogue__ea-plus-3",
+      "perturbation": "ea-plus-3"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/al-o-al-analogue__prefactor-x0.1.toml",
+      "deck_sha256": "559942a97fa8c38c647c585b526a4aa83396f647c2876f2e67f8e5ad1dfb7b57",
+      "family": "al-o-al-analogue",
+      "name": "al-o-al-analogue__prefactor-x0.1",
+      "perturbation": "prefactor-x0.1"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/al-o-al-analogue__prefactor-x10.toml",
+      "deck_sha256": "4f23508b2cd62b29e03667a8df253c11fd98098e0cd78dcea17578498f674960",
+      "family": "al-o-al-analogue",
+      "name": "al-o-al-analogue__prefactor-x10",
+      "perturbation": "prefactor-x10"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/adsorption__ea-minus-3.toml",
+      "deck_sha256": "415b8ec78efdeb9a06871826590609b6ea025b211d5f91e9b6582bcfdac1effb",
+      "family": "adsorption",
+      "name": "adsorption__ea-minus-3",
+      "perturbation": "ea-minus-3"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/adsorption__ea-plus-3.toml",
+      "deck_sha256": "b1ea9bb7825191ec74ab0e4d2808d3c556237d3197bd091fed84e54c315e7e91",
+      "family": "adsorption",
+      "name": "adsorption__ea-plus-3",
+      "perturbation": "ea-plus-3"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/adsorption__prefactor-x0.1.toml",
+      "deck_sha256": "da6af23d7d5433714164f7c0c81fde0db2e65655824d5817769dda4217a6ed15",
+      "family": "adsorption",
+      "name": "adsorption__prefactor-x0.1",
+      "perturbation": "prefactor-x0.1"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/adsorption__prefactor-x10.toml",
+      "deck_sha256": "42fbe30070daf7dd83ca0525dca35e0ce6aa12c8c8d80ce7b09e8d444c3b90e2",
+      "family": "adsorption",
+      "name": "adsorption__prefactor-x10",
+      "perturbation": "prefactor-x10"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/cation-desorption__ea-minus-3.toml",
+      "deck_sha256": "75409967c2aad8652633ecb725c32e4b0a927e20f3f1faed01f6757ec83a5f6f",
+      "family": "cation-desorption",
+      "name": "cation-desorption__ea-minus-3",
+      "perturbation": "ea-minus-3"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/cation-desorption__ea-plus-3.toml",
+      "deck_sha256": "695d452f6101d8f0e78a0cf4f13fcacf8668c5257748cb216c20f92ae46ee8fd",
+      "family": "cation-desorption",
+      "name": "cation-desorption__ea-plus-3",
+      "perturbation": "ea-plus-3"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/cation-desorption__prefactor-x0.1.toml",
+      "deck_sha256": "5e43820a435bb219ff8181a725926bb5f309611c40298ad7f3204553841bae02",
+      "family": "cation-desorption",
+      "name": "cation-desorption__prefactor-x0.1",
+      "perturbation": "prefactor-x0.1"
+    },
+    {
+      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/cation-desorption__prefactor-x10.toml",
+      "deck_sha256": "7bfd772cb83c5d09b41fb63d28585bff97aa7c3e04257e222cf7ed02fb3c158d",
+      "family": "cation-desorption",
+      "name": "cation-desorption__prefactor-x10",
+      "perturbation": "prefactor-x10"
+    }
+  ],
+  "schema": "a9-raw-campaign-v2",
+  "seeds": [
+    90401,
+    90403,
+    90407,
+    90409,
+    90413,
+    90419,
+    90421,
+    90427
+  ],
+  "source_deck": "/mnt/data/vsletten/src/vsletten/dissertation/agents/A9-approximate-rate-closure/petra/examples/kaolinite-approx.toml",
+  "source_deck_sha256": "169b0b4cea9dafb00e6becfcf2ea36ca5cfaef3cc772b46e2b6c8402b13e86d6",
+  "status": "complete",
+  "survey_tier": true,
+  "temperature_k": 298.0,
+  "timeout_seconds": 600,
+  "units": "kcal/mol",
+  "workers": 4
+}

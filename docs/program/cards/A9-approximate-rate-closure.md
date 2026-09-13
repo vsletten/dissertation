@@ -54,4 +54,6 @@ RuntimeMaxSec`) with a `file:` receipt if any ensemble exceeds 30 min.
 
 ## Progress
 
+- 2026-09-13 16:29 PDT (hermes-custom-build-001; profile=workstation) — CONTINUATION: the implementation, 232-run preliminary campaign, strict raw/derived verifier, and condition provenance are preserved, but independent stage-1 review rejected completion. The current 20,000-event windows do not establish stationarity of the ranked propensity response; two perturbations are censored yet receive forced ordinal ranks; and nominal desorption eligibility came from adsorbed solution Si rather than proven lattice-Si hydrolysis, invalidating the provisional laboratory-rate comparison. Resume on this branch/worktree with an origin-aware dissolution observable, response/population stationarity gates, adaptive finite runs, and censor-aware sensitivity ordering. Evidence and exact hashes: `docs/program/results/A9-approximate-rate-closure.md`. No QM or GPU work ran.
+
 - 2026-09-13 12:04 PDT (hermes-custom-build-001; profile=workstation) — Card created verbatim from Victor's TASK-274 ruling. A9 is READY at P0 and machine-any; the board feeder owns its mission-control pointer after this PR merges.

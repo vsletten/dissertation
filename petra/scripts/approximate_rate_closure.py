@@ -2199,6 +2199,54 @@ def _write_provenance(path: Path) -> None:
             }
         )
         rows.append(row)
+    for name, value, unit, source, expression, rationale in (
+        (
+            "temperature",
+            298.0,
+            "K",
+            "A9 program-card ambient-temperature execution contract",
+            "T = 298.0 K exactly",
+            "Ambient-temperature closure condition; validate, run, analyze, and verify reject any other value.",
+        ),
+        (
+            "dissolved_cation_activity",
+            1.0e-12,
+            "dimensionless",
+            "A9 far-from-equilibrium open-flow boundary condition",
+            "activity(Al) = activity(Si) = 1e-12",
+            "Numerical sink for dissolved products in a continuously refreshed, far-from-equilibrium reservoir; this is not a measured pH-dependent activity.",
+        ),
+        (
+            "dissolved_cation_mu",
+            -1.0,
+            "kcal/mol",
+            "legacy low-chemical-potential endpoint",
+            "mu(Al) = mu(Si) = -1 kcal/mol",
+            "Preserves the legacy low-product-potential endpoint while the explicit activity supplies the dilute open-flow sink; Petra does not encode H+/OH- catalysis in this deck.",
+        ),
+        (
+            "effective_consumed_cation_factor_298k",
+            1.847676567496443e-13,
+            "dimensionless",
+            "derived from the declared A9 reservoir",
+            "activity * exp(mu / (R * T)) with R = 0.00198720425864083 kcal mol^-1 K^-1",
+            "Effective mass-action factor applied to cation-consuming adsorption rules at 298 K; records the exact proxy rather than claiming a calibrated pH 3-5 chemical potential.",
+        ),
+    ):
+        row = {field: "" for field in PROVENANCE_FIELDS}
+        row.update(
+            {
+                "record_type": "condition",
+                "source": source,
+                "observable_type": "thermodynamic_boundary_condition",
+                "rationale": rationale,
+                "constant_name": name,
+                "constant_value": value,
+                "constant_unit": unit,
+                "conversion_expression": expression,
+            }
+        )
+        rows.append(row)
     for name, value, unit, expression, rationale in (
         (
             "avogadro_constant",
@@ -2987,12 +3035,32 @@ def _validate_derived_schemas(
     provenance = _read_csv_exact(
         out_dir / "provenance-conversions.csv",
         PROVENANCE_FIELDS,
-        len(REACTION_REGISTRY) + 4,
+        len(REACTION_REGISTRY) + 8,
     )
     if [row["reaction"] for row in provenance[:22]] != [
         entry.name for entry in REACTION_REGISTRY
     ]:
         raise ValueError("provenance reaction coverage/order mismatch")
+    conditions = {
+        row["constant_name"]: row
+        for row in provenance
+        if row["record_type"] == "condition"
+    }
+    if (
+        set(conditions)
+        != {
+            "temperature",
+            "dissolved_cation_activity",
+            "dissolved_cation_mu",
+            "effective_consumed_cation_factor_298k",
+        }
+        or conditions["temperature"]["constant_value"] != "298.0"
+        or conditions["dissolved_cation_activity"]["constant_value"] != "1e-12"
+        or conditions["dissolved_cation_mu"]["constant_value"] != "-1.0"
+        or "not a measured pH-dependent activity"
+        not in conditions["dissolved_cation_activity"]["rationale"]
+    ):
+        raise ValueError("thermodynamic condition provenance mismatch")
     if (
         provenance[-2]["record_type"] != "estimator"
         or provenance[-2]["observable_type"] != PROPENSITY_ESTIMATOR_BASIS

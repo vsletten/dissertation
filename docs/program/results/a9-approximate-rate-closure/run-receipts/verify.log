@@ -1,0 +1,2 @@
+verified: scenarios=29 replicas=8 outcome=no-dissolution acceptance_passed=False
+verify_elapsed=16.24 maxrss_kb=44708
