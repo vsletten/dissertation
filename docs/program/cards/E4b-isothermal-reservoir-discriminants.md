@@ -1,11 +1,11 @@
 # E4b-isothermal-reservoir-discriminants — finish §5 time-domain tests
 
-- status: ready
+- status: done
 - track: E (muscovite / the perfect circle)
 - priority: P1
 - machine: any (CPU ensembles)
 - depends: E4a-surface-gated-release
-- claimed-by: -
+- claimed-by: hermes-macbot-zero
 
 ## Objective
 
@@ -50,3 +50,43 @@ observable or mechanism rather than because a calibrated hypothesis survived:
   contains neither a complete Xe mechanism nor H₂O chemical-potential control;
   those missing capabilities require an explicit follow-up rather than a
   paper-figure claim.
+- 2026-09-13 19:43 PDT — (hermes-macbot-zero; profile=laptop) — Completed the
+  12-cell isothermal/H₂O campaign with eight replicas per cell and byte-identical
+  replay checks. Digitized Figures 6–11 with uncertainty and source hashes;
+  added infinite-cylinder D/a² inversion, explicit ³⁶Ar reservoir access,
+  provenance-labelled Xe and H₂O-vacancy screens, ensemble overlays, and honest
+  mixed verdicts for §5 claims 1, 2, 4, and 7. Result:
+  `docs/program/results/E4b-isothermal-reservoir-discriminants.md`.
+- 2026-09-13 21:06 PDT — (hermes-custom-build-001; profile=workstation) —
+  Independently closed the delivery gates on exact pushed head
+  `94be8c6f7b375368efa17179b086870c86bd5343`: 43 Python tests, focused Ruff
+  check/format, the complete Petra Cargo suite, and diff checks pass. A fresh
+  12-cell/96-primary-trajectory campaign reproduced all four verdicts, all replay
+  checks, 121250 primary events, and a byte-identical overlay; the 132-row series
+  differs only in 18 cross-Python-version float renderings (maximum absolute delta
+  `3.552713678800501e-15`). Corrected the card's non-protocol `complete` status to
+  canonical `done` before PR creation.
+
+## Result
+
+- **Outcome:** complete. §5.1, §5.4, and §5.7 are partially reproduced; §5.2
+  is not reproduced once diffusivity-ratio boundaries require at least four
+  finite replica values.
+- **Evidence:** 12 primary cells × 8 replicas and 24 two-replica replay runs;
+  all replay file triplets are byte-identical. Source rasters for Figures 6–11
+  are hash-receipted and sparse digitizations carry explicit plot-reading
+  uncertainty.
+- **Verification:** 43 Python tests pass; focused Ruff check and format pass;
+  all 12 generated decks complete under the cached Petra release engine with
+  `--paranoid`. This laptop has no Cargo toolchain, so the unchanged Rust
+  workspace suite is explicitly deferred to required PR CI rather than claimed.
+- **Workstation re-verification:** the complete Petra Cargo suite passes against
+  the canonical repository target; an independent campaign rerun reproduced the
+  verdicts and all replay checks with only sub-femtoscale cross-version float
+  serialization differences described in Progress.
+- **Artifacts:** driver, 12 generated decks, source CSV, bootstrap-mean 95%
+  intervals with effective sample counts, overlay SVG, campaign receipts,
+  machine-readable verdict, and full result memo are committed in this PR.
+- **Deviation:** the explicit fast-access ³⁶Ar mechanism does not reproduce the
+  observed early-high/late-near-unity D/a²-ratio sequence. Xe and H₂O remain
+  provenance-labelled screens, not calibrations.

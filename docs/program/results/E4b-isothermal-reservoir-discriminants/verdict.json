@@ -1,0 +1,433 @@
+{
+  "campaign": [
+    {
+      "condition": "vacuum",
+      "dims": [
+        4,
+        4,
+        6
+      ],
+      "elapsed_seconds": 0.23329783300869167,
+      "replay_verified": true,
+      "replicas": 8,
+      "seeds": [
+        19981,
+        19982,
+        19983,
+        19984,
+        19985,
+        19986,
+        19987,
+        19988
+      ],
+      "temperature_c": 500,
+      "total_events": 2166
+    },
+    {
+      "condition": "vacuum",
+      "dims": [
+        8,
+        8,
+        6
+      ],
+      "elapsed_seconds": 0.26122183399274945,
+      "replay_verified": true,
+      "replicas": 8,
+      "seeds": [
+        19981,
+        19982,
+        19983,
+        19984,
+        19985,
+        19986,
+        19987,
+        19988
+      ],
+      "temperature_c": 500,
+      "total_events": 8677
+    },
+    {
+      "condition": "vacuum",
+      "dims": [
+        12,
+        12,
+        6
+      ],
+      "elapsed_seconds": 0.243852874962613,
+      "replay_verified": true,
+      "replicas": 8,
+      "seeds": [
+        19981,
+        19982,
+        19983,
+        19984,
+        19985,
+        19986,
+        19987,
+        19988
+      ],
+      "temperature_c": 500,
+      "total_events": 19280
+    },
+    {
+      "condition": "hydrothermal-2kbar-screen",
+      "dims": [
+        4,
+        4,
+        6
+      ],
+      "elapsed_seconds": 0.2808075409848243,
+      "replay_verified": true,
+      "replicas": 8,
+      "seeds": [
+        19981,
+        19982,
+        19983,
+        19984,
+        19985,
+        19986,
+        19987,
+        19988
+      ],
+      "temperature_c": 500,
+      "total_events": 547
+    },
+    {
+      "condition": "hydrothermal-2kbar-screen",
+      "dims": [
+        8,
+        8,
+        6
+      ],
+      "elapsed_seconds": 0.13610162492841482,
+      "replay_verified": true,
+      "replicas": 8,
+      "seeds": [
+        19981,
+        19982,
+        19983,
+        19984,
+        19985,
+        19986,
+        19987,
+        19988
+      ],
+      "temperature_c": 500,
+      "total_events": 2314
+    },
+    {
+      "condition": "hydrothermal-2kbar-screen",
+      "dims": [
+        12,
+        12,
+        6
+      ],
+      "elapsed_seconds": 0.2802623750176281,
+      "replay_verified": true,
+      "replicas": 8,
+      "seeds": [
+        19981,
+        19982,
+        19983,
+        19984,
+        19985,
+        19986,
+        19987,
+        19988
+      ],
+      "temperature_c": 500,
+      "total_events": 5035
+    },
+    {
+      "condition": "vacuum",
+      "dims": [
+        4,
+        4,
+        6
+      ],
+      "elapsed_seconds": 0.163996750023216,
+      "replay_verified": true,
+      "replicas": 8,
+      "seeds": [
+        19981,
+        19982,
+        19983,
+        19984,
+        19985,
+        19986,
+        19987,
+        19988
+      ],
+      "temperature_c": 700,
+      "total_events": 3163
+    },
+    {
+      "condition": "vacuum",
+      "dims": [
+        8,
+        8,
+        6
+      ],
+      "elapsed_seconds": 0.2801283751614392,
+      "replay_verified": true,
+      "replicas": 8,
+      "seeds": [
+        19981,
+        19982,
+        19983,
+        19984,
+        19985,
+        19986,
+        19987,
+        19988
+      ],
+      "temperature_c": 700,
+      "total_events": 12914
+    },
+    {
+      "condition": "vacuum",
+      "dims": [
+        12,
+        12,
+        6
+      ],
+      "elapsed_seconds": 0.27680200012400746,
+      "replay_verified": true,
+      "replicas": 8,
+      "seeds": [
+        19981,
+        19982,
+        19983,
+        19984,
+        19985,
+        19986,
+        19987,
+        19988
+      ],
+      "temperature_c": 700,
+      "total_events": 29332
+    },
+    {
+      "condition": "hydrothermal-2kbar-screen",
+      "dims": [
+        4,
+        4,
+        6
+      ],
+      "elapsed_seconds": 0.2801624999847263,
+      "replay_verified": true,
+      "replicas": 8,
+      "seeds": [
+        19981,
+        19982,
+        19983,
+        19984,
+        19985,
+        19986,
+        19987,
+        19988
+      ],
+      "temperature_c": 700,
+      "total_events": 2574
+    },
+    {
+      "condition": "hydrothermal-2kbar-screen",
+      "dims": [
+        8,
+        8,
+        6
+      ],
+      "elapsed_seconds": 0.21877562487497926,
+      "replay_verified": true,
+      "replicas": 8,
+      "seeds": [
+        19981,
+        19982,
+        19983,
+        19984,
+        19985,
+        19986,
+        19987,
+        19988
+      ],
+      "temperature_c": 700,
+      "total_events": 10916
+    },
+    {
+      "condition": "hydrothermal-2kbar-screen",
+      "dims": [
+        12,
+        12,
+        6
+      ],
+      "elapsed_seconds": 0.203854207880795,
+      "replay_verified": true,
+      "replicas": 8,
+      "seeds": [
+        19981,
+        19982,
+        19983,
+        19984,
+        19985,
+        19986,
+        19987,
+        19988
+      ],
+      "temperature_c": 700,
+      "total_events": 24332
+    }
+  ],
+  "scope": "provenance-labelled mechanism screen; no fitted parameters",
+  "section_5_claims": {
+    "1_two_stage_non_fickian_loss": {
+      "details": {
+        "500c-12x12x6": true,
+        "500c-4x4x6": true,
+        "500c-8x8x6": true,
+        "700c-12x12x6": false,
+        "700c-4x4x6": false,
+        "700c-8x8x6": false
+      },
+      "of": 6,
+      "passing_cells": 3,
+      "verdict": "partially_reproduced"
+    },
+    "2_distinct_reservoir_diffusivity_ratio": {
+      "details": {
+        "500c-12x12x6": {
+          "early": {
+            "effective_n": 6,
+            "mean": 0.7542774985994605,
+            "sqrt_time_min_half": 4
+          },
+          "late": {
+            "effective_n": 4,
+            "mean": 1.9113343945219592,
+            "sqrt_time_min_half": 15
+          },
+          "supported_points": [
+            {
+              "effective_n": 6,
+              "mean": 0.7542774985994605,
+              "sqrt_time_min_half": 4
+            },
+            {
+              "effective_n": 8,
+              "mean": 0.9831749153732734,
+              "sqrt_time_min_half": 6
+            },
+            {
+              "effective_n": 7,
+              "mean": 2.536316958236738,
+              "sqrt_time_min_half": 8
+            },
+            {
+              "effective_n": 4,
+              "mean": 1.9113343945219592,
+              "sqrt_time_min_half": 15
+            }
+          ]
+        },
+        "500c-4x4x6": {
+          "early": null,
+          "late": null,
+          "supported_points": []
+        },
+        "500c-8x8x6": {
+          "early": {
+            "effective_n": 4,
+            "mean": 5.9858092779061725,
+            "sqrt_time_min_half": 4
+          },
+          "late": {
+            "effective_n": 4,
+            "mean": 5.9858092779061725,
+            "sqrt_time_min_half": 4
+          },
+          "supported_points": [
+            {
+              "effective_n": 4,
+              "mean": 5.9858092779061725,
+              "sqrt_time_min_half": 4
+            }
+          ]
+        },
+        "700c-12x12x6": {
+          "early": {
+            "effective_n": 8,
+            "mean": 1.2776635621432684,
+            "sqrt_time_min_half": 2
+          },
+          "late": {
+            "effective_n": 5,
+            "mean": 1.9903441769391084,
+            "sqrt_time_min_half": 4
+          },
+          "supported_points": [
+            {
+              "effective_n": 8,
+              "mean": 1.2776635621432684,
+              "sqrt_time_min_half": 2
+            },
+            {
+              "effective_n": 5,
+              "mean": 1.9903441769391084,
+              "sqrt_time_min_half": 4
+            }
+          ]
+        },
+        "700c-4x4x6": {
+          "early": {
+            "effective_n": 4,
+            "mean": 4.105491582786743,
+            "sqrt_time_min_half": 2
+          },
+          "late": {
+            "effective_n": 4,
+            "mean": 4.105491582786743,
+            "sqrt_time_min_half": 2
+          },
+          "supported_points": [
+            {
+              "effective_n": 4,
+              "mean": 4.105491582786743,
+              "sqrt_time_min_half": 2
+            }
+          ]
+        },
+        "700c-8x8x6": {
+          "early": {
+            "effective_n": 8,
+            "mean": 2.2294974882300087,
+            "sqrt_time_min_half": 2
+          },
+          "late": {
+            "effective_n": 8,
+            "mean": 2.2294974882300087,
+            "sqrt_time_min_half": 2
+          },
+          "supported_points": [
+            {
+              "effective_n": 8,
+              "mean": 2.2294974882300087,
+              "sqrt_time_min_half": 2
+            }
+          ]
+        }
+      },
+      "matching_cells": 0,
+      "of": 6,
+      "verdict": "not_reproduced"
+    },
+    "4_ar_xe_decoupling": {
+      "mechanism": "E3a Xe screen creates a paired mechanistic prediction, but no source-backed Villa muscovite Xe time series exists here; this cannot be a calibrated reproduction.",
+      "verdict": "partially_reproduced"
+    },
+    "7_hydrothermal_contrast": {
+      "hydrothermal_screen_final_ar40_fraction": 0.43942728358679245,
+      "mechanism": "ideal H2O activity proxy tests direction only; it is not a 2-kbar calibration.",
+      "vacuum_final_ar40_fraction": 0.48935714664544755,
+      "verdict": "partially_reproduced"
+    }
+  }
+}
