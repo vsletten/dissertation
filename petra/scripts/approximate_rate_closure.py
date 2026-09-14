@@ -14,10 +14,11 @@ origin-contaminated and undefined.
 Si and Al response stationarity independently require all-zero blocks (typed
 stationary-zero with one-sided Poisson 95% bounds) or all-positive blocks with
 finite fitted log trend and half-window shift both <= 0.35 decade. Mixed
-zero/positive blocks are unresolved. Tail solid Si and Al populations must each
-have <= 5% relative range and <= 5% absolute fractional trend; final inventory
-need not equal initial inventory. Passing stationary-zero and stationary-positive
-outcomes are both scientifically complete and accepted at this survey tier.
+zero/positive blocks are unresolved. Every state fraction within every lattice
+kind (including oxygen and empty states) must have <= 5 percentage-point tail
+range and <= 5 percentage-point fitted tail trend; final inventory need not equal
+initial inventory. Stationary zero is complete only when an original-lattice
+Si.oh4 and Al.l6 target was observed at event cadence.
 
 Sensitivity ranks use the origin-safe expected propensity response. Any family
 with a censored perturbation has undefined rank; ordinal ranks apply only to
@@ -43,7 +44,7 @@ import threading
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import tomllib
@@ -58,8 +59,17 @@ BOOTSTRAP_RESAMPLES = 2_000
 DEFAULT_SEEDS = (90401, 90403, 90407, 90409, 90413, 90419, 90421, 90427)
 RAW_SCHEMA = "a9-raw-campaign-v2"
 CHECKPOINT_SCHEMA = "a9-checkpoint-v2"
-VERIFICATION_SCHEMA = "a9-verification-v3"
+VERIFICATION_SCHEMA = "a9-verification-v4"
 POISSON_ZERO_EVENT_UPPER_COUNT_95 = -math.log(0.05)
+AGGREGATE_THREAD_CAP = 16
+POPULATION_FRACTION_RANGE_LIMIT = 0.05
+POPULATION_FRACTION_TREND_LIMIT = 0.05
+AGGREGATE_INITIAL_STATE_LIMITATION = (
+    "snapshot.pgif.json was unavailable or not a parseable PGIF initial-state document; "
+    "initial per-site states are therefore inferred only when each site first appears in "
+    "an event. The step-0 populations row remains the authoritative aggregate vector, and "
+    "every event old-state count plus every emitted cadence vector is still verified exactly."
+)
 REQUIRED_OBSERVABLES = frozenset(
     {"state_counts", "event_rates", "rate_spectra", "surface_area", "exposure_age"}
 )
@@ -72,18 +82,20 @@ PROPENSITY_RATE_BASIS = "expected_lattice_origin_from_propensity"
 OBSERVED_RATE_BASIS = "lattice_origin_observed_release"
 PROPENSITY_ESTIMATOR_BASIS = "integrated_ctmc_hazard"
 PROPENSITY_INTERPRETATION = (
-    "Trapezoidally integrated instantaneous total CTMC desorption propensity, "
-    "not observed event release; used as an expected lattice-origin response only "
-    "for trajectories with zero "
-    "adsorption events; adsorption makes the response origin-contaminated and unresolved."
+    "Trapezoidally integrated instantaneous total CTMC desorption propensity, not "
+    "observed event release; used as an expected lattice-origin response only when "
+    "the trajectory has zero adsorption events and event replay observed the species' "
+    "original-lattice desorption target. Adsorption makes the response origin-contaminated; "
+    "absent target eligibility is mechanism-unsampled."
 )
 PROPENSITY_INTEGRAL = (
     "trapezoidal integral of instantaneous total CTMC desorb-si/desorb-al "
     "propensity over the selected observable tail"
 )
 OBSERVED_EVENT_ACCEPTANCE_BASIS = (
-    "site-replayed original-lattice release counts plus origin-safe sampled-propensity "
-    "and tail-population stationarity gates"
+    "site-replayed original-lattice release counts, event-level original-lattice "
+    "desorption-target eligibility, origin-safe sampled propensity, and full per-kind "
+    "state-distribution tail stationarity"
 )
 SENSITIVITY_STATISTIC = (
     "same-seed paired linear deltas; reported delta_log10 is log10(arithmetic mean "
@@ -440,6 +452,37 @@ class EventData:
     names: tuple[str, ...]
     lattice_origin_releases: tuple[str | None, ...]
     counts: dict[str, int]
+    replay: EventReplayDiagnostic
+    target_eligibility: dict[str, TargetEligibilityDiagnostic]
+
+
+@dataclass(frozen=True)
+class EventReplayDiagnostic:
+    initial_state_source: str
+    snapshot_crosscheck_status: str
+    limitation: str | None
+    events_verified: int
+    cadence_rows_verified: int
+    final_state_counts: dict[str, int]
+
+
+@dataclass(frozen=True)
+class TargetEligibilityDiagnostic:
+    species: str
+    target_state: str
+    initial_lattice_count: int
+    initial_reservoir_count: int
+    events_with_lattice_target_eligible: int
+    events_with_reservoir_target_eligible: int
+    max_lattice_target_count: int
+    max_reservoir_target_count: int
+    lattice_target_entries: int
+    lattice_target_exits: int
+    reservoir_target_entries: int
+    reservoir_target_exits: int
+    first_lattice_target_step: int | None
+    last_lattice_target_step: int | None
+    mechanism_sampling_status: str
 
 
 @dataclass(frozen=True)
@@ -476,6 +519,9 @@ class SteadyPoint:
     solid_al_cations: int
     si_desorb_propensity: float | None
     al_desorb_propensity: float | None
+    state_counts: dict[str, int] | None = None
+    si_lattice_target_sampled: bool = True
+    al_lattice_target_sampled: bool = True
 
     @property
     def solid_cations(self) -> int:
@@ -505,6 +551,28 @@ class PopulationSteadyDiagnostic:
 
 
 @dataclass(frozen=True)
+class StateDistributionDiagnostic:
+    initial_count: int
+    final_count: int
+    initial_fraction: float | None
+    final_fraction: float | None
+    tail_fraction_range: float | None
+    tail_fraction_trend: float | None
+    stability_status: str
+
+
+@dataclass(frozen=True)
+class KindDistributionDiagnostic:
+    initial_total: int
+    final_total: int
+    tail_total_range: int | None
+    max_tail_fraction_range: float | None
+    max_abs_tail_fraction_trend: float | None
+    stability_status: str
+    states: dict[str, StateDistributionDiagnostic]
+
+
+@dataclass(frozen=True)
 class SteadyStateGate:
     status: str
     acceptance_passed: bool
@@ -526,6 +594,12 @@ class SteadyStateGate:
     population_tail_relative_range: float | None
     population_tail_fractional_trend: float | None
     population_stability_status: str
+    population_distribution_status: str
+    kind_state_distributions: dict[str, KindDistributionDiagnostic]
+    event_replay: EventReplayDiagnostic | None = None
+    target_eligibility: dict[str, TargetEligibilityDiagnostic] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True)
@@ -554,6 +628,8 @@ class ReplicaRate:
     lattice_al_upper_95_mol_m2_s: float | None
     si_al_lattice_release_ratio_dimensionless: float | None
     propensity_origin_status: str
+    si_target_eligibility_status: str
+    al_target_eligibility_status: str
     steady_state_status: str
     acceptance_passed: bool
 
@@ -912,6 +988,23 @@ def _run_one(
     }
 
 
+def _worker_environment(workers: int) -> dict[str, str]:
+    """Return a process environment that keeps aggregate native threads <= 16."""
+
+    if not 1 <= workers <= MAX_WORKERS:
+        raise ValueError(f"workers must be between 1 and {MAX_WORKERS}")
+    threads_per_worker = max(1, AGGREGATE_THREAD_CAP // workers)
+    env = os.environ.copy()
+    for variable in (
+        "OMP_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "RAYON_NUM_THREADS",
+    ):
+        env[variable] = str(threads_per_worker)
+    return env
+
+
 def run_campaign(
     deck_path: Path,
     petra_bin: Path,
@@ -981,14 +1074,7 @@ def run_campaign(
         {"schema": CHECKPOINT_SCHEMA, "status": "running", "receipts": receipts},
     )
 
-    env = os.environ.copy()
-    for variable in (
-        "OMP_NUM_THREADS",
-        "MKL_NUM_THREADS",
-        "OPENBLAS_NUM_THREADS",
-        "RAYON_NUM_THREADS",
-    ):
-        env[variable] = "16"
+    env = _worker_environment(workers)
     lock = threading.Lock()
     try:
         for scenario_record in scenario_records:
@@ -1070,8 +1156,222 @@ def _center_destinations(reaction: dict) -> set[str]:
     return destinations
 
 
+def _snapshot_initial_states(
+    path: Path | None,
+    contract: DeckContract,
+    state_names: Sequence[str],
+    initial_counts: Mapping[str, int],
+    n_sites: int,
+) -> tuple[list[int] | None, list[bool] | None, str, str | None]:
+    """Parse a production-shaped PGIF snapshot or use the documented fallback."""
+
+    fallback = (None, None, "aggregate-fallback", AGGREGATE_INITIAL_STATE_LIMITATION)
+    if path is None or not path.is_file():
+        return fallback
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return fallback
+    if not isinstance(payload, dict) or payload.get("pgif") != 1:
+        return fallback
+
+    def schema_error(detail: str) -> ValueError:
+        return ValueError(
+            f"{path}: invalid asserted PGIF initial-state document: {detail}"
+        )
+
+    if type(payload["pgif"]) is not int or set(payload) != {
+        "pgif",
+        "meta",
+        "nodes",
+        "edges",
+    }:
+        raise schema_error("top-level structure")
+    meta = payload.get("meta")
+    nodes = payload.get("nodes")
+    edges = payload.get("edges")
+    if not isinstance(meta, dict) or set(meta) != {
+        "producer",
+        "kind",
+        "directed",
+        "petra",
+    }:
+        raise schema_error("meta structure")
+    if (
+        meta.get("producer") != "petra"
+        or meta.get("kind") != "kmc-lattice"
+        or meta.get("directed") is not False
+    ):
+        raise schema_error("meta identity")
+    petra_meta = meta.get("petra")
+    if not isinstance(petra_meta, dict) or set(petra_meta) != {
+        "deck",
+        "temperature",
+        "states",
+        "state_types",
+        "step",
+        "time",
+    }:
+        raise schema_error("meta.petra structure")
+
+    expected_state_types = [
+        state["occupant"]
+        for kind in contract.parsed["kinds"]
+        for state in kind["states"]
+    ]
+    expected_kinds = [kind["name"] for kind in contract.parsed["kinds"]]
+    expected_temperature = float(contract.parsed["thermo"]["temperature"])
+    temperature = petra_meta.get("temperature")
+    if (
+        petra_meta.get("deck") != contract.parsed["deck"]["name"]
+        or petra_meta.get("states") != list(state_names)
+        or petra_meta.get("state_types") != expected_state_types
+        or type(petra_meta.get("step")) is not int
+        or petra_meta.get("step") != 0
+        or isinstance(petra_meta.get("time"), bool)
+        or not isinstance(petra_meta.get("time"), (int, float))
+        or petra_meta.get("time") != 0.0
+        or isinstance(temperature, bool)
+        or not isinstance(temperature, (int, float))
+        or not math.isfinite(float(temperature))
+        or float(temperature) != expected_temperature
+    ):
+        raise schema_error("meta.petra trajectory contract")
+
+    if not isinstance(nodes, dict) or set(nodes) != {"count", "columns"}:
+        raise schema_error("nodes structure")
+    snapshot_count = nodes.get("count")
+    columns = nodes.get("columns")
+    if (
+        type(snapshot_count) is not int
+        or snapshot_count != n_sites
+        or not isinstance(columns, dict)
+    ):
+        raise schema_error("node count/columns")
+    required_columns = {"x", "y", "z", "type", "state", "kind", "frozen"}
+    extras = columns.keys() - required_columns
+    if not required_columns <= columns.keys() or not extras <= {"strain"}:
+        raise schema_error("node column set")
+
+    def numeric_column(name: str) -> list[float | int]:
+        column = columns.get(name)
+        if (
+            not isinstance(column, dict)
+            or set(column) != {"type", "data"}
+            or column.get("type") != "f32"
+            or not isinstance(column.get("data"), list)
+            or len(column["data"]) != n_sites
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                for value in column["data"]
+            )
+        ):
+            raise schema_error(f"{name} node column")
+        return column["data"]
+
+    for coordinate in ("x", "y", "z"):
+        numeric_column(coordinate)
+    if "strain" in columns:
+        numeric_column("strain")
+
+    def categorical_column(name: str, expected_dict: Sequence[str]) -> list[int]:
+        column = columns.get(name)
+        if (
+            not isinstance(column, dict)
+            or set(column) != {"type", "dict", "data"}
+            or column.get("type") != "categorical"
+            or column.get("dict") != list(expected_dict)
+            or not isinstance(column.get("data"), list)
+            or len(column["data"]) != n_sites
+            or any(
+                type(value) is not int or not 0 <= value < len(expected_dict)
+                for value in column["data"]
+            )
+        ):
+            raise schema_error(f"{name} categorical node column")
+        return column["data"]
+
+    expected_type_dict = list(dict.fromkeys(expected_state_types))
+    state_data = categorical_column("state", state_names)
+    type_data = categorical_column("type", expected_type_dict)
+    kind_data = categorical_column("kind", expected_kinds)
+    frozen_column = columns.get("frozen")
+    if (
+        not isinstance(frozen_column, dict)
+        or set(frozen_column) != {"type", "data"}
+        or frozen_column.get("type") != "bool"
+        or not isinstance(frozen_column.get("data"), list)
+        or len(frozen_column["data"]) != n_sites
+        or any(type(value) is not bool for value in frozen_column["data"])
+    ):
+        raise schema_error("frozen node column")
+    frozen_data = frozen_column["data"]
+
+    state_kind_ids = {
+        index: expected_kinds.index(name.partition(".")[0])
+        for index, name in enumerate(state_names)
+    }
+    state_type_ids = {
+        index: expected_type_dict.index(expected_state_types[index])
+        for index in range(len(state_names))
+    }
+    if any(
+        kind_data[site] != state_kind_ids[state_id]
+        or type_data[site] != state_type_ids[state_id]
+        for site, state_id in enumerate(state_data)
+    ):
+        raise schema_error("per-node state/type/kind inconsistency")
+
+    if not isinstance(edges, dict) or set(edges) != {"count", "src", "dst", "columns"}:
+        raise schema_error("edges structure")
+    edge_count = edges.get("count")
+    src = edges.get("src")
+    dst = edges.get("dst")
+    edge_columns = edges.get("columns")
+    if (
+        type(edge_count) is not int
+        or edge_count < 0
+        or not isinstance(src, list)
+        or not isinstance(dst, list)
+        or len(src) != edge_count
+        or len(dst) != edge_count
+        or any(
+            type(value) is not int or not 0 <= value < n_sites for value in [*src, *dst]
+        )
+        or not isinstance(edge_columns, dict)
+        or set(edge_columns) != {"seam"}
+    ):
+        raise schema_error("edge arrays")
+    seam = edge_columns.get("seam")
+    if (
+        not isinstance(seam, dict)
+        or set(seam) != {"type", "data"}
+        or seam.get("type") != "bool"
+        or not isinstance(seam.get("data"), list)
+        or len(seam["data"]) != edge_count
+        or any(type(value) is not bool for value in seam["data"])
+    ):
+        raise schema_error("edge seam column")
+
+    snapshot_counts = {name: 0 for name in state_names}
+    for state_id in state_data:
+        snapshot_counts[state_names[state_id]] += 1
+    if snapshot_counts != dict(initial_counts):
+        raise ValueError(
+            f"{path}: PGIF initial state disagrees with step-0 populations"
+        )
+    return list(state_data), list(frozen_data), "verified", None
+
+
 def parse_events(
-    path: Path, contract: DeckContract, expected_seed: int | None = None
+    path: Path,
+    contract: DeckContract,
+    expected_seed: int | None = None,
+    *,
+    populations: Sequence[PopulationRow],
+    snapshot_path: Path | None = None,
 ) -> EventData:
     with path.open(encoding="utf-8") as handle:
         first = handle.readline()
@@ -1125,7 +1425,19 @@ def parse_events(
             raise ValueError(f"{path}: event seed mismatch")
         if type(n_sites) is not int or n_sites <= 0:
             raise ValueError(f"{path}: invalid site count")
+        if not populations or populations[0].step != 0 or populations[0].time_s != 0.0:
+            raise ValueError(f"{path}: event replay requires a step-0 populations row")
+        if set(populations[0].states) != set(states):
+            raise ValueError(f"{path}: initial population state table mismatch")
+        if sum(populations[0].states.values()) != n_sites:
+            raise ValueError(f"{path}: step-0 population cardinality mismatch")
+
         state_ids = {name: index for index, name in enumerate(states)}
+        initial_state_ids, initial_frozen, snapshot_status, limitation = (
+            _snapshot_initial_states(
+                snapshot_path, contract, states, populations[0].states, n_sites
+            )
+        )
         reaction_by_name = {
             reaction["name"]: reaction for reaction in contract.parsed["reactions"]
         }
@@ -1149,18 +1461,99 @@ def parse_events(
         names: list[str] = []
         lattice_origin_releases: list[str | None] = []
         counts = {name: 0 for name in reaction_names}
+        current_counts = [populations[0].states[name] for name in states]
+        site_states = (
+            {site: state_id for site, state_id in enumerate(initial_state_ids)}
+            if initial_state_ids is not None
+            else {}
+        )
+        site_lineage: dict[int, str] = {}
+        lineage_state_counts: dict[tuple[str, int], int] = {}
+        for state_id, (state_type, count) in enumerate(
+            zip(state_types, current_counts, strict=True)
+        ):
+            lineage = (
+                "lattice"
+                if state_type in {"Si", "Al"}
+                else "empty"
+                if state_type == "vacant"
+                else "not-applicable"
+            )
+            lineage_state_counts[(lineage, state_id)] = count
+        if initial_state_ids is not None:
+            for site, state_id in site_states.items():
+                state_type = state_types[state_id]
+                site_lineage[site] = (
+                    "lattice"
+                    if state_type in {"Si", "Al"}
+                    else "empty"
+                    if state_type == "vacant"
+                    else "not-applicable"
+                )
+        site_frozen = (
+            {site: frozen for site, frozen in enumerate(initial_frozen)}
+            if initial_frozen is not None
+            else {}
+        )
+
+        target_ids = {"si": state_ids["Si.oh4"], "al": state_ids["Al.l6"]}
+        eligible_target_counts: dict[tuple[str, str], int] = {}
+        for species, target_id in target_ids.items():
+            eligible_target_counts[(species, "lattice")] = (
+                sum(
+                    state_id == target_id
+                    and not site_frozen[site]
+                    and site_lineage[site] == "lattice"
+                    for site, state_id in site_states.items()
+                )
+                if initial_state_ids is not None
+                else 0
+            )
+            eligible_target_counts[(species, "reservoir")] = 0
+        target_stats: dict[str, dict[str, int | None]] = {}
+        for species in target_ids:
+            lattice = eligible_target_counts[(species, "lattice")]
+            reservoir = eligible_target_counts[(species, "reservoir")]
+            target_stats[species] = {
+                "initial_lattice": lattice,
+                "initial_reservoir": reservoir,
+                "lattice_events": 0,
+                "reservoir_events": 0,
+                "max_lattice": lattice,
+                "max_reservoir": reservoir,
+                "lattice_entries": 0,
+                "lattice_exits": 0,
+                "reservoir_entries": 0,
+                "reservoir_exits": 0,
+                "first_lattice_step": 0 if lattice > 0 else None,
+                "last_lattice_step": 0 if lattice > 0 else None,
+            }
+
+        def verify_population(row: PopulationRow) -> None:
+            expected = {
+                name: current_counts[index] for index, name in enumerate(states)
+            }
+            if row.states != expected:
+                changed = [
+                    name for name in states if row.states[name] != expected[name]
+                ]
+                raise ValueError(
+                    f"{path}: replayed state vector disagrees with populations at step "
+                    f"{row.step}: {changed}"
+                )
+
+        population_index = 1
+        cadence_rows_verified = 1
         previous_time = -math.inf
         previous_step = 0
-        last_seen_state: dict[int, int] = {}
-        cation_lineage: dict[int, str] = {}
         for line_number, line in enumerate(handle, start=2):
             row = json.loads(line)
             if not isinstance(row, list) or len(row) != 4:
                 raise ValueError(f"{path}:{line_number}: invalid event row")
             step, event_time, reaction_id, changes = row
-            if type(step) is not int or step <= previous_step:
+            if type(step) is not int or step != previous_step + 1:
                 raise ValueError(
-                    f"{path}:{line_number}: event steps must be strictly increasing"
+                    f"{path}:{line_number}: event steps must be contiguous from 1"
                 )
             event_time = _finite_number(event_time, f"{path}:{line_number} time")
             if event_time < previous_time:
@@ -1173,7 +1566,15 @@ def parse_events(
                 raise ValueError(f"{path}:{line_number}: invalid reaction id")
             if not isinstance(changes, list) or not changes:
                 raise ValueError(f"{path}:{line_number}: event has no state changes")
+            while (
+                population_index < len(populations)
+                and populations[population_index].step < step
+            ):
+                verify_population(populations[population_index])
+                cadence_rows_verified += 1
+                population_index += 1
             normalized_changes = []
+            changed_sites: set[int] = set()
             for change in changes:
                 if not isinstance(change, list) or len(change) != 3:
                     raise ValueError(f"{path}:{line_number}: invalid state change")
@@ -1186,13 +1587,41 @@ def parse_events(
                     or not 0 <= old < len(states)
                     or not 0 <= new < len(states)
                     or old == new
+                    or site in changed_sites
                 ):
                     raise ValueError(f"{path}:{line_number}: invalid state transition")
-                if site in last_seen_state and last_seen_state[site] != old:
+                if site in site_states and site_states[site] != old:
                     raise ValueError(
                         f"{path}:{line_number}: state-change replay mismatch"
                     )
+                if site_frozen.get(site) is True:
+                    raise ValueError(
+                        f"{path}:{line_number}: frozen site changed in event stream"
+                    )
+                if current_counts[old] <= 0:
+                    raise ValueError(
+                        f"{path}:{line_number}: event old-state count is unavailable"
+                    )
+                if site not in site_states:
+                    site_states[site] = old
+                    site_frozen[site] = False
+                    old_type = state_types[old]
+                    site_lineage[site] = (
+                        "lattice"
+                        if old_type in {"Si", "Al"}
+                        else "empty"
+                        if old_type == "vacant"
+                        else "not-applicable"
+                    )
+                    for species, target_id in target_ids.items():
+                        if old == target_id and site_lineage[site] == "lattice":
+                            eligible_target_counts[(species, "lattice")] += 1
                 normalized_changes.append((site, old, new))
+                changed_sites.add(site)
+            target_eligible_during_event = {
+                species: eligible_target_counts[(species, "lattice")] > 0
+                for species in target_ids
+            }
             name = reaction_names[reaction_id]
             centers: list[tuple[int, int, int]] = []
             if name in transitions:
@@ -1206,23 +1635,78 @@ def parse_events(
                     raise ValueError(
                         f"{path}:{line_number}: expected center transition missing for {name}"
                     )
+            lattice_release: str | None = None
+            if name.startswith("desorb-"):
+                site = centers[0][0]
+                if site_lineage.get(site) == "lattice":
+                    lattice_release = name.removeprefix("desorb-")
+
             for site, old, new in normalized_changes:
                 old_type = state_types[old]
                 new_type = state_types[new]
-                if old_type in {"Si", "Al"}:
-                    cation_lineage.setdefault(site, "lattice")
+                old_lineage = site_lineage[site]
+                new_lineage = old_lineage
+                if name.startswith("adsorb-") and new_type in {"Si", "Al"}:
+                    new_lineage = "reservoir"
+                elif name.startswith("desorb-") and new_type == "vacant":
+                    new_lineage = "empty"
                 elif old_type == "vacant" and new_type in {"Si", "Al"}:
-                    cation_lineage.setdefault(site, "empty")
-            lattice_release: str | None = None
-            if name.startswith("adsorb-"):
-                cation_lineage[centers[0][0]] = "reservoir"
-            elif name.startswith("desorb-"):
-                site = centers[0][0]
-                if cation_lineage.get(site) == "lattice":
-                    lattice_release = name.removeprefix("desorb-")
-                cation_lineage[site] = "empty"
-            for site, _, new in normalized_changes:
-                last_seen_state[site] = new
+                    new_lineage = "reservoir"
+                elif old_type in {"Si", "Al"} and new_type == "vacant":
+                    new_lineage = "empty"
+
+                if old_type in {"Si", "Al", "vacant"}:
+                    old_key = (old_lineage, old)
+                    if lineage_state_counts.get(old_key, 0) <= 0:
+                        raise ValueError(
+                            f"{path}:{line_number}: event old-state lineage is unavailable"
+                        )
+                    lineage_state_counts[old_key] -= 1
+                if new_type in {"Si", "Al", "vacant"}:
+                    new_key = (new_lineage, new)
+                    lineage_state_counts[new_key] = (
+                        lineage_state_counts.get(new_key, 0) + 1
+                    )
+
+                for species, target_id in target_ids.items():
+                    stats = target_stats[species]
+                    if old == target_id and old_lineage in {"lattice", "reservoir"}:
+                        stats[f"{old_lineage}_exits"] += 1
+                        eligible_target_counts[(species, old_lineage)] -= 1
+                    if new == target_id and new_lineage in {"lattice", "reservoir"}:
+                        stats[f"{new_lineage}_entries"] += 1
+                        eligible_target_counts[(species, new_lineage)] += 1
+
+                if current_counts[old] <= 0:
+                    raise ValueError(
+                        f"{path}:{line_number}: event over-consumes its old-state vector"
+                    )
+                current_counts[old] -= 1
+                current_counts[new] += 1
+                site_states[site] = new
+                site_lineage[site] = new_lineage
+
+            for species in target_ids:
+                stats = target_stats[species]
+                lattice = eligible_target_counts[(species, "lattice")]
+                reservoir = eligible_target_counts[(species, "reservoir")]
+                if target_eligible_during_event[species] or lattice > 0:
+                    stats["lattice_events"] += 1
+                    if stats["first_lattice_step"] is None:
+                        stats["first_lattice_step"] = step
+                    stats["last_lattice_step"] = step
+                if reservoir > 0:
+                    stats["reservoir_events"] += 1
+                stats["max_lattice"] = max(int(stats["max_lattice"]), lattice)
+                stats["max_reservoir"] = max(int(stats["max_reservoir"]), reservoir)
+
+            while (
+                population_index < len(populations)
+                and populations[population_index].step == step
+            ):
+                verify_population(populations[population_index])
+                cadence_rows_verified += 1
+                population_index += 1
             previous_step = step
             previous_time = event_time
             steps.append(step)
@@ -1230,6 +1714,45 @@ def parse_events(
             names.append(name)
             lattice_origin_releases.append(lattice_release)
             counts[name] += 1
+        if previous_step != contract.step_limit:
+            raise ValueError(
+                f"{path}: event stream must contain every step through configured final "
+                f"step {contract.step_limit}; found {previous_step}"
+            )
+        while population_index < len(populations):
+            verify_population(populations[population_index])
+            cadence_rows_verified += 1
+            population_index += 1
+
+    target_eligibility = {}
+    for species, target_id in target_ids.items():
+        stats = target_stats[species]
+        sampled = int(stats["initial_lattice"]) > 0 or int(stats["lattice_events"]) > 0
+        target_eligibility[species] = TargetEligibilityDiagnostic(
+            species=species,
+            target_state=states[target_id],
+            initial_lattice_count=int(stats["initial_lattice"]),
+            initial_reservoir_count=int(stats["initial_reservoir"]),
+            events_with_lattice_target_eligible=int(stats["lattice_events"]),
+            events_with_reservoir_target_eligible=int(stats["reservoir_events"]),
+            max_lattice_target_count=int(stats["max_lattice"]),
+            max_reservoir_target_count=int(stats["max_reservoir"]),
+            lattice_target_entries=int(stats["lattice_entries"]),
+            lattice_target_exits=int(stats["lattice_exits"]),
+            reservoir_target_entries=int(stats["reservoir_entries"]),
+            reservoir_target_exits=int(stats["reservoir_exits"]),
+            first_lattice_target_step=(
+                int(stats["first_lattice_step"])
+                if stats["first_lattice_step"] is not None
+                else None
+            ),
+            last_lattice_target_step=(
+                int(stats["last_lattice_step"])
+                if stats["last_lattice_step"] is not None
+                else None
+            ),
+            mechanism_sampling_status=("sampled" if sampled else "mechanism-unsampled"),
+        )
     return EventData(
         seed,
         n_sites,
@@ -1239,6 +1762,21 @@ def parse_events(
         tuple(names),
         tuple(lattice_origin_releases),
         counts,
+        EventReplayDiagnostic(
+            initial_state_source=(
+                "snapshot.pgif.json"
+                if initial_state_ids is not None
+                else "first-populations-row-aggregate"
+            ),
+            snapshot_crosscheck_status=snapshot_status,
+            limitation=limitation,
+            events_verified=len(steps),
+            cadence_rows_verified=cadence_rows_verified,
+            final_state_counts={
+                name: current_counts[index] for index, name in enumerate(states)
+            },
+        ),
+        target_eligibility,
     )
 
 
@@ -1561,11 +2099,105 @@ def _population_diagnostics(
     )
 
 
+def _kind_state_distribution_diagnostics(
+    points: Sequence[SteadyPoint], tail: Sequence[SteadyPoint]
+) -> tuple[dict[str, KindDistributionDiagnostic], str]:
+    """Diagnose every state fraction within every lattice kind over the tail."""
+
+    if not points or not tail or any(point.state_counts is None for point in points):
+        return {}, "incomplete"
+    state_names = tuple(points[0].state_counts or {})
+    if not state_names or any(
+        tuple(point.state_counts or {}) != state_names
+        or any(value < 0 for value in (point.state_counts or {}).values())
+        for point in points
+    ):
+        return {}, "incomplete"
+    kinds: dict[str, list[str]] = {}
+    for state in state_names:
+        kind, separator, _ = state.partition(".")
+        if not separator:
+            return {}, "incomplete"
+        kinds.setdefault(kind, []).append(state)
+
+    diagnostics: dict[str, KindDistributionDiagnostic] = {}
+    for kind, kind_states in kinds.items():
+        totals = [
+            sum((point.state_counts or {})[state] for state in kind_states)
+            for point in points
+        ]
+        tail_totals = totals[-len(tail) :]
+        state_diagnostics: dict[str, StateDistributionDiagnostic] = {}
+        for state in kind_states:
+            counts = [(point.state_counts or {})[state] for point in points]
+            fractions = [
+                count / total if total > 0 else None
+                for count, total in zip(counts, totals, strict=True)
+            ]
+            tail_fractions = fractions[-len(tail) :]
+            if any(value is None for value in tail_fractions):
+                fraction_range = trend = None
+                stable = False
+            else:
+                numeric_tail = [float(value) for value in tail_fractions]
+                fraction_range = max(numeric_tail) - min(numeric_tail)
+                trend = _linear_trend(numeric_tail)
+                stable = (
+                    fraction_range <= POPULATION_FRACTION_RANGE_LIMIT
+                    and abs(trend) <= POPULATION_FRACTION_TREND_LIMIT
+                )
+            state_diagnostics[state] = StateDistributionDiagnostic(
+                initial_count=counts[0],
+                final_count=counts[-1],
+                initial_fraction=fractions[0],
+                final_fraction=fractions[-1],
+                tail_fraction_range=fraction_range,
+                tail_fraction_trend=trend,
+                stability_status="stable" if stable else "evolving",
+            )
+        total_range = max(tail_totals) - min(tail_totals) if tail_totals else None
+        state_ranges = [
+            value.tail_fraction_range
+            for value in state_diagnostics.values()
+            if value.tail_fraction_range is not None
+        ]
+        state_trends = [
+            abs(value.tail_fraction_trend)
+            for value in state_diagnostics.values()
+            if value.tail_fraction_trend is not None
+        ]
+        stable = (
+            total_range == 0
+            and len(state_ranges) == len(kind_states)
+            and len(state_trends) == len(kind_states)
+            and all(
+                value.stability_status == "stable"
+                for value in state_diagnostics.values()
+            )
+        )
+        diagnostics[kind] = KindDistributionDiagnostic(
+            initial_total=totals[0],
+            final_total=totals[-1],
+            tail_total_range=total_range,
+            max_tail_fraction_range=max(state_ranges) if state_ranges else None,
+            max_abs_tail_fraction_trend=max(state_trends) if state_trends else None,
+            stability_status="stable" if stable else "evolving",
+            states=state_diagnostics,
+        )
+    return diagnostics, (
+        "stable"
+        if diagnostics
+        and all(value.stability_status == "stable" for value in diagnostics.values())
+        else "evolving"
+    )
+
+
 def _species_diagnostic(
     species: str,
     tail: Sequence[SteadyPoint],
     area_time_a2_s: float,
     reasons: list[str],
+    mechanism_sampled: bool,
 ) -> SpeciesSteadyDiagnostic:
     attribute = f"lattice_{species}_releases"
     interval_events: list[int] = []
@@ -1591,6 +2223,13 @@ def _species_diagnostic(
         event_count_to_flux(count, denominator) if count > 0 else 0.0
         for count, denominator in zip(block_events, block_area_times, strict=True)
     ]
+    if not mechanism_sampled:
+        reasons.append(
+            f"{species} original-lattice desorption target was never event-level eligible"
+        )
+        return SpeciesSteadyDiagnostic(
+            "mechanism-unsampled", lattice_events, 0, None, None, None, None, None
+        )
     propensity_attribute = f"{species}_desorb_propensity"
     propensity_values = [getattr(point, propensity_attribute) for point in tail]
     if any(value is None for value in propensity_values):
@@ -1703,13 +2342,21 @@ def _species_diagnostic(
 
 
 def assess_steady_state(
-    points: Sequence[SteadyPoint], expected_steps: int
+    points: Sequence[SteadyPoint],
+    expected_steps: int,
+    *,
+    event_replay: EventReplayDiagnostic | None = None,
+    target_eligibility: dict[str, TargetEligibilityDiagnostic] | None = None,
 ) -> SteadyStateGate:
     reasons: list[str] = []
     tail = points[-17:] if len(points) >= 17 else points
     si_population = _population_diagnostics(points, tail, "solid_si_cations")
     al_population = _population_diagnostics(points, tail, "solid_al_cations")
     population = _population_diagnostics(points, tail, "solid_cations")
+    kind_distributions, distribution_status = _kind_state_distribution_diagnostics(
+        points, tail
+    )
+    target_eligibility = {} if target_eligibility is None else target_eligibility
 
     def early(status: str, reason: str) -> SteadyStateGate:
         return SteadyStateGate(
@@ -1733,6 +2380,10 @@ def assess_steady_state(
             population.tail_relative_range,
             population.tail_fractional_trend,
             population.stability_status,
+            distribution_status,
+            kind_distributions,
+            event_replay,
+            target_eligibility,
         )
 
     if len(points) < 21:
@@ -1767,21 +2418,33 @@ def assess_steady_state(
     area_time = integrate_area(
         [point.time_s for point in tail], [point.area_a2 for point in tail]
     )
-    si = _species_diagnostic("si", tail, area_time, reasons)
-    al = _species_diagnostic("al", tail, area_time, reasons)
+    si_sampled = all(point.si_lattice_target_sampled for point in points)
+    al_sampled = all(point.al_lattice_target_sampled for point in points)
+    si = _species_diagnostic("si", tail, area_time, reasons, si_sampled)
+    al = _species_diagnostic("al", tail, area_time, reasons, al_sampled)
     species_statuses = {si.status, al.status}
-    populations_stable = (
-        si_population.stability_status == "stable"
-        and al_population.stability_status == "stable"
-    )
+    populations_stable = distribution_status == "stable"
     if not populations_stable:
-        reasons.append("tail solid Si/Al populations are not stationary")
+        evolving_kinds = sorted(
+            kind
+            for kind, diagnostic in kind_distributions.items()
+            if diagnostic.stability_status != "stable"
+        )
+        reasons.append(
+            "full per-kind state distributions are not stationary"
+            + (f": {evolving_kinds}" if evolving_kinds else "")
+        )
     if species_statuses & {
         "nonsteady",
         "unresolved-mixed-response",
         "origin-contaminated",
+        "mechanism-unsampled",
     }:
-        status = "nonsteady"
+        status = (
+            "mechanism-unsampled"
+            if "mechanism-unsampled" in species_statuses
+            else "nonsteady"
+        )
         outcome = "unresolved"
     elif len(species_statuses) != 1:
         reasons.append("Si/Al responses mix stationary zero and positive outcomes")
@@ -1818,6 +2481,10 @@ def assess_steady_state(
         population.tail_relative_range,
         population.tail_fractional_trend,
         population.stability_status,
+        distribution_status,
+        kind_distributions,
+        event_replay,
+        target_eligibility,
     )
 
 
@@ -1897,8 +2564,14 @@ def _analyze_replica(
         for kind in contract.parsed["kinds"]
         for state in (f"{kind['name']}.{entry['name']}" for entry in kind["states"])
     ]
-    events = parse_events(run_dir / "events.jsonl", contract, seed)
     populations = parse_populations(run_dir / "populations.csv", state_names)
+    events = parse_events(
+        run_dir / "events.jsonl",
+        contract,
+        seed,
+        populations=populations,
+        snapshot_path=run_dir / "snapshot.pgif.json",
+    )
     if any(sum(row.states.values()) != events.n_sites for row in populations):
         raise ValueError(
             f"{run_dir}: population cardinality disagrees with event header"
@@ -1921,6 +2594,19 @@ def _analyze_replica(
         raise ValueError(
             f"{run_dir}: observables/populations must align exactly by step"
         )
+    for row in populations:
+        sample_time = observables[row.step].time_s
+        if row.time_s != sample_time:
+            raise ValueError(
+                f"{run_dir}: population/observable times disagree at step {row.step}"
+            )
+        if row.step == 0:
+            if row.time_s != 0.0:
+                raise ValueError(f"{run_dir}: step-0 cadence time must be exactly zero")
+        elif events.times[row.step - 1] != row.time_s:
+            raise ValueError(
+                f"{run_dir}: event/population/observable times disagree at step {row.step}"
+            )
 
     origin_safe = propensity_origin_safe(events)
     si_desorb_index = events.reaction_names.index("desorb-si")
@@ -1947,9 +2633,17 @@ def _analyze_replica(
                 _solid_cations(row, "Al"),
                 sample.values["event_rates"][si_desorb_index] if origin_safe else None,
                 sample.values["event_rates"][al_desorb_index] if origin_safe else None,
+                dict(row.states),
+                events.target_eligibility["si"].mechanism_sampling_status == "sampled",
+                events.target_eligibility["al"].mechanism_sampling_status == "sampled",
             )
         )
-    gate = assess_steady_state(points, contract.step_limit)
+    gate = assess_steady_state(
+        points,
+        contract.step_limit,
+        event_replay=events.replay,
+        target_eligibility=events.target_eligibility,
+    )
     start = points[-17] if len(points) >= 17 else points[0]
     end = points[-1]
     area_time: float | None = None
@@ -2010,12 +2704,16 @@ def _analyze_replica(
         lattice_al_release_flux_mol_m2_s=flux(lattice_al),
         expected_lattice_origin_si_flux_from_propensity_mol_m2_s=(
             propensity_estimate.expected_gross_si_flux_from_propensity_mol_m2_s
-            if propensity_estimate is not None and origin_safe
+            if propensity_estimate is not None
+            and origin_safe
+            and events.target_eligibility["si"].mechanism_sampling_status == "sampled"
             else None
         ),
         expected_lattice_origin_al_flux_from_propensity_mol_m2_s=(
             propensity_estimate.expected_gross_al_flux_from_propensity_mol_m2_s
-            if propensity_estimate is not None and origin_safe
+            if propensity_estimate is not None
+            and origin_safe
+            and events.target_eligibility["al"].mechanism_sampling_status == "sampled"
             else None
         ),
         lattice_si_upper_95_mol_m2_s=(
@@ -2028,6 +2726,12 @@ def _analyze_replica(
         propensity_origin_status=(
             "origin-safe" if origin_safe else "origin-contaminated"
         ),
+        si_target_eligibility_status=events.target_eligibility[
+            "si"
+        ].mechanism_sampling_status,
+        al_target_eligibility_status=events.target_eligibility[
+            "al"
+        ].mechanism_sampling_status,
         steady_state_status=gate.status,
         acceptance_passed=gate.acceptance_passed,
     )
@@ -2097,7 +2801,7 @@ def _valid_sha256(value: object) -> bool:
 
 def _campaign_outcome(gates: Sequence[dict[str, object]]) -> str:
     statuses = {str(gate["status"]) for gate in gates}
-    for status in ("incomplete", "absorbed", "nonsteady"):
+    for status in ("incomplete", "absorbed", "mechanism-unsampled", "nonsteady"):
         if status in statuses:
             return status
     if "steady-zero" in statuses:
@@ -2589,12 +3293,19 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
     ensemble_rows: list[dict[str, object]] = []
     for scenario_name, members in by_scenario.items():
         for species in ("si", "al"):
+            target_statuses = [
+                getattr(member, f"{species}_target_eligibility_status")
+                for member in members
+            ]
             values = [
                 getattr(member, f"lattice_{species}_release_flux_mol_m2_s")
                 for member in members
             ]
             defined = [value for value in values if value is not None]
-            if len(defined) == len(values):
+            if "mechanism-unsampled" in target_statuses:
+                mean = low = high = upper = None
+                status = "mechanism-unsampled"
+            elif len(defined) == len(values):
                 mean, low, high = bootstrap_summary(
                     defined, f"{scenario_name}:{species}:{OBSERVED_RATE_BASIS}"
                 )
@@ -2631,7 +3342,10 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
             defined_propensities = [
                 value for value in propensity_values if value is not None
             ]
-            if len(defined_propensities) == len(propensity_values):
+            if "mechanism-unsampled" in target_statuses:
+                mean = low = high = None
+                status = "mechanism-unsampled"
+            elif len(defined_propensities) == len(propensity_values):
                 mean, low, high = bootstrap_summary(
                     defined_propensities,
                     f"{scenario_name}:{species}:{PROPENSITY_RATE_BASIS}",
@@ -2882,7 +3596,7 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
     )
     write_json_atomic(
         out_dir / "steady-state-gates.json",
-        {"schema": "a9-steady-state-gates-v2", "gates": gates},
+        {"schema": "a9-steady-state-gates-v3", "gates": gates},
     )
     _write_provenance(out_dir / "provenance-conversions.csv")
 
@@ -2891,6 +3605,7 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
         for status in (
             "steady-positive",
             "steady-zero",
+            "mechanism-unsampled",
             "nonsteady",
             "absorbed",
             "incomplete",
@@ -3001,6 +3716,9 @@ def _validate_derived_schemas(
         raise ValueError("per-replica rate identity coverage mismatch")
     for row in rate_rows:
         for species in ("si", "al"):
+            eligibility_status = row[f"{species}_target_eligibility_status"]
+            if eligibility_status not in {"sampled", "mechanism-unsampled"}:
+                raise ValueError("per-replica target-eligibility status mismatch")
             value_field = (
                 f"expected_lattice_origin_{species}_flux_from_propensity_mol_m2_s"
             )
@@ -3008,14 +3726,18 @@ def _validate_derived_schemas(
                 f"log10_expected_lattice_origin_{species}_flux_from_propensity_mol_m2_s"
             )
             if row[value_field] == "undefined":
-                if (
-                    row[log_field] != "undefined"
-                    or row["propensity_origin_status"] != "origin-contaminated"
+                if row[log_field] != "undefined" or (
+                    row["propensity_origin_status"] != "origin-contaminated"
+                    and eligibility_status != "mechanism-unsampled"
                 ):
                     raise ValueError(
                         "undefined propensity flux must have undefined log10"
                     )
                 continue
+            if row[f"{species}_target_eligibility_status"] != "sampled":
+                raise ValueError(
+                    "defined propensity flux requires sampled target eligibility"
+                )
             if row["propensity_origin_status"] != "origin-safe":
                 raise ValueError("defined propensity flux must be origin-safe")
             value = float(row[value_field])
@@ -3055,26 +3777,99 @@ def _validate_derived_schemas(
     }:
         raise ValueError("ensemble rate identity coverage mismatch")
     for row in ensemble_rows:
-        if row["rate_basis"] != PROPENSITY_RATE_BASIS:
-            continue
-        if (
-            row["status"]
-            not in {
-                "estimated-positive",
-                "censored-nonpositive-propensity",
-                "incomplete",
-            }
-            or row["poisson_zero_upper_95_mol_m2_s"] != "undefined"
-        ):
-            raise ValueError("propensity ensemble status/schema mismatch")
         summary_fields = (
             "mean_mol_m2_s",
             "ci95_low_mol_m2_s",
             "ci95_high_mol_m2_s",
         )
-        if row["status"] == "incomplete":
-            if any(row[field] != "undefined" for field in summary_fields):
-                raise ValueError("incomplete propensity ensemble must be undefined")
+        unresolved_fields = (
+            *summary_fields,
+            "poisson_zero_upper_95_mol_m2_s",
+            "log10_mean_mol_m2_s",
+        )
+        member_target_statuses = {
+            member[f"{row['species']}_target_eligibility_status"]
+            for member in rate_rows
+            if member["scenario"] == row["scenario"]
+        }
+        any_unsampled = "mechanism-unsampled" in member_target_statuses
+        if row["rate_basis"] == OBSERVED_RATE_BASIS:
+            if row["status"] not in {
+                "estimated",
+                "zero-upper-bound",
+                "mechanism-unsampled",
+                "incomplete",
+            }:
+                raise ValueError("observed-event ensemble status mismatch")
+            if any_unsampled:
+                if row["status"] != "mechanism-unsampled" or any(
+                    row[field] != "undefined" for field in unresolved_fields
+                ):
+                    raise ValueError(
+                        "mechanism-unsampled observed-event ensemble must be wholly undefined"
+                    )
+                continue
+            if row["status"] == "mechanism-unsampled":
+                raise ValueError(
+                    "observed-event ensemble cannot be mechanism-unsampled when all members are sampled"
+                )
+            if row["status"] == "incomplete":
+                if any(row[field] != "undefined" for field in unresolved_fields):
+                    raise ValueError(
+                        "incomplete observed-event ensemble must be undefined"
+                    )
+                continue
+            summary = [float(row[field]) for field in summary_fields]
+            if any(not math.isfinite(value) or value < 0.0 for value in summary):
+                raise ValueError(
+                    "observed-event ensemble values must be finite and nonnegative"
+                )
+            mean, low, high = summary
+            if low > high:
+                raise ValueError("observed-event ensemble bootstrap band is reversed")
+            if row["status"] == "estimated":
+                if (
+                    mean <= 0.0
+                    or row["poisson_zero_upper_95_mol_m2_s"] != "undefined"
+                    or not math.isclose(
+                        float(row["log10_mean_mol_m2_s"]),
+                        math.log10(mean),
+                        rel_tol=1.0e-14,
+                    )
+                ):
+                    raise ValueError("positive observed-event ensemble schema mismatch")
+            elif (
+                mean != 0.0
+                or low != 0.0
+                or high != 0.0
+                or row["log10_mean_mol_m2_s"] != "undefined"
+                or not math.isfinite(float(row["poisson_zero_upper_95_mol_m2_s"]))
+                or float(row["poisson_zero_upper_95_mol_m2_s"]) <= 0.0
+            ):
+                raise ValueError("zero observed-event ensemble schema mismatch")
+            continue
+
+        if row["rate_basis"] != PROPENSITY_RATE_BASIS:
+            raise ValueError("unknown ensemble rate basis")
+        if (
+            row["status"]
+            not in {
+                "estimated-positive",
+                "censored-nonpositive-propensity",
+                "mechanism-unsampled",
+                "incomplete",
+            }
+            or row["poisson_zero_upper_95_mol_m2_s"] != "undefined"
+        ):
+            raise ValueError("propensity ensemble status/schema mismatch")
+        if any_unsampled != (row["status"] == "mechanism-unsampled"):
+            raise ValueError("propensity ensemble target-eligibility mismatch")
+        if row["status"] in {"incomplete", "mechanism-unsampled"}:
+            if any(
+                row[field] != "undefined"
+                for field in (*summary_fields, "log10_mean_mol_m2_s")
+            ):
+                raise ValueError("unresolved propensity ensemble must be undefined")
             continue
         summary = [float(row[field]) for field in summary_fields]
         if any(not math.isfinite(value) or value < 0.0 for value in summary):
@@ -3307,7 +4102,7 @@ def _validate_derived_schemas(
         "steady-state gates",
     )
     if (
-        gate_payload["schema"] != "a9-steady-state-gates-v2"
+        gate_payload["schema"] != "a9-steady-state-gates-v3"
         or len(gate_payload["gates"]) != expected_runs
     ):
         raise ValueError("steady-state gate schema/cardinality mismatch")
@@ -3318,6 +4113,7 @@ def _validate_derived_schemas(
         if gate["status"] not in {
             "steady-positive",
             "steady-zero",
+            "mechanism-unsampled",
             "nonsteady",
             "absorbed",
             "incomplete",
@@ -3445,7 +4241,7 @@ def analyze_single_run(
     contract = validate_deck(deck_path)
     rate, gate, _ = _analyze_replica("nominal", 0, seed, run_dir, contract)
     payload = {
-        "schema": "a9-single-run-analysis-v3",
+        "schema": "a9-single-run-analysis-v4",
         "survey_tier": True,
         "acceptance_passed": gate.acceptance_passed,
         "outcome": gate.dissolution_outcome,
@@ -3519,6 +4315,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"outcome={verification['campaign_outcome']} "
             f"acceptance_passed={verification['acceptance_passed']}"
         )
+        return 0 if verification["acceptance_passed"] else 2
     elif args.command == "analyze-run":
         payload = analyze_single_run(args.deck, args.run_dir, args.out_path, args.seed)
         print(
@@ -3534,6 +4331,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"outcome={verification['campaign_outcome']} "
             f"acceptance_passed={verification['acceptance_passed']}"
         )
+        return 0 if verification["acceptance_passed"] else 2
     return 0
 
 

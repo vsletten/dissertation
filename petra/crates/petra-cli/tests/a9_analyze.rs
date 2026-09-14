@@ -9,7 +9,7 @@ fn repo_path(relative: &str) -> PathBuf {
 }
 
 #[test]
-fn canonical_real_cli_run_reaches_typed_zero_analysis() {
+fn canonical_real_cli_run_rejects_mechanism_unsampled_zero() {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock after epoch")
@@ -48,12 +48,16 @@ fn canonical_real_cli_run_reaches_typed_zero_analysis() {
         String::from_utf8_lossy(&python.stderr)
     );
     let payload = std::fs::read_to_string(&analysis).expect("analysis payload");
-    assert!(payload.contains("\"steady_state_status\": \"steady-zero\""));
-    assert!(payload.contains("\"outcome\": \"no-dissolution\""));
-    assert!(payload.contains("\"acceptance_passed\": true"));
+    assert!(payload.contains("\"steady_state_status\": \"mechanism-unsampled\""));
+    assert!(payload.contains("\"outcome\": \"unresolved\""));
+    assert!(payload.contains("\"acceptance_passed\": false"));
     assert!(payload.contains("\"upper_95_mol_m2_s\":"));
     assert!(payload.contains("\"propensity_estimator_basis\": \"integrated_ctmc_hazard\""));
     assert!(payload.contains("\"expected_lattice_origin_si_flux_from_propensity_mol_m2_s\":"));
+    assert!(payload.contains("\"target_state\": \"Si.oh4\""));
+    assert!(payload.contains("\"target_state\": \"Al.l6\""));
+    assert!(payload.contains("\"events_verified\": 200000"));
+    assert!(payload.contains("\"snapshot_crosscheck_status\": \"verified\""));
     assert!(payload.contains("not observed event release"));
     std::fs::remove_dir_all(root).expect("temporary cleanup");
 }

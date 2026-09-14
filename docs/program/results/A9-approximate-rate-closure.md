@@ -76,6 +76,14 @@ This continuation closes two implementation defects in the preliminary branch bu
 
 Generated output hashing now follows the declared file contract rather than filesystem enumeration, so macOS AppleDouble sidecars on external storage cannot poison declared hashes. Verification still rejects undeclared files in the committed derived bundle.
 
+### Diagnostic-gate correction (implementation verified; campaign not rerun here)
+
+The runner now requires one event row for every contiguous step from 1 through the deck's configured final step, replays the complete state-count vector from the step-0 populations row, validates each event's old state and every cadence population vector, and binds population, observable, and event times exactly at every sampled step. Recomputed artifact hashes therefore cannot launder a dropped event into an analysis. It records separate lattice/reservoir lineage diagnostics for event-level `Si.oh4` and `Al.l6` eligibility. A trajectory with zero nonfrozen original-lattice target eligibility is now typed `mechanism-unsampled` / `unresolved`; it cannot pass as steady zero. Population stationarity now covers every state fraction within every kind, including oxygen and empty states, rather than only conserved Si/Al totals.
+
+When `snapshot.pgif.json` asserts `pgif: 1`, its production node/edge/meta structure, coordinates, categorical state/type/kind mappings, frozen flags, and per-row consistency are validated before its per-site state vector is cross-checked against the step-0 populations row. Only nonfrozen Si/Al centers count toward initial desorption-target eligibility. If the artifact is absent or does not assert PGIF, the step-0 populations row is authoritative: per-site state and nonfrozen eligibility are inferred only when that site first appears in a fired event, while aggregate old-state availability and every emitted cadence vector are still checked exactly. That fallback cannot independently prove the unobserved step-0 site-to-state assignment; the trajectory diagnostic records this limitation instead of inventing one. A malformed document that asserts `"pgif": 1` is rejected rather than downgraded to fallback.
+
+The existing 232-run derived bundle predates this gate schema and was not regenerated in this correction slice because its raw campaign is retained at the external macOS path named above, not in this worktree. Its historical `steady-zero` census must therefore not be treated as acceptance evidence under the corrected runner. A focused real 200,000-event Petra contract run exercises the new path and is classified `mechanism-unsampled`, with both target maxima zero and the PGIF snapshot cross-check verified.
+
 **DEVIATION:** The deck uses B3LYP/def2-SVP/DF survey anchors where the card text labels the 27.0/32.2 kcal/mol values r2SCAN-3c. The provenance table records the actual method and explicitly rejects the card's stale method label.
 
 **DEVIATION:** The `1e-30` dissolved-cation activity is a numerical open-flow sink, not a realistic pH 3–5 solution model. It makes origin-safe attribution possible without engine-level particle identity but precludes accepting the adsorption-family sensitivity requested by the card.
@@ -83,7 +91,7 @@ Generated output hashing now follows the declared file contract rather than file
 ## Tradeoffs
 
 - The `1e-30` product activity is an explicit numerical open-flow sink, not a measured pH-dependent activity. It isolates dissolution from reservoir re-entry but does not constitute calibrated solution chemistry.
-- The finite 200,000-event cap is adequate to classify every trajectory as stationary zero under the declared gate, but its observed-event upper bound remains above laboratory rates.
+- The finite 200,000-event cap is enough to diagnose a mechanism-unsampled recrossing trap under the corrected gate, not to classify physical dissolution as stationary zero; the historical observed-event upper bound is therefore non-acceptance telemetry rather than a laboratory-rate estimate.
 - A longer run could tighten the Poisson bound, but it would not resolve the more important zero-hazard topology problem unless the mechanism begins reaching desorption-eligible states.
 - Survey barriers mix computed, literature-analogue, and heuristic values. The result must not be presented as production kinetics.
 

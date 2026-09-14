@@ -202,7 +202,7 @@ fn run() -> Result<(), String> {
         let row: Vec<String> = counts.iter().map(|c| c.to_string()).collect();
         writeln!(
             csv,
-            "{},{:.6e},{}",
+            "{},{:.9e},{}",
             engine.step_count,
             engine.time,
             row.join(",")

@@ -4,12 +4,13 @@ import csv
 import importlib.util
 import json
 import math
-import os
 import shutil
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
 import tomllib
 
@@ -68,6 +69,19 @@ def _points(
     assert len(al_propensities) == sample_count
     cumulative_si = 0
     cumulative_al = 0
+    si_kind_total = max(solid_si_samples)
+    al_kind_total = max(solid_al_samples)
+
+    def state_counts(index: int) -> dict[str, int]:
+        return {
+            "Si.occupied": solid_si_samples[index],
+            "Si.empty": si_kind_total - solid_si_samples[index],
+            "Al.occupied": solid_al_samples[index],
+            "Al.empty": al_kind_total - solid_al_samples[index],
+            "O.occupied": 1,
+            "O.empty": 0,
+        }
+
     points = [
         closure.SteadyPoint(
             0,
@@ -79,6 +93,7 @@ def _points(
             solid_al_samples[0],
             si_propensities[0],
             al_propensities[0],
+            state_counts(0),
         )
     ]
     for index, (si_increment, al_increment) in enumerate(
@@ -102,9 +117,103 @@ def _points(
                 solid_al,
                 si_propensities[index],
                 al_propensities[index],
+                state_counts(index),
             )
         )
     return points
+
+
+def _event_population_rows(
+    states: list[str],
+    event_rows: list[list],
+    initial_counts: dict[str, int],
+) -> list:
+    counts = {state: initial_counts.get(state, 0) for state in states}
+    result = [closure.PopulationRow(0, 0.0, dict(counts))]
+    for step, event_time, _reaction_id, changes in event_rows:
+        for _site, old, new in changes:
+            counts[states[old]] -= 1
+            counts[states[new]] += 1
+        result.append(closure.PopulationRow(step, event_time, dict(counts)))
+    return result
+
+
+def _short_contract(final_step: int):
+    contract = closure.validate_deck(DECK)
+    return replace(contract, step_limit=final_step, report_every=1)
+
+
+SYNTHETIC_CONTRACT = _short_contract(20)
+
+
+def _production_pgif(
+    contract, state_names_by_site: list[str], *, frozen: list[bool] | None = None
+) -> dict:
+    states = [
+        f"{kind['name']}.{state['name']}"
+        for kind in contract.parsed["kinds"]
+        for state in kind["states"]
+    ]
+    state_types = [
+        state["occupant"]
+        for kind in contract.parsed["kinds"]
+        for state in kind["states"]
+    ]
+    kinds = [kind["name"] for kind in contract.parsed["kinds"]]
+    type_dict = list(dict.fromkeys(state_types))
+    state_ids = {name: index for index, name in enumerate(states)}
+    n_sites = len(state_names_by_site)
+    state_data = [state_ids[name] for name in state_names_by_site]
+    kind_data = [kinds.index(name.partition(".")[0]) for name in state_names_by_site]
+    type_data = [type_dict.index(state_types[state_id]) for state_id in state_data]
+    frozen = [False] * n_sites if frozen is None else frozen
+    assert len(frozen) == n_sites
+    return {
+        "pgif": 1,
+        "meta": {
+            "producer": "petra",
+            "kind": "kmc-lattice",
+            "directed": False,
+            "petra": {
+                "deck": contract.parsed["deck"]["name"],
+                "temperature": contract.parsed["thermo"]["temperature"],
+                "states": states,
+                "state_types": state_types,
+                "step": 0,
+                "time": 0.0,
+            },
+        },
+        "nodes": {
+            "count": n_sites,
+            "columns": {
+                "x": {"type": "f32", "data": [float(i) for i in range(n_sites)]},
+                "y": {"type": "f32", "data": [0.0] * n_sites},
+                "z": {"type": "f32", "data": [0.0] * n_sites},
+                "type": {
+                    "type": "categorical",
+                    "dict": type_dict,
+                    "data": type_data,
+                },
+                "state": {
+                    "type": "categorical",
+                    "dict": states,
+                    "data": state_data,
+                },
+                "kind": {
+                    "type": "categorical",
+                    "dict": kinds,
+                    "data": kind_data,
+                },
+                "frozen": {"type": "bool", "data": frozen},
+            },
+        },
+        "edges": {
+            "count": 0,
+            "src": [],
+            "dst": [],
+            "columns": {"seam": {"type": "bool", "data": []}},
+        },
+    }
 
 
 def _build_synthetic_campaign(root: Path) -> tuple[Path, Path]:
@@ -127,6 +236,14 @@ def _build_synthetic_campaign(root: Path) -> tuple[Path, Path]:
     state_ids = {name: index for index, name in enumerate(states)}
     reaction_names = [entry.name for entry in closure.REACTION_REGISTRY]
     reaction_ids = {name: index for index, name in enumerate(reaction_names)}
+    snapshot_site_states = [
+        "Oaa.br",
+        "Oaa.hy",
+        "Oss.br",
+        "Osa.full",
+        *(["Si.oh4"] * 10),
+        *(["Al.l6"] * 10),
+    ]
     scenario_records = []
     receipts = []
 
@@ -170,7 +287,7 @@ def _build_synthetic_campaign(root: Path) -> tuple[Path, Path]:
                 "petra_traj": 1,
                 "deck": contract.parsed["deck"]["name"],
                 "seed": seed,
-                "n_sites": 21,
+                "n_sites": 24,
                 "states": states,
                 "state_types": [
                     state["occupant"]
@@ -184,7 +301,7 @@ def _build_synthetic_campaign(root: Path) -> tuple[Path, Path]:
                 forward = index % 2 == 1
                 event_rows.append(
                     [
-                        index * 10_000,
+                        index,
                         float(index),
                         reaction_ids[
                             "R14-alohal-hydrolysis"
@@ -196,7 +313,12 @@ def _build_synthetic_campaign(root: Path) -> tuple[Path, Path]:
                                 0,
                                 state_ids["Oaa.br" if forward else "Oaa.hy"],
                                 state_ids["Oaa.hy" if forward else "Oaa.br"],
-                            ]
+                            ],
+                            [
+                                1,
+                                state_ids["Oaa.hy" if forward else "Oaa.br"],
+                                state_ids["Oaa.br" if forward else "Oaa.hy"],
+                            ],
                         ],
                     ]
                 )
@@ -213,11 +335,13 @@ def _build_synthetic_campaign(root: Path) -> tuple[Path, Path]:
                 counts = {state: 0 for state in states}
                 counts["Si.oh4"] = 10
                 counts["Al.l6"] = 10
-                counts["Oaa.br"] = int(index % 2 == 0)
-                counts["Oaa.hy"] = int(index % 2 == 1)
-                step = index * 10_000
+                counts["Oaa.br"] = 1
+                counts["Oaa.hy"] = 1
+                counts["Oss.br"] = 1
+                counts["Osa.full"] = 1
+                step = index
                 population_rows.append({"step": step, "time": float(index), **counts})
-                observable_time = 0.0 if index == 0 else float(index) + 1.0e-7
+                observable_time = float(index)
                 values = {
                     "state_counts": [counts[state] for state in states],
                     "event_rates": [0.0] * len(reaction_names),
@@ -254,7 +378,10 @@ def _build_synthetic_campaign(root: Path) -> tuple[Path, Path]:
                 ["replica", "seed", "step", "time", "kind", "index", "value"],
                 observable_rows,
             )
-            (run_dir / "snapshot.pgif.json").write_text("{}\n", encoding="utf-8")
+            (run_dir / "snapshot.pgif.json").write_text(
+                json.dumps(_production_pgif(contract, snapshot_site_states)) + "\n",
+                encoding="utf-8",
+            )
             artifact_hashes = {
                 name: closure.sha256_file(run_dir / name)
                 for name in (
@@ -326,23 +453,50 @@ def _build_synthetic_campaign(root: Path) -> tuple[Path, Path]:
 
 
 def _contaminate_one_run_with_adsorption(raw: Path, scenario: str) -> None:
-    run = raw / "runs" / scenario / "replica-00-seed-90401" / "events.jsonl"
+    run_dir = raw / "runs" / scenario / "replica-00-seed-90401"
+    run = run_dir / "events.jsonl"
     rows = [json.loads(line) for line in run.read_text(encoding="utf-8").splitlines()]
     header = rows[0]
     state_ids = {name: index for index, name in enumerate(header["states"])}
     rows[-2] = [
-        190_000,
+        19,
         19.0,
+        header["reactions"].index("desorb-si"),
+        [[4, state_ids["Si.oh4"], state_ids["Si.empty"]]],
+    ]
+    rows[-1] = [
+        20,
+        20.0,
         header["reactions"].index("adsorb-si"),
         [[4, state_ids["Si.empty"], state_ids["Si.oh4"]]],
     ]
-    rows[-1] = [
-        200_000,
-        20.0,
-        header["reactions"].index("R14-alohal-hydrolysis"),
-        [[0, state_ids["Oaa.br"], state_ids["Oaa.hy"]]],
-    ]
     run.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+    populations_path = run_dir / "populations.csv"
+    with populations_path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        population_fields = reader.fieldnames
+        population_rows = list(reader)
+    assert population_fields is not None
+    population_190 = next(row for row in population_rows if row["step"] == "19")
+    population_190["Si.oh4"] = "9"
+    population_190["Si.empty"] = "1"
+    closure._write_csv_atomic(populations_path, population_fields, population_rows)
+
+    observables_path = run_dir / "observables.csv"
+    with observables_path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        observable_fields = reader.fieldnames
+        observable_rows = list(reader)
+    assert observable_fields is not None
+    for row in observable_rows:
+        if row["step"] == "19" and row["kind"] == "state_counts":
+            if row["index"] == str(state_ids["Si.oh4"]):
+                row["value"] = "9"
+            elif row["index"] == str(state_ids["Si.empty"]):
+                row["value"] = "1"
+    closure._write_csv_atomic(observables_path, observable_fields, observable_rows)
+
     checkpoint_path = raw / "checkpoint.json"
     checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
     receipt = next(
@@ -350,7 +504,8 @@ def _contaminate_one_run_with_adsorption(raw: Path, scenario: str) -> None:
         for receipt in checkpoint["receipts"]
         if receipt["scenario"] == scenario and receipt["replica"] == 0
     )
-    receipt["sha256"]["events.jsonl"] = closure.sha256_file(run)
+    for name in ("events.jsonl", "populations.csv", "observables.csv"):
+        receipt["sha256"][name] = closure.sha256_file(run_dir / name)
     closure.write_json_atomic(checkpoint_path, checkpoint)
     manifest_path = raw / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -372,7 +527,7 @@ def _make_one_run_propensity_nonstationary(raw: Path, scenario: str) -> None:
     }
     for row in rows:
         if row["kind"] == "event_rates" and row["index"] in desorb_indices:
-            block = min(int(row["step"]) // 40_000, 4)
+            block = min(int(row["step"]) // 4, 4)
             row["value"] = str(float(row["value"]) * (2**block))
     closure._write_csv_atomic(path, fields, rows)
     checkpoint_path = raw / "checkpoint.json"
@@ -415,6 +570,64 @@ def _zero_all_desorption_propensities(raw: Path) -> None:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["checkpoint_sha256"] = closure.sha256_file(checkpoint_path)
     closure.write_json_atomic(manifest_path, manifest)
+
+
+def _refresh_run_hashes(
+    raw: Path, scenario: str, replica: int, filenames: tuple[str, ...]
+) -> None:
+    checkpoint_path = raw / "checkpoint.json"
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    receipt = next(
+        receipt
+        for receipt in checkpoint["receipts"]
+        if receipt["scenario"] == scenario and receipt["replica"] == replica
+    )
+    run_dir = Path(receipt["output"])
+    for filename in filenames:
+        receipt["sha256"][filename] = closure.sha256_file(run_dir / filename)
+    closure.write_json_atomic(checkpoint_path, checkpoint)
+    manifest_path = raw / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["checkpoint_sha256"] = closure.sha256_file(checkpoint_path)
+    closure.write_json_atomic(manifest_path, manifest)
+
+
+def _drop_inverse_event(raw: Path) -> None:
+    run_dir = raw / "runs" / "nominal" / "replica-00-seed-90401"
+    path = run_dir / "events.jsonl"
+    rows = path.read_text(encoding="utf-8").splitlines()
+    del rows[2]
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    _refresh_run_hashes(raw, "nominal", 0, ("events.jsonl",))
+
+
+def _scale_observable_times(raw: Path) -> None:
+    run_dir = raw / "runs" / "nominal" / "replica-00-seed-90401"
+    path = run_dir / "observables.csv"
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        fields = reader.fieldnames
+        rows = list(reader)
+    assert fields is not None
+    for row in rows:
+        if row["step"] != "0":
+            row["time"] = str(float(row["time"]) * 2.0)
+    closure._write_csv_atomic(path, fields, rows)
+    _refresh_run_hashes(raw, "nominal", 0, ("observables.csv",))
+
+
+def _freeze_one_run_si_targets(raw: Path) -> None:
+    run_dir = raw / "runs" / "nominal" / "replica-00-seed-90401"
+    path = run_dir / "snapshot.pgif.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    state_column = payload["nodes"]["columns"]["state"]
+    frozen = payload["nodes"]["columns"]["frozen"]["data"]
+    si_target_id = state_column["dict"].index("Si.oh4")
+    for site, state_id in enumerate(state_column["data"]):
+        if state_id == si_target_id:
+            frozen[site] = True
+    path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    _refresh_run_hashes(raw, "nominal", 0, ("snapshot.pgif.json",))
 
 
 class DeckContractTests(unittest.TestCase):
@@ -616,7 +829,7 @@ class DeckContractTests(unittest.TestCase):
 
 class EventAndUnitTests(unittest.TestCase):
     def test_event_gross_and_net_accounting_by_reaction_name(self) -> None:
-        contract = closure.validate_deck(DECK)
+        contract = _short_contract(4)
         states = [
             f"{kind['name']}.{state['name']}"
             for kind in contract.parsed["kinds"]
@@ -664,6 +877,9 @@ class EventAndUnitTests(unittest.TestCase):
             ],
             "reactions": reactions,
         }
+        populations = _event_population_rows(
+            states, rows, {"Si.oh4": 1, "Al.l6": 1, "Oaa.br": 8}
+        )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "events.jsonl"
             path.write_text(
@@ -671,9 +887,27 @@ class EventAndUnitTests(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            events = closure.parse_events(path, contract, expected_seed=99)
+            events = closure.parse_events(
+                path, contract, expected_seed=99, populations=populations
+            )
         self.assertEqual(events.steps, (1, 2, 3, 4))
         self.assertEqual(events.times[:2], (1.0, 1.0))
+        self.assertEqual(
+            events.replay.initial_state_source, "first-populations-row-aggregate"
+        )
+        self.assertEqual(
+            events.replay.limitation, closure.AGGREGATE_INITIAL_STATE_LIMITATION
+        )
+        self.assertEqual(events.replay.events_verified, 4)
+        self.assertEqual(events.replay.cadence_rows_verified, 5)
+        self.assertEqual(events.target_eligibility["si"].initial_lattice_count, 0)
+        self.assertEqual(events.target_eligibility["al"].initial_lattice_count, 0)
+        self.assertEqual(
+            events.target_eligibility["si"].mechanism_sampling_status, "sampled"
+        )
+        self.assertEqual(
+            events.target_eligibility["al"].mechanism_sampling_status, "sampled"
+        )
         self.assertEqual(
             closure.dissolution_event_counts(events, 0, 4),
             {
@@ -689,7 +923,7 @@ class EventAndUnitTests(unittest.TestCase):
         )
 
     def test_event_lineage_counts_only_original_lattice_cations(self) -> None:
-        contract = closure.validate_deck(DECK)
+        contract = _short_contract(7)
         states = [
             f"{kind['name']}.{state['name']}"
             for kind in contract.parsed["kinds"]
@@ -761,6 +995,11 @@ class EventAndUnitTests(unittest.TestCase):
                 [[5, state_id["Si.oh4"], state_id["Si.empty"]]],
             ],
         ]
+        populations = _event_population_rows(
+            states,
+            rows,
+            {"Si.oh4": 2, "Si.empty": 1, "Oaa.br": 1, "Oaa.empty": 6},
+        )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "events.jsonl"
             path.write_text(
@@ -768,7 +1007,9 @@ class EventAndUnitTests(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            events = closure.parse_events(path, contract, expected_seed=99)
+            events = closure.parse_events(
+                path, contract, expected_seed=99, populations=populations
+            )
 
         self.assertEqual(
             closure.dissolution_event_counts(events, 0, 7),
@@ -785,9 +1026,106 @@ class EventAndUnitTests(unittest.TestCase):
         )
         self.assertFalse(closure.propensity_origin_safe(events))
         self.assertEqual(closure._lattice_releases_through_step(events, 7, "si"), 1)
+        self.assertEqual(events.target_eligibility["si"].reservoir_target_entries, 2)
+        self.assertEqual(events.target_eligibility["si"].lattice_target_exits, 2)
+
+    def test_event_level_target_entry_is_not_hidden_by_population_cadence(self) -> None:
+        contract = _short_contract(2)
+        states = [
+            f"{kind['name']}.{state['name']}"
+            for kind in contract.parsed["kinds"]
+            for state in kind["states"]
+        ]
+        state_id = {name: index for index, name in enumerate(states)}
+        reactions = [reaction["name"] for reaction in contract.parsed["reactions"]]
+        reaction_id = {name: index for index, name in enumerate(reactions)}
+        header = {
+            "petra_traj": 1,
+            "deck": contract.parsed["deck"]["name"],
+            "seed": 17,
+            "n_sites": 4,
+            "states": states,
+            "state_types": [
+                state["occupant"]
+                for kind in contract.parsed["kinds"]
+                for state in kind["states"]
+            ],
+            "reactions": reactions,
+        }
+        rows = [
+            [
+                1,
+                1.0,
+                reaction_id["R10-sial-hydrolysis"],
+                [
+                    [0, state_id["Osa.sial"], state_id["Osa.sialh"]],
+                    [1, state_id["Si.oh3"], state_id["Si.oh4"]],
+                ],
+            ],
+            [
+                2,
+                2.0,
+                reaction_id["R11-sial-condensation"],
+                [
+                    [0, state_id["Osa.sialh"], state_id["Osa.sial"]],
+                    [1, state_id["Si.oh4"], state_id["Si.oh3"]],
+                ],
+            ],
+        ]
+        all_rows = _event_population_rows(
+            states,
+            rows,
+            {"Osa.sial": 1, "Si.oh3": 1, "Al.l6": 1, "Oss.br": 1},
+        )
+        populations = [all_rows[0], all_rows[-1]]
+        snapshot = _production_pgif(
+            contract,
+            ["Osa.sial", "Si.oh3", "Al.l6", "Oss.br"],
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            event_path = root / "events.jsonl"
+            event_path.write_text(
+                "\n".join([json.dumps(header), *(json.dumps(row) for row in rows)])
+                + "\n",
+                encoding="utf-8",
+            )
+            snapshot_path = root / "snapshot.pgif.json"
+            snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+            events = closure.parse_events(
+                event_path,
+                contract,
+                expected_seed=17,
+                populations=populations,
+                snapshot_path=snapshot_path,
+            )
+            forged_final = dict(populations[-1].states)
+            forged_final["Si.oh3"] -= 1
+            forged_final["Si.oh4"] += 1
+            with self.assertRaisesRegex(ValueError, "replayed state vector"):
+                closure.parse_events(
+                    event_path,
+                    contract,
+                    expected_seed=17,
+                    populations=[
+                        populations[0],
+                        replace(populations[-1], states=forged_final),
+                    ],
+                    snapshot_path=snapshot_path,
+                )
+
+        diagnostic = events.target_eligibility["si"]
+        self.assertEqual(diagnostic.initial_lattice_count, 0)
+        self.assertEqual(diagnostic.lattice_target_entries, 1)
+        self.assertEqual(diagnostic.lattice_target_exits, 1)
+        self.assertEqual(diagnostic.events_with_lattice_target_eligible, 2)
+        self.assertEqual(diagnostic.first_lattice_target_step, 1)
+        self.assertEqual(diagnostic.mechanism_sampling_status, "sampled")
+        self.assertEqual(events.replay.snapshot_crosscheck_status, "verified")
+        self.assertEqual(events.replay.cadence_rows_verified, 2)
 
     def test_event_step_regression_and_time_regression_are_rejected(self) -> None:
-        contract = closure.validate_deck(DECK)
+        contract = _short_contract(2)
         states = [
             f"{kind['name']}.{state['name']}"
             for kind in contract.parsed["kinds"]
@@ -815,10 +1153,17 @@ class EventAndUnitTests(unittest.TestCase):
             reaction_id,
             [[0, state_id["Oaa.br"], state_id["Oaa.hy"]]],
         ]
+        populations = [
+            closure.PopulationRow(
+                0,
+                0.0,
+                {state: int(state == "Oaa.br") for state in states},
+            )
+        ]
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "events.jsonl"
             for second, message in (
-                ([1, 2.0, reaction_id, base[3]], "strictly increasing"),
+                ([1, 2.0, reaction_id, base[3]], "contiguous from 1"),
                 ([2, 0.5, reaction_id, base[3]], "nondecreasing"),
             ):
                 path.write_text(
@@ -826,7 +1171,198 @@ class EventAndUnitTests(unittest.TestCase):
                     encoding="utf-8",
                 )
                 with self.assertRaisesRegex(ValueError, message):
-                    closure.parse_events(path, contract, expected_seed=1)
+                    closure.parse_events(
+                        path, contract, expected_seed=1, populations=populations
+                    )
+
+    def test_event_stream_must_be_contiguous_and_reach_configured_final_step(
+        self,
+    ) -> None:
+        contract = _short_contract(3)
+        states = [
+            f"{kind['name']}.{state['name']}"
+            for kind in contract.parsed["kinds"]
+            for state in kind["states"]
+        ]
+        state_id = {name: index for index, name in enumerate(states)}
+        reactions = [reaction["name"] for reaction in contract.parsed["reactions"]]
+        header = {
+            "petra_traj": 1,
+            "deck": contract.parsed["deck"]["name"],
+            "seed": 1,
+            "n_sites": 1,
+            "states": states,
+            "state_types": [
+                state["occupant"]
+                for kind in contract.parsed["kinds"]
+                for state in kind["states"]
+            ],
+            "reactions": reactions,
+        }
+        forward = [
+            1,
+            1.0,
+            reactions.index("R14-alohal-hydrolysis"),
+            [[0, state_id["Oaa.br"], state_id["Oaa.hy"]]],
+        ]
+        inverse = [
+            2,
+            2.0,
+            reactions.index("R15-alohal-condensation"),
+            [[0, state_id["Oaa.hy"], state_id["Oaa.br"]]],
+        ]
+        populations = [
+            closure.PopulationRow(
+                0,
+                0.0,
+                {state: int(state == "Oaa.br") for state in states},
+            )
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.jsonl"
+            dropped_inverse = [
+                3,
+                3.0,
+                forward[2],
+                forward[3],
+            ]
+            path.write_text(
+                "\n".join(map(json.dumps, (header, forward, dropped_inverse))) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "contiguous from 1"):
+                closure.parse_events(
+                    path, contract, expected_seed=1, populations=populations
+                )
+
+            path.write_text(
+                "\n".join(map(json.dumps, (header, forward, inverse))) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "configured final step 3"):
+                closure.parse_events(
+                    path, contract, expected_seed=1, populations=populations
+                )
+
+    def test_asserted_pgif_requires_production_shape_and_consistent_columns(
+        self,
+    ) -> None:
+        contract = _short_contract(1)
+        states = [
+            f"{kind['name']}.{state['name']}"
+            for kind in contract.parsed["kinds"]
+            for state in kind["states"]
+        ]
+        initial_counts = {state: int(state == "Oaa.br") for state in states}
+        valid = _production_pgif(contract, ["Oaa.br"])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "snapshot.pgif.json"
+            path.write_text(json.dumps(valid), encoding="utf-8")
+            state_data, frozen, status, limitation = closure._snapshot_initial_states(
+                path, contract, states, initial_counts, 1
+            )
+            self.assertIsNotNone(state_data)
+            self.assertEqual(frozen, [False])
+            self.assertEqual(status, "verified")
+            self.assertIsNone(limitation)
+
+            malformed_documents = [{"pgif": 1}]
+            wrong_kind = json.loads(json.dumps(valid))
+            wrong_kind["nodes"]["columns"]["kind"]["data"] = [1]
+            malformed_documents.append(wrong_kind)
+            bad_edge = json.loads(json.dumps(valid))
+            bad_edge["edges"] = {
+                "count": 1,
+                "src": [0],
+                "dst": [1],
+                "columns": {"seam": {"type": "bool", "data": [False]}},
+            }
+            malformed_documents.append(bad_edge)
+            missing_frozen = json.loads(json.dumps(valid))
+            del missing_frozen["nodes"]["columns"]["frozen"]
+            malformed_documents.append(missing_frozen)
+            for malformed in malformed_documents:
+                with self.subTest(malformed=malformed):
+                    path.write_text(json.dumps(malformed), encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "invalid asserted PGIF"):
+                        closure._snapshot_initial_states(
+                            path, contract, states, initial_counts, 1
+                        )
+
+            path.write_text("{}\n", encoding="utf-8")
+            fallback = closure._snapshot_initial_states(
+                path, contract, states, initial_counts, 1
+            )
+            self.assertEqual(fallback[2], "aggregate-fallback")
+
+    def test_frozen_only_desorption_target_is_mechanism_unsampled(self) -> None:
+        contract = _short_contract(2)
+        states = [
+            f"{kind['name']}.{state['name']}"
+            for kind in contract.parsed["kinds"]
+            for state in kind["states"]
+        ]
+        state_id = {name: index for index, name in enumerate(states)}
+        reactions = [reaction["name"] for reaction in contract.parsed["reactions"]]
+        header = {
+            "petra_traj": 1,
+            "deck": contract.parsed["deck"]["name"],
+            "seed": 11,
+            "n_sites": 3,
+            "states": states,
+            "state_types": [
+                state["occupant"]
+                for kind in contract.parsed["kinds"]
+                for state in kind["states"]
+            ],
+            "reactions": reactions,
+        }
+        rows = [
+            [
+                1,
+                1.0,
+                reactions.index("R14-alohal-hydrolysis"),
+                [[0, state_id["Oaa.br"], state_id["Oaa.hy"]]],
+            ],
+            [
+                2,
+                2.0,
+                reactions.index("R15-alohal-condensation"),
+                [[0, state_id["Oaa.hy"], state_id["Oaa.br"]]],
+            ],
+        ]
+        populations = _event_population_rows(
+            states, rows, {"Oaa.br": 1, "Si.oh4": 1, "Al.l6": 1}
+        )
+        snapshot = _production_pgif(
+            contract,
+            ["Oaa.br", "Si.oh4", "Al.l6"],
+            frozen=[False, True, False],
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            event_path = root / "events.jsonl"
+            event_path.write_text(
+                "\n".join(map(json.dumps, (header, *rows))) + "\n",
+                encoding="utf-8",
+            )
+            snapshot_path = root / "snapshot.pgif.json"
+            snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+            events = closure.parse_events(
+                event_path,
+                contract,
+                expected_seed=11,
+                populations=populations,
+                snapshot_path=snapshot_path,
+            )
+
+        si = events.target_eligibility["si"]
+        al = events.target_eligibility["al"]
+        self.assertEqual(si.initial_lattice_count, 0)
+        self.assertEqual(si.max_lattice_target_count, 0)
+        self.assertEqual(si.mechanism_sampling_status, "mechanism-unsampled")
+        self.assertEqual(al.initial_lattice_count, 1)
+        self.assertEqual(al.mechanism_sampling_status, "sampled")
 
     def test_exact_unit_conversion_oracle(self) -> None:
         self.assertEqual(closure.AVOGADRO_EXACT, 6.02214076e23)
@@ -977,6 +1513,52 @@ class SteadyStateGateTests(unittest.TestCase):
         self.assertEqual(gate.population_stability_status, "evolving")
         self.assertFalse(gate.acceptance_passed)
 
+    def test_conserved_totals_do_not_hide_oxygen_empty_state_redistribution(
+        self,
+    ) -> None:
+        points = _points([0] * 20)
+        redistributed = []
+        for index, point in enumerate(points):
+            counts = dict(point.state_counts)
+            shift = min(100, max(0, index - 4) * 7)
+            counts["O.occupied"] = 100 - shift
+            counts["O.empty"] = shift
+            redistributed.append(replace(point, state_counts=counts))
+
+        gate = closure.assess_steady_state(redistributed, 20_000)
+
+        self.assertEqual(gate.si_population.stability_status, "stable")
+        self.assertEqual(gate.al_population.stability_status, "stable")
+        self.assertEqual(gate.population_stability_status, "stable")
+        self.assertEqual(
+            gate.kind_state_distributions["O"].stability_status, "evolving"
+        )
+        self.assertEqual(gate.population_distribution_status, "evolving")
+        self.assertEqual(gate.status, "nonsteady")
+        self.assertFalse(gate.acceptance_passed)
+
+    def test_zero_target_eligibility_is_mechanism_unsampled_not_steady_zero(
+        self,
+    ) -> None:
+        points = [
+            replace(
+                point,
+                si_desorb_propensity=0.0,
+                al_desorb_propensity=0.0,
+                si_lattice_target_sampled=False,
+                al_lattice_target_sampled=False,
+            )
+            for point in _points([0] * 20)
+        ]
+
+        gate = closure.assess_steady_state(points, 20_000)
+
+        self.assertEqual(gate.status, "mechanism-unsampled")
+        self.assertEqual(gate.dissolution_outcome, "unresolved")
+        self.assertEqual(gate.si.status, "mechanism-unsampled")
+        self.assertIsNone(gate.si.upper_95_mol_m2_s)
+        self.assertFalse(gate.acceptance_passed)
+
     def test_species_population_floor_is_not_hidden_by_combined_inventory(self) -> None:
         gate = closure.assess_steady_state(
             _points([2] * 20, solid_si_final=50, solid_al_final=5), 20_000
@@ -1044,7 +1626,84 @@ class SteadyStateGateTests(unittest.TestCase):
         )
 
 
+@mock.patch.object(
+    closure, "validate_deck", new=mock.Mock(return_value=SYNTHETIC_CONTRACT)
+)
 class CampaignEndToEndTests(unittest.TestCase):
+    def test_hashed_incomplete_event_stream_is_rejected_before_analysis(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            raw, derived = _build_synthetic_campaign(Path(directory))
+            _drop_inverse_event(raw)
+            with self.assertRaisesRegex(ValueError, "contiguous from 1"):
+                closure.analyze_campaign(raw, derived)
+            self.assertFalse((derived / "verification.json").exists())
+
+    def test_scaled_observable_time_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            raw, derived = _build_synthetic_campaign(Path(directory))
+            _scale_observable_times(raw)
+            with self.assertRaisesRegex(
+                ValueError, "population/observable times disagree at step 1"
+            ):
+                closure.analyze_campaign(raw, derived)
+
+    def test_any_unsampled_member_censors_observed_ensemble(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            raw, derived = _build_synthetic_campaign(root)
+            _freeze_one_run_si_targets(raw)
+            analysis = closure.analyze_campaign(raw, derived)
+            self.assertEqual(analysis["campaign_outcome"], "mechanism-unsampled")
+            self.assertFalse(analysis["acceptance_passed"])
+            self.assertEqual(closure.verify_campaign(raw, derived), analysis)
+
+            with (derived / "ensemble-rates.csv").open(
+                newline="", encoding="utf-8"
+            ) as handle:
+                rows = list(csv.DictReader(handle))
+            observed = next(
+                row
+                for row in rows
+                if row["scenario"] == "nominal"
+                and row["species"] == "si"
+                and row["rate_basis"] == closure.OBSERVED_RATE_BASIS
+            )
+            self.assertEqual(observed["status"], "mechanism-unsampled")
+            for field in (
+                "mean_mol_m2_s",
+                "ci95_low_mol_m2_s",
+                "ci95_high_mol_m2_s",
+                "poisson_zero_upper_95_mol_m2_s",
+                "log10_mean_mol_m2_s",
+            ):
+                self.assertEqual(observed[field], "undefined")
+
+            forged = root / "derived-forged-unsampled"
+            shutil.copytree(derived, forged)
+            path = forged / "ensemble-rates.csv"
+            with path.open(newline="", encoding="utf-8") as handle:
+                reader = csv.DictReader(handle)
+                fields = reader.fieldnames
+                forged_rows = list(reader)
+            assert fields is not None
+            forged_observed = next(
+                row
+                for row in forged_rows
+                if row["scenario"] == "nominal"
+                and row["species"] == "si"
+                and row["rate_basis"] == closure.OBSERVED_RATE_BASIS
+            )
+            forged_observed["mean_mol_m2_s"] = "0.0"
+            closure._write_csv_atomic(path, fields, forged_rows)
+            verification_path = forged / "verification.json"
+            verification = json.loads(verification_path.read_text(encoding="utf-8"))
+            verification["output_sha256"]["ensemble-rates.csv"] = closure.sha256_file(
+                path
+            )
+            closure.write_json_atomic(verification_path, verification)
+            with self.assertRaisesRegex(ValueError, "wholly undefined"):
+                closure.verify_campaign(raw, forged)
+
     def test_censored_families_have_undefined_rank_but_complete_classification(
         self,
     ) -> None:
@@ -1100,12 +1759,15 @@ class CampaignEndToEndTests(unittest.TestCase):
             raw, derived = _build_synthetic_campaign(root)
             _zero_all_desorption_propensities(raw)
 
-            analysis = closure.analyze_campaign(raw, derived)
+            analyze_exit = closure.main(["analyze", str(raw), str(derived)])
+            analysis = json.loads((derived / "verification.json").read_text())
 
             self.assertEqual(analysis["campaign_outcome"], "no-dissolution")
             self.assertTrue(analysis["sensitivity_complete"])
             self.assertFalse(analysis["ordinal_ranking_complete"])
             self.assertFalse(analysis["acceptance_passed"])
+            self.assertEqual(analyze_exit, 2)
+            self.assertEqual(closure.main(["verify", str(raw), str(derived)]), 2)
 
     def test_zero_campaign_analyzes_verifies_and_tampering_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1120,6 +1782,7 @@ class CampaignEndToEndTests(unittest.TestCase):
                 {
                     "steady-positive": 0,
                     "steady-zero": 29 * 8,
+                    "mechanism-unsampled": 0,
                     "nonsteady": 0,
                     "absorbed": 0,
                     "incomplete": 0,
@@ -1316,6 +1979,22 @@ class CampaignEndToEndTests(unittest.TestCase):
 
 
 class DeterminismTests(unittest.TestCase):
+    def test_worker_environment_caps_aggregate_native_threads(self) -> None:
+        for workers, expected_threads in ((1, 16), (2, 8), (3, 5), (4, 4)):
+            with self.subTest(workers=workers):
+                env = closure._worker_environment(workers)
+                for variable in (
+                    "OMP_NUM_THREADS",
+                    "MKL_NUM_THREADS",
+                    "OPENBLAS_NUM_THREADS",
+                    "RAYON_NUM_THREADS",
+                ):
+                    self.assertEqual(int(env[variable]), expected_threads)
+                self.assertLessEqual(
+                    workers * int(env["RAYON_NUM_THREADS"]),
+                    closure.AGGREGATE_THREAD_CAP,
+                )
+
     def test_derived_hash_inventory_ignores_appledouble_sidecars(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1372,19 +2051,12 @@ for name in ('populations.csv', 'observables.csv', 'snapshot.pgif.json'):
             deck.write_text("fixture", encoding="utf-8")
             output = root / "output"
             log = root / "run.log"
-            env = os.environ.copy()
-            for variable in (
-                "OMP_NUM_THREADS",
-                "MKL_NUM_THREADS",
-                "OPENBLAS_NUM_THREADS",
-                "RAYON_NUM_THREADS",
-            ):
-                env[variable] = "16"
+            env = closure._worker_environment(4)
             receipt = closure._run_one(fake, deck, output, log, 90401, 30, root, env)
             event_receipt = json.loads((output / "events.jsonl").read_text())
             self.assertEqual(
                 event_receipt["threads"],
-                {name: "16" for name in event_receipt["threads"]},
+                {name: "4" for name in event_receipt["threads"]},
             )
             args = event_receipt["args"]
             self.assertIn("--viz", args)
