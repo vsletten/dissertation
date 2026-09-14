@@ -1,6 +1,6 @@
 # E4a2-surface-connected-lateral-release — test the missing in-plane length scale
 
-- status: done
+- status: active
 - track: E (muscovite / the perfect circle)
 - priority: P1
 - machine: any (CPU ensembles)
@@ -38,6 +38,16 @@ path. Rerun the exact E4 campaign to determine whether the existing in-plane
 - Petra Rust and Python suites, Ruff, formatting, card/PLAN/STATUS green.
 
 ## Progress
+
+- 2026-09-13 18:39 PDT (hermes-macbot-zero; profile=laptop) — Implementation,
+  campaign evidence, final verification, and independent review are complete and
+  pushed, but PR creation could not finish. Existing `gh` auth is invalid;
+  typed-browser access correctly refused without the user-controlled
+  `computer_use.grant_existing_profile` opt-in; and native Chrome control failed
+  because the authenticated window is on another Space and AX-unreachable. No
+  API credential or browser-profile grant was configured. Continue from branch
+  `agents/E4a2-surface-connected-lateral-release`: open the PR, record it, and
+  perform POLICY §2 teardown. Scientific verdict remains **NO-GO**.
 
 - 2026-09-13 18:14 PDT (hermes-macbot-zero; profile=laptop) — Implemented the
   parameter-free lateral front: all `a/b` boundaries are open, edge gates seed
