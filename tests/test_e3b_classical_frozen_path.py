@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import tomllib
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS) not in sys.path:
@@ -85,7 +86,9 @@ def _prepared(root: Path) -> Path:
         prepared / "preparation.json",
         {
             "schema": "e3b-cp2k-preparation-v1",
-            "models": {MODEL: {"atom_identity_sha256": "fixture-identity"}},
+            "models": {
+                MODEL: {"atom_identity_sha256": e3b.canonical_sha256(atom_map["atoms"])}
+            },
         },
     )
     e3b.write_manifest(prepared)
@@ -141,6 +144,50 @@ def test_render_static_input_removes_relaxation() -> None:
     assert "minimize" not in rendered
     assert "write_data" not in rendered
     assert "write_dump" not in rendered
+
+
+def test_parse_energy_ignores_unbound_five_number_diagnostic(tmp_path: Path) -> None:
+    output = tmp_path / "screen.log"
+    output.write_text(
+        "Step PotEng Fnorm Fmax Press\n"
+        "0 -100.0 1.0 0.5 0.0\n"
+        "Loop time of 0.1 on 1 procs for 0 steps\n"
+        "1 2 999 4 5\n"
+        "Total wall time: 0:00:01\n"
+    )
+    assert classical.parse_energy(output) == -100.0
+
+
+def test_profile_rejects_atom_map_not_bound_to_declared_identity(
+    tmp_path: Path,
+) -> None:
+    prepared = _prepared(tmp_path)
+    preparation = e3b.read_json(prepared / "preparation.json")
+    preparation["models"][MODEL]["atom_identity_sha256"] = "stale-identity"
+    e3b.write_json(prepared / "preparation.json", preparation)
+    e3b.write_manifest(prepared)
+    with pytest.raises(ValueError, match="declared atom identity"):
+        classical.run_profile(_args(tmp_path, prepared, _fake_lammps(tmp_path / "lmp")))
+
+
+def test_e3b_fragment_records_every_e4_value_selection() -> None:
+    fragment = tomllib.loads(
+        (
+            Path(__file__).resolve().parents[1]
+            / "petra/data/muscovite-1998/e3b-calibration-fragment.toml"
+        ).read_text()
+    )
+    assert fragment["frozen_path_values_are_activation_barriers"] is False
+    assert fragment["corrections_applied"] is False
+    routes = {route["model"]: route for route in fragment["routes"]}
+    assert set(routes) == set(classical.MODELS)
+    assert {route["verdict"] for route in routes.values()} == {"disagrees"}
+    assert routes[MODEL]["e4_selection"] == "retain-e3a-bounded-sensitivity"
+    assert routes[MODEL]["e4_value_kcal_mol"] == 64.095991
+    assert routes["reconstructed-replication"]["e4_selection"] == (
+        "use-neither-e3b-number"
+    )
+    assert routes["xenon-divacancy"]["e4_selection"] == "use-neither-e3b-number"
 
 
 def test_profile_receipt_emits_like_for_like_classical_rise(tmp_path: Path) -> None:

@@ -49,6 +49,16 @@ periodic CI-NEB is outside this phase's acceptance and is not claimed.
 
 ## Progress
 
+- 2026-09-14 16:40 PDT — `(hermes-custom-build-001; profile=workstation)` —
+  `REVIEW FIX:` the one POLICY §13 cold review found two safety defects and one
+  completion defect. The LAMMPS parser now accepts only the row bound to its
+  exact declared thermo header, the runner recomputes and verifies the canonical
+  atom-map identity, and `e3b-calibration-fragment.toml` records every E4 value
+  selection. All three classical profiles were replayed through the corrected
+  runner with unchanged numbers; comparison receipt v2 independently verifies
+  the fixes. Non-blocking source-attestation hardening is captured by ready card
+  `E3b2-classical-receipt-code-binding` per the review cost ceiling.
+
 - 2026-09-14 16:23 PDT — `(hermes-custom-build-001; profile=workstation)` —
   DONE under POLICY §12's platform-test amendment. All three PBE-D3 frozen-path
   profiles and all three fresh matched-cell LAMMPS profiles completed 8/8
@@ -58,7 +68,7 @@ periodic CI-NEB is outside this phase's acceptance and is not claimed.
   repository's 5.0 kcal/mol transfer tolerance. No correction, endorsement,
   relaxed DFT barrier, CI-NEB, or production result is claimed. Independent
   receipt replay verified all 48 image records and container cleanup; the
-  E3-focused suite is 57/57 green.
+  E3-focused suite is 60/60 green after the review fixes.
 
 - 2026-09-14 15:07 PDT — `(hermes-custom-build-001; profile=workstation)` —
   The reconstructed-replication profile completed 8/8 converged PBE-D3 single
@@ -167,8 +177,8 @@ Evidence and claim boundaries are in
 `docs/program/results/E3b-periodic-dft-spot-checks.md`. Durable receipts live
 under `/mnt/data/vsletten/dissertation-data/e3b-periodic-dft-calibration-20260914/`;
 the independent comparison receipt is
-`receipts/comparison-verification-01.json` at SHA-256
-`1e315ac3d3a80777c7d39d1e4c3c4a16d9fb135baf22061fab21df961500eaf9`.
+`receipts/comparison-verification-02.json` at SHA-256
+`b0f7b58bd3bf7a79e6d86365f04cea16a57eaeb07f5efc0f0b92e2351e5a8cc9`.
 
 ## Prior blocked result (superseded by the 2026-09-14 11:17 PDT unblock)
 

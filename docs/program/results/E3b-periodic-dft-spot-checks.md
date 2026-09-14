@@ -61,9 +61,9 @@ non-finite energy, missing normal termination, or prepared-manifest drift.
 
 | Route | Runtime-manifest SHA-256 | Receipt SHA-256 |
 |---|---|---|
-| dehydroxylate-lattice | `31bf222583816c6b72c801657dd572a0eabf74edc96efc78af934a669445ad49` | `aaa4e019a1b4edf2e9a3ef63dfc0636528d16cadd78196ce9b41ad44d3afc9bc` |
-| reconstructed-replication | `b5816dc9f1974c5cf114a9ed186b22eecfea50cea88a1845558b5f71f3172ed9` | `56d170da731b9cd9cead42bb07c6bb60c187fb8664a30f92122cdbfa2a5b47fb` |
-| xenon-divacancy | `3a8ea9c6f1a1f3bf732d4c2f7f1b30c752ff3ab0b350a9d0ca87fb559245ee62` | `3c6665aecce08e028000ddfb7473014819bb19f9639357e1696738e5054decf2` |
+| dehydroxylate-lattice | `4ac1048830471a14836d953c9220f91c57c520c6080356f396b4024d300b97a4` | `700004e307ac47056c3c28d4d0c4b556bce25f48f3086fc0ab0d7ba6351296a5` |
+| reconstructed-replication | `ed325856e21bd28236556e9a064376fb1e1af9c6996937800ca0970e892e985d` | `e25840dc27bc289098a89c526721a0c5a4c96d382a1a869aad010f4f1dfc0ba6` |
+| xenon-divacancy | `a89dacff84fae60e6b79d9b737638288833652d4f29873a2649abf15d23b0d14` | `729189c9bba8e3298b6f16473bfeeaab8e7ce51beba6c84bbc251e78e7ded9b7` |
 
 ## Scope deviation
 
@@ -115,14 +115,22 @@ The independent replay of all 48 image records, both runtime manifests per
 route, all receipt arithmetic, every immutable coordinate hash, all CP2K
 termination/SCF/cleanup gates, and all LAMMPS normal-termination/energy gates is:
 
-`receipts/comparison-verification-01.json`
+`receipts/comparison-verification-02.json`
 
 SHA-256:
-`1e315ac3d3a80777c7d39d1e4c3c4a16d9fb135baf22061fab21df961500eaf9`.
+`b0f7b58bd3bf7a79e6d86365f04cea16a57eaeb07f5efc0f0b92e2351e5a8cc9`.
+
+The single POLICY §13 cold review found and closed three delivery-changing
+issues: arbitrary five-number diagnostics could supersede the declared LAMMPS
+thermo row; the receipt copied rather than recomputed atom-map identity; and no
+deck decision fragment recorded which value E4 used. The corrected runner was
+replayed for all 24 classical images with unchanged results. Non-blocking
+runner/revision attestation is deliberately deferred to
+`E3b2-classical-receipt-code-binding`.
 
 ## Verification
 
-- E3-focused PBE-D3/evidence-contract/classical-runner suite: **57 passed**.
+- E3-focused PBE-D3/evidence-contract/classical-runner suite: **60 passed**.
 - Ruff check and format, Python compilation, and `git diff --check`: pass.
 - Receipt replay: **48/48 images** hash-bound and complete; profile arithmetic
   independently recomputed.

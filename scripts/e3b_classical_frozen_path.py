@@ -161,18 +161,35 @@ def parse_energy(path: pathlib.Path) -> float:
         raise ValueError(f"{path}: LAMMPS fatal/error output")
     if "total wall time:" not in text.lower() and "loop time of" not in text.lower():
         raise ValueError(f"{path}: missing LAMMPS normal termination")
-    rows: list[list[float]] = []
-    for line in text.splitlines():
-        fields = line.split()
-        if len(fields) != 5:
-            continue
-        try:
-            rows.append([float(field) for field in fields])
-        except ValueError:
-            continue
-    if not rows:
-        raise ValueError(f"{path}: no five-column thermo row")
-    energy = rows[-1][1]
+    lines = text.splitlines()
+    expected_header = ("Step", "PotEng", "Fnorm", "Fmax", "Press")
+    header_indices = [
+        index
+        for index, line in enumerate(lines)
+        if tuple(line.split()) == expected_header
+    ]
+    if len(header_indices) != 1:
+        raise ValueError(f"{path}: expected exactly one declared thermo header")
+    row_index = next(
+        (
+            index
+            for index in range(header_indices[0] + 1, len(lines))
+            if lines[index].strip()
+        ),
+        None,
+    )
+    if row_index is None:
+        raise ValueError(f"{path}: declared thermo header has no row")
+    fields = lines[row_index].split()
+    if len(fields) != len(expected_header):
+        raise ValueError(f"{path}: malformed declared thermo row")
+    try:
+        row = [float(field) for field in fields]
+    except ValueError as exc:
+        raise ValueError(f"{path}: non-numeric declared thermo row") from exc
+    if row[0] != 0.0:
+        raise ValueError(f"{path}: static energy row is not step zero")
+    energy = row[1]
     if not math.isfinite(energy):
         raise ValueError(f"{path}: non-finite potential energy")
     return energy
@@ -205,6 +222,9 @@ def run_profile(args: argparse.Namespace) -> dict[str, Any]:
     ):
         raise TypeError("prepared atom map is malformed")
     atom_map: list[dict[str, Any]] = atom_map_value
+    atom_identity_sha256 = e3b.canonical_sha256(atom_map)
+    if atom_identity_sha256 != model_record.get("atom_identity_sha256"):
+        raise ValueError("prepared atom map does not match declared atom identity")
     images = [
         model_root / "images" / f"replica-{index:02d}.xyz"
         for index in range(IMAGE_COUNT)
@@ -336,7 +356,7 @@ def run_profile(args: argparse.Namespace) -> dict[str, Any]:
         "completed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "elapsed_seconds": time.monotonic() - started,
         "model": args.model,
-        "atom_identity_sha256": model_record.get("atom_identity_sha256"),
+        "atom_identity_sha256": atom_identity_sha256,
         "prepared": {
             "path": str(prepared),
             "preparation_sha256": e3b.sha256(prepared / "preparation.json"),

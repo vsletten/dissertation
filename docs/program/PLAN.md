@@ -83,6 +83,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [E3a-classical-neb-barriers](cards/E3a-classical-neb-barriers.md) | E | P1 | any | done | — |
 | [E3b-periodic-dft-spot-checks](cards/E3b-periodic-dft-spot-checks.md) | E | P2 | workstation | done | E3b1 ✅; 3/3 PBE-D3 + matched-cell frozen-path profiles; all `disagrees`, no correction |
 | [E3b1-periodic-dft-evidence-contract](cards/E3b1-periodic-dft-evidence-contract.md) | E | P2 | workstation | done | E3a ✅; bounded force timing + native evidence gates verified |
+| [E3b2-classical-receipt-code-binding](cards/E3b2-classical-receipt-code-binding.md) | E | P2 | any | ready | E3b ✅; non-blocking runner/revision receipt attestation |
 | [E4-1998-comparison](cards/E4-1998-comparison.md) | E | P1 | any | done | E3a ✅, E2b ✅, A8 ✅ |
 | [E4a-surface-gated-release](cards/E4a-surface-gated-release.md) | E | P1 | any | done | E4 ✅, B5 ✅; NO-GO — local basal gating did not recover the grain-size crossover |
 | [E4a2-surface-connected-lateral-release](cards/E4a2-surface-connected-lateral-release.md) | E | P1 | any | done | E4a ✅; PRs #131 + #132; NO-GO under inherited gate timescale + proxy-size ladder |

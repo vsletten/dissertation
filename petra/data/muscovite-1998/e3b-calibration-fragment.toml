@@ -1,0 +1,39 @@
+# E3b survey calibration fragment for the E4 muscovite comparison decks.
+# This is a data/decision fragment, not a standalone executable Petra deck.
+schema = "e3b-calibration-fragment-v1"
+status = "complete"
+comparison_basis = "same immutable eight-image coordinates"
+close_enough_tolerance_kcal_mol = 5.0
+frozen_path_values_are_activation_barriers = false
+corrections_applied = false
+
+[[routes]]
+model = "dehydroxylate-lattice"
+species = "Ar"
+dft_frozen_path_rise_kcal_mol = 297.91365858839634
+classical_frozen_path_rise_kcal_mol = 9877.633000000002
+verdict = "disagrees"
+e4_selection = "retain-e3a-bounded-sensitivity"
+e4_value_kcal_mol = 64.095991
+e4_value_source = "E3a local-dehydroxylate incomplete-convergence sensitivity"
+e4_rationale = "Neither E3b frozen-path rise is a relaxed barrier; E4 retains its already-declared bounded sensitivity value and does not present it as calibrated."
+
+[[routes]]
+model = "reconstructed-replication"
+species = "Ar"
+dft_frozen_path_rise_kcal_mol = 305.94620434479094
+classical_frozen_path_rise_kcal_mol = 9877.629
+verdict = "disagrees"
+e4_selection = "use-neither-e3b-number"
+e4_value_source = "none"
+e4_rationale = "E4 does not carry a route-specific reconstructed-replication rule; both E3b values are frozen-path rises rather than barriers."
+
+[[routes]]
+model = "xenon-divacancy"
+species = "Xe"
+dft_frozen_path_rise_kcal_mol = 425.85486214921366
+classical_frozen_path_rise_kcal_mol = 39166.519
+verdict = "disagrees"
+e4_selection = "use-neither-e3b-number"
+e4_value_source = "none"
+e4_rationale = "The current E4 decks model Ar isotopes and retain Xe only as an uncalibrated discriminant; neither E3b frozen-path rise is an executable barrier."
