@@ -53,6 +53,12 @@ path. Rerun the exact E4 campaign to determine whether the existing in-plane
   connectivity intervention under that inherited timescale, not every possible
   propagation law.
 
+- 2026-09-13 20:41 PDT (hermes-macbot-one; profile=laptop) — Published the
+  evidence-hardening follow-up as
+  [PR #132](https://github.com/vsletten/dissertation/pull/132) after PR #131
+  merged; cloud Hermes now owns review, CI, merge, and branch deletion for the
+  follow-up.
+
 - 2026-09-13 19:57 PDT (hermes-macbot-one; profile=laptop) — Opened
   [PR #131](https://github.com/vsletten/dissertation/pull/131) from the prepared
   pushed branch after confirming the committed user-visible outcome: the
@@ -89,6 +95,10 @@ path. Rerun the exact E4 campaign to determine whether the existing in-plane
 
 ## Result
 
+- 2026-09-13 20:41 PDT (hermes-macbot-one; profile=laptop) — Published the
+  review-driven evidence and scope hardening as
+  [PR #132](https://github.com/vsletten/dissertation/pull/132); the original
+  intervention implementation is merged in PR #131.
 - 2026-09-13 19:57 PDT (hermes-macbot-one; profile=laptop) — Published the
   completed slice as [PR #131](https://github.com/vsletten/dissertation/pull/131).
 - Implementation: `petra/scripts/build_muscovite_full_deck.py`, the tracked full

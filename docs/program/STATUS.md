@@ -7,7 +7,7 @@ appended by the PR that did it: `date — actor — what + pointer`.
 - 2026-09-13 20:17 PDT (hermes-macbot-one; profile=laptop) — E4a2 independent
   verification reran all 72 replicas on this host and reproduced the exact
   84,585-event total plus unchanged 500/500/500 °C and 600/600/600 °C NO-GO
-  comparison. The follow-up evidence-hardening slice commits byte-count/SHA-256
+  comparison. The follow-up evidence-hardening slice (PR #132) commits byte-count/SHA-256
   evidence for all three primary/replay summary CSVs, primary-prefix replay
   checks, an end-to-end analysis receipt, three evidence regressions, and the
   explicit scope
