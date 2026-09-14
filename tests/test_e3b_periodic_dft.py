@@ -116,7 +116,7 @@ def _prepared_analysis_fixture() -> dict[str, Any]:
                 "atom_identity_sha256": "identity",
                 "classical_reference": {
                     "barrier_kcal_mol": 100.0,
-                    "status": "incomplete-convergence",
+                    "status": "converged",
                 },
             }
         },
@@ -148,7 +148,7 @@ def _observation_fixture() -> dict[str, Any]:
     }
 
 
-def test_analysis_applies_only_matched_cell_correction() -> None:
+def test_analysis_refuses_unbound_manual_barriers() -> None:
     result = e3b.analyze_models(
         _prepared_analysis_fixture(),
         _observation_fixture(),
@@ -156,10 +156,21 @@ def test_analysis_applies_only_matched_cell_correction() -> None:
         endorsement_tolerance_kcal_mol=5.0,
     )
     model = result["models"]["model"]
-    assert model["typed_outcome"] == "complete-correction"
-    assert model["matched_cell_correction_kcal_mol"] == 10.0
-    assert model["calibrated_barrier_kcal_mol"] == 110.0
-    assert model["verdict"] == "apply-dft-minus-matched-classical-correction"
+    assert model["typed_outcome"] == "incomplete-unverified-observation"
+    assert model["matched_cell_correction_kcal_mol"] is None
+    assert model["calibrated_barrier_kcal_mol"] is None
+    assert model["verdict"] == "no-correction"
+
+
+def test_analysis_refuses_incomplete_source_classical_barrier() -> None:
+    preparation = _prepared_analysis_fixture()
+    preparation["models"]["model"]["classical_reference"]["status"] = (
+        "incomplete-convergence"
+    )
+    result = e3b.analyze_models(preparation, _observation_fixture())
+    model = result["models"]["model"]
+    assert model["typed_outcome"] == "incomplete-source-classical"
+    assert model["calibrated_barrier_kcal_mol"] is None
 
 
 @pytest.mark.parametrize(
@@ -189,14 +200,14 @@ def test_analysis_refuses_incomplete_results(
     assert model["calibrated_barrier_kcal_mol"] is None
 
 
-def test_analysis_refuses_failed_matched_cell_transfer() -> None:
+def test_analysis_does_not_trust_manual_transfer_numbers() -> None:
     observations = _observation_fixture()
     observations["models"]["model"]["matched_classical"]["barrier_kcal_mol"] = 106.0
     result = e3b.analyze_models(
         _prepared_analysis_fixture(), observations, transfer_tolerance_kcal_mol=5.0
     )
     model = result["models"]["model"]
-    assert model["typed_outcome"] == "incomplete-transfer-gate"
+    assert model["typed_outcome"] == "incomplete-unverified-observation"
     assert model["matched_cell_transfer_pass"] is False
     assert model["matched_cell_correction_kcal_mol"] is None
 
@@ -234,9 +245,12 @@ def test_analyze_command_generates_result_and_manifest(tmp_path: Path) -> None:
         endorsement_tolerance=5.0,
     )
 
-    assert e3b.command_analyze(args) == 0
+    assert e3b.command_analyze(args) == 2
     result = json.loads((out / "analysis.json").read_text(encoding="utf-8"))
-    assert result["models"]["model"]["typed_outcome"] == "complete-correction"
+    assert (
+        result["models"]["model"]["typed_outcome"]
+        == "incomplete-unverified-observation"
+    )
     e3b.verify_manifest(out)
 
 
@@ -262,13 +276,13 @@ def test_real_e3a_inputs_prepare_three_periodic_spot_checks(tmp_path: Path) -> N
     )
 
     expected_atoms = {
-        "reconstructed-replication": 502,
-        "dehydroxylate-lattice": 499,
-        "xenon-divacancy": 502,
+        "reconstructed-replication": 334,
+        "dehydroxylate-lattice": 331,
+        "xenon-divacancy": 334,
     }
     for name, record in preparation["models"].items():
         assert record["atom_count"] == expected_atoms[name]
-        assert record["supercell"] == [3, 2, 1]
+        assert record["supercell"] == [2, 2, 1]
         assert record["gates"]["all_pass"] is True
         assert abs(record["gates"]["net_charge_e3a_e"]) <= 1.0e-8
         assert record["gates"]["route_pass"] is True

@@ -43,57 +43,57 @@ MODEL_ORDER = (
     "xenon-divacancy",
 )
 SOURCE_SUPERCELL = (6, 3, 1)
-TARGET_SUPERCELL = (3, 2, 1)
+TARGET_SUPERCELL = (2, 2, 1)
 SOURCE_ATOMS_PER_UNIT_CELL = 84
 TARGET_PRISTINE_COUNTS = Counter(
     {
-        "K": 24,
-        "Al1": 48,
-        "Al2": 24,
-        "Si": 72,
-        "O1": 48,
-        "O2": 144,
-        "O3": 96,
-        "H": 48,
+        "K": 16,
+        "Al1": 32,
+        "Al2": 16,
+        "Si": 48,
+        "O1": 32,
+        "O2": 96,
+        "O3": 64,
+        "H": 32,
     }
 )
 EXPECTED_MODEL_COUNTS = {
     "reconstructed-replication": Counter(
         {
-            "K": 21,
-            "Al1": 48,
-            "Al2": 21,
-            "Si": 75,
-            "O1": 48,
-            "O2": 156,
-            "O3": 84,
-            "H": 48,
+            "K": 13,
+            "Al1": 32,
+            "Al2": 13,
+            "Si": 51,
+            "O1": 32,
+            "O2": 108,
+            "O3": 52,
+            "H": 32,
             "Ar": 1,
         }
     ),
     "dehydroxylate-lattice": Counter(
         {
-            "K": 21,
-            "Al1": 48,
-            "Al2": 21,
-            "Si": 75,
-            "O1": 46,
-            "O2": 157,
-            "O3": 84,
-            "H": 46,
+            "K": 13,
+            "Al1": 32,
+            "Al2": 13,
+            "Si": 51,
+            "O1": 30,
+            "O2": 109,
+            "O3": 52,
+            "H": 30,
             "Ar": 1,
         }
     ),
     "xenon-divacancy": Counter(
         {
-            "K": 21,
-            "Al1": 48,
-            "Al2": 21,
-            "Si": 75,
-            "O1": 48,
-            "O2": 156,
-            "O3": 84,
-            "H": 48,
+            "K": 13,
+            "Al1": 32,
+            "Al2": 13,
+            "Si": 51,
+            "O1": 32,
+            "O2": 108,
+            "O3": 52,
+            "H": 32,
             "Xe": 1,
         }
     ),
@@ -316,18 +316,24 @@ def reduce_pristine(
 
     route_ids = {3, 4, 88}
     candidates: list[tuple[int, int, list[contract.nteme_neb.Atom]]] = []
-    for start_x in range(6):
-        for start_y in range(3):
+    for start_x in range(SOURCE_SUPERCELL[0]):
+        for start_y in range(SOURCE_SUPERCELL[1]):
             tiles = {
-                ((start_x + dx) % 6, (start_y + dy) % 3)
-                for dx in range(3)
-                for dy in range(2)
+                (
+                    (start_x + dx) % SOURCE_SUPERCELL[0],
+                    (start_y + dy) % SOURCE_SUPERCELL[1],
+                )
+                for dx in range(TARGET_SUPERCELL[0])
+                for dy in range(TARGET_SUPERCELL[1])
             }
             selected = [atom for tile in tiles for atom in by_tile[tile]]
             ids = {atom.id for atom in selected}
             counts = Counter(atom.element for atom in selected)
             if (
-                len(selected) == SOURCE_ATOMS_PER_UNIT_CELL * 6
+                len(selected)
+                == SOURCE_ATOMS_PER_UNIT_CELL
+                * TARGET_SUPERCELL[0]
+                * TARGET_SUPERCELL[1]
                 and route_ids <= ids
                 and counts == TARGET_PRISTINE_COUNTS
                 and math.isclose(contract.net_charge(selected), 0.0, abs_tol=1.0e-8)
@@ -335,7 +341,10 @@ def reduce_pristine(
                 candidates.append((start_x, start_y, selected))
     if len(candidates) != 1:
         windows = [(item[0], item[1]) for item in candidates]
-        raise ValueError(f"expected one neutral 3x2 route window, found {windows}")
+        raise ValueError(
+            f"expected one neutral {TARGET_SUPERCELL[0]}x{TARGET_SUPERCELL[1]} "
+            f"route window, found {windows}"
+        )
     start_x, start_y, selected = candidates[0]
     target_cell = contract.nteme_neb.Cell(
         a=cell.a * TARGET_SUPERCELL[0] / SOURCE_SUPERCELL[0],
@@ -345,14 +354,16 @@ def reduce_pristine(
         beta=cell.beta,
         gamma=cell.gamma,
     )
-    origin_x = (grid_x + start_x / 6.0) % 1.0
-    origin_y = (grid_y + start_y / 3.0) % 1.0
+    origin_x = (grid_x + start_x / SOURCE_SUPERCELL[0]) % 1.0
+    origin_y = (grid_y + start_y / SOURCE_SUPERCELL[1]) % 1.0
     reduced = []
     for atom in selected:
         source_fractional = fractional[atom.id]
         target_fractional = (
-            ((source_fractional[0] - origin_x) % 1.0) / 0.5,
-            ((source_fractional[1] - origin_y) % 1.0) / (2.0 / 3.0),
+            ((source_fractional[0] - origin_x) % 1.0)
+            / (TARGET_SUPERCELL[0] / SOURCE_SUPERCELL[0]),
+            ((source_fractional[1] - origin_y) % 1.0)
+            / (TARGET_SUPERCELL[1] / SOURCE_SUPERCELL[1]),
             source_fractional[2] % 1.0,
         )
         if target_fractional[0] >= 1.0 + 1.0e-10 or target_fractional[1] >= (
@@ -364,7 +375,7 @@ def reduce_pristine(
     reduced.sort(key=lambda atom: atom.id)
     minimum, _ids = contract.minimum_pair(reduced, target_cell)
     if minimum < MINIMUM_DISTANCE_ANGSTROM:
-        raise ValueError("3x2 remap created an atomic collision")
+        raise ValueError("reduced-cell remap created an atomic collision")
     return (
         reduced,
         target_cell,
@@ -662,8 +673,16 @@ def validate_spot_model(
     )
     cell_pass = all(
         (
-            math.isclose(model.cell.a, source_cell.a / 2.0, abs_tol=1.0e-10),
-            math.isclose(model.cell.b, source_cell.b * 2.0 / 3.0, abs_tol=1.0e-10),
+            math.isclose(
+                model.cell.a,
+                source_cell.a * TARGET_SUPERCELL[0] / SOURCE_SUPERCELL[0],
+                abs_tol=1.0e-10,
+            ),
+            math.isclose(
+                model.cell.b,
+                source_cell.b * TARGET_SUPERCELL[1] / SOURCE_SUPERCELL[1],
+                abs_tol=1.0e-10,
+            ),
             math.isclose(model.cell.c, source_cell.c, abs_tol=1.0e-10),
             math.isclose(model.cell.alpha, source_cell.alpha, abs_tol=1.0e-10),
             math.isclose(model.cell.beta, source_cell.beta, abs_tol=1.0e-10),
@@ -1343,13 +1362,6 @@ def run_smoke(
     return receipt
 
 
-def _finite_number(value: object) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    number = float(value)
-    return number if math.isfinite(number) else None
-
-
 def _failure_result(outcome: str, reason: str) -> dict[str, Any]:
     return {
         "typed_outcome": outcome,
@@ -1410,6 +1422,12 @@ def analyze_models(
             raise TypeError(f"{name}: missing typed CP2K or classical observation")
         if not isinstance(reference, Mapping):
             raise TypeError(f"{name}: missing classical reference")
+        if reference.get("status") != "converged":
+            results[name] = _failure_result(
+                "incomplete-source-classical",
+                "E3a source classical barrier is not typed converged",
+            )
+            continue
         cp2k_status = cp2k.get("status")
         matched_status = matched.get("status")
         if cp2k_status not in ALLOWED_OBSERVATION_STATUS:
@@ -1441,16 +1459,10 @@ def analyze_models(
                 "incomplete-convergence", "CP2K endpoints or CI-NEB are not converged"
             )
             continue
-        cp2k_barrier = _finite_number(cp2k.get("barrier_kcal_mol"))
-        if cp2k_barrier is None or cp2k_barrier < 0:
-            results[name] = _failure_result(
-                "incomplete-convergence", "CP2K barrier is missing or non-finite"
-            )
-            continue
         if matched_status != "converged":
             results[name] = _failure_result(
                 "incomplete-matched-classical",
-                "matched 3x2 classical CI-NEB is not typed converged",
+                "matched 2x2 classical CI-NEB is not typed converged",
             )
             continue
         if (
@@ -1462,54 +1474,14 @@ def analyze_models(
                 "matched classical timeout/convergence evidence is incomplete",
             )
             continue
-        matched_barrier = _finite_number(matched.get("barrier_kcal_mol"))
-        reference_barrier = _finite_number(reference.get("barrier_kcal_mol"))
-        if (
-            matched_barrier is None
-            or matched_barrier < 0
-            or reference_barrier is None
-            or reference_barrier < 0
-        ):
-            results[name] = _failure_result(
-                "incomplete-matched-classical",
-                "matched or E3a classical barrier is missing/non-finite",
-            )
-            continue
-        transfer_delta = matched_barrier - reference_barrier
-        transfer_pass = abs(transfer_delta) <= transfer_tolerance_kcal_mol
-        if not transfer_pass:
-            result = _failure_result(
-                "incomplete-transfer-gate",
-                "3x2 matched classical barrier does not transfer to the E3a 6x3 cell",
-            )
-            result["matched_cell_transfer_delta_kcal_mol"] = transfer_delta
-            result["transfer_tolerance_kcal_mol"] = transfer_tolerance_kcal_mol
-            results[name] = result
-            continue
-        correction = cp2k_barrier - matched_barrier
-        calibrated = reference_barrier + correction
-        endorsement = abs(correction) <= endorsement_tolerance_kcal_mol
-        results[name] = {
-            "typed_outcome": (
-                "complete-endorsement" if endorsement else "complete-correction"
-            ),
-            "reason": None,
-            "source_classical_status": reference.get("status"),
-            "source_classical_barrier_kcal_mol": reference_barrier,
-            "matched_classical_barrier_kcal_mol": matched_barrier,
-            "cp2k_barrier_kcal_mol": cp2k_barrier,
-            "matched_cell_transfer_delta_kcal_mol": transfer_delta,
-            "transfer_tolerance_kcal_mol": transfer_tolerance_kcal_mol,
-            "matched_cell_transfer_pass": True,
-            "matched_cell_correction_kcal_mol": correction,
-            "calibrated_barrier_kcal_mol": calibrated,
-            "endorsement_tolerance_kcal_mol": endorsement_tolerance_kcal_mol,
-            "verdict": (
-                "endorse-classical-within-tolerance"
-                if endorsement
-                else "apply-dft-minus-matched-classical-correction"
-            ),
-        }
+        # Observation JSON is an operator worksheet, not executable evidence.
+        # Until the harness parses and hash-binds raw CP2K and LAMMPS outputs,
+        # it must never promote copied booleans/numbers into a calibration.
+        results[name] = _failure_result(
+            "incomplete-unverified-observation",
+            "manual observations are not accepted as barrier evidence; raw-output "
+            "parsers and hashes are required",
+        )
     return {
         "schema": "e3b-cp2k-analysis-v1",
         "transfer_tolerance_kcal_mol": transfer_tolerance_kcal_mol,
@@ -1567,7 +1539,10 @@ def command_analyze(args: argparse.Namespace) -> int:
     write_json(args.out / "analysis.json", result)
     write_manifest(args.out)
     print(json.dumps(result, indent=2, sort_keys=True))
-    return 0
+    outcomes = [model["typed_outcome"] for model in result["models"].values()]
+    return (
+        0 if outcomes and all(item.startswith("complete-") for item in outcomes) else 2
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
