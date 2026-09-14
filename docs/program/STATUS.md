@@ -4,6 +4,8 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-14 16:23 PDT — (hermes-custom-build-001; profile=workstation) — E3b DONE under POLICY §12: three PBE-D3 and three exact-coordinate matched-cell classical frozen-path profiles completed 8/8 images with 48/48 hash-bound replay. PBE-D3 rises 297.913659/305.946204/425.854862 versus classical 9877.633000/9877.629000/39166.519000 kcal/mol all type `disagrees`; no barrier, correction, endorsement, CI-NEB, or production claim is made. Evidence: `docs/program/results/E3b-periodic-dft-spot-checks.md`.
+
 - 2026-09-14 15:07 PDT — (hermes-custom-build-001; profile=workstation) — E3b CONTINUATION: reconstructed-replication completed 8/8 converged PBE-D3 frozen-path single points in 2,248.029 s with a hash-bound 305.946204 kcal/mol survey rise. Combined with dehydroxylate-lattice, acceptance is 2/3. The third xenon-divacancy profile is running under bounded unit `task320-e3b-xenon-frozen-profile.service` (invocation `e0960c9d933b4c1e918d7afc3ad5d621`); these are frozen-path rises, not DFT barriers or corrections.
 
 - 2026-09-14 11:17 PDT — (hermes-custom-build-001; profile=workstation) — E3b1 DONE: immutable prepared/runtime separation, native hash-bound CP2K/LAMMPS parsing, incomplete E3a-anchor rejection, and the chemical five-coordinate-Al criterion are verified after one cold-review fix pass. A real 334-atom reconstructed-Ar PBE-D3 `ENERGY_FORCE` probe converged in 780.622 s under a bounded 4 MPI × 4 OpenMP transient unit; it is planning evidence, not a BAND lower bound. E3b is READY at 0/3 barriers. Evidence: `docs/program/results/E3b1-periodic-dft-evidence-contract.md`.

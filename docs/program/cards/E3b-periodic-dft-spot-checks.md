@@ -1,6 +1,6 @@
 # E3b-periodic-dft-spot-checks — route 2 calibration of the classical set
 
-- status: active
+- status: done
 - track: E (muscovite / the perfect circle)
 - priority: P2
 - machine: workstation (periodic DFT; CP2K)
@@ -48,6 +48,17 @@ periodic CI-NEB is outside this phase's acceptance and is not claimed.
 - Tests/lint green; card/PLAN/STATUS bookkeeping in the PR.
 
 ## Progress
+
+- 2026-09-14 16:23 PDT — `(hermes-custom-build-001; profile=workstation)` —
+  DONE under POLICY §12's platform-test amendment. All three PBE-D3 frozen-path
+  profiles and all three fresh matched-cell LAMMPS profiles completed 8/8
+  images with hash-bound receipts. Coordinate-matched rises are respectively
+  297.913659 vs 9877.633000, 305.946204 vs 9877.629000, and 425.854862 vs
+  39166.519000 kcal/mol; all three typed verdicts are `disagrees` at the
+  repository's 5.0 kcal/mol transfer tolerance. No correction, endorsement,
+  relaxed DFT barrier, CI-NEB, or production result is claimed. Independent
+  receipt replay verified all 48 image records and container cleanup; the
+  E3-focused suite is 57/57 green.
 
 - 2026-09-14 15:07 PDT — `(hermes-custom-build-001; profile=workstation)` —
   The reconstructed-replication profile completed 8/8 converged PBE-D3 single
@@ -140,6 +151,24 @@ periodic CI-NEB is outside this phase's acceptance and is not claimed.
   `docs/program/results/E3b-periodic-dft-spot-checks.md`.
 
 - 2026-08-27 — filed by Fable alongside E3a.
+
+## Result
+
+Completed the six-profile coordinate-matched survey and its fail-closed
+runner. `scripts/e3b_classical_frozen_path.py` binds every immutable XYZ row to
+the prepared source atom identity, evaluates the unchanged LAMMPS topology at
+those coordinates, and emits no numeric profile after a failed image or
+manifest drift. The three PBE-D3 profile rises are 297.913659, 305.946204, and
+425.854862 kcal/mol; the same-path classical rises are 9877.633000,
+9877.629000, and 39166.519000 kcal/mol. All are typed `disagrees`; none is
+promoted to a barrier or correction.
+
+Evidence and claim boundaries are in
+`docs/program/results/E3b-periodic-dft-spot-checks.md`. Durable receipts live
+under `/mnt/data/vsletten/dissertation-data/e3b-periodic-dft-calibration-20260914/`;
+the independent comparison receipt is
+`receipts/comparison-verification-01.json` at SHA-256
+`1e315ac3d3a80777c7d39d1e4c3c4a16d9fb135baf22061fab21df961500eaf9`.
 
 ## Prior blocked result (superseded by the 2026-09-14 11:17 PDT unblock)
 
