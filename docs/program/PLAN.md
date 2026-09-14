@@ -82,7 +82,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [E4-1998-comparison](cards/E4-1998-comparison.md) | E | P1 | any | done | E3a ✅, E2b ✅, A8 ✅ |
 | [E4a-surface-gated-release](cards/E4a-surface-gated-release.md) | E | P1 | any | done | E4 ✅, B5 ✅; NO-GO — local basal gating did not recover the grain-size crossover |
 | [E4a2-surface-connected-lateral-release](cards/E4a2-surface-connected-lateral-release.md) | E | P1 | any | ready | E4a ✅ |
-| [E4b-isothermal-reservoir-discriminants](cards/E4b-isothermal-reservoir-discriminants.md) | E | P1 | any | ready | E4a ✅ |
+| [E4b-isothermal-reservoir-discriminants](cards/E4b-isothermal-reservoir-discriminants.md) | E | P1 | any | done | E4a ✅; §5.1/.4/.7 partial, §5.2 not reproduced |
 
 **Done** (acceptance verified on main): E4a-surface-gated-release (PR #129;
 NO-GO — local basal gating did not recover the grain-size crossover),

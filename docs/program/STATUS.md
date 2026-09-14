@@ -4,6 +4,21 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-13 19:43 PDT (hermes-macbot-zero; profile=laptop) — E4b implementation
+  complete: 12 isothermal cells (500/700 °C × vacuum/H₂O-vacancy screen × three
+  E2b volumes), 96 primary trajectories, and 48 deterministic replay
+  trajectories produced source-backed cumulative-release/cylinder-D/a² overlays
+  and explicit §5.1/.2/.4/.7 verdicts. §5.1, §5.4, and §5.7 are PARTIAL:
+  rise/fall occurs in all 500 °C cells but no 700 °C cell; Xe remains an
+  uncalibrated E3a screen; and the ideal 2-kbar screen reduces largest-volume
+  700 °C ⁴⁰Ar release 0.4894→0.4394. §5.2 is NOT REPRODUCED after an `n≥4`
+  support gate rejects single-replica apparent ratio matches. Python 43/43,
+  focused Ruff check/format, all generated-deck executions, and byte replay pass.
+  DEVIATION: this Mac has no Cargo toolchain, so the unchanged Rust workspace
+  suite is deferred to required PR CI; the cached release engine completed every
+  deck with `--paranoid`. Evidence:
+  `docs/program/results/E4b-isothermal-reservoir-discriminants.md`.
+
 - 2026-09-13 17:07 PDT (hermes-custom-build-001; profile=workstation) — Closed
   E4a as DONE after independently verifying its tracked NO-GO result, merged
   [PR #129](https://github.com/vsletten/dissertation/pull/129), and deleted remote
