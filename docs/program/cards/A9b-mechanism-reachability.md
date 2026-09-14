@@ -1,11 +1,11 @@
 # A9b-mechanism-reachability — close the lattice-desorption sampling gap
 
-- status: ready
+- status: done
 - track: A (geochemistry)
 - priority: P0
 - machine: any (analysis, deterministic fixtures, and CPU-only tests; no long campaign)
 - depends: A9-approximate-rate-closure ✅
-- claimed-by:
+- claimed-by: hermes-macbot-one
 
 ## Objective
 
@@ -59,6 +59,19 @@ cannot turn non-observation into a positive rate or ordinal rank.
 
 ## Progress
 
+- 2026-09-14 00:36 PDT (hermes-macbot-one; profile=laptop) — Second independent cold review reproduced the corrected 260/60 census, 1,020-event path log, hashes, site-0 path, boundary caps, reverse/adsorption stress behavior, and engine likelihood arithmetic, then found two estimator false-greens: a reservoir ion re-adsorbed onto a vacated lattice site could be counted twice, and one underflowed replica weight could hide behind aggregate ESS. The runner now consumes a per-ion lineage ledger on first release and rejects each weight outside the normal finite range before aggregation; dedicated re-adsorption and underflow regressions pass.
+- 2026-09-14 00:19 PDT (hermes-macbot-one; profile=laptop) — DEVIATION: independent verification rejected the first 40/320 initial-local census because live forward propagation released a supposedly unreachable site. Replaced it with a hash-bound, 1,020-event live Petra replay proving 260/320 release paths and exact frozen/vacant-boundary ladder caps for the remaining 60; removed the invalid-kind witness adversary. Added an executable finite-horizon importance-sampling runner with lineage filtering, ESS/numerical gates, fixed stopping, and rank exclusion. Failed biased transitions now restore RNG as well as weight/time/state/step.
 - 2026-09-13 20:52 PDT (hermes-macbot-zero; profile=laptop) — Created from A9's review-ready closeout. The shipped A9 campaign observed zero original-lattice release and the corrected runner types a real trajectory `mechanism-unsampled`; this card owns the reachability and finite rare-event-method question rather than hiding it behind another A9 continuation.
 
 ## Result
+
+DONE with a bounded partial-reachability verdict. The exact production state has
+320 nonfrozen original-lattice targets: 260 have concrete live-engine release
+paths and 60 periodic boundary targets are topology NO-GOs (20 Al capped at
+`Al.l4`; 20 Si capped at `Si.oh2`; 20 Si capped at `Si.oh1`). The checked-in
+`path-report.json` binds the production deck and zero-step PGIF, records every
+legal witness event, and preserves initial-site lineage. `BiasedCtmc` plus the
+`a9b_importance_sampling` example supplies an executable finite-horizon,
+likelihood-reweighted route that fails closed on numerical/ESS defects and never
+ranks zero-observation scenarios. Full evidence and commands:
+`docs/program/results/A9b-mechanism-reachability.md`.

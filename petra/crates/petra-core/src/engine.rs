@@ -126,6 +126,70 @@ pub enum CtmcAdvance {
     Deadline { time: f64 },
 }
 
+/// Construction errors for an importance-sampled CTMC bias vector.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum BiasError {
+    #[error("reaction index {reaction} is outside 0..{reaction_count}")]
+    ReactionOutOfRange {
+        reaction: u16,
+        reaction_count: usize,
+    },
+    #[error("bias factor for reaction {reaction} must be finite and positive, got {factor}")]
+    InvalidFactor { reaction: u16, factor: f64 },
+}
+
+/// Positive per-reaction propensity tilting with an exact path likelihood ratio.
+///
+/// If the physical rates are `lambda_j` and the biased rates are
+/// `lambda'_j = factor_j * lambda_j`, a path segment of duration `dt` ending
+/// in event `j` updates `log(P/Q)` by
+/// `(sum(lambda') - sum(lambda)) * dt - ln(factor_j)`. A censored segment at a
+/// fixed deadline carries only the integrated-hazard term. Consequently callers
+/// can estimate finite-horizon physical expectations under the biased process as
+/// `mean(exp(log_likelihood_ratio) * observable)` without converting a
+/// non-observation into a positive rate.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BiasedCtmc {
+    factors: Vec<f64>,
+    log_likelihood_ratio: f64,
+    identity: bool,
+}
+
+impl BiasedCtmc {
+    pub fn new<I>(reaction_count: usize, overrides: I) -> Result<Self, BiasError>
+    where
+        I: IntoIterator<Item = (u16, f64)>,
+    {
+        let mut factors = vec![1.0; reaction_count];
+        for (reaction, factor) in overrides {
+            if reaction as usize >= reaction_count {
+                return Err(BiasError::ReactionOutOfRange {
+                    reaction,
+                    reaction_count,
+                });
+            }
+            if !factor.is_finite() || factor <= 0.0 {
+                return Err(BiasError::InvalidFactor { reaction, factor });
+            }
+            factors[reaction as usize] = factor;
+        }
+        let identity = factors.iter().all(|&factor| factor == 1.0);
+        Ok(Self {
+            factors,
+            log_likelihood_ratio: 0.0,
+            identity,
+        })
+    }
+
+    pub fn log_likelihood_ratio(&self) -> f64 {
+        self.log_likelihood_ratio
+    }
+
+    pub fn likelihood_ratio(&self) -> f64 {
+        self.log_likelihood_ratio.exp()
+    }
+}
+
 /// Why the simulation cannot advance.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Stop {
@@ -636,6 +700,142 @@ impl Engine {
             reaction,
         };
         Ok(CtmcAdvance::Fired(fired))
+    }
+
+    /// Advance an importance-sampled CTMC to one event or a fixed physical-time
+    /// deadline while accumulating the exact physical/biased path likelihood.
+    /// Unit bias preserves the exact CTMC draw and selection path.
+    pub fn advance_biased_ctmc_until(
+        &mut self,
+        sampler: &mut BiasedCtmc,
+        deadline: f64,
+    ) -> Result<CtmcAdvance, Stop> {
+        assert!(deadline.is_finite(), "CTMC deadline must be finite");
+        assert!(deadline >= self.time, "CTMC deadline cannot move backward");
+        assert_eq!(
+            sampler.factors.len(),
+            self.reactions.len(),
+            "bias vector must match the engine reaction count"
+        );
+        if deadline == self.time {
+            self.last_changes.clear();
+            return Ok(CtmcAdvance::Deadline { time: self.time });
+        }
+        if self.tree.total() <= 0.0 && self.site_events.iter().any(|events| !events.is_empty()) {
+            self.tree.rebuild();
+        }
+        let base_total = self.tree.total();
+        if base_total <= 0.0 {
+            self.time = deadline;
+            self.last_changes.clear();
+            return Ok(CtmcAdvance::Deadline { time: self.time });
+        }
+
+        let biased_total = if sampler.identity {
+            base_total
+        } else {
+            self.site_events
+                .iter()
+                .flat_map(|events| events.iter())
+                .map(|&(reaction, rate)| rate * sampler.factors[reaction as usize])
+                .sum()
+        };
+        if biased_total <= 0.0 || !biased_total.is_finite() {
+            return Err(Stop::ZeroRate);
+        }
+
+        // Transition resolution may itself draw (weighted branches and
+        // RandomMatch). Keep the whole draw sequence atomic if resolution
+        // fails, just as lattice/time/weight state already is.
+        let rng_checkpoint = self.rng.clone();
+        let draw = self.rng.gen::<f64>() * biased_total;
+        let (site, reaction) = if sampler.identity {
+            let Some((site, mut residual)) = self.tree.find(draw) else {
+                self.time = deadline;
+                self.last_changes.clear();
+                return Ok(CtmcAdvance::Deadline { time: self.time });
+            };
+            let events = &self.site_events[site];
+            let mut chosen = events.len() - 1;
+            for (index, &(_, rate)) in events.iter().enumerate() {
+                if residual < rate {
+                    chosen = index;
+                    break;
+                }
+                residual -= rate;
+            }
+            (site, events[chosen].0)
+        } else {
+            let mut residual = draw;
+            let mut selected = None;
+            'sites: for (site, events) in self.site_events.iter().enumerate() {
+                for &(reaction, rate) in events {
+                    let tilted = rate * sampler.factors[reaction as usize];
+                    if residual < tilted {
+                        selected = Some((site, reaction));
+                        break 'sites;
+                    }
+                    residual -= tilted;
+                }
+            }
+            selected
+                .or_else(|| {
+                    self.site_events
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .find_map(|(site, events)| {
+                            events.last().map(|&(reaction, _)| (site, reaction))
+                        })
+                })
+                .ok_or(Stop::NoEvents)?
+        };
+
+        let wait_draw: f64 = self.rng.gen();
+        let dt = -(1.0 - wait_draw).ln() / biased_total;
+        let segment = (deadline - self.time).min(dt);
+        let integrated_hazard = (biased_total - base_total) * segment;
+        if self.time + dt >= deadline {
+            sampler.log_likelihood_ratio += integrated_hazard;
+            self.time = deadline;
+            self.last_changes.clear();
+            return Ok(CtmcAdvance::Deadline { time: self.time });
+        }
+        let event_log_likelihood = integrated_hazard - sampler.factors[reaction as usize].ln();
+
+        let mut pending = Vec::new();
+        {
+            let mut apply = ApplyHandle {
+                lattice: &self.lattice,
+                rules: &self.reactions,
+                kinds: &self.kinds,
+                kind_state_ranges: &self.kind_state_ranges,
+                site_events: &self.site_events,
+                enabled_rules: &self.enabled_rules,
+                live_sites: &self.live_sites,
+                tree: &self.tree,
+                scratch: &mut self.scratch,
+                pending: &mut pending,
+            };
+            if let Err(stop) = apply.apply_transition(site, reaction, &mut self.rng) {
+                self.rng = rng_checkpoint;
+                return Err(stop);
+            }
+        }
+        sampler.log_likelihood_ratio += event_log_likelihood;
+        let transition_time = self.time + dt;
+        self.commit_transitions(pending, transition_time);
+        self.time = transition_time;
+        self.step_count += 1;
+        if self.step_count.is_multiple_of(REBUILD_EVERY) {
+            self.tree.rebuild();
+        }
+        Ok(CtmcAdvance::Fired(Fired {
+            step: self.step_count,
+            time: self.time,
+            site,
+            reaction,
+        }))
     }
 
     /// Advance with an explicitly supplied strategy. The strategy can only
