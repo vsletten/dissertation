@@ -84,7 +84,9 @@ on main). Priority P0 > P1 > P2 within READY.
 | [E4a2-surface-connected-lateral-release](cards/E4a2-surface-connected-lateral-release.md) | E | P1 | any | ready | E4a ✅ |
 | [E4b-isothermal-reservoir-discriminants](cards/E4b-isothermal-reservoir-discriminants.md) | E | P1 | any | ready | E4a ✅ |
 
-**Done** (acceptance verified on main): E4-1998-comparison (PR #127),
+**Done** (acceptance verified on main): E4a-surface-gated-release (PR #129;
+NO-GO — local basal gating did not recover the grain-size crossover),
+E4-1998-comparison (PR #127),
 A3j-calc005-si-n1-verification,
 E3a-classical-neb-barriers
 (bounded reconstructed route-1 gate 68.414811 vs 67.644151 kcal/mol, +1.1393%;
