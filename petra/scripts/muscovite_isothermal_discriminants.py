@@ -263,6 +263,9 @@ def run_one(command: list[str], cwd: Path, log: Path) -> float:
         env[key] = "8"
     start = time.monotonic()
     with log.open("w", encoding="utf-8") as handle:
+        # argv sequence, shell=False: trusted `nice` plus a local petra binary
+        # and static thread-limit env keys for isothermal discriminants.
+        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
         subprocess.run(
             command,
             cwd=cwd,
@@ -271,6 +274,7 @@ def run_one(command: list[str], cwd: Path, log: Path) -> float:
             stderr=subprocess.STDOUT,
             check=True,
             timeout=1800,
+            shell=False,
         )
     return time.monotonic() - start
 
