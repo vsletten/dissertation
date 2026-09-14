@@ -6,7 +6,7 @@
 - machine: workstation (GPU campaign)
 - depends: A9b-sensitivity-ranking
 - claimed-by: hermes-custom-build-001
-- blocked-on: A9b-sensitivity-ranking
+- blocked-on: victor
 
 ## Objective
 
@@ -20,17 +20,20 @@ retry the exhausted wB97M-V reactant SCF routes.
 Source evidence is immutable at
 `/mnt/data/vsletten/dissertation-data/task168-al-neutral-20260823/`.
 Use the immutable source store/geometry hashes to support the banked survey
-value. A9's sensitivity verdict decides whether a later, separately scoped
-published-family replication is warranted.
+value. A9b's completed all-censored verdict identifies no supported replication
+target; Victor's program-level choice of an observable-release regime or
+replacement method now gates any later, separately scoped published-family
+replication.
 
 ## Execution
 
 1. Verify the existing B3LYP/def2-SVP/DF value, units, mechanism identity, and source
    hashes from the accepted evidence.
 2. Record 32.2 kcal/mol as the banked A9 input with survey-tier provenance.
-3. Make no new QM call on this card. If `A9b-sensitivity-ranking` ranks this family sensitive, a
-   separate card may replicate the closest published family within POLICY v16's
-   four-hour-per-unit envelope.
+3. Make no new QM call on this card. The completed `A9b-sensitivity-ranking`
+   ranks no family; a separate replication card is permitted only after Victor
+   chooses a route that produces a supported sensitive-family target within
+   POLICY v16's four-hour-per-unit envelope.
 
 ## Constraints
 
@@ -45,11 +48,14 @@ published-family replication is warranted.
   identified as survey tier.
 - The accepted sequential mechanism remains unchanged and rejected saddles do
   not contribute.
-- A9 consumes the banked value; this card remains blocked until A9's sensitivity
-  verdict determines whether any published-family replication is worth running.
+- A9 consumes the banked value; the completed A9b verdict supplies no supported
+  replication target, so this card remains blocked on Victor's program-level
+  choice.
 - No new higher-tier energy, SCF retry, or workstation quality claim is made.
 
 ## Progress
+
+- 2026-09-14 06:41 PDT (hermes-custom-build-001; profile=workstation) — BLOCKED ON PROGRAM DECISION: A9b completed all 232 stationary trajectories but observed zero biased original-lattice Si/Al releases, leaving every family response censored/unrankable and identifying no replication target. The accepted 32.2 kcal/mol B3LYP/def2-SVP/DF survey value remains banked, but A2b authorizes no new QM. Recommendation: first find an observable-release regime with the approximate deck at 350–450 K and/or pH 3, then rank sensitivity there; mechanism/deck revision or an accelerated rare-event method are the alternatives. Decision gate: Victor; escalation is the daily omnibus-supervisor digest to Victor's default-profile Telegram home channel, and aging is daily re-surfacing with no default compute until ruled.
 
 - 2026-09-13 20:52 PDT (hermes-macbot-zero; profile=laptop) — A9 closed with no defensible family ranking. A2b remains BLOCKED on `A9b-sensitivity-ranking`, authorizes no new QM, and corrects the banked 32.2 kcal/mol A9 anchor to its actual B3LYP/def2-SVP/DF provenance; older r2SCAN-3c stationary-point receipts remain historical mechanism evidence only.
 
