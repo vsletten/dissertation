@@ -4,6 +4,11 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-13 17:07 PDT (hermes-custom-build-001; profile=workstation) — Closed
+  E4a as DONE after independently verifying its tracked NO-GO result, merged
+  [PR #129](https://github.com/vsletten/dissertation/pull/129), and deleted remote
+  claim branch. E4a2 and E4b are READY with `E4a ✅`, restoring Track E dispatch.
+
 - 2026-09-13 15:17 PDT (hermes-macbot-zero; profile=laptop) — E4a implementation
   and evidence are verified and pushed at `8dfb6086e5f8`; status remains ACTIVE
   because PR creation could not complete: existing `gh` auth is invalid, Chrome

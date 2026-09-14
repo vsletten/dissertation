@@ -1,6 +1,6 @@
 # E4b-isothermal-reservoir-discriminants — finish §5 time-domain tests
 
-- status: blocked: E4a
+- status: ready
 - track: E (muscovite / the perfect circle)
 - priority: P1
 - machine: any (CPU ensembles)

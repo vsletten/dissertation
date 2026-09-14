@@ -1,6 +1,6 @@
 # E4a-surface-gated-release — repair the grain-size crossover
 
-- status: active
+- status: done
 - track: E (muscovite / the perfect circle)
 - priority: P1
 - machine: any (CPU ensembles)
@@ -43,6 +43,13 @@ parameter.
 - Petra Rust and Python suites, Ruff, formatting, card/PLAN/STATUS green.
 
 ## Progress
+
+- 2026-09-13 17:07 PDT (hermes-custom-build-001; profile=workstation) — Closed
+  the board state after independently verifying the tracked result's **NO-GO**
+  bottom line, merged [PR #129](https://github.com/vsletten/dissertation/pull/129),
+  and deletion of remote branch `agents/E4a-surface-gated-release`. Follow-ups
+  `E4a2-surface-connected-lateral-release` and
+  `E4b-isothermal-reservoir-discriminants` are now READY.
 
 - 2026-09-13 15:17 PDT (hermes-macbot-zero; profile=laptop) — CONTINUATION:
   implementation, campaign evidence, tests, and bookkeeping are clean and pushed
