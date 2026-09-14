@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.11
 """Run and analyze the A9 approximate kaolinite rate-closure campaign.
 
 This is survey-tier platform testing, not calibrated or production kinetics.
