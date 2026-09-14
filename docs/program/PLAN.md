@@ -81,7 +81,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A5p1-aging-study](cards/A5p1-aging-study.md) | A | P1 | any | done | A5p0 ✅ |
 | [E2b-grain-size-sweep](cards/E2b-grain-size-sweep.md) | E | P1 | any | done | E2 ✅, B4 ✅ |
 | [E3a-classical-neb-barriers](cards/E3a-classical-neb-barriers.md) | E | P1 | any | done | — |
-| [E3b-periodic-dft-spot-checks](cards/E3b-periodic-dft-spot-checks.md) | E | P2 | workstation | ready | E3b1 ✅; native evidence route ready, 0/3 DFT barriers |
+| [E3b-periodic-dft-spot-checks](cards/E3b-periodic-dft-spot-checks.md) | E | P2 | workstation | active | E3b1 ✅; POLICY §12 frozen-path survey route, 0/3 profiles |
 | [E3b1-periodic-dft-evidence-contract](cards/E3b1-periodic-dft-evidence-contract.md) | E | P2 | workstation | done | E3a ✅; bounded force timing + native evidence gates verified |
 | [E4-1998-comparison](cards/E4-1998-comparison.md) | E | P1 | any | done | E3a ✅, E2b ✅, A8 ✅ |
 | [E4a-surface-gated-release](cards/E4a-surface-gated-release.md) | E | P1 | any | done | E4 ✅, B5 ✅; NO-GO — local basal gating did not recover the grain-size crossover |

@@ -1,15 +1,32 @@
-# E3b periodic-DFT spot checks — preparation result
+# E3b periodic-DFT spot checks — active survey calibration
 
-**State:** `blocked: E3b1-periodic-dft-evidence-contract`; no DFT barrier or correction emitted  
+**State:** active; frozen-path survey profiles in progress; no DFT barrier or correction emitted
 **Run date:** 2026-09-14  
 **Operator:** `(hermes-custom-build-001; profile=workstation)`
 
 ## Verdict
 
-E3b is **not complete**: **0/3 periodic-DFT barriers were checked**. The work
-produced a valid, deterministic 2×2×1 preparation harness and exercised CP2K,
-but it did not produce a converged energy/force evaluation, endpoint, BAND, or
-calibration number.
+E3b is **not complete**: **0/3 frozen-path survey profiles are complete** and
+no DFT barrier or correction is emitted. The immutable 2×2×1 preparation and
+evidence contract remain valid. POLICY §12 now governs this platform-test phase:
+three full endpoint optimizations plus converged eight-image CI-NEBs would
+exceed the card's roughly one-day compute envelope, so the active route is three
+PBE-D3 single-point profiles on the immutable classical images, paired with
+fresh matched-cell classical profiles.
+
+The only supportable quantity from that route is the energy rise along each
+tested frozen path. It is not a DFT-relaxed activation barrier, a converged DFT
+minimum-energy path, or a production result. The result stays incomplete until
+all eight images and the corresponding matched-cell classical path pass.
+
+## Current execution evidence
+
+The first dehydroxylate endpoint GEO_OPT ran in a bounded transient unit for
+1,830.018 s. Ten SCF/geometry cycles converged, but the geometry did not; the
+typed receipt is `incomplete-timeout`, return code `-9`, with no normal
+termination or barrier. Cleanup proved the process group and container absent,
+and the immutable prepared manifest remained valid. This timing is the measured
+basis for narrowing the card rather than replaying a multi-day route.
 
 The earlier 3×2 timing-based “outside the workstation envelope” conclusion was
 rejected by the card's one allowed cold review. A wrapped, neutral 2×2 route

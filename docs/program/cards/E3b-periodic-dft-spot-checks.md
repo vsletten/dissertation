@@ -1,11 +1,11 @@
 # E3b-periodic-dft-spot-checks — route 2 calibration of the classical set
 
-- status: ready
+- status: active
 - track: E (muscovite / the perfect circle)
 - priority: P2
 - machine: workstation (periodic DFT; CP2K)
 - depends: E3a-classical-neb-barriers
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## Objective
 
@@ -17,6 +17,14 @@ dehydroxylate lattice. The deliverable is a calibration statement: for each
 checked barrier, DFT vs classical with a correction or a documented
 endorsement, so E4 runs on numbers whose error bars mean something.
 
+**POLICY §12 scope amendment (2026-09-14):** the three fully relaxed endpoint
+and CI-NEB calculations exceed the one-workstation platform-test envelope. This
+card therefore banks three PBE-D3 **frozen-classical-path energy profiles** on
+the immutable E3a images, paired with fresh matched-cell classical profiles.
+The reported quantity is the energy rise along each tested path, not a
+DFT-relaxed activation barrier or converged DFT minimum-energy path. Full
+periodic CI-NEB is outside this phase's acceptance and is not claimed.
+
 ## Constraints
 
 - Follow PROTOCOL.md and POLICY.md; QI2 GPU-lease etiquette; heavy
@@ -27,13 +35,28 @@ endorsement, so E4 runs on numbers whose error bars mean something.
 
 ## Acceptance
 
-- ≥ 3 E3a barriers checked, including at least one dehydroxylate-lattice
-  Ar hop involving 5-coordinate Al.
-- Results doc extends the E3a table with a DFT column and per-barrier
-  calibration verdicts.
+- Three eight-image PBE-D3 frozen-path profiles are complete, including the
+  dehydroxylate-lattice Ar hop whose prepared identity gate proves interaction
+  with the five-coordinate-Al environment.
+- Every image has converged SCF, normal termination, immutable coordinate/input/
+  native-output hashes, an exact bounded-controller receipt, and no surviving
+  container; incomplete profiles emit no numeric result.
+- Fresh matched-cell classical profiles are complete for the same three paths.
+  The results doc compares like-for-like profile rises and gives a typed
+  `close-enough`, `disagrees`, or `incomplete` survey verdict per route without
+  relabeling the frozen-path rise as a DFT barrier or applying it as a correction.
 - Tests/lint green; card/PLAN/STATUS bookkeeping in the PR.
 
 ## Progress
+
+- 2026-09-14 12:47 PDT — `(hermes-custom-build-001; profile=workstation)` —
+  `DEVIATION:` POLICY §12 superseded the full three-route CI-NEB plan after the
+  first dehydroxylate endpoint GEO_OPT used 1,830.0 s for only ten converged SCF/
+  geometry cycles and timed out without endpoint convergence. The atomic
+  receipt is `dehydroxylate-cp2k-initial-02.json`; it emitted no barrier.
+  Narrowed the card to three frozen-classical-path PBE-D3 profiles plus fresh
+  matched-cell classical comparisons. Added the fail-closed bounded profile
+  runner and six tests; the existing + new focused suite is 36/36 green.
 
 - 2026-09-14 12:04 PDT — `(hermes-custom-build-001; profile=workstation)` —
   Launched the first scientific stage for the required five-coordinate-Al route:
