@@ -26,10 +26,21 @@ fn approximate_deck_preserves_structure_init_and_reaction_semantics() {
         assert_eq!(approximate.get(key), legacy.get(key), "{key} drifted");
     }
     assert_eq!(
-        approximate["simulation"], legacy["simulation"],
-        "run length/cadence must remain the canonical 20k-step shape"
+        approximate["simulation"]["steps"].as_integer(),
+        Some(200_000)
     );
-    assert_eq!(approximate["observables"], legacy["observables"]);
+    assert_eq!(
+        approximate["simulation"]["report_every"].as_integer(),
+        Some(10_000)
+    );
+    assert_eq!(
+        approximate["observables"]["report_every"].as_integer(),
+        Some(10_000)
+    );
+    assert_eq!(
+        approximate["observables"]["series"],
+        legacy["observables"]["series"]
+    );
 
     let legacy_reactions = legacy["reactions"].as_array().expect("legacy reactions");
     let approximate_reactions = approximate["reactions"]

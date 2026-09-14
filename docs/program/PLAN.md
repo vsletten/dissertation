@@ -45,7 +45,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A1f-acid-neutral-water-attacker-relay](cards/A1f-acid-neutral-water-attacker-relay.md) | A | P1 | workstation | done | exact donor migrated to relay |
 | [A1g-acid-bridge-side-hydronium-neutral-attacker](cards/A1g-acid-bridge-side-hydronium-neutral-attacker.md) | A | P1 | workstation | done | conclusive product-family rejection |
 | [A1i-acid-production-tier-bridge-side-revisit](cards/A1i-acid-production-tier-bridge-side-revisit.md) | A | P1 | workstation | blocked: A2 | A1g ✅, A2 |
-| [A9-approximate-rate-closure](cards/A9-approximate-rate-closure.md) | A | P0 | any | ready | — |
+| [A9-approximate-rate-closure](cards/A9-approximate-rate-closure.md) | A | P0 | any | ready | continuation: reachability, state-distribution convergence, pH 3–5 reservoir |
 | [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | blocked: A9 | A9 |
 | [A3a-reactant-minimum-recovery](cards/A3a-reactant-minimum-recovery.md) | A | P1 | workstation | done | terminal microstate rejection; no minimum promoted |
 | [A3b-osa-neutral-n1-proton-microstate-stability](cards/A3b-osa-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; H52 became third mobile owner |
@@ -112,10 +112,13 @@ D2a-astro-rate-reproduction (PR #31 — verdict: GO gas-phase /
 NO-GO surface-LH), A7-kinetics-database (PR #27 — 36 minerals, 74
 mechanisms, validator green). **Blocked closeout branch**:
 `agents/A1b-acid-microsolvation` for A1b-acid-mechanisms.
-A9-approximate-rate-closure is READY at P0 to run the full KMC loop with
-approximate absolute rates and rank barrier-family sensitivity. A3, A2, and A2b
-are BLOCKED on that verdict. For any family A9 ranks sensitive, A3 rebuilds the
-closest published cluster and method and reproduces its observable within ±3
+A9-approximate-rate-closure remains READY after the origin-safe 29-scenario
+campaign produced a reproducible but unaccepted all-censored result. Its next
+continuation must prove event-level desorption eligibility/reachability, gate
+the relevant state distribution, and replace the numerical sink with a
+defensible pH 3–5 reservoir before ranking families. A3, A2, and A2b remain
+blocked on A9. If the corrected result identifies a sensitive family, A3 rebuilds
+the closest published cluster and method and reproduces its observable within ±3
 kcal/mol; the survey-tier or literature-replication value is then banked. One
 family per PR carries the paper/replication/banked-value table and Petra
 fragment. The prior home-grown hydrated-cell

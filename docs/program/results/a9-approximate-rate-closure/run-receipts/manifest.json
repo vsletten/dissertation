@@ -1,209 +1,209 @@
 {
-  "checkpoint_sha256": "48c46e3d5aa594b903e4c11c60fd85e72dee433cffe8663eb31d419723cae2a7",
+  "checkpoint_sha256": "1cefe9a577424841dfd3c5ba0920c8763a4cbec84176eccd2275109315c3359e",
   "completed_runs": 232,
-  "petra_binary": "/home/vsletten/.hermes/cache/cargo-target/vsletten-dissertation-da68ebaefa3a/debug/petra",
-  "petra_binary_sha256": "bbedccd9b53beef113ec73cbb169fc3917c132eae93c3e51ba4bd5b45ae44043",
+  "petra_binary": "/Users/vsletten/.hermes/cache/cargo-target/vsletten-dissertation-da68ebaefa3a/debug/petra",
+  "petra_binary_sha256": "b3c0d4e4744453cffe1352b39f58d962f410566b6ef2963e56e77097b9266446",
   "replicas": 8,
   "scenarios": [
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/nominal.toml",
-      "deck_sha256": "169b0b4cea9dafb00e6becfcf2ea36ca5cfaef3cc772b46e2b6c8402b13e86d6",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/nominal.toml",
+      "deck_sha256": "8356fa4ee648a9a3b8581aa5693e467aa5c7e7e6fd9d62c592795008464ccaf7",
       "family": null,
       "name": "nominal",
       "perturbation": null
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/siloxane-neutral__ea-minus-3.toml",
-      "deck_sha256": "c779419dd605db95e76c284b709302ffeca799fcf66308fe9fcd3e2a4afdee61",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/siloxane-neutral__ea-minus-3.toml",
+      "deck_sha256": "87799d4e566872d5126f973bc22ad34734d781a4157555e0482c48d82d422716",
       "family": "siloxane-neutral",
       "name": "siloxane-neutral__ea-minus-3",
       "perturbation": "ea-minus-3"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/siloxane-neutral__ea-plus-3.toml",
-      "deck_sha256": "de5d32874a518809bec1474a5c5665b846373c0b9f14d5ab55e162c1bb894554",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/siloxane-neutral__ea-plus-3.toml",
+      "deck_sha256": "7700ec8413be79913d5aede85b5e541bd5cf9003d3cd76064f4f5ace3c00af88",
       "family": "siloxane-neutral",
       "name": "siloxane-neutral__ea-plus-3",
       "perturbation": "ea-plus-3"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/siloxane-neutral__prefactor-x0.1.toml",
-      "deck_sha256": "0f5cbd2ed9a6c1df57a9ec4403eb876fd536e4d53ac3503b8554d9aa4f684917",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/siloxane-neutral__prefactor-x0.1.toml",
+      "deck_sha256": "9c287f9dc0cefc092741f18cb98b1dc0a0ec9d91e8f9c156ce83455f3e3ee8aa",
       "family": "siloxane-neutral",
       "name": "siloxane-neutral__prefactor-x0.1",
       "perturbation": "prefactor-x0.1"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/siloxane-neutral__prefactor-x10.toml",
-      "deck_sha256": "4fb0589804330b5bfae77ce74faf5b247169deea07bd052326716c6e8ef25985",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/siloxane-neutral__prefactor-x10.toml",
+      "deck_sha256": "4ccb50932edb980acddf1362a3a40d0892206b09137de4b4061e2eb99568fe26",
       "family": "siloxane-neutral",
       "name": "siloxane-neutral__prefactor-x10",
       "perturbation": "prefactor-x10"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/sioal-si-neutral__ea-minus-3.toml",
-      "deck_sha256": "736b16e29325b4e34f1f4445a0f3110b7f4d9c1398f56798a982b3a450cde5a3",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/sioal-si-neutral__ea-minus-3.toml",
+      "deck_sha256": "ac6beb29e2cfbf5743136ab0bcb15c24470340a4adac18767dea20428a883cbe",
       "family": "sioal-si-neutral",
       "name": "sioal-si-neutral__ea-minus-3",
       "perturbation": "ea-minus-3"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/sioal-si-neutral__ea-plus-3.toml",
-      "deck_sha256": "3780c27cc0c403f817581d7fb920af641e33474cdb019a6e543b8ec4723ad5a7",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/sioal-si-neutral__ea-plus-3.toml",
+      "deck_sha256": "bb1955b00f46af247865e1306020d286802210654bb347537fd37c84e3aad92b",
       "family": "sioal-si-neutral",
       "name": "sioal-si-neutral__ea-plus-3",
       "perturbation": "ea-plus-3"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/sioal-si-neutral__prefactor-x0.1.toml",
-      "deck_sha256": "51a3da20e23a3efb4f4bfc576a6b669408d3ab4910cf06e236a65c6d5b59fd81",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/sioal-si-neutral__prefactor-x0.1.toml",
+      "deck_sha256": "99cc5ef0196e58bebdd1e4667780351ca1606602294aff39fc596c430800799d",
       "family": "sioal-si-neutral",
       "name": "sioal-si-neutral__prefactor-x0.1",
       "perturbation": "prefactor-x0.1"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/sioal-si-neutral__prefactor-x10.toml",
-      "deck_sha256": "cdf124fc5eaea55ccfe9d0a8c54a67010f59e2fb89d59990e676aa175392bcc3",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/sioal-si-neutral__prefactor-x10.toml",
+      "deck_sha256": "88cbd07d5aae36f3872a87d6db82f76aa9ef6ad6e5e7b1d8566d3cdb9265adbe",
       "family": "sioal-si-neutral",
       "name": "sioal-si-neutral__prefactor-x10",
       "perturbation": "prefactor-x10"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/sioal-al-neutral__ea-minus-3.toml",
-      "deck_sha256": "229b7fbb6fabb8eff3a30453fa3cf8b3e521acf1c26922a530a110f85387e123",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/sioal-al-neutral__ea-minus-3.toml",
+      "deck_sha256": "e3966fc1749fe7f0329e48d6e505a9488160a5397bd5a0074022dbe129bfec69",
       "family": "sioal-al-neutral",
       "name": "sioal-al-neutral__ea-minus-3",
       "perturbation": "ea-minus-3"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/sioal-al-neutral__ea-plus-3.toml",
-      "deck_sha256": "82cfc545335dfdcadf7a5bb2aa7290435ff40cdfbaccbce7f6b62a7653c3bcf9",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/sioal-al-neutral__ea-plus-3.toml",
+      "deck_sha256": "07846d6acb31a38c4c39828ad5b63f097f2327512c087b913e355a5ab858cdbf",
       "family": "sioal-al-neutral",
       "name": "sioal-al-neutral__ea-plus-3",
       "perturbation": "ea-plus-3"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/sioal-al-neutral__prefactor-x0.1.toml",
-      "deck_sha256": "f9f2cb847a0f57cd1b5dcb86a161c41f096c2c5b7edd35ccda6b11caf81a4795",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/sioal-al-neutral__prefactor-x0.1.toml",
+      "deck_sha256": "76c3abcfa12ec16ca6260cfe9e26e76cb20096792bcae6364bf22d771ac4de1e",
       "family": "sioal-al-neutral",
       "name": "sioal-al-neutral__prefactor-x0.1",
       "perturbation": "prefactor-x0.1"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/sioal-al-neutral__prefactor-x10.toml",
-      "deck_sha256": "d7ccb8662b55be41ac40d4b8ad8b967e5088f5a0f80d9b710abd501ec934c977",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/sioal-al-neutral__prefactor-x10.toml",
+      "deck_sha256": "d08e97aa3b44912a8cb0b3267569cb4875c752bd18c8b8c0daa3b75bacc32869",
       "family": "sioal-al-neutral",
       "name": "sioal-al-neutral__prefactor-x10",
       "perturbation": "prefactor-x10"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/connectivity-ladder__ea-minus-3.toml",
-      "deck_sha256": "7a724c19148a48949f80321ccb83605a63046fedeb630bd5b9deaf9ebb3332bf",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/connectivity-ladder__ea-minus-3.toml",
+      "deck_sha256": "f3c6e4e6de726ff4a1f4f94aeaf00c2187be220107891be3f8d26d404dd46378",
       "family": "connectivity-ladder",
       "name": "connectivity-ladder__ea-minus-3",
       "perturbation": "ea-minus-3"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/connectivity-ladder__ea-plus-3.toml",
-      "deck_sha256": "2c8619827ea2e2c010832ab8a916772a4b1737c1683462c594577c4ed5e6003f",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/connectivity-ladder__ea-plus-3.toml",
+      "deck_sha256": "667b06891994ad8df4cb07e2e31eac58a8af231423082e99c9d762ac56ce2bb2",
       "family": "connectivity-ladder",
       "name": "connectivity-ladder__ea-plus-3",
       "perturbation": "ea-plus-3"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/connectivity-ladder__prefactor-x0.1.toml",
-      "deck_sha256": "e5db2d6c9d1349b5d7fceb694cc3f2b67219942dea06a5f98b53d5860c9c41cb",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/connectivity-ladder__prefactor-x0.1.toml",
+      "deck_sha256": "49617172cd19e19cf53241687f0343a4c0342e863648f20c9f429dbfa0970095",
       "family": "connectivity-ladder",
       "name": "connectivity-ladder__prefactor-x0.1",
       "perturbation": "prefactor-x0.1"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/connectivity-ladder__prefactor-x10.toml",
-      "deck_sha256": "35dbb80c29efc71350dad99c9412f83395379bbeae2a345680d16e6c001a198f",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/connectivity-ladder__prefactor-x10.toml",
+      "deck_sha256": "942fb1025bf0dea3051ad1252ab5135052abf4000156e8177a33d9a68bb53779",
       "family": "connectivity-ladder",
       "name": "connectivity-ladder__prefactor-x10",
       "perturbation": "prefactor-x10"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/al-o-al-analogue__ea-minus-3.toml",
-      "deck_sha256": "ce0364dc6f33bb38b94c7ebf391523e799e04e3faaf5234a60411b8c90f0f2f8",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/al-o-al-analogue__ea-minus-3.toml",
+      "deck_sha256": "97890e95aee98a509a15263a140b4ebcba0339962e8a6a8de6a054218ba7c593",
       "family": "al-o-al-analogue",
       "name": "al-o-al-analogue__ea-minus-3",
       "perturbation": "ea-minus-3"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/al-o-al-analogue__ea-plus-3.toml",
-      "deck_sha256": "574c0eaf04febfaaa883a0f451bde6d63b5aa93e6f29b8f7e5c6da2f2cdc8020",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/al-o-al-analogue__ea-plus-3.toml",
+      "deck_sha256": "1c77cf272f36f4c5eaa0482a3434b6747b73e661696976013caec72e15b5c183",
       "family": "al-o-al-analogue",
       "name": "al-o-al-analogue__ea-plus-3",
       "perturbation": "ea-plus-3"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/al-o-al-analogue__prefactor-x0.1.toml",
-      "deck_sha256": "559942a97fa8c38c647c585b526a4aa83396f647c2876f2e67f8e5ad1dfb7b57",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/al-o-al-analogue__prefactor-x0.1.toml",
+      "deck_sha256": "56844a4d189e548fc702833bf3c2294fd52eb2a8a24dd7a97d79848b0bbf3bfd",
       "family": "al-o-al-analogue",
       "name": "al-o-al-analogue__prefactor-x0.1",
       "perturbation": "prefactor-x0.1"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/al-o-al-analogue__prefactor-x10.toml",
-      "deck_sha256": "4f23508b2cd62b29e03667a8df253c11fd98098e0cd78dcea17578498f674960",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/al-o-al-analogue__prefactor-x10.toml",
+      "deck_sha256": "7d4c0b3776c30a7026d8c746d97b72c669ed474320c52e6b7250708e14ba2c6f",
       "family": "al-o-al-analogue",
       "name": "al-o-al-analogue__prefactor-x10",
       "perturbation": "prefactor-x10"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/adsorption__ea-minus-3.toml",
-      "deck_sha256": "415b8ec78efdeb9a06871826590609b6ea025b211d5f91e9b6582bcfdac1effb",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/adsorption__ea-minus-3.toml",
+      "deck_sha256": "7d4fd69f8c99b74d59a36ddf9afdce9fc151298b40ae04803e17d9986bd352fe",
       "family": "adsorption",
       "name": "adsorption__ea-minus-3",
       "perturbation": "ea-minus-3"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/adsorption__ea-plus-3.toml",
-      "deck_sha256": "b1ea9bb7825191ec74ab0e4d2808d3c556237d3197bd091fed84e54c315e7e91",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/adsorption__ea-plus-3.toml",
+      "deck_sha256": "586b7a465533442ce5f8a56c65115c2ab4a3b8b7edada6f36c6f852fd69a746c",
       "family": "adsorption",
       "name": "adsorption__ea-plus-3",
       "perturbation": "ea-plus-3"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/adsorption__prefactor-x0.1.toml",
-      "deck_sha256": "da6af23d7d5433714164f7c0c81fde0db2e65655824d5817769dda4217a6ed15",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/adsorption__prefactor-x0.1.toml",
+      "deck_sha256": "a56dea9f7879b3c03b100629285626ca86d29eea92d445477ecd16cf7a9a5dc6",
       "family": "adsorption",
       "name": "adsorption__prefactor-x0.1",
       "perturbation": "prefactor-x0.1"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/adsorption__prefactor-x10.toml",
-      "deck_sha256": "42fbe30070daf7dd83ca0525dca35e0ce6aa12c8c8d80ce7b09e8d444c3b90e2",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/adsorption__prefactor-x10.toml",
+      "deck_sha256": "530c0fc8adbcf35a77c9c254c37202125ea5065dfcd2732b71110843f6f3d758",
       "family": "adsorption",
       "name": "adsorption__prefactor-x10",
       "perturbation": "prefactor-x10"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/cation-desorption__ea-minus-3.toml",
-      "deck_sha256": "75409967c2aad8652633ecb725c32e4b0a927e20f3f1faed01f6757ec83a5f6f",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/cation-desorption__ea-minus-3.toml",
+      "deck_sha256": "baa8dc35511c18a149c7b242078fbf82646cdcd838ed83d22b2ef554dfebbb6f",
       "family": "cation-desorption",
       "name": "cation-desorption__ea-minus-3",
       "perturbation": "ea-minus-3"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/cation-desorption__ea-plus-3.toml",
-      "deck_sha256": "695d452f6101d8f0e78a0cf4f13fcacf8668c5257748cb216c20f92ae46ee8fd",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/cation-desorption__ea-plus-3.toml",
+      "deck_sha256": "e8aedf21ddf8455f89f1773458129f62553f5f92bb103b3d862e9fff601f4f69",
       "family": "cation-desorption",
       "name": "cation-desorption__ea-plus-3",
       "perturbation": "ea-plus-3"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/cation-desorption__prefactor-x0.1.toml",
-      "deck_sha256": "5e43820a435bb219ff8181a725926bb5f309611c40298ad7f3204553841bae02",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/cation-desorption__prefactor-x0.1.toml",
+      "deck_sha256": "e99c77440433f8c5a7b93775ea29cd7841ac095f248ff3d178d934c6bb0889b2",
       "family": "cation-desorption",
       "name": "cation-desorption__prefactor-x0.1",
       "perturbation": "prefactor-x0.1"
     },
     {
-      "deck": "/mnt/data/vsletten/run-outputs/dissertation/A9-approximate-rate-closure-20260913/raw/decks/cation-desorption__prefactor-x10.toml",
-      "deck_sha256": "7bfd772cb83c5d09b41fb63d28585bff97aa7c3e04257e222cf7ed02fb3c158d",
+      "deck": "/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740/decks/cation-desorption__prefactor-x10.toml",
+      "deck_sha256": "049b323640f3e08b6874b7f52a22955979bd9b7a08a18abd211baf75568ddebc",
       "family": "cation-desorption",
       "name": "cation-desorption__prefactor-x10",
       "perturbation": "prefactor-x10"
@@ -220,12 +220,12 @@
     90421,
     90427
   ],
-  "source_deck": "/mnt/data/vsletten/src/vsletten/dissertation/agents/A9-approximate-rate-closure/petra/examples/kaolinite-approx.toml",
-  "source_deck_sha256": "169b0b4cea9dafb00e6becfcf2ea36ca5cfaef3cc772b46e2b6c8402b13e86d6",
+  "source_deck": "/Users/vsletten/src/vsletten/dissertation/agents/A9-approximate-rate-closure/petra/examples/kaolinite-approx.toml",
+  "source_deck_sha256": "8356fa4ee648a9a3b8581aa5693e467aa5c7e7e6fd9d62c592795008464ccaf7",
   "status": "complete",
   "survey_tier": true,
   "temperature_k": 298.0,
-  "timeout_seconds": 600,
+  "timeout_seconds": 300,
   "units": "kcal/mol",
   "workers": 4
 }

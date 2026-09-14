@@ -2897,14 +2897,22 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
         )
     }
     outcome = _campaign_outcome(gates)
-    output_hashes = {
-        path.name: sha256_file(path)
-        for path in sorted(out_dir.iterdir())
-        if path.is_file() and path.name != "verification.json"
-    }
+    sensitivity_complete = (
+        len(sensitivity_rows) == len(FAMILY_REACTIONS)
+        and {row["family"] for row in sensitivity_rows} == set(FAMILY_REACTIONS)
+        and {row["declared_response"] for row in sensitivity_rows}
+        == {SENSITIVITY_RESPONSE}
+        and all(row["status"] in {"estimated", "censored"} for row in sensitivity_rows)
+    )
+    ordinal_ranking_complete = sensitivity_complete and all(
+        row["status"] == "estimated" and row["rank"] != "undefined"
+        for row in sensitivity_rows
+    )
+    output_hashes = _derived_output_hashes(out_dir)
     verification = {
         "schema": VERIFICATION_SCHEMA,
-        "acceptance_passed": outcome in {"steady-positive", "no-dissolution"},
+        "acceptance_passed": outcome in {"steady-positive", "no-dissolution"}
+        and ordinal_ranking_complete,
         "campaign_outcome": outcome,
         "survey_tier": True,
         "temperature_k": 298.0,
@@ -2925,11 +2933,8 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
         },
         "sensitivity_response": SENSITIVITY_RESPONSE,
         "sensitivity_statistic": SENSITIVITY_STATISTIC,
-        "sensitivity_complete": len(sensitivity_rows) == len(FAMILY_REACTIONS)
-        and {row["family"] for row in sensitivity_rows} == set(FAMILY_REACTIONS)
-        and {row["declared_response"] for row in sensitivity_rows}
-        == {SENSITIVITY_RESPONSE}
-        and all(row["status"] in {"estimated", "censored"} for row in sensitivity_rows),
+        "sensitivity_complete": sensitivity_complete,
+        "ordinal_ranking_complete": ordinal_ranking_complete,
         "sensitivity_families": list(FAMILY_REACTIONS),
         "scenario_count": len(scenario_records),
         "expected_scenarios": [asdict(value) for value in scenarios()],
@@ -2946,6 +2951,14 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
     }
     write_json_atomic(out_dir / "verification.json", verification)
     return json.loads((out_dir / "verification.json").read_text(encoding="utf-8"))
+
+
+def _derived_output_hashes(out_dir: Path) -> dict[str, str]:
+    """Hash only the contract-declared outputs, excluding filesystem sidecars."""
+    return {
+        name: sha256_file(out_dir / name)
+        for name in sorted(DERIVED_FILES - {"verification.json"})
+    }
 
 
 def _read_csv_exact(
@@ -3349,6 +3362,7 @@ def verify_campaign(raw_root: Path, out_dir: Path) -> dict:
             "sensitivity_response",
             "sensitivity_statistic",
             "sensitivity_complete",
+            "ordinal_ranking_complete",
             "sensitivity_families",
             "scenario_count",
             "expected_scenarios",
@@ -3387,6 +3401,12 @@ def verify_campaign(raw_root: Path, out_dir: Path) -> dict:
         or verification["sensitivity_response"] != SENSITIVITY_RESPONSE
         or verification["sensitivity_statistic"] != SENSITIVITY_STATISTIC
         or verification["sensitivity_complete"] is not True
+        or not isinstance(verification["ordinal_ranking_complete"], bool)
+        or verification["acceptance_passed"]
+        is not (
+            verification["campaign_outcome"] in {"steady-positive", "no-dissolution"}
+            and verification["ordinal_ranking_complete"]
+        )
         or verification["sensitivity_families"] != list(FAMILY_REACTIONS)
         or verification["scenario_count"] != len(scenarios())
         or verification["expected_scenarios"]

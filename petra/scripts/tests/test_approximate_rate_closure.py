@@ -390,6 +390,33 @@ def _make_one_run_propensity_nonstationary(raw: Path, scenario: str) -> None:
     closure.write_json_atomic(manifest_path, manifest)
 
 
+def _zero_all_desorption_propensities(raw: Path) -> None:
+    checkpoint_path = raw / "checkpoint.json"
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    desorb_indices = {
+        str(index)
+        for index, entry in enumerate(closure.REACTION_REGISTRY)
+        if entry.name in {"desorb-si", "desorb-al"}
+    }
+    for receipt in checkpoint["receipts"]:
+        path = Path(receipt["output"]) / "observables.csv"
+        with path.open(newline="", encoding="utf-8") as handle:
+            reader = csv.DictReader(handle)
+            fields = reader.fieldnames
+            rows = list(reader)
+        assert fields is not None
+        for row in rows:
+            if row["kind"] == "event_rates" and row["index"] in desorb_indices:
+                row["value"] = "0.0"
+        closure._write_csv_atomic(path, fields, rows)
+        receipt["sha256"]["observables.csv"] = closure.sha256_file(path)
+    closure.write_json_atomic(checkpoint_path, checkpoint)
+    manifest_path = raw / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["checkpoint_sha256"] = closure.sha256_file(checkpoint_path)
+    closure.write_json_atomic(manifest_path, manifest)
+
+
 class DeckContractTests(unittest.TestCase):
     def test_canonical_deck_and_family_partition(self) -> None:
         contract = closure.validate_deck(DECK)
@@ -1028,9 +1055,11 @@ class CampaignEndToEndTests(unittest.TestCase):
             _make_one_run_propensity_nonstationary(raw, "cation-desorption__ea-minus-3")
             analysis = closure.analyze_campaign(raw, derived)
             self.assertTrue(analysis["sensitivity_complete"])
-            self.assertTrue(
-                closure.verify_campaign(raw, derived)["sensitivity_complete"]
-            )
+            self.assertFalse(analysis["ordinal_ranking_complete"])
+            self.assertFalse(analysis["acceptance_passed"])
+            verified = closure.verify_campaign(raw, derived)
+            self.assertTrue(verified["sensitivity_complete"])
+            self.assertFalse(verified["ordinal_ranking_complete"])
             with (derived / "sensitivity-ranking.csv").open(
                 newline="", encoding="utf-8"
             ) as handle:
@@ -1065,6 +1094,19 @@ class CampaignEndToEndTests(unittest.TestCase):
                 "undefined",
             )
 
+    def test_all_censored_campaign_is_not_card_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            raw, derived = _build_synthetic_campaign(root)
+            _zero_all_desorption_propensities(raw)
+
+            analysis = closure.analyze_campaign(raw, derived)
+
+            self.assertEqual(analysis["campaign_outcome"], "no-dissolution")
+            self.assertTrue(analysis["sensitivity_complete"])
+            self.assertFalse(analysis["ordinal_ranking_complete"])
+            self.assertFalse(analysis["acceptance_passed"])
+
     def test_zero_campaign_analyzes_verifies_and_tampering_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1072,6 +1114,7 @@ class CampaignEndToEndTests(unittest.TestCase):
             analysis = closure.analyze_campaign(raw, derived)
             self.assertEqual(analysis["campaign_outcome"], "no-dissolution")
             self.assertTrue(analysis["acceptance_passed"])
+            self.assertTrue(analysis["ordinal_ranking_complete"])
             self.assertEqual(
                 analysis["status_counts"],
                 {
@@ -1273,6 +1316,18 @@ class CampaignEndToEndTests(unittest.TestCase):
 
 
 class DeterminismTests(unittest.TestCase):
+    def test_derived_hash_inventory_ignores_appledouble_sidecars(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            expected = closure.DERIVED_FILES - {"verification.json"}
+            for name in expected:
+                (root / name).write_text(name, encoding="utf-8")
+                (root / f"._{name}").write_text("appledouble", encoding="utf-8")
+
+            hashes = closure._derived_output_hashes(root)
+
+            self.assertEqual(set(hashes), expected)
+
     def test_bootstrap_and_verification_receipts_are_byte_deterministic(self) -> None:
         values = [1.0, 2.0, 3.0, 5.0, 8.0, 13.0, 21.0, 34.0]
         first = closure.bootstrap_summary(values, "fixed-derived-output")
