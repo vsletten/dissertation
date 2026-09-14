@@ -6,3 +6,4 @@
 
 - [debugging.md](debugging.md) — A3g one-shot receipts: first-stage observations, loaded-code audit, per-return persistence, internally observed cold-process identity, recursive output inventory, and non-destructive verification attempts.
 - [debugging.md](debugging.md) — A3g CLI and library share locked preflight before GPU initialization, with validated stage snapshots passed into recomputation.
+- [petra-reachability.md](petra-reachability.md) — Live-engine path proofs, kind-valid adversaries, fixed-boundary ladder invariants, and RNG-atomic importance sampling.
