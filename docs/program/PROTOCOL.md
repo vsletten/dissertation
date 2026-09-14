@@ -84,11 +84,21 @@ PR all unwritten (supervision finished them from artifacts). Rules:
 Your PR contains, atomically:
 
 1. The work itself.
-2. The card file updated: `status: done`, a dated entry in its
-   `## Progress` log, and a `## Result` section (what/where/surprises —
+2. For a `done` closeout, the card file updated: `status: done`, a dated entry in
+   its `## Progress` log, and a `## Result` section (what/where/surprises —
    enough for the next card's worker).
-3. One line appended to [`STATUS.md`](STATUS.md) (newest first).
-4. Any new follow-up cards (status: ready or blocked) your work exposed.
+3. For a `blocked` closeout, the card file updated: `status: blocked`,
+   `blocked: <card>` or `blocked: victor`, a dated entry in its `## Progress`
+   log explaining the blocker, and a `## Result` section recording the
+   completed work and blocking result.
+4. One line appended to [`STATUS.md`](STATUS.md) (newest first).
+5. Any new follow-up cards (status: ready or blocked) your work exposed.
+
+**Queue-pointer closeout:** a worker may close its pointer (or return `done`) only
+after this same PR satisfies the applicable `done` or `blocked` card requirements
+above and makes `PLAN.md` match. Leaving `active` without a claim branch is a
+protocol violation: the feeder reports `[ORPHAN]` / `[DRIFT]` and refuses dependents.
+A follow-up card does not close its parent; the parent card and row must say so.
 
 Open the PR (`gh pr create`) — **then STOP** (amended 2026-08-20 to
 match fleet POLICY §1 v7, which supersedes the old wording here): this
