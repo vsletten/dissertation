@@ -49,6 +49,20 @@ periodic CI-NEB is outside this phase's acceptance and is not claimed.
 
 ## Progress
 
+- 2026-09-14 12:49 PDT — `(hermes-custom-build-001; profile=workstation)` —
+  Launched the first narrowed survey profile, the required
+  `dehydroxylate-lattice` five-coordinate-Al route, from pushed harness head
+  `b56b1fcd6e381489f39ddf04e9751e5262d8e43d`. Bounded transient unit
+  `task320-e3b-dehydroxylate-frozen-profile.service` has invocation
+  `14444d8b45e44030844484bc7692290b`, `RuntimeMaxSec=14,400`, 4 MPI × 4
+  OpenMP, `Nice=10`, `CPUQuota=1600%`, and a 48 GiB container limit. Runner
+  SHA-256 is `6c99aa6a4143f720100300622eeef32bc7768f747b3fcdb26133417fd0345fc3`;
+  prelaunch load15 was 5.82 with 39,895,036 KiB available. Native image-00
+  stdout and the pinned CP2K container were observed live. Atomic receipt:
+  `/mnt/data/vsletten/dissertation-data/e3b-periodic-dft-calibration-20260914/receipts/dehydroxylate-frozen-profile-01.json`.
+  Scientific acceptance remains 0/3 until all eight images complete and the
+  typed receipt emits a frozen-path profile rise.
+
 - 2026-09-14 12:47 PDT — `(hermes-custom-build-001; profile=workstation)` —
   `DEVIATION:` POLICY §12 superseded the full three-route CI-NEB plan after the
   first dehydroxylate endpoint GEO_OPT used 1,830.0 s for only ten converged SCF/
