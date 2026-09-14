@@ -77,6 +77,15 @@ fn biased_event_accumulates_exact_path_likelihood_ratio() {
     };
     let expected = (8.0 - 2.0) * event.time - 4.0_f64.ln();
     assert!((sampler.log_likelihood_ratio() - expected).abs() < 1.0e-14);
+    let segment = sampler.last_segment().expect("event segment is retained");
+    assert_eq!(segment.start_time, 0.0);
+    assert_eq!(segment.end_time, event.time);
+    assert_eq!(segment.physical_total_rate, 2.0);
+    assert_eq!(segment.biased_total_rate, 8.0);
+    assert_eq!(segment.fired_reaction, Some(0));
+    assert_eq!(segment.fired_bias_factor, Some(4.0));
+    assert!((segment.log_likelihood_increment - expected).abs() < 1.0e-14);
+    assert!((segment.cumulative_log_likelihood - expected).abs() < 1.0e-14);
 }
 
 #[test]
@@ -93,7 +102,17 @@ fn biased_deadline_accumulates_survival_likelihood_without_an_event() {
     );
     assert_eq!(engine.step_count, 0);
     assert_eq!(engine.lattice.states, vec![StateId(0)]);
-    assert!((sampler.log_likelihood_ratio() - (8.0 - 2.0) * deadline).abs() < 1.0e-20);
+    let expected = (8.0 - 2.0) * deadline;
+    assert!((sampler.log_likelihood_ratio() - expected).abs() < 1.0e-20);
+    let segment = sampler.last_segment().expect("deadline segment retained");
+    assert_eq!(segment.start_time, 0.0);
+    assert_eq!(segment.end_time, deadline);
+    assert_eq!(segment.physical_total_rate, 2.0);
+    assert_eq!(segment.biased_total_rate, 8.0);
+    assert_eq!(segment.fired_reaction, None);
+    assert_eq!(segment.fired_bias_factor, None);
+    assert!((segment.log_likelihood_increment - expected).abs() < 1.0e-20);
+    assert!((segment.cumulative_log_likelihood - expected).abs() < 1.0e-20);
 }
 
 #[test]
@@ -119,10 +138,18 @@ fn failed_transition_is_atomic_across_weight_time_state_and_rng() {
         states: impossible_states,
     });
     let mut sampler = BiasedCtmc::new(1, [(0, 4.0)]).expect("valid bias");
+    assert!(matches!(
+        engine
+            .advance_biased_ctmc_until(&mut sampler, 0.0)
+            .expect("zero-length deadline"),
+        CtmcAdvance::Deadline { time: 0.0 }
+    ));
+    assert!(sampler.last_segment().is_some());
 
     assert!(engine
         .advance_biased_ctmc_until(&mut sampler, 1.0e9)
         .is_err());
+    assert!(sampler.last_segment().is_none());
     assert_eq!(sampler.log_likelihood_ratio(), 0.0);
     assert_eq!(engine.time, 0.0);
     assert_eq!(engine.step_count, 0);

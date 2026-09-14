@@ -287,7 +287,7 @@ fn run_replica(
         let name = names[fired.reaction as usize];
         if name == "metal_dissolution" {
             dissolution_events += 1;
-            dissolution_depth[fired.site as usize] += 1;
+            dissolution_depth[fired.site] += 1;
         } else if name.starts_with("repassivate_") {
             repassivation_events += 1;
         }

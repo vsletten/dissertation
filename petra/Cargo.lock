@@ -232,6 +232,8 @@ dependencies = [
  "kaolinite",
  "kmc-io",
  "petra-core",
+ "petra-io",
+ "petra-observables",
  "rand",
  "rand_pcg",
  "serde",
