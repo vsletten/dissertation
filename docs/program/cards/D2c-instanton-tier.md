@@ -9,30 +9,48 @@
 
 ## Objective
 
-D2b's NO-GO residual is isolated to tunneling method: asymmetric
-Eckart is 1.5–3 orders low against instanton-class anchors below
-~59 K, because it inherits the barrier *width* from a single imaginary
-frequency (and PWB6K's width is demonstrably too stiff — T_c 149 K vs
-Andersson's 79 K for H+CO). Add one instanton-grade tunneling tier to
-quarry: small-curvature tunneling (SCT) along the existing
-`full_irc`/`quick_irc` path machinery, or a ring-polymer instanton on
-the driver's stationary points. Benchmark reaction-by-reaction against
-Song & Kästner 2017 (H2CO+H channels) and Andersson 2011 / Simons 2020
-(H+CO), reusing the D2b campaign's checkpointed geometries and CC
-barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
+Deliver one small-curvature-tunneling (SCT) rate for
+`H + CO -> HCO`, 1w C-side site, from the inputs already at
+`qm/data/D2c-instanton-tier/d2b-inputs/h-co-1w-cside/` (CC-corrected barrier,
+PWB6K/def2-SVP TS, `irc_fwd.xyz`/`irc_back.xyz`, `results.json` with the
+existing Eckart kappa and k(T)). Report kappa_SCT(T) and k(T) at 15, 20 and
+50 K next to the Eckart values and the Simons 2020 / Andersson 2011 anchors in
+`docs/program/results/D2c-instanton-tier.md`. That number plus the PR is the
+deliverable; nothing else is.
+
+Use standard SCT (Liu/Truhlar 1993; Fernandez-Ramos et al. 2007 review):
+
+1. Along the IRC, compute the Hessian at each path point (PWB6K/def2-SVP, same
+   as D2b; GPU allowed). Project out translations, rotations and the path
+   tangent; get the generalized normal-mode frequencies, the vibrationally
+   adiabatic ground-state potential V_a^G(s), and the curvature couplings
+   B_mF(s) -> effective reduced mass mu_eff(s)/mu.
+2. Compute transmission probability P(E) from the WKB imaginary action with
+   mu_eff(s), thermally average to kappa_SCT(T), and use
+   `k_SCT = kappa_SCT * k_TST` with the same CC-corrected barrier and partition
+   functions D2b used. State the shift/scale convention in one sentence.
+3. Extend the reactant-side path until V_a^G(s) is within about 1 kcal/mol of
+   the reactant asymptote; deep tunneling at 15 K samples far down the valley.
+4. Symmetrize every finite-difference or analytic Hessian as `(H + H^T)/2` and
+   log maximum asymmetry; never gate on raw asymmetry.
+
+The compute envelope is one bounded `systemd-run --user` unit with
+`RuntimeMaxSec=14400` and one named retry. Add only one new test: the SCT
+integrator against an analytic Eckart barrier. Run one cold formula/arithmetic
+review after the number exists. Do not add receipt/provenance/checkpoint
+hardening, new CLI surfaces, or non-decisive diagnostics.
 
 ## Acceptance
 
-- A tunneling correction beyond Eckart implemented against the
-  existing IRC machinery, unit-tested, with the same receipt
-  discipline as D2b.
-- H+CO and both H2CO channels within the documented literature spread
-  at 12–20 K (the Simons plateau ±1 order), with the branching ratio
-  defensible against the experiment-benchmarked network.
-- The D2b validity floor restated with the new tier; if the gate now
-  passes, emit the machine-readable D3b rate table D2b withheld —
-  that table unblocks D3b.
-- Bounded, GPU-first where applicable, thread-capped, teed logs.
+1. `kappa_SCT` and `k_SCT` at 15/20/50 K for H+CO 1w C-side are in the
+   results doc alongside Eckart and the literature anchors, with the Hessian
+   asymmetry log attached.
+2. The analytic-Eckart unit test is green.
+3. The results include a one-paragraph verdict: within +/-1 order of the
+   Simons plateau at 15-20 K is GO and files `D2c2-sct-remaining-channels` for
+   the other three D2b channels plus the D3b table; outside is a documented
+   NO-GO naming the residual. This card emits no D3b rate table either way.
+4. One PR is opened on `vsletten/dissertation`; cloud Hermes merges it.
 
 ## Progress
 
@@ -361,3 +379,18 @@ barriers (`qm/runs/D2b-explicit-surface-rates/`, campaign worktree).
   no-delivery ceiling on `blocked-on: victor`; do not run or merge this checkpoint
   until Victor rules whether to narrow/split/close D2c and a later worker closes
   these review findings.
+- 2026-09-13 18:32 PDT (hermes-custom-build-001; profile=workstation) —
+  NARROWED SCT COMPUTE CONTINUATION: pushed `6e22007` replaces raw-Hessian
+  asymmetry rejection with logged `(H + H^T)/2`, narrows the production
+  foundation to H+CO 1w C-side, and adds the sole permitted analytic-Eckart
+  SCT regression (`235 passed`; Ruff/format/diff clean). The first four-hour
+  unit reached and symmetrized the TS Hessian (`max skew 9.65256e-7
+  Eh/Bohr^2`) but failed afterward in the pre-existing mutable private-module
+  attestor. Named retry source `f88da72` excluded those caches; its fresh unit
+  again completed and symmetrized the TS Hessian (`max skew 9.65256e-7`) but
+  failed on the next pre-existing native-payload identity gate. Immutable
+  failure receipts are under `task300-d2c-sct-6e22007/` and
+  `task300-d2c-sct-f88da72-r2/`; no IRC/path Hessians, SCT number, verdict, or
+  PR exists. The bounded unit plus named retry are exhausted. Continue by
+  removing the forbidden runtime-attestation obstruction from the scientific
+  execution path before any newly authorized compute.
