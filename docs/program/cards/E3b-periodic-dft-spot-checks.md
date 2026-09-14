@@ -1,11 +1,12 @@
 # E3b-periodic-dft-spot-checks — route 2 calibration of the classical set
 
-- status: ready
+- status: blocked
 - track: E (muscovite / the perfect circle)
 - priority: P2
 - machine: workstation (periodic DFT; CP2K)
 - depends: E3a-classical-neb-barriers
-- claimed-by:
+- claimed-by: hermes-custom-build-001
+- blocked-on: E3b1-periodic-dft-evidence-contract
 
 ## Objective
 
@@ -35,4 +36,24 @@ endorsement, so E4 runs on numbers whose error bars mean something.
 
 ## Progress
 
+- 2026-09-14 09:01 PDT — `(hermes-custom-build-001; profile=workstation)` —
+  Cold review rejected the 3×2 compute-envelope verdict: a neutral wrapped
+  2×2×1 route cell exists, and an unfinished force evaluation cannot establish
+  a BAND lower bound. The harness now prepares valid 334/331/334-atom models,
+  refuses manual observation numbers, and rejects all three incomplete E3a
+  classical references. A real 2×2 PBE-D3 force probe remained unfinished at
+  the execution channel's 420-second ceiling; no DFT number was emitted and no
+  campaign-feasibility conclusion is claimed. `E3b1-periodic-dft-evidence-contract`
+  owns the remaining raw-parser, immutable-artifact, classical-reference,
+  interaction-criterion, and bounded timing work. Results:
+  `docs/program/results/E3b-periodic-dft-spot-checks.md`.
+
 - 2026-08-27 — filed by Fable alongside E3a.
+
+## Result
+
+Blocked on `E3b1-periodic-dft-evidence-contract`, not completed. The original
+acceptance remains **0/3 DFT barriers checked**. A valid 2×2 preparation exists,
+but the current E3a references are all typed incomplete and manual observation
+JSON is no longer accepted as evidence. No compute-envelope verdict, DFT
+barrier, correction, endorsement, or deck replacement is claimed.
