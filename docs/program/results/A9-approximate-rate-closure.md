@@ -27,6 +27,7 @@ The campaign imposed a far-from-equilibrium numerical product sink (`activity(Al
 - Gate census: 232 `steady-zero`; 0 `steady-positive`; 0 `nonsteady`; 0 `absorbed`; 0 `incomplete`.
 - Origin audit across all trajectories: 0 Si adsorption, 0 Al adsorption, 0 original-lattice Si release, 0 original-lattice Al release.
 - Raw campaign: `/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740` (2.720523 GiB), with 232 hash-addressed receipts.
+- The committed derived CSV/JSON bundle and `run-receipts/manifest.json` are **non-verifiable outside the author's machine**. Full `analyze`/`verify` still needs that external campaign and the hashed Petra binary; neither is in the repository. A normal checkout can only rebind `petra/examples/kaolinite-approx.toml` by SHA-256 and regenerate the 29 scenario-deck hashes from that file.
 
 ### Absolute rate result
 

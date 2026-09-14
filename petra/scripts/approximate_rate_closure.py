@@ -2815,6 +2815,35 @@ def _campaign_outcome(gates: Sequence[dict[str, object]]) -> str:
     return "steady-positive"
 
 
+CHECKOUT_SOURCE_DECK = (
+    Path(__file__).resolve().parent.parent / "examples" / "kaolinite-approx.toml"
+)
+
+
+def bind_checkout_source_deck(manifest: Mapping[str, object]) -> Path:
+    expected = manifest.get("source_deck_sha256")
+    if not _valid_sha256(expected):
+        raise ValueError("source deck binding is missing")
+    recorded = Path(str(manifest.get("source_deck", "")))
+    for candidate in (recorded, CHECKOUT_SOURCE_DECK):
+        if candidate.is_file() and sha256_file(candidate) == expected:
+            return candidate.resolve()
+    raise ValueError("source deck binding is missing")
+
+
+def regenerate_scenario_deck_hashes(source_deck: Path) -> dict[str, str]:
+    contract = validate_deck(source_deck)
+    hashes: dict[str, str] = {}
+    for scenario in scenarios():
+        text = (
+            contract.text
+            if scenario.family is None
+            else perturb_deck(contract, scenario.family, scenario.perturbation or "")
+        )
+        hashes[scenario.name] = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return hashes
+
+
 def _validate_raw_campaign(
     raw_root: Path,
 ) -> tuple[dict, tuple[int, ...], list[dict], DeckContract, dict[str, str]]:
@@ -2862,16 +2891,12 @@ def _validate_raw_campaign(
     ):
         raise ValueError("campaign execution bounds are invalid")
 
-    source_deck = Path(manifest["source_deck"])
+    source_deck = bind_checkout_source_deck(manifest)
     petra_binary = Path(manifest["petra_binary"])
-    for path, expected_hash, label in (
-        (source_deck, manifest["source_deck_sha256"], "source deck"),
-        (petra_binary, manifest["petra_binary_sha256"], "Petra binary"),
-    ):
-        if not _valid_sha256(expected_hash) or not path.is_file():
-            raise ValueError(f"{label} binding is missing")
-        if sha256_file(path) != expected_hash:
-            raise ValueError(f"{label} hash mismatch")
+    if not _valid_sha256(manifest["petra_binary_sha256"]) or not petra_binary.is_file():
+        raise ValueError("Petra binary binding is missing")
+    if sha256_file(petra_binary) != manifest["petra_binary_sha256"]:
+        raise ValueError("Petra binary hash mismatch")
     source_contract = validate_deck(source_deck, seeds)
 
     scenario_records = manifest["scenarios"]
@@ -2889,9 +2914,12 @@ def _validate_raw_campaign(
         if {key: record[key] for key in expected} != expected:
             raise ValueError("campaign scenario coverage/order is incomplete")
         deck_path = raw_root / "decks" / f"{record['name']}.toml"
-        if Path(record["deck"]).resolve() != deck_path or not _valid_sha256(
+        recorded_deck = Path(record["deck"])
+        if recorded_deck.name != f"{record['name']}.toml" or not _valid_sha256(
             record["deck_sha256"]
         ):
+            raise ValueError(f"scenario deck binding mismatch: {record['name']}")
+        if recorded_deck.exists() and recorded_deck.resolve() != deck_path:
             raise ValueError(f"scenario deck binding mismatch: {record['name']}")
         if sha256_file(deck_path) != record["deck_sha256"]:
             raise ValueError(f"scenario deck hash mismatch: {record['name']}")

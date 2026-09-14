@@ -2071,5 +2071,28 @@ for name in ('populations.csv', 'observables.csv', 'snapshot.pgif.json'):
                 closure._run_one(fake, deck, output, log, 90401, 30, root, env)
 
 
+class CheckoutPortabilityTests(unittest.TestCase):
+    def test_committed_manifest_rebinds_source_deck_from_checkout(self) -> None:
+        manifest = json.loads(
+            (
+                Path(__file__).resolve().parents[3]
+                / "docs/program/results/a9-approximate-rate-closure/run-receipts/manifest.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertIn("/Users/", str(manifest["source_deck"]))
+        self.assertFalse(Path(manifest["source_deck"]).exists())
+        self.assertFalse(Path(manifest["petra_binary"]).exists())
+        for record in manifest["scenarios"]:
+            self.assertTrue(str(record["deck"]).startswith("/Volumes/DATA/"))
+            self.assertFalse(Path(record["deck"]).exists())
+
+        bound = closure.bind_checkout_source_deck(manifest)
+        self.assertEqual(bound.resolve(), DECK.resolve())
+        self.assertEqual(
+            closure.regenerate_scenario_deck_hashes(bound),
+            {record["name"]: record["deck_sha256"] for record in manifest["scenarios"]},
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
