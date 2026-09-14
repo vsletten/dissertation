@@ -1,6 +1,6 @@
 # D2c-instanton-tier — deep-tunneling rates that flip the D2b gate
 
-- status: active
+- status: blocked
 - track: D (astrochemistry)
 - priority: P2
 - machine: workstation
@@ -404,3 +404,20 @@ hardening, new CLI surfaces, or non-decisive diagnostics.
   active with a four-hour cap, PID 2248184 at nice 10, 16-thread limits, and the QI2
   GPU lease. Await `/mnt/data/vsletten/dissertation-data/task300-d2c-sct-0976034-r3/production-terminal.json`;
   no IRC/path-Hessian completion, SCT number, verdict, or PR is claimed yet.
+- 2026-09-13 22:01 PDT (hermes-custom-build-001; profile=workstation) —
+  NAMED RETRY EXHAUSTED / BLOCKED: receipt
+  `/mnt/data/vsletten/dissertation-data/task300-d2c-sct-0976034-r3/production-terminal.json`
+  showed the default-grid C-side TS still has more than one significant negative
+  vibrational mode after Hessian symmetrization. A narrow dense-grid attempt was
+  implemented and verified (`156 passed`; Ruff/format/diff clean) because the
+  September convergence receipt showed a one-negative-mode grid-5 saddle, but
+  preflight initially lacked its required receipt and the corrected run then failed
+  the same TS index gate. Readback proved that historical grid-5 evidence was for
+  `h-co-1w-oside`, not this card's `h-co-1w-cside`; the unsupported grid change was
+  therefore reverted at pushed head `7a16c1fe36b25b29a5c55ffe80b5586a66c2a95a`.
+  Named-retry terminal receipt:
+  `/mnt/data/vsletten/dissertation-data/task300-d2c-sct-574bd16-r4/production-terminal.json`.
+  No IRC, path Hessians, SCT value, verdict, result document, or PR exists. The card
+  is blocked on a scope decision: authorize C-side TS refinement/a different
+  scientifically specified Hessian route, or accept that the supplied C-side TS is
+  not SCT-qualifiable and close the card as a documented no-result.
