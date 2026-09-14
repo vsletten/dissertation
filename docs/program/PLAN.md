@@ -49,7 +49,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A9b-mechanism-reachability](cards/A9b-mechanism-reachability.md) | A | P0 | any | done | 260 live release paths + 60 boundary topology NO-GOs; finite biased sampler ✅ |
 | [A9b-reservoir-origin-contract](cards/A9b-reservoir-origin-contract.md) | A | P0 | any | done | A9 ✅; pH 3–5 open-flow contract + origin-safe release accounting |
 | [A9b-sensitivity-ranking](cards/A9b-sensitivity-ranking.md) | A | P0 | workstation | done | verified 29 × 8 campaign; all responses censored/unrankable; no irrelevant family |
-| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | blocked: A9b-sensitivity-ranking | final top-k/irrelevant verdict |
+| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | blocked: victor | choose an observable-release regime or revise the model after A9b's all-censored result |
 | [A3a-reactant-minimum-recovery](cards/A3a-reactant-minimum-recovery.md) | A | P1 | workstation | done | terminal microstate rejection; no minimum promoted |
 | [A3b-osa-neutral-n1-proton-microstate-stability](cards/A3b-osa-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; H52 became third mobile owner |
 | [A3c-osa-neutral-n1-mobile-proton-triad-conditioning](cards/A3c-osa-neutral-n1-mobile-proton-triad-conditioning.md) | A | P1 | workstation | done | verified triad-conditioning failure; owners retained, projected gradients red |
@@ -63,7 +63,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
 | [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: A9b-sensitivity-ranking | final banked survey/literature table after corrected ranking |
 | [A2a-si-neutral-production-path-rebuild](cards/A2a-si-neutral-production-path-rebuild.md) | A | P1 | workstation | done | exact r2SCAN-3c minima + A2 infrastructure ✅ |
-| [A2b-al-neutral-production-energetics](cards/A2b-al-neutral-production-energetics.md) | A | P1 | workstation | blocked: A9b-sensitivity-ranking | banked B3LYP/def2-SVP/DF 32.2 kcal/mol survey value |
+| [A2b-al-neutral-production-energetics](cards/A2b-al-neutral-production-energetics.md) | A | P1 | workstation | blocked: victor | banked 32.2 kcal/mol survey value; no supported replication target after A9b |
 | [A2b1-wb97mv-reactant-scf-recovery](cards/A2b1-wb97mv-reactant-scf-recovery.md) | A | P1 | workstation | done | independently verified finite SCF failure; no retry authorized |
 | [A2c-al-acid-production-energetics](cards/A2c-al-acid-production-energetics.md) | A | P1 | workstation | blocked: A2b | A1b banked one-water Al-acid route |
 | [A2d-oss-neutral-n4-production-energetics](cards/A2d-oss-neutral-n4-production-energetics.md) | A | P1 | workstation | blocked: A2c | documented embedded pilot; deterministic rebuild |
@@ -122,11 +122,7 @@ D2a-astro-rate-reproduction (PR #31 — verdict: GO gas-phase /
 NO-GO surface-LH), A7-kinetics-database (PR #27 — 36 minerals, 74
 mechanisms, validator green). **Blocked closeout branch**:
 `agents/A1b-acid-microsolvation` for A1b-acid-mechanisms.
-A9-approximate-rate-closure is DONE by the 2026-09-13 scope ruling with an honest partial/negative survey result: 46.4 million events observed zero original-lattice Si/Al release, the corrected gate types the mechanism unsampled, and all seven sensitivity families remain censored/unrankable. It names no top-k and no irrelevant family. READY follow-ups `A9b-mechanism-reachability` and `A9b-reservoir-origin-contract` own the sampling and realistic pH/origin gaps; workstation `A9b-sensitivity-ranking` is blocked on both and owns the corrected 29 × 8 verdict. A3, A2, and A2b remain blocked on that ranking follow-up. If the corrected result identifies a sensitive family, A3 rebuilds
-the closest published cluster and method and reproduces its observable within ±3
-kcal/mol; the survey-tier or literature-replication value is then banked. One
-family per PR carries the paper/replication/banked-value table and Petra
-fragment. The prior home-grown hydrated-cell
+A9-approximate-rate-closure is DONE by the 2026-09-13 scope ruling with an honest partial/negative survey result: 46.4 million events observed zero original-lattice Si/Al release, the corrected gate types the mechanism unsampled, and all seven sensitivity families remain censored/unrankable. A9b mechanism reachability, reservoir origin, and the corrected 29 × 8 sensitivity campaign are now DONE. The 232/232 stationary A9b trajectories still observed zero biased original-lattice release, so A9b names no top-k and no irrelevant family. A3 and A2b are blocked on Victor's program-level choice of an observable-release regime, mechanism/deck revision, or accelerated rare-event method; neither card authorizes QM from this non-observation. The recommended cheapest discriminator is the approximate deck at 350–450 K and/or pH 3, followed by sensitivity ranking in a regime where release is observable. If a later decision and result identifies a sensitive family, A3 rebuilds the closest published cluster and method and reproduces its observable within ±3 kcal/mol; the survey-tier or literature-replication value is then banked. One family per PR carries the paper/replication/banked-value table and Petra fragment. The prior home-grown hydrated-cell
 Osa/OSS/Oaa/CALC-005 attempts remain historical null evidence and are not to be
 replayed. A3j is DONE by ruling; A3i's hash-bound terminal optimizer-failure
 receipt stands and no second-worker null-result ceremony remains.
