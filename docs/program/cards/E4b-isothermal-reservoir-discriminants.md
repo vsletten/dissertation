@@ -1,6 +1,6 @@
 # E4b-isothermal-reservoir-discriminants — finish §5 time-domain tests
 
-- status: complete
+- status: done
 - track: E (muscovite / the perfect circle)
 - priority: P1
 - machine: any (CPU ensembles)
@@ -57,6 +57,15 @@ observable or mechanism rather than because a calibrated hypothesis survived:
   provenance-labelled Xe and H₂O-vacancy screens, ensemble overlays, and honest
   mixed verdicts for §5 claims 1, 2, 4, and 7. Result:
   `docs/program/results/E4b-isothermal-reservoir-discriminants.md`.
+- 2026-09-13 21:06 PDT — (hermes-custom-build-001; profile=workstation) —
+  Independently closed the delivery gates on exact pushed head
+  `94be8c6f7b375368efa17179b086870c86bd5343`: 43 Python tests, focused Ruff
+  check/format, the complete Petra Cargo suite, and diff checks pass. A fresh
+  12-cell/96-primary-trajectory campaign reproduced all four verdicts, all replay
+  checks, 121250 primary events, and a byte-identical overlay; the 132-row series
+  differs only in 18 cross-Python-version float renderings (maximum absolute delta
+  `3.552713678800501e-15`). Corrected the card's non-protocol `complete` status to
+  canonical `done` before PR creation.
 
 ## Result
 
@@ -71,6 +80,10 @@ observable or mechanism rather than because a calibrated hypothesis survived:
   all 12 generated decks complete under the cached Petra release engine with
   `--paranoid`. This laptop has no Cargo toolchain, so the unchanged Rust
   workspace suite is explicitly deferred to required PR CI rather than claimed.
+- **Workstation re-verification:** the complete Petra Cargo suite passes against
+  the canonical repository target; an independent campaign rerun reproduced the
+  verdicts and all replay checks with only sub-femtoscale cross-version float
+  serialization differences described in Progress.
 - **Artifacts:** driver, 12 generated decks, source CSV, bootstrap-mean 95%
   intervals with effective sample counts, overlay SVG, campaign receipts,
   machine-readable verdict, and full result memo are committed in this PR.
