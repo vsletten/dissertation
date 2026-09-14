@@ -90,6 +90,13 @@ Your PR contains, atomically:
 3. One line appended to [`STATUS.md`](STATUS.md) (newest first).
 4. Any new follow-up cards (status: ready or blocked) your work exposed.
 
+**Queue-pointer closeout:** a worker may close its pointer (or return `done`) only
+after this same PR gives the board card a final state and makes `PLAN.md` match.
+Correct examples are `status: done` with the verdict, or `status: blocked` with
+`blocked: <card>` / `blocked: victor`. Leaving `active` without a claim branch is
+a protocol violation: the feeder reports `[ORPHAN]` / `[DRIFT]` and refuses dependents.
+A follow-up card does not close its parent; the parent card and row must say so.
+
 Open the PR (`gh pr create`) — **then STOP** (amended 2026-08-20 to
 match fleet POLICY §1 v7, which supersedes the old wording here): this
 repo is webhook-wired, and the cloud Hermes PR watcher owns the rest
