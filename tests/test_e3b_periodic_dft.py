@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 import sys
+import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -18,339 +19,241 @@ e3b = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = e3b
 SPEC.loader.exec_module(e3b)
 
-WORKBOOK = Path(
-    "/mnt/data/vsletten/dissertation-data/e3a-classical-neb-barriers-20260902/"
-    "sources/nteme-2022-supplement/Results Of MD Simulations.xlsx"
-)
-CAMPAIGN = Path(
-    "/mnt/data/vsletten/dissertation-data/e3a-classical-neb-campaign-grid-20260903"
-)
+MODEL = "model"
+CELL = {"a": 10.0, "b": 11.0, "c": 12.0, "alpha": 90.0, "beta": 90.0, "gamma": 90.0}
 
 
-def method_files(tmp_path: Path) -> Any:
-    basis = tmp_path / "BASIS_MOLOPT"
-    potential = tmp_path / "GTH_POTENTIALS"
-    d3 = tmp_path / "dftd3.dat"
-    basis.write_text("test basis data\n", encoding="utf-8")
-    potential.write_text("test potential data\n", encoding="utf-8")
-    d3.write_text("test D3 parameter data\n", encoding="utf-8")
-    return e3b.MethodProvenance(
-        cp2k_version="2026.1",
-        cp2k_image_digest="sha256:" + "a" * 64,
-        basis_set_file=basis,
-        potential_file=potential,
-        d3_parameter_file=d3,
-    )
+def _write_e3a_source(
+    root: Path, barrier: float = 100.0
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    workbook = root / "source-workbook.fixture"
+    workbook.write_text("deterministic E3a workbook fixture\n", encoding="utf-8")
+    campaign_root = root / "e3a-campaign"
+    model_root = campaign_root / MODEL
+    model_root.mkdir(parents=True)
 
+    endpoint_paths = {}
+    for label, energy in (("initial", -700.0), ("endpoint", -701.0)):
+        path = model_root / f"{label}.min.stdout.log"
+        path.write_text(
+            f"100 {energy} 0.005 0.001 0.0\nTotal wall time: 0:00:01\n",
+            encoding="utf-8",
+        )
+        endpoint_paths[label] = path
 
-def test_require_sha256_fails_closed(tmp_path: Path) -> None:
-    path = tmp_path / "input.json"
-    path.write_text("{}\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="hash mismatch"):
-        e3b.require_sha256(path, "0" * 64, label="campaign result")
-
-
-def test_cp2k_smoke_status_is_fail_closed() -> None:
-    complete = e3b.classify_cp2k_output(
-        "SCF run converged in 12 steps\n"
-        "ENERGY| Total FORCE_EVAL ( QS ) energy [a.u.]: -123.5\n"
-        "PROGRAM ENDED AT 2026-09-14\n",
-        returncode=0,
-        timed_out=False,
-    )
-    assert complete["status"] == "converged"
-    assert complete["energy_hartree"] == -123.5
-
-    assert (
-        e3b.classify_cp2k_output(
-            "SCF run NOT converged\n", returncode=0, timed_out=False
-        )["status"]
-        == "incomplete-scf"
-    )
-    assert (
-        e3b.classify_cp2k_output("", returncode=None, timed_out=True)["status"]
-        == "incomplete-timeout"
-    )
-    assert (
-        e3b.classify_cp2k_output(
-            "SCF run converged in 2 steps\n", returncode=1, timed_out=False
-        )["status"]
-        == "incomplete-execution"
-    )
-
-
-def test_smoke_runner_writes_timing_receipt(tmp_path: Path) -> None:
-    fake = tmp_path / "fake-cp2k"
-    fake.write_text(
-        "#!/usr/bin/env python3\n"
-        "from pathlib import Path\n"
-        "Path('runtime-side-effect.restart').write_text('runtime only')\n"
-        "print('SCF run converged in 3 steps')\n"
-        "print('ENERGY| Total FORCE_EVAL ( QS ) energy [a.u.]: -42.25')\n"
-        "print('PROGRAM ENDED AT 2026-09-14')\n",
+    neb_path = model_root / "screen.log"
+    row = [1000.0, 0.005, 0.001, 0.0, 0.0, 0.0, barrier, barrier + 1.0, 0.0]
+    row.extend(float(index) for index in range(16))
+    neb_path.write_text(
+        " ".join(str(value) for value in row) + "\nTotal wall time: 0:00:01\n",
         encoding="utf-8",
     )
-    fake.chmod(0o755)
-    prepared_root = tmp_path / "prepared"
-    model_dir = prepared_root / "models" / "reconstructed-replication"
-    data_dir = prepared_root / "cp2k-data"
-    model_dir.mkdir(parents=True)
-    data_dir.mkdir()
-    input_path = model_dir / "smoke.inp"
-    input_path.write_text(
-        "&GLOBAL\n  RUN_TYPE ENERGY_FORCE\n&END GLOBAL\n"
-        "BASIS_SET_FILE_NAME ../../cp2k-data/BASIS_SET\n"
-        "COORD_FILE_NAME initial.xyz\n",
-        encoding="utf-8",
-    )
-    (model_dir / "initial.xyz").write_text("0\nfixture\n", encoding="utf-8")
-    (data_dir / "BASIS_SET").write_text("fixture basis\n", encoding="utf-8")
-    (prepared_root / "preparation.json").write_text(
-        json.dumps(
-            {
-                "schema": "e3b-cp2k-preparation-v1",
-                "method": {
-                    "cp2k_version": "2026.1",
-                    "cp2k_image_digest": "sha256:" + "a" * 64,
-                },
-                "models": {
-                    "reconstructed-replication": {"atom_identity_sha256": "identity"}
-                },
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    e3b.write_manifest(prepared_root)
-    manifest_before = (prepared_root / "manifest.json").read_bytes()
-    runtime_dir = tmp_path / "runtime"
-    receipt_path = runtime_dir / "smoke-result.json"
-
-    receipt = e3b.run_smoke(
-        executable=str(fake),
-        prepared_root=prepared_root,
-        model="reconstructed-replication",
-        runtime_dir=runtime_dir,
-        receipt_path=receipt_path,
-        timeout_seconds=5.0,
-    )
-
-    assert receipt["status"] == "converged"
-    assert receipt["energy_hartree"] == -42.25
-    assert receipt["elapsed_seconds"] >= 0.0
-    assert receipt["schema"] == "e3b-cp2k-smoke-v2"
-    assert receipt["input"]["sha256"] == e3b.sha256(input_path)
-    assert receipt["output"]["stdout"]["sha256"] == e3b.sha256(
-        runtime_dir / "smoke.stdout.log"
-    )
-    assert receipt["method"]["cp2k_version"] == "2026.1"
-    assert receipt["resources"]["omp_threads"] == 1
-    assert {item["prepared_path"] for item in receipt["dependencies"]} == {
-        "cp2k-data/BASIS_SET",
-        "models/reconstructed-replication/initial.xyz",
-        "models/reconstructed-replication/smoke.inp",
-    }
-    assert receipt["cleanup"]["work_directory_removed"] is True
-    assert not (runtime_dir / "work").exists()
-    assert receipt["post_run_state"]["prepared_manifest_valid"] is True
-    assert (prepared_root / "manifest.json").read_bytes() == manifest_before
-    e3b.verify_manifest(prepared_root)
-    assert json.loads(receipt_path.read_text(encoding="utf-8")) == receipt
-    second_runtime = tmp_path / "runtime-second"
-    second = e3b.run_smoke(
-        executable=str(fake),
-        prepared_root=prepared_root,
-        model="reconstructed-replication",
-        runtime_dir=second_runtime,
-        receipt_path=second_runtime / "smoke-result.json",
-        timeout_seconds=5.0,
-    )
-    assert second["status"] == "converged"
-    e3b.verify_manifest(prepared_root)
-
-
-def test_smoke_rejects_runtime_inside_prepared_tree(tmp_path: Path) -> None:
-    prepared_root = tmp_path / "prepared"
-    model_dir = prepared_root / "models" / "reconstructed-replication"
-    model_dir.mkdir(parents=True)
-    (model_dir / "smoke.inp").write_text("&GLOBAL\n&END GLOBAL\n")
-    (prepared_root / "preparation.json").write_text(
-        json.dumps(
-            {
-                "schema": "e3b-cp2k-preparation-v1",
-                "method": {},
-                "models": {
-                    "reconstructed-replication": {"atom_identity_sha256": "identity"}
-                },
-            }
-        )
-        + "\n"
-    )
-    e3b.write_manifest(prepared_root)
-
-    with pytest.raises(ValueError, match="outside the prepared tree"):
-        e3b.run_smoke(
-            executable="cp2k",
-            prepared_root=prepared_root,
-            model="reconstructed-replication",
-            runtime_dir=prepared_root / "runtime",
-            receipt_path=prepared_root / "runtime" / "smoke-result.json",
-            timeout_seconds=5.0,
-        )
-    e3b.verify_manifest(prepared_root)
-
-
-def _source_reference(
-    barrier: float = 100.0, *, converged: bool = True
-) -> dict[str, Any]:
-    return {
-        "schema": "e3a-source-barrier-reference-v1",
-        "barrier_kcal_mol": barrier,
-        "status": "converged" if converged else "incomplete-convergence",
-        "source_cell": [6, 3, 1],
-        "campaign_result": {
-            "path": "campaign-result.json",
-            "sha256": "1" * 64,
-            "bytes": 123,
-        },
-        "campaign_model_record_sha256": "2" * 64,
-        "raw_neb_output": {
-            "path": "model/screen.log",
-            "sha256": "3" * 64,
-            "bytes": 456,
-        },
-        "raw_endpoint_outputs": {
-            "initial": {
-                "path": "model/initial.min.stdout.log",
-                "sha256": "4" * 64,
-                "bytes": 100,
-            },
-            "endpoint": {
-                "path": "model/endpoint.min.stdout.log",
-                "sha256": "5" * 64,
-                "bytes": 101,
-            },
-        },
-        "convergence": {
-            "independent_parser": "e3a_campaign.parse_last_thermo+parse_neb",
-            "requested_ftol_kcal_mol_angstrom": 0.01,
+    model_record = {
+        "neb": {
+            "computed_forward_barrier_kcal_mol": barrier,
             "max_replica_force_kcal_mol_angstrom": 0.005,
-            "converged_to_requested_ftol": converged,
-            "final_step": 1000,
-            "expected_final_step": 1000,
-            "complete_step_history": True,
-            "parsed_forward_barrier_kcal_mol": barrier,
-            "initial_endpoint_force_pass": True,
-            "final_endpoint_force_pass": True,
-            "initial_endpoint_normal_termination": True,
-            "final_endpoint_normal_termination": True,
+            "converged_to_requested_ftol": True,
+            "screen_sha256": e3b.sha256(neb_path),
+        }
+    }
+    campaign = {
+        "schema": "e3a-classical-neb-campaign-v1",
+        "source": {"source_sha256": e3b.sha256(workbook)},
+        "settings": {
+            "neb_ftol_kcal_mol_angstrom": 0.01,
+            "min_ftol_kcal_mol_angstrom": 0.01,
+            "neb_relax_steps": 400,
+            "neb_climb_steps": 600,
+        },
+        "models": {MODEL: model_record},
+    }
+    result_path = campaign_root / "campaign-result.json"
+    e3b.write_json(result_path, campaign)
+    manifest_entries = []
+    for path in (result_path, neb_path, *endpoint_paths.values()):
+        manifest_entries.append(
+            {
+                "path": str(path.relative_to(campaign_root)),
+                "bytes": path.stat().st_size,
+                "sha256": e3b.sha256(path),
+            }
+        )
+    manifest_path = campaign_root / "manifest.json"
+    e3b.write_json(
+        manifest_path,
+        {"schema": "sha256-manifest-v1", "files": manifest_entries},
+    )
+    source = {
+        "workbook_path": str(workbook.resolve()),
+        "workbook_sha256": e3b.sha256(workbook),
+        "campaign_root": str(campaign_root.resolve()),
+        "campaign_manifest_sha256": e3b.sha256(manifest_path),
+        "campaign_result_sha256": e3b.sha256(result_path),
+    }
+    reference = e3b._classical_reference(
+        campaign, MODEL, campaign_root, e3b.read_json(manifest_path)
+    )
+    assert reference["status"] == "converged"
+    return source, reference
+
+
+def _write_prepared_fixture(
+    root: Path, *, source_barrier: float = 100.0
+) -> tuple[Path, dict[str, Any]]:
+    prepared = root / "prepared"
+    model_root = prepared / "models" / MODEL
+    matched = model_root / "matched-classical"
+    images = model_root / "images"
+    data = prepared / "cp2k-data"
+    matched.mkdir(parents=True)
+    images.mkdir()
+    data.mkdir(parents=True)
+
+    for name in ("BASIS_SET", "GTH_POTENTIALS", "dftd3.dat"):
+        (data / name).write_text(f"fixture {name}\n", encoding="utf-8")
+    for name in ("initial.xyz", "endpoint.xyz"):
+        (model_root / name).write_text("3\nfixture\n", encoding="utf-8")
+    for name in ("initial-opt.inp", "endpoint-opt.inp", "neb.inp", "smoke.inp"):
+        (model_root / name).write_text(
+            f"&GLOBAL\n PROJECT {name}\n&END GLOBAL\n", encoding="utf-8"
+        )
+    for index in range(e3b.IMAGE_COUNT):
+        (images / f"replica-{index:02d}.xyz").write_text(
+            "3\nfixture image\n", encoding="utf-8"
+        )
+    for name in (
+        "in.min.initial",
+        "initial.seed.data",
+        "in.min.endpoint",
+        "endpoint.seed.data",
+        "in.neb",
+    ):
+        (matched / name).write_text(f"fixture {name}\n", encoding="utf-8")
+
+    source, reference = _write_e3a_source(root, source_barrier)
+    method = {
+        "cp2k_version": "2024.3",
+        "cp2k_image_digest": "sha256:" + "a" * 64,
+        "files": {
+            name: {
+                "artifact_path": f"cp2k-data/{name}",
+                "sha256": e3b.sha256(data / name),
+            }
+            for name in ("BASIS_SET", "GTH_POTENTIALS", "dftd3.dat")
         },
     }
-
-
-def _prepared_analysis_fixture() -> dict[str, Any]:
-    return {
+    preparation = {
         "schema": "e3b-cp2k-preparation-v1",
+        "source": source,
+        "method": method,
         "models": {
-            "model": {
-                "atom_identity_sha256": "identity",
-                "classical_reference": _source_reference(),
+            MODEL: {
+                "atom_count": 3,
+                "atom_identity_sha256": "identity-model",
+                "periodic_cell": CELL,
+                "periodic_cell_sha256": e3b.canonical_sha256(CELL),
+                "classical_reference": reference,
             }
         },
     }
+    e3b.write_json(prepared / "preparation.json", preparation)
+    e3b.write_manifest(prepared)
+    return prepared, preparation
 
 
-def _observation_fixture() -> dict[str, Any]:
-    return {
-        "schema": "e3b-cp2k-observations-v1",
-        "models": {
-            "model": {
-                "atom_identity_sha256": "identity",
-                "cp2k": {
-                    "status": "converged",
-                    "timed_out": False,
-                    "scf_converged_all_images": True,
-                    "endpoints_converged": True,
-                    "neb_converged": True,
-                    "barrier_kcal_mol": 112.0,
-                },
-                "matched_classical": {
-                    "status": "converged",
-                    "timed_out": False,
-                    "neb_converged": True,
-                    "barrier_kcal_mol": 102.0,
-                },
-            }
-        },
-    }
-
-
-def test_analysis_refuses_unbound_manual_barriers() -> None:
-    result = e3b.analyze_models(
-        _prepared_analysis_fixture(),
-        _observation_fixture(),
-        transfer_tolerance_kcal_mol=5.0,
-        endorsement_tolerance_kcal_mol=5.0,
+def _identity(project: str, atom_count: int = 3, *, a: float = 10.0) -> str:
+    return (
+        f" GLOBAL| Project name {project}\n"
+        f" - Atoms: {atom_count}\n"
+        f" CELL| Vector a [angstrom]: {a:.8f} 0.00000000 0.00000000\n"
+        " CELL| Vector b [angstrom]: 0.00000000 11.00000000 0.00000000\n"
+        " CELL| Vector c [angstrom]: 0.00000000 0.00000000 12.00000000\n"
     )
-    model = result["models"]["model"]
-    assert model["typed_outcome"] == "incomplete-unverified-observation"
-    assert model["matched_cell_correction_kcal_mol"] is None
-    assert model["calibrated_barrier_kcal_mol"] is None
-    assert model["verdict"] == "no-correction"
 
 
-def test_analysis_refuses_incomplete_source_classical_barrier() -> None:
-    preparation = _prepared_analysis_fixture()
-    preparation["models"]["model"]["classical_reference"]["status"] = (
-        "incomplete-convergence"
-    )
-    result = e3b.analyze_models(preparation, _observation_fixture())
-    model = result["models"]["model"]
-    assert model["typed_outcome"] == "incomplete-source-classical"
-    assert model["calibrated_barrier_kcal_mol"] is None
+def _cp2k_profile(barrier: float) -> list[float]:
+    delta = barrier / e3b.HARTREE_TO_KCAL_MOL
+    return [
+        -100.0,
+        -100.0 + 0.3 * delta,
+        -100.0 + 0.7 * delta,
+        -100.0 + delta,
+        -100.0 + 0.8 * delta,
+        -100.0 + 0.5 * delta,
+        -100.0 + 0.2 * delta,
+        -100.01,
+    ]
 
 
-def _write_raw_fixture(root: Path, *, replica_count: int = 8) -> dict[str, Path]:
+def _lammps_neb_row(barrier: float, max_force: float) -> list[float]:
+    row = [1000.0, max_force, 0.001, 0.0, 0.0, 0.0, barrier, barrier + 1.0, 0.0]
+    energies = [-500.0, -490.0, -480.0, -470.0, -475.0, -485.0, -495.0, -501.0]
+    for index, energy in enumerate(energies):
+        row.extend((index / 7.0, energy))
+    return row
+
+
+def _write_raw_fixture(
+    root: Path,
+    *,
+    model: str = MODEL,
+    cp2k_barrier: float = 112.0,
+    matched_barrier: float = 102.0,
+) -> dict[str, Path]:
     root.mkdir(parents=True)
     paths: dict[str, Path] = {}
-    for role, energy in (("cp2k_initial", -100.0), ("cp2k_endpoint", -100.01)):
-        path = root / f"{role}.log"
+    for role, suffix, energy in (
+        ("cp2k_initial", "initial", -100.0),
+        ("cp2k_endpoint", "endpoint", -100.01),
+    ):
+        path = root / f"{role}.out"
         path.write_text(
-            "SCF run converged in 3 steps\n"
-            f"ENERGY| Total FORCE_EVAL ( QS ) energy [a.u.]: {energy}\n"
-            "GEOMETRY OPTIMIZATION COMPLETED\n"
-            "PROGRAM ENDED AT 2026-09-14\n",
+            _identity(f"e3b-{model}-{suffix}")
+            + " SCF run converged in 3 steps\n"
+            + f" ENERGY| Total FORCE_EVAL ( QS ) energy [a.u.]: {energy}\n"
+            + " GEOMETRY OPTIMIZATION COMPLETED\n"
+            + " PROGRAM ENDED AT 2026-09-14 12:00:00\n",
             encoding="utf-8",
         )
         paths[role] = path
-    band = root / "band.log"
+
+    profile = _cp2k_profile(cp2k_barrier)
+    band = root / "e3b-band.out"
     band.write_text(
-        "".join("SCF run converged in 4 steps\n" for _ in range(replica_count))
-        + f"BAND| Number of replicas {replica_count}\n"
-        + "BAND OPTIMIZATION CONVERGED\nPROGRAM ENDED AT 2026-09-14\n",
+        _identity(f"e3b-{model}-neb")
+        + " BAND TYPE = CI-NEB\n"
+        + " BAND TYPE OPTIMIZATION = DIIS\n"
+        + " STEP NUMBER = 44\n"
+        + f" NUMBER OF NEB REPLICA = {e3b.IMAGE_COUNT}\n"
+        + " ENERGIES [au] = "
+        + " ".join(f"{value:.16f}" for value in profile)
+        + "\n BAND TOTAL ENERGY [au] = -799.0\n"
+        + " RMS DISPLACEMENT = 0.00010 (YES)\n"
+        + " MAX DISPLACEMENT = 0.00020 (YES)\n"
+        + " RMS FORCE = 0.00010 (YES)\n"
+        + " MAX FORCE = 0.00020 (YES)\n"
+        + " PROGRAM ENDED AT 2026-09-14 12:00:00\n",
         encoding="utf-8",
     )
     paths["cp2k_band"] = band
-    energies = root / "replica-energies.log"
-    barrier_hartree = 112.0 / e3b.HARTREE_TO_KCAL_MOL
-    profile = [
-        -100.0,
-        -100.0 + barrier_hartree * 0.3,
-        -100.0 + barrier_hartree * 0.7,
-        -100.0 + barrier_hartree,
-        -100.0 + barrier_hartree * 0.8,
-        -100.0 + barrier_hartree * 0.5,
-        -100.0 + barrier_hartree * 0.2,
-        -100.01,
-    ][:replica_count]
-    energies.write_text(
-        "".join(
-            f"Replica {index + 1} energy [a.u.] = {energy:.16f}\n"
-            for index, energy in enumerate(profile)
-        ),
+    profile_path = root / "e3b-band-final.profile"
+    profile_path.write_text(
+        "ENERGIES [au] = " + " ".join(f"{value:.16f}" for value in profile) + "\n",
         encoding="utf-8",
     )
-    paths["cp2k_replica_energies"] = energies
+    paths["cp2k_band_profile"] = profile_path
+
+    for index, role in enumerate(e3b.CP2K_REPLICA_OUTPUT_ROLES, 1):
+        path = root / f"e3b-{model}-neb-BAND{index:02d}.out"
+        path.write_text(
+            _identity(f"e3b-{model}-neb-BAND{index:02d}")
+            + " SCF run converged in 4 steps\n"
+            + " ENERGY| Total FORCE_EVAL ( QS ) energy [a.u.]: -100.0\n"
+            + " PROGRAM ENDED AT 2026-09-14 12:00:00\n",
+            encoding="utf-8",
+        )
+        paths[role] = path
+
     for role, energy in (("lammps_initial", -500.0), ("lammps_endpoint", -501.0)):
         path = root / f"{role}.log"
         path.write_text(
@@ -358,73 +261,634 @@ def _write_raw_fixture(root: Path, *, replica_count: int = 8) -> dict[str, Path]
             encoding="utf-8",
         )
         paths[role] = path
+
+    header = (
+        "Step MaxReplicaForce MaxAtomForce GradV0 GradV1 GradVc EBF EBR RDT "
+        + " ".join(f"RD{index} PE{index}" for index in range(e3b.IMAGE_COUNT))
+    )
+    preclimb = _lammps_neb_row(90.0, 0.2)
+    climb = _lammps_neb_row(matched_barrier, 0.005)
     neb = root / "neb.screen"
-    row = [1000.0, 0.005, 0.001, 0.0, 0.0, 0.0, 102.0, 103.0, 0.0]
-    row.extend(float(index) for index in range(2 * replica_count))
     neb.write_text(
-        " ".join(str(value) for value in row) + "\nTotal wall time: 0:00:01\n",
+        header
+        + "\n"
+        + " ".join(str(value) for value in preclimb)
+        + "\nSetting up climbing ...\nClimbing replica = 4\n"
+        + header
+        + "\n"
+        + " ".join(str(value) for value in climb)
+        + "\nLoop time of 1.0 on 8 procs for 1000 steps\nTotal wall time: 0:00:01\n",
         encoding="utf-8",
     )
     paths["lammps_neb"] = neb
+    assert set(paths) == set(e3b.RAW_OUTPUT_ROLES)
     return paths
 
 
-def _write_prepared_fixture(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
-    prepared_root = tmp_path / "prepared-evidence"
-    prepared_root.mkdir()
-    preparation = _prepared_analysis_fixture()
-    preparation_path = prepared_root / "preparation.json"
-    e3b.write_json(preparation_path, preparation)
-    e3b.write_manifest(prepared_root)
-    return prepared_root, preparation
+def _fake_executable(path: Path, body: str = "print('fixture executable')\n") -> Path:
+    path.write_text("#!/usr/bin/env python3\n" + body, encoding="utf-8")
+    path.chmod(0o755)
+    return path
 
 
-def test_hash_bound_raw_fixtures_produce_calibration(tmp_path: Path) -> None:
-    prepared_root, preparation = _write_prepared_fixture(tmp_path)
-    raw = _write_raw_fixture(tmp_path / "raw")
-    evidence_root = tmp_path / "evidence"
-    evidence = e3b.collect_evidence(
-        prepared_root=prepared_root,
-        raw_outputs={"model": raw},
-        out=evidence_root,
+def _create_receipt(
+    prepared: Path, raw: dict[str, Path], path: Path, executable: Path
+) -> dict[str, Any]:
+    return e3b.create_execution_receipt(
+        prepared_root=prepared,
+        model=MODEL,
+        raw_outputs=raw,
+        executables={"cp2k": executable, "lammps": executable},
+        executable_identities={"cp2k": "test/fake", "lammps": "test/fake"},
+        commands={unit: [str(executable), unit] for unit in e3b.SOLVER_UNITS},
+        resources={unit: {"ranks": 1, "threads": 1} for unit in e3b.SOLVER_UNITS},
+        out=path,
     )
 
+
+def _collect_bundle(
+    tmp_path: Path,
+    *,
+    source_barrier: float = 100.0,
+    cp2k_barrier: float = 112.0,
+    matched_barrier: float = 102.0,
+) -> tuple[Path, dict[str, Any], Path, dict[str, Any]]:
+    prepared, preparation = _write_prepared_fixture(
+        tmp_path, source_barrier=source_barrier
+    )
+    raw = _write_raw_fixture(
+        tmp_path / "raw",
+        cp2k_barrier=cp2k_barrier,
+        matched_barrier=matched_barrier,
+    )
+    fake = _fake_executable(tmp_path / "solver-fixture")
+    receipt_path = tmp_path / "execution-receipt.json"
+    _create_receipt(prepared, raw, receipt_path, fake)
+    evidence_root = tmp_path / "evidence"
+    evidence = e3b.collect_evidence(
+        prepared_root=prepared,
+        raw_outputs={MODEL: raw},
+        execution_receipts={MODEL: receipt_path},
+        out=evidence_root,
+    )
+    return prepared, preparation, evidence_root, evidence
+
+
+def _parse_cp2k(raw: dict[str, Path], **overrides: Any) -> dict[str, Any]:
+    arguments = {
+        "initial_log": raw["cp2k_initial"],
+        "endpoint_log": raw["cp2k_endpoint"],
+        "band_log": raw["cp2k_band"],
+        "profile_log": raw["cp2k_band_profile"],
+        "replica_logs": [raw[role] for role in e3b.CP2K_REPLICA_OUTPUT_ROLES],
+        "expected_model": MODEL,
+        "expected_atom_count": 3,
+        "expected_cell": CELL,
+    }
+    arguments.update(overrides)
+    return e3b.parse_cp2k_barrier(**arguments)
+
+
+def _parse_lammps(raw: dict[str, Path]) -> dict[str, Any]:
+    return e3b.parse_matched_classical_barrier(
+        initial_log=raw["lammps_initial"],
+        endpoint_log=raw["lammps_endpoint"],
+        neb_log=raw["lammps_neb"],
+    )
+
+
+def test_cp2k_2024_3_native_band_and_replica_outputs_parse(tmp_path: Path) -> None:
+    raw = _write_raw_fixture(tmp_path / "raw")
+    parsed = _parse_cp2k(raw)
+    assert parsed["barrier_kcal_mol"] == pytest.approx(112.0)
+    assert parsed["final_convergence_criteria"] == {
+        "rms_displacement": True,
+        "max_displacement": True,
+        "rms_force": True,
+        "max_force": True,
+    }
+    assert len(parsed["replica_outputs"]) == 8
+    assert all(item["scf_converged"] for item in parsed["replica_outputs"])
+    assert all(item["normal_termination"] for item in parsed["replica_outputs"])
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("wrong-count", "replica count"),
+        ("incomplete-criteria", "criteria incomplete"),
+        ("criterion-no", "did not all pass"),
+        ("missing-replica-log", "replica log count"),
+        ("replica-scf-failure", "SCF did not converge"),
+        ("replica-no-footer", "normal termination"),
+        ("nonfinite-profile", "not finite"),
+        ("malformed-profile", "wrong replica count"),
+    ],
+)
+def test_cp2k_native_parser_fails_closed(
+    tmp_path: Path, mutation: str, message: str
+) -> None:
+    raw = _write_raw_fixture(tmp_path / "raw")
+    replica_logs = [raw[role] for role in e3b.CP2K_REPLICA_OUTPUT_ROLES]
+    if mutation == "wrong-count":
+        raw["cp2k_band"].write_text(
+            raw["cp2k_band"]
+            .read_text()
+            .replace("NUMBER OF NEB REPLICA = 8", "NUMBER OF NEB REPLICA = 7")
+        )
+    elif mutation == "incomplete-criteria":
+        raw["cp2k_band"].write_text(
+            raw["cp2k_band"].read_text().replace(" RMS FORCE = 0.00010 (YES)\n", "")
+        )
+    elif mutation == "criterion-no":
+        raw["cp2k_band"].write_text(
+            raw["cp2k_band"]
+            .read_text()
+            .replace("MAX FORCE = 0.00020 (YES)", "MAX FORCE = 0.00020 (NO)")
+        )
+    elif mutation == "missing-replica-log":
+        replica_logs.pop()
+    elif mutation == "replica-scf-failure":
+        replica_logs[3].write_text(
+            replica_logs[3]
+            .read_text()
+            .replace("SCF run converged in 4 steps", "SCF run NOT converged")
+        )
+    elif mutation == "replica-no-footer":
+        replica_logs[3].write_text(
+            replica_logs[3].read_text().replace("PROGRAM ENDED AT", "STOPPED AT")
+        )
+    elif mutation == "nonfinite-profile":
+        fields = raw["cp2k_band_profile"].read_text().split()
+        fields[6] = "NaN"
+        raw["cp2k_band_profile"].write_text(" ".join(fields) + "\n")
+    else:
+        raw["cp2k_band_profile"].write_text("ENERGIES [au] = -100 -99\n")
+
+    with pytest.raises(ValueError, match=message):
+        _parse_cp2k(raw, replica_logs=replica_logs)
+
+
+def test_cp2k_parser_accepts_numeric_ener_rows(tmp_path: Path) -> None:
+    raw = _write_raw_fixture(tmp_path / "raw")
+    profile = _cp2k_profile(112.0)
+    raw["cp2k_band_profile"].write_text(
+        "# Step Nr. Time[fs] Kin.[a.u.] Temp[K] Pot.[a.u.]\n"
+        + "".join(
+            f"{index} 0.0 0.0 0.0 {energy:.16f} 0.0\n"
+            for index, energy in enumerate(profile)
+        )
+    )
+    assert _parse_cp2k(raw)["barrier_kcal_mol"] == pytest.approx(112.0)
+
+
+def test_cp2k_native_identity_is_cross_checked(tmp_path: Path) -> None:
+    raw = _write_raw_fixture(tmp_path / "raw", model="other")
+    with pytest.raises(ValueError, match="project"):
+        _parse_cp2k(raw)
+
+
+def test_lammps_parser_requires_completed_climbing_phase(tmp_path: Path) -> None:
+    raw = _write_raw_fixture(tmp_path / "raw")
+    parsed = _parse_lammps(raw)
+    assert parsed["barrier_kcal_mol"] == 102.0
+    assert parsed["climbing_phase"] is True
+    assert parsed["endpoint_energy_deltas_kcal_mol"] == {
+        "initial": 0.0,
+        "endpoint": 0.0,
+    }
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("preclimb-only", "climbing phase"),
+        ("missing-second-header", "climbing progress header"),
+        ("aborted", "normal termination after climb"),
+        ("fatal", "fatal/error"),
+        ("climb-unconverged", "did not converge"),
+        ("endpoint-mismatch", "endpoint energies"),
+    ],
+)
+def test_lammps_regular_aborted_or_mismatched_neb_cannot_promote(
+    tmp_path: Path, mutation: str, message: str
+) -> None:
+    raw = _write_raw_fixture(tmp_path / "raw")
+    text = raw["lammps_neb"].read_text()
+    if mutation == "preclimb-only":
+        text = text.split("Setting up climbing")[0] + "Total wall time: 0:00:01\n"
+    elif mutation == "missing-second-header":
+        before, after = text.split("Climbing replica = 4\n", 1)
+        after = after.split("\n", 1)[1]
+        text = before + "Climbing replica = 4\n" + after
+    elif mutation == "aborted":
+        text = text.replace("Loop time of 1.0 on 8 procs for 1000 steps\n", "")
+        text = text.replace("Total wall time: 0:00:01\n", "")
+    elif mutation == "fatal":
+        text += "ERROR: Lost atoms\n"
+    elif mutation == "climb-unconverged":
+        lines = text.splitlines()
+        fields = lines[-3].split()
+        fields[1] = "0.05"
+        lines[-3] = " ".join(fields)
+        text = "\n".join(lines) + "\n"
+    else:
+        lines = text.splitlines()
+        fields = lines[-3].split()
+        fields[10] = "-499.0"
+        lines[-3] = " ".join(fields)
+        text = "\n".join(lines) + "\n"
+    raw["lammps_neb"].write_text(text)
+    with pytest.raises(ValueError, match=message):
+        _parse_lammps(raw)
+
+
+def test_execution_receipt_binds_every_prepared_input_and_raw_output(
+    tmp_path: Path,
+) -> None:
+    prepared, _ = _write_prepared_fixture(tmp_path)
+    raw = _write_raw_fixture(tmp_path / "raw")
+    fake = _fake_executable(tmp_path / "solver")
+    receipt_path = tmp_path / "receipt.json"
+    receipt = _create_receipt(prepared, raw, receipt_path, fake)
+    assert receipt["preparation"]["sha256"] == e3b.sha256(prepared / "preparation.json")
+    assert receipt["periodic_cell_record_sha256"] == e3b.canonical_sha256(CELL)
+    assert set(receipt["raw_outputs"]) == set(e3b.RAW_OUTPUT_ROLES)
+    assert set(receipt["units"]) == set(e3b.SOLVER_UNITS)
+    assert all(unit["prepared_inputs"] for unit in receipt["units"].values())
+    assert receipt["executables"]["cp2k"]["identity"] == "test/fake"
+    assert receipt["executables"]["cp2k"]["identity_verification"] == "test-fixture"
+
+
+def test_collect_requires_receipt_and_rejects_changed_output(tmp_path: Path) -> None:
+    prepared, _ = _write_prepared_fixture(tmp_path)
+    raw = _write_raw_fixture(tmp_path / "raw")
+    with pytest.raises(ValueError, match="execution-receipt model set"):
+        e3b.collect_evidence(
+            prepared_root=prepared,
+            raw_outputs={MODEL: raw},
+            execution_receipts={},
+            out=tmp_path / "missing-receipt",
+        )
+
+    fake = _fake_executable(tmp_path / "solver")
+    receipt_path = tmp_path / "receipt.json"
+    _create_receipt(prepared, raw, receipt_path, fake)
+    raw["cp2k_band"].write_text(raw["cp2k_band"].read_text() + "changed\n")
+    with pytest.raises(ValueError, match="hash mismatch"):
+        e3b.collect_evidence(
+            prepared_root=prepared,
+            raw_outputs={MODEL: raw},
+            execution_receipts={MODEL: receipt_path},
+            out=tmp_path / "changed-output",
+        )
+
+
+def test_collect_rejects_cross_model_swapped_logs_even_with_fresh_receipt(
+    tmp_path: Path,
+) -> None:
+    prepared, _ = _write_prepared_fixture(tmp_path)
+    swapped = _write_raw_fixture(tmp_path / "raw", model="other")
+    fake = _fake_executable(tmp_path / "solver")
+    receipt_path = tmp_path / "receipt.json"
+    _create_receipt(prepared, swapped, receipt_path, fake)
+    with pytest.raises(ValueError, match="project"):
+        e3b.collect_evidence(
+            prepared_root=prepared,
+            raw_outputs={MODEL: swapped},
+            execution_receipts={MODEL: receipt_path},
+            out=tmp_path / "swapped",
+        )
+
+
+def test_analysis_reopens_source_files_and_applies_corrected_outcome(
+    tmp_path: Path,
+) -> None:
+    prepared, preparation, evidence_root, evidence = _collect_bundle(tmp_path)
     result = e3b.analyze_models(
         preparation,
         evidence,
+        prepared_root=prepared,
         evidence_root=evidence_root,
-        preparation_sha256=e3b.sha256(prepared_root / "preparation.json"),
+        preparation_sha256=e3b.sha256(prepared / "preparation.json"),
+        transfer_tolerance_kcal_mol=5.0,
+        endorsement_tolerance_kcal_mol=5.0,
     )
-    model = result["models"]["model"]
-    assert model["typed_outcome"] == "complete-endorsed"
-    assert model["matched_cell_transfer_pass"] is True
+    model = result["models"][MODEL]
+    assert model["typed_outcome"] == "complete-corrected"
     assert model["matched_cell_transfer_delta_kcal_mol"] == pytest.approx(2.0)
     assert model["matched_cell_correction_kcal_mol"] == pytest.approx(10.0)
     assert model["calibrated_barrier_kcal_mol"] == pytest.approx(110.0)
-    assert model["endorsement_delta_kcal_mol"] == pytest.approx(2.0)
+    assert model["endorsement_delta_kcal_mol"] == pytest.approx(10.0)
+    assert model["verdict"] == "corrected"
+
+
+def test_small_cp2k_correction_is_endorsed(tmp_path: Path) -> None:
+    prepared, preparation, evidence_root, evidence = _collect_bundle(
+        tmp_path, cp2k_barrier=105.0
+    )
+    result = e3b.analyze_models(
+        preparation,
+        evidence,
+        prepared_root=prepared,
+        evidence_root=evidence_root,
+        preparation_sha256=e3b.sha256(prepared / "preparation.json"),
+        endorsement_tolerance_kcal_mol=5.0,
+    )
+    model = result["models"][MODEL]
+    assert model["typed_outcome"] == "complete-endorsed"
+    assert model["matched_cell_correction_kcal_mol"] == pytest.approx(3.0)
+    assert model["calibrated_barrier_kcal_mol"] == pytest.approx(103.0)
+    assert model["endorsement_delta_kcal_mol"] == pytest.approx(3.0)
     assert model["verdict"] == "endorsed"
-    e3b.verify_manifest(evidence_root)
 
 
-def test_collect_and_analyze_cli_handlers_use_raw_spec(tmp_path: Path) -> None:
-    prepared_root, _ = _write_prepared_fixture(tmp_path)
-    raw = _write_raw_fixture(tmp_path / "raw-with-arbitrary-names")
+def test_analysis_rehashes_and_reparses_e3a_source_artifacts(tmp_path: Path) -> None:
+    prepared, preparation, evidence_root, evidence = _collect_bundle(tmp_path)
+    source_neb = Path(preparation["source"]["campaign_root"]) / MODEL / "screen.log"
+    source_neb.write_text(source_neb.read_text() + "tampered\n")
+    result = e3b.analyze_models(
+        preparation,
+        evidence,
+        prepared_root=prepared,
+        evidence_root=evidence_root,
+        preparation_sha256=e3b.sha256(prepared / "preparation.json"),
+    )
+    model = result["models"][MODEL]
+    assert model["typed_outcome"] == "incomplete-evidence-integrity"
+    assert "hash mismatch" in model["reason"]
+    assert model["calibrated_barrier_kcal_mol"] is None
+
+
+def test_analysis_rejects_tampered_stored_parser_fields(tmp_path: Path) -> None:
+    prepared, preparation, evidence_root, evidence = _collect_bundle(tmp_path)
+    evidence["models"][MODEL]["cp2k"]["barrier_kcal_mol"] = 1.0
+    result = e3b.analyze_models(
+        preparation,
+        evidence,
+        prepared_root=prepared,
+        evidence_root=evidence_root,
+        preparation_sha256=e3b.sha256(prepared / "preparation.json"),
+    )
+    assert result["models"][MODEL]["typed_outcome"] == "incomplete-evidence-integrity"
+
+
+def _write_smoke_prepared(root: Path) -> Path:
+    prepared = root / "smoke-prepared"
+    model_root = prepared / "models" / "reconstructed-replication"
+    data = prepared / "cp2k-data"
+    model_root.mkdir(parents=True)
+    data.mkdir()
+    (model_root / "smoke.inp").write_text(
+        "&GLOBAL\n RUN_TYPE ENERGY_FORCE\n&END GLOBAL\n"
+        "BASIS_SET_FILE_NAME ../../cp2k-data/BASIS_SET\n"
+        "COORD_FILE_NAME initial.xyz\n"
+    )
+    (model_root / "initial.xyz").write_text("0\nfixture\n")
+    (data / "BASIS_SET").write_text("fixture basis\n")
+    e3b.write_json(
+        prepared / "preparation.json",
+        {
+            "schema": "e3b-cp2k-preparation-v1",
+            "method": {
+                "cp2k_version": "2024.3",
+                "cp2k_image_digest": "sha256:" + "a" * 64,
+            },
+            "models": {
+                "reconstructed-replication": {"atom_identity_sha256": "identity"}
+            },
+        },
+    )
+    e3b.write_manifest(prepared)
+    return prepared
+
+
+def test_smoke_receipt_labels_fake_and_unenforced_declarations(tmp_path: Path) -> None:
+    prepared = _write_smoke_prepared(tmp_path)
+    fake = _fake_executable(
+        tmp_path / "fake-cp2k",
+        "print('SCF run converged in 3 steps')\n"
+        "print('ENERGY| Total FORCE_EVAL ( QS ) energy [a.u.]: -42.25')\n"
+        "print('PROGRAM ENDED AT 2026-09-14')\n",
+    )
+    executable_hash_before = e3b.sha256(fake)
+    runtime = tmp_path / "runtime"
+    receipt = e3b.run_smoke(
+        executable=str(fake),
+        executable_identity="test/fake",
+        prepared_root=prepared,
+        model="reconstructed-replication",
+        runtime_dir=runtime,
+        receipt_path=runtime / "smoke-result.json",
+        timeout_seconds=5.0,
+        mpi_ranks=4,
+        omp_threads=2,
+        memory_limit_mib=512,
+        execution_method="fixture direct launch",
+    )
+    assert receipt["schema"] == "e3b-cp2k-smoke-v3"
+    assert receipt["status"] == "converged"
+    executable = receipt["method"]["resolved_executable_before_launch"]
+    assert executable["identity"] == "test/fake"
+    assert executable["sha256"] == executable_hash_before
+    assert receipt["resource_declarations"]["mpi_ranks"] == {
+        "value": 4,
+        "verification": "declared-not-enforced-by-generic-runner",
+    }
+    assert receipt["resource_declarations"]["memory_limit_mib"]["verification"] == (
+        "declared-not-enforced-by-generic-runner"
+    )
+    assert receipt["environment_controls"]["omp_threads"]["mechanism"] == (
+        "OMP_NUM_THREADS"
+    )
+    assert receipt["external_controller_evidence"] is None
+    assert receipt["cleanup"]["internal_process_group"]["new_session"] is True
+    assert receipt["cleanup"]["internal_process_group"]["subprocess_reaped"] is True
+    assert receipt["cleanup"]["work_directory_removed"] is True
+
+
+def test_smoke_timeout_terminates_descendant_process_group(tmp_path: Path) -> None:
+    prepared = _write_smoke_prepared(tmp_path)
+    marker = tmp_path / "descendant-survived"
+    child_code = (
+        "import signal,time,pathlib; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "time.sleep(1.2); "
+        f"pathlib.Path({str(marker)!r}).write_text('survived')"
+    )
+    fake = _fake_executable(
+        tmp_path / "timeout-cp2k",
+        "import subprocess, sys, time\n"
+        f"subprocess.Popen([sys.executable, '-c', {child_code!r}])\n"
+        "print('started descendant', flush=True)\n"
+        "time.sleep(10)\n",
+    )
+    runtime = tmp_path / "timeout-runtime"
+    receipt = e3b.run_smoke(
+        executable=str(fake),
+        executable_identity="test/fake",
+        prepared_root=prepared,
+        model="reconstructed-replication",
+        runtime_dir=runtime,
+        receipt_path=runtime / "smoke-result.json",
+        timeout_seconds=0.1,
+    )
+    assert receipt["status"] == "incomplete-timeout"
+    cleanup = receipt["cleanup"]["internal_process_group"]
+    assert cleanup["timeout_term_sent"] is True
+    assert cleanup["timeout_kill_sent"] is True
+    assert cleanup["subprocess_reaped"] is True
+    time.sleep(1.3)
+    assert not marker.exists()
+
+
+def test_typed_controller_readback_is_recorded_only_when_verified(
+    tmp_path: Path,
+) -> None:
+    prepared = _write_smoke_prepared(tmp_path)
+    fake = _fake_executable(
+        tmp_path / "fake-cp2k",
+        "print('SCF run converged in 1 steps')\n"
+        "print('ENERGY| Total FORCE_EVAL ( QS ) energy [a.u.]: -1')\n"
+        "print('PROGRAM ENDED AT now')\n",
+    )
+    readback = {"unit": "e3b-smoke.scope", "MemoryMax": 536870912}
+    controller = {
+        "schema": "e3b-controller-readback-v1",
+        "controller": "systemd",
+        "verified": True,
+        "readback": readback,
+        "readback_sha256": e3b.canonical_sha256(readback),
+    }
+    runtime = tmp_path / "controller-runtime"
+    receipt = e3b.run_smoke(
+        executable=str(fake),
+        executable_identity="test/fake",
+        prepared_root=prepared,
+        model="reconstructed-replication",
+        runtime_dir=runtime,
+        receipt_path=runtime / "smoke-result.json",
+        timeout_seconds=2.0,
+        controller_evidence=controller,
+    )
+    assert receipt["external_controller_evidence"] == controller
+
+
+def test_al_causality_rejects_lost_other_oxygen_and_gained_replacement() -> None:
+    atom = e3b.contract.nteme_neb.Atom
+    cell = e3b.contract.nteme_neb.Cell(30.0, 30.0, 30.0, 90.0, 90.0, 90.0)
+    moving = atom(3, "Ar", 0.0, 0.0, 3.0)
+    al = atom(10, "Al1", 0.0, 0.0, 0.0)
+    parent_oxygen = [
+        atom(76, "O1", 1.0, 0.0, 0.0),
+        atom(75, "O1", -1.0, 0.0, 0.0),
+        atom(1, "O2", 0.0, 1.0, 0.0),
+        atom(2, "O2", 0.0, -1.0, 0.0),
+        atom(4, "O3", 0.0, 0.0, 1.0),
+        atom(5, "O3", 0.0, 0.0, -1.0),
+    ]
+    parent = e3b.contract.Model(
+        name="reconstructed-replication",
+        atoms=tuple([moving, al, *parent_oxygen]),
+        cell=cell,
+        metadata={},
+        endpoint_atoms=None,
+    )
+    transformed_oxygen = [
+        replace(item, element="O2") if item.id == 75 else item
+        for item in parent_oxygen
+        if item.id not in {76, 5}
+    ]
+    transformed_oxygen.append(atom(99, "O2", 0.5, 0.5, 0.0))
+    endpoint_moving = replace(moving, z=2.0)
+    transformed_atoms = tuple([moving, al, *transformed_oxygen])
+    transformed = e3b.contract.Model(
+        name="dehydroxylate-lattice",
+        atoms=transformed_atoms,
+        cell=cell,
+        metadata={
+            "transformation": {
+                "selected_oh_oxygen_ids": [75, 76],
+                "residual_oxygen_site_id": 75,
+                "removed_site_ids": [76],
+            },
+            "route": {"moving_site_id": 3},
+        },
+        endpoint_atoms=tuple(
+            endpoint_moving if item.id == 3 else item for item in transformed_atoms
+        ),
+    )
+    gate = e3b._coordination_gate(transformed, parent)
+    candidate = gate["five_coordinate_al_criterion"]["candidates"][0]
+    assert candidate["parent_o_coordination"] == 6
+    assert candidate["transformed_o_coordination"] == 5
+    assert candidate["removed_hydroxyl_o_in_parent_shell"] is True
+    assert candidate["lost_o_neighbor_source_ids"] == [5, 76]
+    assert candidate["gained_o_neighbor_source_ids"] == [99]
+    assert candidate["exact_removed_o_neighbor_change"] is False
+    assert candidate["coordination_change_caused_by_transformation"] is False
+    assert gate["coordination_pass"] is False
+
+
+def test_collect_and_analyze_cli_use_typed_receipt_spec(tmp_path: Path) -> None:
+    prepared, _ = _write_prepared_fixture(tmp_path)
+    raw = _write_raw_fixture(tmp_path / "raw")
+    fake = _fake_executable(tmp_path / "solver")
+    receipt_path = tmp_path / "receipt.json"
     raw_spec = tmp_path / "raw-spec.json"
     e3b.write_json(
         raw_spec,
         {
             "schema": "e3b-raw-output-spec-v1",
             "models": {
-                "model": {role: str(path) for role, path in raw.items()},
+                MODEL: {
+                    "execution_receipt": str(receipt_path),
+                    "outputs": {role: str(path) for role, path in raw.items()},
+                }
             },
         },
     )
+    execution_spec = tmp_path / "execution-spec.json"
+    e3b.write_json(
+        execution_spec,
+        {
+            "schema": "e3b-execution-declarations-v1",
+            "executables": {
+                solver: {"path": str(fake), "identity": "test/fake"}
+                for solver in ("cp2k", "lammps")
+            },
+            "units": {
+                unit: {
+                    "command": [str(fake), unit],
+                    "resources": {"ranks": 1, "threads": 1},
+                }
+                for unit in e3b.SOLVER_UNITS
+            },
+        },
+    )
+    receipt_args = e3b.build_parser().parse_args(
+        [
+            "create-execution-receipt",
+            "--prepared-root",
+            str(prepared),
+            "--model",
+            MODEL,
+            "--raw-spec",
+            str(raw_spec),
+            "--execution-spec",
+            str(execution_spec),
+            "--out",
+            str(receipt_path),
+        ]
+    )
+    assert receipt_args.func(receipt_args) == 0
+    assert receipt_path.is_file()
     evidence_root = tmp_path / "evidence-cli"
     collect_args = e3b.build_parser().parse_args(
         [
             "collect-evidence",
             "--prepared-root",
-            str(prepared_root),
+            str(prepared),
             "--raw-spec",
             str(raw_spec),
             "--out",
@@ -438,7 +902,7 @@ def test_collect_and_analyze_cli_handlers_use_raw_spec(tmp_path: Path) -> None:
         [
             "analyze",
             "--prepared-root",
-            str(prepared_root),
+            str(prepared),
             "--evidence-root",
             str(evidence_root),
             "--out",
@@ -447,375 +911,5 @@ def test_collect_and_analyze_cli_handlers_use_raw_spec(tmp_path: Path) -> None:
     )
     assert analyze_args.func(analyze_args) == 0
     result = e3b.read_json(analysis_root / "analysis.json")
-    assert result["models"]["model"]["typed_outcome"] == "complete-endorsed"
+    assert result["models"][MODEL]["typed_outcome"] == "complete-corrected"
     e3b.verify_manifest(analysis_root)
-
-
-def test_analysis_reparses_raw_files_and_rejects_tampered_evidence(
-    tmp_path: Path,
-) -> None:
-    prepared_root, preparation = _write_prepared_fixture(tmp_path)
-    evidence_root = tmp_path / "evidence"
-    evidence = e3b.collect_evidence(
-        prepared_root=prepared_root,
-        raw_outputs={"model": _write_raw_fixture(tmp_path / "raw")},
-        out=evidence_root,
-    )
-    evidence["models"]["model"]["cp2k"]["barrier_kcal_mol"] = 1.0
-
-    result = e3b.analyze_models(
-        preparation,
-        evidence,
-        evidence_root=evidence_root,
-        preparation_sha256=e3b.sha256(prepared_root / "preparation.json"),
-    )
-    assert result["models"]["model"]["typed_outcome"] == "incomplete-evidence-integrity"
-    assert result["models"]["model"]["calibrated_barrier_kcal_mol"] is None
-
-
-def test_analysis_rejects_raw_output_changed_after_collection(tmp_path: Path) -> None:
-    prepared_root, preparation = _write_prepared_fixture(tmp_path)
-    evidence_root = tmp_path / "evidence"
-    evidence = e3b.collect_evidence(
-        prepared_root=prepared_root,
-        raw_outputs={"model": _write_raw_fixture(tmp_path / "raw")},
-        out=evidence_root,
-    )
-    raw_path = (
-        evidence_root / evidence["models"]["model"]["raw_outputs"]["cp2k_band"]["path"]
-    )
-    raw_path.write_text(raw_path.read_text() + "tampered\n")
-
-    result = e3b.analyze_models(
-        preparation,
-        evidence,
-        evidence_root=evidence_root,
-        preparation_sha256=e3b.sha256(prepared_root / "preparation.json"),
-    )
-    model = result["models"]["model"]
-    assert model["typed_outcome"] == "incomplete-evidence-integrity"
-    assert model["matched_cell_correction_kcal_mol"] is None
-
-
-def test_analysis_rejects_nominally_converged_unbound_source(tmp_path: Path) -> None:
-    prepared_root, preparation = _write_prepared_fixture(tmp_path)
-    del preparation["models"]["model"]["classical_reference"]["raw_endpoint_outputs"]
-    evidence_root = tmp_path / "evidence"
-    evidence = e3b.collect_evidence(
-        prepared_root=prepared_root,
-        raw_outputs={"model": _write_raw_fixture(tmp_path / "raw")},
-        out=evidence_root,
-    )
-
-    result = e3b.analyze_models(
-        preparation,
-        evidence,
-        evidence_root=evidence_root,
-        preparation_sha256=e3b.sha256(prepared_root / "preparation.json"),
-    )
-    model = result["models"]["model"]
-    assert model["typed_outcome"] == "incomplete-evidence-integrity"
-    assert model["calibrated_barrier_kcal_mol"] is None
-
-
-@pytest.mark.parametrize(
-    ("mutation", "message"),
-    [
-        ("missing-normal-end", "normal termination"),
-        ("missing-scf", "SCF"),
-        ("missing-band-convergence", "BAND convergence"),
-        ("wrong-replica-count", "replica count"),
-        ("nonfinite-energy", "finite"),
-    ],
-)
-def test_cp2k_raw_parser_fails_closed(
-    tmp_path: Path, mutation: str, message: str
-) -> None:
-    raw = _write_raw_fixture(
-        tmp_path / "raw", replica_count=7 if mutation == "wrong-replica-count" else 8
-    )
-    if mutation == "missing-normal-end":
-        raw["cp2k_initial"].write_text(
-            raw["cp2k_initial"].read_text().replace("PROGRAM ENDED AT", "STOPPED AT")
-        )
-    elif mutation == "missing-scf":
-        raw["cp2k_initial"].write_text(
-            raw["cp2k_initial"].read_text().replace("SCF run converged", "SCF run")
-        )
-    elif mutation == "missing-band-convergence":
-        raw["cp2k_band"].write_text(
-            raw["cp2k_band"]
-            .read_text()
-            .replace("BAND OPTIMIZATION CONVERGED", "BAND OPTIMIZATION STOPPED")
-        )
-    elif mutation == "nonfinite-energy":
-        lines = raw["cp2k_replica_energies"].read_text().splitlines()
-        lines[3] = "Replica 4 energy [a.u.] = NaN"
-        raw["cp2k_replica_energies"].write_text("\n".join(lines) + "\n")
-
-    with pytest.raises(ValueError, match=message):
-        e3b.parse_cp2k_barrier(
-            initial_log=raw["cp2k_initial"],
-            endpoint_log=raw["cp2k_endpoint"],
-            band_log=raw["cp2k_band"],
-            replica_energies=raw["cp2k_replica_energies"],
-            expected_replicas=8,
-        )
-
-
-def test_cp2k_parser_accepts_replica_block_energy_output(tmp_path: Path) -> None:
-    raw = _write_raw_fixture(tmp_path / "raw")
-    blocks = []
-    for line in raw["cp2k_replica_energies"].read_text().splitlines():
-        match = e3b.re.match(r"Replica (\d+) energy \[a.u.\] = (\S+)", line)
-        assert match is not None
-        blocks.append(
-            f"----- REPLICA Nr. {match.group(1)} -----\n"
-            "ENERGY| Total FORCE_EVAL ( QS ) energy [a.u.]: "
-            f"{match.group(2)}\n"
-        )
-    raw["cp2k_replica_energies"].write_text("".join(blocks))
-
-    parsed = e3b.parse_cp2k_barrier(
-        initial_log=raw["cp2k_initial"],
-        endpoint_log=raw["cp2k_endpoint"],
-        band_log=raw["cp2k_band"],
-        replica_energies=raw["cp2k_replica_energies"],
-    )
-    assert parsed["barrier_kcal_mol"] == pytest.approx(112.0)
-
-
-@pytest.mark.parametrize(
-    "mutation",
-    ["missing-normal-end", "unconverged-endpoint", "wrong-replica-count"],
-)
-def test_matched_classical_raw_parser_fails_closed(
-    tmp_path: Path, mutation: str
-) -> None:
-    raw = _write_raw_fixture(tmp_path / "raw")
-    if mutation == "missing-normal-end":
-        raw["lammps_initial"].write_text(
-            raw["lammps_initial"].read_text().replace("Total wall time", "Stopped")
-        )
-    elif mutation == "unconverged-endpoint":
-        raw["lammps_initial"].write_text(
-            raw["lammps_initial"].read_text().replace("0.005", "0.05")
-        )
-    else:
-        fields = raw["lammps_neb"].read_text().splitlines()[0].split()
-        raw["lammps_neb"].write_text(
-            " ".join(fields[:-2]) + "\nTotal wall time: 0:00:01\n"
-        )
-
-    with pytest.raises(ValueError):
-        e3b.parse_matched_classical_barrier(
-            initial_log=raw["lammps_initial"],
-            endpoint_log=raw["lammps_endpoint"],
-            neb_log=raw["lammps_neb"],
-        )
-
-
-@pytest.mark.parametrize(
-    ("mutation", "outcome"),
-    [
-        (("cp2k", "status", "incomplete-scf"), "incomplete-scf"),
-        (("cp2k", "status", "incomplete-timeout"), "incomplete-timeout"),
-        (("cp2k", "status", "incomplete-convergence"), "incomplete-convergence"),
-        (
-            ("matched_classical", "status", "incomplete-convergence"),
-            "incomplete-matched-classical",
-        ),
-    ],
-)
-def test_analysis_refuses_incomplete_results(
-    mutation: tuple[str, str, object], outcome: str
-) -> None:
-    observations = _observation_fixture()
-    section, field, value = mutation
-    observations["models"]["model"][section][field] = value
-    result = e3b.analyze_models(
-        _prepared_analysis_fixture(), observations, transfer_tolerance_kcal_mol=5.0
-    )
-    model = result["models"]["model"]
-    assert model["typed_outcome"] == outcome
-    assert model["matched_cell_correction_kcal_mol"] is None
-    assert model["calibrated_barrier_kcal_mol"] is None
-
-
-def test_analysis_does_not_trust_manual_transfer_numbers() -> None:
-    observations = _observation_fixture()
-    observations["models"]["model"]["matched_classical"]["barrier_kcal_mol"] = 106.0
-    result = e3b.analyze_models(
-        _prepared_analysis_fixture(), observations, transfer_tolerance_kcal_mol=5.0
-    )
-    model = result["models"]["model"]
-    assert model["typed_outcome"] == "incomplete-unverified-observation"
-    assert model["matched_cell_transfer_pass"] is False
-    assert model["matched_cell_correction_kcal_mol"] is None
-
-
-def test_analysis_rejects_atom_identity_drift() -> None:
-    observations = _observation_fixture()
-    observations["models"]["model"]["atom_identity_sha256"] = "different"
-    result = e3b.analyze_models(_prepared_analysis_fixture(), observations)
-    model = result["models"]["model"]
-    assert model["typed_outcome"] == "incomplete-atom-identity"
-    assert model["matched_cell_correction_kcal_mol"] is None
-
-
-def test_analyze_command_generates_result_and_manifest(tmp_path: Path) -> None:
-    prepared_root = tmp_path / "prepared"
-    prepared_root.mkdir()
-    preparation_path = prepared_root / "preparation.json"
-    preparation = _prepared_analysis_fixture()
-    preparation_path.write_text(
-        json.dumps(preparation, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    e3b.write_manifest(prepared_root)
-    observations = _observation_fixture()
-    observations["preparation_sha256"] = e3b.sha256(preparation_path)
-    observations_path = tmp_path / "observations.json"
-    observations_path.write_text(
-        json.dumps(observations, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    out = tmp_path / "analysis"
-    args = e3b.argparse.Namespace(
-        prepared_root=prepared_root,
-        observations=observations_path,
-        out=out,
-        transfer_tolerance=5.0,
-        endorsement_tolerance=5.0,
-    )
-
-    assert e3b.command_analyze(args) == 2
-    result = json.loads((out / "analysis.json").read_text(encoding="utf-8"))
-    assert (
-        result["models"]["model"]["typed_outcome"]
-        == "incomplete-unverified-observation"
-    )
-    e3b.verify_manifest(out)
-
-
-@pytest.mark.skipif(
-    not WORKBOOK.exists() or not CAMPAIGN.exists(),
-    reason="hash-pinned E3a evidence unavailable",
-)
-def test_real_e3a_inputs_prepare_three_periodic_spot_checks(tmp_path: Path) -> None:
-    pytest.importorskip("openpyxl")
-    out = tmp_path / "prepared"
-    preparation = e3b.prepare_campaign(
-        workbook=WORKBOOK,
-        campaign_root=CAMPAIGN,
-        out=out,
-        method=method_files(tmp_path),
-    )
-
-    assert preparation["schema"] == "e3b-cp2k-preparation-v1"
-    assert tuple(preparation["models"]) == e3b.MODEL_ORDER
-    assert preparation["source"]["workbook_sha256"] == e3b.WORKBOOK_SHA256
-    assert preparation["source"]["campaign_result_sha256"] == (
-        e3b.CAMPAIGN_RESULT_SHA256
-    )
-    assert tuple(preparation["source"]["reduction"]["window_start"]) == (5, 2)
-
-    expected_atoms = {
-        "reconstructed-replication": 334,
-        "dehydroxylate-lattice": 331,
-        "xenon-divacancy": 334,
-    }
-    for name, record in preparation["models"].items():
-        assert record["atom_count"] == expected_atoms[name]
-        assert record["supercell"] == [2, 2, 1]
-        assert record["gates"]["all_pass"] is True
-        assert abs(record["gates"]["net_charge_e3a_e"]) <= 1.0e-8
-        assert record["gates"]["route_pass"] is True
-        assert record["gates"]["identity_pass"] is True
-        model_dir = out / "models" / name
-        neb_text = (model_dir / "neb.inp").read_text(encoding="utf-8")
-        assert neb_text.count("&REPLICA") == 8
-        assert "BAND_TYPE CI-NEB" in neb_text
-        assert "TYPE DFTD3" in neb_text
-        assert "PARAMETER_FILE_NAME ../../cp2k-data/dftd3.dat" in neb_text
-        assert len(list((model_dir / "images").glob("replica-*.xyz"))) == 8
-        atom_map = json.loads((model_dir / "atom-map.json").read_text())
-        assert len(atom_map["atoms"]) == expected_atoms[name]
-        assert len({atom["source_id"] for atom in atom_map["atoms"]}) == len(
-            atom_map["atoms"]
-        )
-        assert (model_dir / "matched-classical" / "in.neb").is_file()
-
-    dehyd = preparation["models"]["dehydroxylate-lattice"]
-    gate = dehyd["gates"]
-    assert gate["five_coordinate_al_ids"] == [10, 11]
-    assert gate["coordination_pass"] is True
-    criterion = gate["five_coordinate_al_criterion"]
-    assert criterion["schema"] == "e3b-five-coordinate-al-criterion-v1"
-    assert criterion["parent_model"] == "reconstructed-replication"
-    assert criterion["al_o_cutoff_angstrom"] == 2.3
-    assert criterion["route_interaction_cutoff_angstrom"] == 6.0
-    assert criterion["removed_hydroxyl_oxygen_ids"] == [76]
-    assert criterion["candidate_al_source_ids"] == [10, 11]
-    for candidate in criterion["candidates"]:
-        assert candidate["parent_o_coordination"] == 6
-        assert candidate["transformed_o_coordination"] == 5
-        assert candidate["removed_hydroxyl_o_in_parent_shell"] is True
-        assert candidate["removed_hydroxyl_o_declared_removed"] is True
-        assert candidate["removed_hydroxyl_o_absent_from_transformed_model"] is True
-        assert candidate["route_interaction_pass"] is True
-        assert len(candidate["route_image_distances_angstrom"]) == 8
-        assert candidate["minimum_route_distance_angstrom"] <= 6.0
-    assert dehyd["scientific_scope"] == (
-        "local post-dehydroxylation Ar hop; not a dehydroxylation reaction path"
-    )
-
-    for record in preparation["models"].values():
-        source = record["classical_reference"]
-        assert source["schema"] == "e3a-source-barrier-reference-v1"
-        assert source["status"] == "incomplete-convergence"
-        assert source["campaign_result"]["sha256"] == e3b.CAMPAIGN_RESULT_SHA256
-        assert len(source["campaign_model_record_sha256"]) == 64
-        assert len(source["raw_neb_output"]["sha256"]) == 64
-        assert set(source["raw_endpoint_outputs"]) == {"initial", "endpoint"}
-        assert all(
-            len(item["sha256"]) == 64
-            for item in source["raw_endpoint_outputs"].values()
-        )
-        assert source["convergence"]["independent_parser"] == (
-            "e3a_campaign.parse_last_thermo+parse_neb"
-        )
-        assert source["convergence"]["converged_to_requested_ftol"] is False
-        assert (
-            source["convergence"]["max_replica_force_kcal_mol_angstrom"]
-            > (source["convergence"]["requested_ftol_kcal_mol_angstrom"])
-        )
-
-    source_atoms, source_cell, barriers = e3b.contract.nteme_neb.read_workbook(WORKBOOK)
-    route = e3b.contract.nteme_neb.select_route(barriers, "divacancy", 1)
-    pristine, target_cell, _ = e3b.reduce_pristine(source_atoms, source_cell)
-    built = {
-        model.name: model
-        for model in e3b.build_spot_models(pristine, target_cell, route)
-    }
-    parent_model = built["reconstructed-replication"]
-    dehyd_model = built["dehydroxylate-lattice"]
-    bad_transformation = dict(dehyd_model.metadata["transformation"])
-    bad_transformation["removed_site_ids"] = [81, 84]
-    bad_model = e3b.replace(
-        dehyd_model,
-        metadata={**dehyd_model.metadata, "transformation": bad_transformation},
-    )
-    provenance_gate = e3b._coordination_gate(bad_model, parent_model)
-    assert provenance_gate["five_coordinate_al_ids"] == [10, 11]
-    assert provenance_gate["coordination_pass"] is False
-    assert all(
-        candidate["route_interaction_pass"] is True
-        and candidate["removed_hydroxyl_o_declared_removed"] is False
-        for candidate in provenance_gate["five_coordinate_al_criterion"]["candidates"]
-    )
-
-    manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
-    assert "manifest.json" not in {entry["path"] for entry in manifest["files"]}
-    for entry in manifest["files"]:
-        artifact = out / entry["path"]
-        assert entry["bytes"] == artifact.stat().st_size
-        assert entry["sha256"] == e3b.sha256(artifact)
