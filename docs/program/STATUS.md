@@ -4,6 +4,8 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-14 07:24 PDT — (hermes-macbot-one; profile=laptop) — Tightened the program protocol so a mission-control queue pointer cannot close until the same PR records the board card's final `done`/`blocked` state and matching PLAN row; `[ORPHAN]` / `[DRIFT]` now name the enforced failure mode.
+
 - 2026-09-14 06:41 PDT — (hermes-custom-build-001; profile=workstation) — A3 and A2b BLOCKED ON VICTOR after A9b's verified negative result: 232/232 stationary trajectories at 298 K / pH 4 observed zero biased original-lattice Si/Al releases, leaving all seven families censored/unrankable with no top-k or irrelevant set. No replication or QM is authorized. Recommendation: locate an observable-release regime with the approximate deck at 350–450 K and/or pH 3 before re-ranking; mechanism/deck revision or accelerated rare-event sampling are the alternatives. The daily omnibus-supervisor digest re-surfaces the decision until ruled.
 
 - 2026-09-14 06:01 PDT — (hermes-custom-build-001; profile=workstation) — A9b SENSITIVITY RANKING DONE with a verified negative survey result: the bounded 29 × 8 campaign completed all 232 trajectories and every scenario passed stationarity, but independent raw-artifact replay confirms zero biased original-lattice Si/Al observations. Rates, stoichiometry, laboratory gaps, all seven family responses, and top-k remain censored/unrankable; no family is demonstrated irrelevant. Evidence: `docs/program/results/A9b-sensitivity-ranking.md`.
