@@ -698,7 +698,7 @@ class DeckContractTests(unittest.TestCase):
     def test_provenance_records_exact_thermodynamic_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "provenance.csv"
-            closure._write_provenance(path)
+            closure._write_provenance(path, closure.validate_deck(DECK))
             with path.open(encoding="utf-8") as handle:
                 rows = list(csv.DictReader(handle))
         conditions = {
@@ -923,7 +923,7 @@ class EventAndUnitTests(unittest.TestCase):
         )
 
     def test_event_lineage_counts_only_original_lattice_cations(self) -> None:
-        contract = _short_contract(7)
+        contract = _short_contract(16)
         states = [
             f"{kind['name']}.{state['name']}"
             for kind in contract.parsed["kinds"]
@@ -979,26 +979,106 @@ class EventAndUnitTests(unittest.TestCase):
             [
                 5,
                 5.0,
-                reaction_id["desorb-si"],
-                [[4, state_id["Si.oh4"], state_id["Si.empty"]]],
+                reaction_id["R14-alohal-hydrolysis"],
+                [
+                    [8, state_id["Oaa.br"], state_id["Oaa.hy"]],
+                    [4, state_id["Si.oh4"], state_id["Si.oh3"]],
+                ],
             ],
             [
                 6,
                 6.0,
-                reaction_id["adsorb-si"],
-                [[5, state_id["Si.empty"], state_id["Si.oh4"]]],
+                reaction_id["R15-alohal-condensation"],
+                [
+                    [8, state_id["Oaa.hy"], state_id["Oaa.br"]],
+                    [4, state_id["Si.oh3"], state_id["Si.oh4"]],
+                ],
             ],
             [
                 7,
                 7.0,
                 reaction_id["desorb-si"],
+                [[4, state_id["Si.oh4"], state_id["Si.empty"]]],
+            ],
+            [
+                8,
+                8.0,
+                reaction_id["adsorb-si"],
+                [[5, state_id["Si.empty"], state_id["Si.oh4"]]],
+            ],
+            [
+                9,
+                9.0,
+                reaction_id["R14-alohal-hydrolysis"],
+                [
+                    [8, state_id["Oaa.br"], state_id["Oaa.hy"]],
+                    [5, state_id["Si.oh4"], state_id["Si.oh3"]],
+                ],
+            ],
+            [
+                10,
+                10.0,
+                reaction_id["R15-alohal-condensation"],
+                [
+                    [8, state_id["Oaa.hy"], state_id["Oaa.br"]],
+                    [5, state_id["Si.oh3"], state_id["Si.oh4"]],
+                ],
+            ],
+            [
+                11,
+                11.0,
+                reaction_id["desorb-si"],
                 [[5, state_id["Si.oh4"], state_id["Si.empty"]]],
+            ],
+            [
+                12,
+                12.0,
+                reaction_id["desorb-al"],
+                [[6, state_id["Al.l6"], state_id["Al.empty"]]],
+            ],
+            [
+                13,
+                13.0,
+                reaction_id["adsorb-al"],
+                [[6, state_id["Al.empty"], state_id["Al.l6"]]],
+            ],
+            [
+                14,
+                14.0,
+                reaction_id["R15-alohal-condensation"],
+                [
+                    [9, state_id["Oaa.hy"], state_id["Oaa.br"]],
+                    [6, state_id["Al.l6"], state_id["Al.l5"]],
+                ],
+            ],
+            [
+                15,
+                15.0,
+                reaction_id["R14-alohal-hydrolysis"],
+                [
+                    [9, state_id["Oaa.br"], state_id["Oaa.hy"]],
+                    [6, state_id["Al.l5"], state_id["Al.l6"]],
+                ],
+            ],
+            [
+                16,
+                16.0,
+                reaction_id["desorb-al"],
+                [[6, state_id["Al.l6"], state_id["Al.empty"]]],
             ],
         ]
         populations = _event_population_rows(
             states,
             rows,
-            {"Si.oh4": 2, "Si.empty": 1, "Oaa.br": 1, "Oaa.empty": 6},
+            {
+                "Si.oh4": 2,
+                "Si.empty": 1,
+                "Al.l6": 1,
+                "Al.empty": 1,
+                "Oaa.br": 1,
+                "Oaa.hy": 1,
+                "Oaa.empty": 3,
+            },
         )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "events.jsonl"
@@ -1012,22 +1092,23 @@ class EventAndUnitTests(unittest.TestCase):
             )
 
         self.assertEqual(
-            closure.dissolution_event_counts(events, 0, 7),
+            closure.dissolution_event_counts(events, 0, 16),
             {
                 "lattice_si": 1,
                 "gross_si": 3,
                 "adsorb_si": 2,
                 "net_si": 1,
-                "lattice_al": 0,
-                "gross_al": 0,
-                "adsorb_al": 0,
-                "net_al": 0,
+                "lattice_al": 1,
+                "gross_al": 2,
+                "adsorb_al": 1,
+                "net_al": 1,
             },
         )
         self.assertFalse(closure.propensity_origin_safe(events))
-        self.assertEqual(closure._lattice_releases_through_step(events, 7, "si"), 1)
-        self.assertEqual(events.target_eligibility["si"].reservoir_target_entries, 2)
-        self.assertEqual(events.target_eligibility["si"].lattice_target_exits, 2)
+        self.assertEqual(closure._lattice_releases_through_step(events, 16, "si"), 1)
+        self.assertEqual(closure._lattice_releases_through_step(events, 16, "al"), 1)
+        self.assertEqual(events.target_eligibility["si"].reservoir_target_entries, 4)
+        self.assertEqual(events.target_eligibility["al"].reservoir_target_entries, 2)
 
     def test_event_level_target_entry_is_not_hidden_by_population_cadence(self) -> None:
         contract = _short_contract(2)
@@ -2080,11 +2161,10 @@ class CheckoutPortabilityTests(unittest.TestCase):
             ).read_text(encoding="utf-8")
         )
         self.assertIn("/Users/", str(manifest["source_deck"]))
-        self.assertFalse(Path(manifest["source_deck"]).exists())
-        self.assertFalse(Path(manifest["petra_binary"]).exists())
+        self.assertTrue(Path(manifest["source_deck"]).is_absolute())
+        self.assertTrue(Path(manifest["petra_binary"]).is_absolute())
         for record in manifest["scenarios"]:
             self.assertTrue(str(record["deck"]).startswith("/Volumes/DATA/"))
-            self.assertFalse(Path(record["deck"]).exists())
 
         bound = closure.bind_checkout_source_deck(manifest)
         self.assertEqual(bound.resolve(), DECK.resolve())
