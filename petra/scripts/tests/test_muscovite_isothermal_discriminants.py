@@ -92,6 +92,23 @@ class E4bDeckTests(unittest.TestCase):
         self.assertTrue(all(float(row["estimated_y_uncertainty"]) > 0 for row in rows))
         self.assertEqual({int(row["grain_size_um"]) for row in rows}, {58, 165, 3000})
 
+    def test_h2o_activity_scales_forward_dehydroxylation_only(self) -> None:
+        hydrothermal = e4b.render_e4b_deck((4, 4, 6), 700, "hydrothermal-2kbar-screen")
+        vacuum = e4b.render_e4b_deck((4, 4, 6), 700, "vacuum")
+        for text in (hydrothermal, vacuum):
+            names = [rule["name"] for rule in tomllib.loads(text)["dynamics"]["rules"]]
+            self.assertEqual(
+                [name for name in names if "dehydrox" in name],
+                ["dehydroxylate_pair"],
+            )
+        doc = " ".join((e4b.__doc__ or "").split())
+        self.assertNotIn("reversible dehydroxylation", doc)
+        self.assertNotIn("reverse rate", doc)
+        self.assertIn(
+            "H2O activity scales only the forward dehydroxylate_pair rate",
+            doc,
+        )
+
 
 class AggregationTests(unittest.TestCase):
     def test_bootstrap_mean_interval_is_deterministic(self) -> None:

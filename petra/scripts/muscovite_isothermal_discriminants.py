@@ -3,9 +3,10 @@
 
 This is a hypothesis screen, not a fit.  It combines the E4a surface-gated deck
 with (1) explicit fast-access 36Ar reservoir rules, (2) E3a's Xe barrier as a
-labelled screen, and (3) a reversible dehydroxylation proxy whose reverse rate
-is controlled by H2O activity.  The analysis applies the same infinite-cylinder
-cumulative-loss inversion used by Sletten & Onstott (1998).
+labelled screen, and (3) a forward dehydroxylation proxy: H2O activity scales
+only the forward dehydroxylate_pair rate; there is no reverse dehydroxylation
+rule.  The analysis applies the same infinite-cylinder cumulative-loss inversion
+used by Sletten & Onstott (1998).
 """
 
 from __future__ import annotations
