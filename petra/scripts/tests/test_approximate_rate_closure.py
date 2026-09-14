@@ -39,19 +39,56 @@ def _points(
     area_final: float = 100.0,
     solid_si_final: int = 50,
     solid_al_final: int = 50,
+    solid_si_samples: list[int] | None = None,
+    solid_al_samples: list[int] | None = None,
+    si_propensities: list[float] | None = None,
+    al_propensities: list[float] | None = None,
 ) -> list:
     al_increments = si_increments if al_increments is None else al_increments
+    sample_count = len(si_increments) + 1
+    solid_si_samples = (
+        [50] * (sample_count - 1) + [solid_si_final]
+        if solid_si_samples is None
+        else solid_si_samples
+    )
+    solid_al_samples = (
+        [50] * (sample_count - 1) + [solid_al_final]
+        if solid_al_samples is None
+        else solid_al_samples
+    )
+    assert len(solid_si_samples) == sample_count
+    assert len(solid_al_samples) == sample_count
+    si_propensities = (
+        [1.0] * sample_count if si_propensities is None else si_propensities
+    )
+    al_propensities = (
+        [1.0] * sample_count if al_propensities is None else al_propensities
+    )
+    assert len(si_propensities) == sample_count
+    assert len(al_propensities) == sample_count
     cumulative_si = 0
     cumulative_al = 0
-    points = [closure.SteadyPoint(0, 0.0, 0, 0, 100.0, 50, 50)]
+    points = [
+        closure.SteadyPoint(
+            0,
+            0.0,
+            0,
+            0,
+            100.0,
+            solid_si_samples[0],
+            solid_al_samples[0],
+            si_propensities[0],
+            al_propensities[0],
+        )
+    ]
     for index, (si_increment, al_increment) in enumerate(
         zip(si_increments, al_increments, strict=True), start=1
     ):
         cumulative_si += si_increment
         cumulative_al += al_increment
         area = area_final if index == len(si_increments) else 100.0
-        solid_si = solid_si_final if index == len(si_increments) else 50
-        solid_al = solid_al_final if index == len(si_increments) else 50
+        solid_si = solid_si_samples[index]
+        solid_al = solid_al_samples[index]
         if area == 0:
             solid_si = solid_al = 0
         points.append(
@@ -63,6 +100,8 @@ def _points(
                 area,
                 solid_si,
                 solid_al,
+                si_propensities[index],
+                al_propensities[index],
             )
         )
     return points
@@ -141,12 +180,12 @@ def _build_synthetic_campaign(root: Path) -> tuple[Path, Path]:
                 "reactions": reaction_names,
             }
             event_rows = []
-            for index in range(1, 11):
+            for index in range(1, 21):
                 forward = index % 2 == 1
                 event_rows.append(
                     [
-                        index * 2000,
-                        float((index + 1) // 2),
+                        index * 10_000,
+                        float(index),
                         reaction_ids[
                             "R14-alohal-hydrolysis"
                             if forward
@@ -170,13 +209,13 @@ def _build_synthetic_campaign(root: Path) -> tuple[Path, Path]:
             )
             population_rows = []
             observable_rows = []
-            for index in range(11):
+            for index in range(21):
                 counts = {state: 0 for state in states}
                 counts["Si.oh4"] = 10
                 counts["Al.l6"] = 10
                 counts["Oaa.br"] = int(index % 2 == 0)
                 counts["Oaa.hy"] = int(index % 2 == 1)
-                step = index * 2000
+                step = index * 10_000
                 population_rows.append({"step": step, "time": float(index), **counts})
                 observable_time = 0.0 if index == 0 else float(index) + 1.0e-7
                 values = {
@@ -286,9 +325,77 @@ def _build_synthetic_campaign(root: Path) -> tuple[Path, Path]:
     return raw, root / "derived"
 
 
+def _contaminate_one_run_with_adsorption(raw: Path, scenario: str) -> None:
+    run = raw / "runs" / scenario / "replica-00-seed-90401" / "events.jsonl"
+    rows = [json.loads(line) for line in run.read_text(encoding="utf-8").splitlines()]
+    header = rows[0]
+    state_ids = {name: index for index, name in enumerate(header["states"])}
+    rows[-2] = [
+        190_000,
+        19.0,
+        header["reactions"].index("adsorb-si"),
+        [[4, state_ids["Si.empty"], state_ids["Si.oh4"]]],
+    ]
+    rows[-1] = [
+        200_000,
+        20.0,
+        header["reactions"].index("R14-alohal-hydrolysis"),
+        [[0, state_ids["Oaa.br"], state_ids["Oaa.hy"]]],
+    ]
+    run.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    checkpoint_path = raw / "checkpoint.json"
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    receipt = next(
+        receipt
+        for receipt in checkpoint["receipts"]
+        if receipt["scenario"] == scenario and receipt["replica"] == 0
+    )
+    receipt["sha256"]["events.jsonl"] = closure.sha256_file(run)
+    closure.write_json_atomic(checkpoint_path, checkpoint)
+    manifest_path = raw / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["checkpoint_sha256"] = closure.sha256_file(checkpoint_path)
+    closure.write_json_atomic(manifest_path, manifest)
+
+
+def _make_one_run_propensity_nonstationary(raw: Path, scenario: str) -> None:
+    path = raw / "runs" / scenario / "replica-00-seed-90401" / "observables.csv"
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        fields = reader.fieldnames
+        rows = list(reader)
+    assert fields is not None
+    desorb_indices = {
+        str(index)
+        for index, entry in enumerate(closure.REACTION_REGISTRY)
+        if entry.name in {"desorb-si", "desorb-al"}
+    }
+    for row in rows:
+        if row["kind"] == "event_rates" and row["index"] in desorb_indices:
+            block = min(int(row["step"]) // 40_000, 4)
+            row["value"] = str(float(row["value"]) * (2**block))
+    closure._write_csv_atomic(path, fields, rows)
+    checkpoint_path = raw / "checkpoint.json"
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    receipt = next(
+        receipt
+        for receipt in checkpoint["receipts"]
+        if receipt["scenario"] == scenario and receipt["replica"] == 0
+    )
+    receipt["sha256"]["observables.csv"] = closure.sha256_file(path)
+    closure.write_json_atomic(checkpoint_path, checkpoint)
+    manifest_path = raw / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["checkpoint_sha256"] = closure.sha256_file(checkpoint_path)
+    closure.write_json_atomic(manifest_path, manifest)
+
+
 class DeckContractTests(unittest.TestCase):
     def test_canonical_deck_and_family_partition(self) -> None:
         contract = closure.validate_deck(DECK)
+        self.assertEqual(contract.step_limit, 200_000)
+        self.assertEqual(contract.report_every, 10_000)
+        self.assertIn("numerical open-flow sink", contract.text)
         self.assertEqual(len(contract.barriers), 22)
         self.assertEqual(set(contract.barriers), set(closure.EXPECTED_REACTIONS))
         self.assertEqual(
@@ -339,8 +446,8 @@ class DeckContractTests(unittest.TestCase):
     def test_dilute_reservoir_sabotage_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            activity = _write_sabotage(root, ("Al = 1.0e-12", "Al = 1.0"))
-            with self.assertRaisesRegex(ValueError, "dilute.*reservoir"):
+            activity = _write_sabotage(root, ("Al = 1.0e-30", "Al = 1.0"))
+            with self.assertRaisesRegex(ValueError, "open-flow sink"):
                 closure.validate_deck(activity)
             chemical_potential = _write_sabotage(
                 root, ("Al = -1.0\nSi = -1.0", "Al = 0.0\nSi = -1.0")
@@ -366,17 +473,46 @@ class DeckContractTests(unittest.TestCase):
                 "dissolved_cation_activity",
                 "dissolved_cation_mu",
                 "effective_consumed_cation_factor_298k",
+                "simulation_steps",
+                "report_every_steps",
             },
         )
         self.assertEqual(conditions["temperature"]["constant_value"], "298.0")
         self.assertEqual(
-            conditions["dissolved_cation_activity"]["constant_value"], "1e-12"
+            conditions["dissolved_cation_activity"]["constant_value"], "1e-30"
         )
         self.assertEqual(conditions["dissolved_cation_mu"]["constant_value"], "-1.0")
         self.assertIn(
-            "not a measured pH-dependent activity",
+            "numerical open-flow sink",
             conditions["dissolved_cation_activity"]["rationale"],
         )
+        self.assertEqual(conditions["simulation_steps"]["constant_value"], "200000")
+        self.assertEqual(conditions["report_every_steps"]["constant_value"], "10000")
+
+    def test_canonical_run_length_and_cadence_are_required(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            short = _write_sabotage(root, ("steps = 200000", "steps = 20000"))
+            with self.assertRaisesRegex(ValueError, "exactly 200000"):
+                closure.validate_deck(short)
+            sparse = _write_sabotage(
+                root,
+                (
+                    "[observables]\nreport_every = 10000",
+                    "[observables]\nreport_every = 20000",
+                ),
+            )
+            with self.assertRaisesRegex(ValueError, "exactly 10000"):
+                closure.validate_deck(sparse)
+            simulation_cadence = _write_sabotage(
+                root,
+                (
+                    "seed = 42\nreport_every = 10000",
+                    "seed = 42\nreport_every = 20000",
+                ),
+            )
+            with self.assertRaisesRegex(ValueError, "simulation.report_every"):
+                closure.validate_deck(simulation_cadence)
 
     def test_schedule_and_wrong_prefactor_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -514,14 +650,114 @@ class EventAndUnitTests(unittest.TestCase):
         self.assertEqual(
             closure.dissolution_event_counts(events, 0, 4),
             {
+                "lattice_si": 1,
                 "gross_si": 1,
                 "adsorb_si": 1,
                 "net_si": 0,
+                "lattice_al": 1,
                 "gross_al": 1,
                 "adsorb_al": 1,
                 "net_al": 0,
             },
         )
+
+    def test_event_lineage_counts_only_original_lattice_cations(self) -> None:
+        contract = closure.validate_deck(DECK)
+        states = [
+            f"{kind['name']}.{state['name']}"
+            for kind in contract.parsed["kinds"]
+            for state in kind["states"]
+        ]
+        state_id = {name: index for index, name in enumerate(states)}
+        reactions = [reaction["name"] for reaction in contract.parsed["reactions"]]
+        reaction_id = {name: index for index, name in enumerate(reactions)}
+        header = {
+            "petra_traj": 1,
+            "deck": contract.parsed["deck"]["name"],
+            "seed": 99,
+            "n_sites": 10,
+            "states": states,
+            "state_types": [
+                state["occupant"]
+                for kind in contract.parsed["kinds"]
+                for state in kind["states"]
+            ],
+            "reactions": reactions,
+        }
+        rows = [
+            [
+                1,
+                1.0,
+                reaction_id["R14-alohal-hydrolysis"],
+                [
+                    [8, state_id["Oaa.br"], state_id["Oaa.hy"]],
+                    [4, state_id["Si.oh4"], state_id["Si.oh3"]],
+                ],
+            ],
+            [
+                2,
+                2.0,
+                reaction_id["R15-alohal-condensation"],
+                [
+                    [8, state_id["Oaa.hy"], state_id["Oaa.br"]],
+                    [4, state_id["Si.oh3"], state_id["Si.oh4"]],
+                ],
+            ],
+            [
+                3,
+                3.0,
+                reaction_id["desorb-si"],
+                [[4, state_id["Si.oh4"], state_id["Si.empty"]]],
+            ],
+            [
+                4,
+                4.0,
+                reaction_id["adsorb-si"],
+                [[4, state_id["Si.empty"], state_id["Si.oh4"]]],
+            ],
+            [
+                5,
+                5.0,
+                reaction_id["desorb-si"],
+                [[4, state_id["Si.oh4"], state_id["Si.empty"]]],
+            ],
+            [
+                6,
+                6.0,
+                reaction_id["adsorb-si"],
+                [[5, state_id["Si.empty"], state_id["Si.oh4"]]],
+            ],
+            [
+                7,
+                7.0,
+                reaction_id["desorb-si"],
+                [[5, state_id["Si.oh4"], state_id["Si.empty"]]],
+            ],
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.jsonl"
+            path.write_text(
+                "\n".join([json.dumps(header), *(json.dumps(row) for row in rows)])
+                + "\n",
+                encoding="utf-8",
+            )
+            events = closure.parse_events(path, contract, expected_seed=99)
+
+        self.assertEqual(
+            closure.dissolution_event_counts(events, 0, 7),
+            {
+                "lattice_si": 1,
+                "gross_si": 3,
+                "adsorb_si": 2,
+                "net_si": 1,
+                "lattice_al": 0,
+                "gross_al": 0,
+                "adsorb_al": 0,
+                "net_al": 0,
+            },
+        )
+        self.assertFalse(closure.propensity_origin_safe(events))
+        self.assertEqual(closure._lattice_releases_through_step(events, 7, "si"), 1)
 
     def test_event_step_regression_and_time_regression_are_rejected(self) -> None:
         contract = closure.validate_deck(DECK)
@@ -657,98 +893,185 @@ class EventAndUnitTests(unittest.TestCase):
 
 
 class SteadyStateGateTests(unittest.TestCase):
-    def test_constant_two_species_tail_passes(self) -> None:
-        gate = closure.assess_steady_state(_points([2, 2, 2, 2, 2, 2, 2]), 7000)
+    def test_constant_two_species_four_block_tail_passes(self) -> None:
+        gate = closure.assess_steady_state(_points([2] * 20), 20_000)
         self.assertTrue(gate.acceptance_passed, gate.reasons)
         self.assertEqual(gate.status, "steady-positive")
-        self.assertEqual(gate.si.gross_events, 12)
-        self.assertEqual(gate.al.gross_events, 12)
+        self.assertEqual(gate.si.status, "stationary-positive")
+        self.assertEqual(gate.al.status, "stationary-positive")
+        self.assertEqual(gate.si.lattice_release_events, 32)
+        self.assertEqual(gate.al.lattice_release_events, 32)
 
-    def test_zero_is_typed_with_poisson_bounds_not_accepted(self) -> None:
-        gate = closure.assess_steady_state(_points([0] * 7), 7000)
+    def test_zero_is_stationary_complete_accepted_with_poisson_bounds(self) -> None:
+        gate = closure.assess_steady_state(_points([0] * 20), 20_000)
         self.assertEqual(gate.status, "steady-zero")
         self.assertEqual(gate.dissolution_outcome, "no-dissolution")
+        self.assertEqual(gate.si.status, "stationary-zero")
+        self.assertEqual(gate.al.status, "stationary-zero")
         self.assertTrue(gate.evidence_complete)
-        self.assertFalse(gate.acceptance_passed)
+        self.assertTrue(gate.acceptance_passed)
         self.assertGreater(gate.si.upper_95_mol_m2_s, 0.0)
         self.assertGreater(gate.al.upper_95_mol_m2_s, 0.0)
 
-    def test_si_only_cannot_pass_al_gate(self) -> None:
+    def test_mixed_zero_and_positive_response_is_unresolved(self) -> None:
         gate = closure.assess_steady_state(
-            _points([2] * 7, al_increments=[1] * 7), 7000
+            _points([1] * 4 + [0] * 4 + [1] * 12), 20_000
         )
         self.assertEqual(gate.status, "nonsteady")
-        self.assertEqual(gate.si.status, "steady-positive")
-        self.assertEqual(gate.al.status, "censored-insufficient-events")
+        self.assertEqual(gate.si.status, "unresolved-mixed-response")
+        self.assertFalse(gate.evidence_complete)
         self.assertFalse(gate.acceptance_passed)
 
-    def test_positive_si_with_zero_al_is_not_called_no_dissolution(self) -> None:
+    def test_stable_depleted_tail_does_not_require_initial_inventory(self) -> None:
+        populations = [100, 75, 50, 50, *([50] * 17)]
         gate = closure.assess_steady_state(
-            _points([2] * 7, al_increments=[0] * 7), 7000
+            _points(
+                [2] * 20,
+                solid_si_samples=populations,
+                solid_al_samples=populations,
+            ),
+            20_000,
         )
-        self.assertEqual(gate.status, "steady-zero")
-        self.assertEqual(gate.dissolution_outcome, "species-zero-upper-bound")
-        self.assertEqual(gate.si.status, "steady-positive")
-        self.assertEqual(gate.al.status, "zero-upper-bound")
+        self.assertTrue(gate.acceptance_passed, gate.reasons)
+        self.assertEqual(gate.si_population.final_fraction, 0.5)
+        self.assertEqual(gate.si_population.stability_status, "stable")
+
+    def test_evolving_tail_population_fails_acceptance(self) -> None:
+        populations = [100] * 4 + list(range(100, 83, -1))
+        gate = closure.assess_steady_state(
+            _points(
+                [2] * 20,
+                solid_si_samples=populations,
+                solid_al_samples=populations,
+            ),
+            20_000,
+        )
+        self.assertEqual(gate.status, "nonsteady")
+        self.assertEqual(gate.population_stability_status, "evolving")
         self.assertFalse(gate.acceptance_passed)
 
     def test_species_population_floor_is_not_hidden_by_combined_inventory(self) -> None:
         gate = closure.assess_steady_state(
-            _points([2] * 7, solid_si_final=50, solid_al_final=5), 7000
+            _points([2] * 20, solid_si_final=50, solid_al_final=5), 20_000
         )
         self.assertEqual(gate.status, "absorbed")
         self.assertEqual(gate.si_population.final_fraction, 1.0)
         self.assertEqual(gate.al_population.final_fraction, 0.1)
 
-    def test_early_insufficient_cadence_and_absorbing_are_typed(self) -> None:
+    def test_requires_twenty_one_samples_and_complete_run(self) -> None:
         self.assertEqual(
-            closure.assess_steady_state(_points([2] * 7), 8000).status,
+            closure.assess_steady_state(_points([2] * 20), 21_000).status,
             "incomplete",
         )
         self.assertEqual(
-            closure.assess_steady_state(_points([2] * 5), 5000).status,
+            closure.assess_steady_state(_points([2] * 19), 19_000).status,
             "incomplete",
         )
         self.assertEqual(
-            closure.assess_steady_state(_points([2] * 7, area_final=0.0), 7000).status,
+            closure.assess_steady_state(
+                _points([2] * 20, area_final=0.0), 20_000
+            ).status,
             "absorbed",
         )
 
-    def test_monotonic_trend_fails(self) -> None:
-        gate = closure.assess_steady_state(_points([1, 2, 4, 8, 16, 32, 64]), 7000)
+    def test_four_block_monotonic_trend_fails(self) -> None:
+        increments = [1] * 4 + [1] * 4 + [2] * 4 + [4] * 4 + [8] * 4
+        gate = closure.assess_steady_state(_points(increments), 20_000)
         self.assertEqual(gate.status, "nonsteady")
         self.assertTrue(
             any("trend" in reason or "shift" in reason for reason in gate.reasons)
         )
 
-    def test_opposite_replica_trends_cannot_cancel_in_mean(self) -> None:
-        increasing = closure.assess_steady_state(
-            _points([1, 2, 4, 8, 16, 32, 64]), 7000
+    def test_evolving_sampled_propensity_fails_even_with_stationary_event_counts(
+        self,
+    ) -> None:
+        propensities = [1.0] * 5 + [2.0] * 4 + [4.0] * 4 + [8.0] * 4 + [16.0] * 4
+        gate = closure.assess_steady_state(
+            _points(
+                [2] * 20,
+                si_propensities=propensities,
+                al_propensities=propensities,
+            ),
+            20_000,
         )
-        decreasing_increments = [64, 63, 61, 57, 49, 33, 1]
-        decreasing = closure.assess_steady_state(_points(decreasing_increments), 7000)
+        self.assertEqual(gate.status, "nonsteady")
+        self.assertGreater(abs(gate.si.propensity_trend_decades), 0.35)
+        self.assertTrue(any("propensity" in reason for reason in gate.reasons))
+
+    def test_opposite_replica_trends_cannot_cancel_in_mean(self) -> None:
+        increasing_increments = [1] * 4 + [1] * 4 + [2] * 4 + [4] * 4 + [8] * 4
+        decreasing_increments = [8] * 4 + [8] * 4 + [7] * 4 + [5] * 4 + [1] * 4
+        increasing = closure.assess_steady_state(_points(increasing_increments), 20_000)
+        decreasing = closure.assess_steady_state(_points(decreasing_increments), 20_000)
         self.assertFalse(increasing.acceptance_passed)
         self.assertFalse(decreasing.acceptance_passed)
         self.assertEqual(
             [
                 a + b
                 for a, b in zip(
-                    [1, 2, 4, 8, 16, 32, 64], decreasing_increments, strict=True
+                    increasing_increments, decreasing_increments, strict=True
                 )
             ],
-            [65] * 7,
+            [9] * 20,
             "ensemble averaging would hide the opposed trends",
         )
 
 
 class CampaignEndToEndTests(unittest.TestCase):
+    def test_censored_families_have_undefined_rank_but_complete_classification(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            raw, derived = _build_synthetic_campaign(root)
+            _contaminate_one_run_with_adsorption(raw, "adsorption__ea-minus-3")
+            _make_one_run_propensity_nonstationary(raw, "cation-desorption__ea-minus-3")
+            analysis = closure.analyze_campaign(raw, derived)
+            self.assertTrue(analysis["sensitivity_complete"])
+            self.assertTrue(
+                closure.verify_campaign(raw, derived)["sensitivity_complete"]
+            )
+            with (derived / "sensitivity-ranking.csv").open(
+                newline="", encoding="utf-8"
+            ) as handle:
+                rows = list(csv.DictReader(handle))
+            censored = next(row for row in rows if row["family"] == "adsorption")
+            self.assertEqual(censored["status"], "censored")
+            self.assertEqual(censored["rank"], "undefined")
+            self.assertEqual(censored["ea-minus-3_status"], "censored")
+            nonstationary = next(
+                row for row in rows if row["family"] == "cation-desorption"
+            )
+            self.assertEqual(nonstationary["status"], "censored")
+            self.assertEqual(nonstationary["rank"], "undefined")
+            estimated = [row for row in rows if row["status"] == "estimated"]
+            self.assertEqual({int(row["rank"]) for row in estimated}, set(range(1, 6)))
+            with (derived / "per-replica-rates.csv").open(
+                newline="", encoding="utf-8"
+            ) as handle:
+                rates = list(csv.DictReader(handle))
+            contaminated = next(
+                row
+                for row in rates
+                if row["scenario"] == "adsorption__ea-minus-3" and row["replica"] == "0"
+            )
+            self.assertEqual(
+                contaminated["propensity_origin_status"], "origin-contaminated"
+            )
+            self.assertEqual(
+                contaminated[
+                    "expected_lattice_origin_si_flux_from_propensity_mol_m2_s"
+                ],
+                "undefined",
+            )
+
     def test_zero_campaign_analyzes_verifies_and_tampering_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             raw, derived = _build_synthetic_campaign(root)
             analysis = closure.analyze_campaign(raw, derived)
             self.assertEqual(analysis["campaign_outcome"], "no-dissolution")
-            self.assertFalse(analysis["acceptance_passed"])
+            self.assertTrue(analysis["acceptance_passed"])
             self.assertEqual(
                 analysis["status_counts"],
                 {
@@ -777,19 +1100,39 @@ class CampaignEndToEndTests(unittest.TestCase):
                 )
             )
             self.assertTrue(
-                all(row["acceptance_passed"] == "False" for row in replica_rates)
+                all(row["acceptance_passed"] == "True" for row in replica_rates)
             )
             for row in replica_rates:
+                self.assertEqual(row["lattice_si_release_events"], "0")
+                self.assertEqual(row["lattice_al_release_events"], "0")
+                self.assertEqual(row["propensity_origin_status"], "origin-safe")
+                self.assertNotIn("gross_si_flux_mol_m2_s", row)
                 self.assertGreater(
-                    float(row["expected_gross_si_flux_from_propensity_mol_m2_s"]), 0.0
+                    float(
+                        row["expected_lattice_origin_si_flux_from_propensity_mol_m2_s"]
+                    ),
+                    0.0,
                 )
                 self.assertGreater(
-                    float(row["expected_gross_al_flux_from_propensity_mol_m2_s"]), 0.0
+                    float(
+                        row["expected_lattice_origin_al_flux_from_propensity_mol_m2_s"]
+                    ),
+                    0.0,
                 )
                 self.assertNotEqual(
-                    row["log10_expected_gross_si_flux_from_propensity_mol_m2_s"],
+                    row[
+                        "log10_expected_lattice_origin_si_flux_from_propensity_mol_m2_s"
+                    ],
                     "undefined",
                 )
+            with (derived / "stoichiometry.csv").open(
+                newline="", encoding="utf-8"
+            ) as handle:
+                stoichiometry = list(csv.DictReader(handle))
+            self.assertIn(
+                "si_al_lattice_release_ratio_dimensionless_mean", stoichiometry[0]
+            )
+            self.assertNotIn("si_al_net_ratio_dimensionless_mean", stoichiometry[0])
             with (derived / "ensemble-rates.csv").open(
                 newline="", encoding="utf-8"
             ) as handle:
@@ -797,7 +1140,7 @@ class CampaignEndToEndTests(unittest.TestCase):
             propensity_rows = [
                 row
                 for row in ensemble
-                if row["rate_basis"] == "expected_gross_from_propensity"
+                if row["rate_basis"] == closure.PROPENSITY_RATE_BASIS
             ]
             self.assertEqual(len(propensity_rows), 29 * 2)
             self.assertTrue(
@@ -853,11 +1196,11 @@ class CampaignEndToEndTests(unittest.TestCase):
                 fields = reader.fieldnames
                 propensity_rows = list(reader)
             assert fields is not None
-            field = "expected_gross_si_flux_from_propensity_mol_m2_s"
+            field = "expected_lattice_origin_si_flux_from_propensity_mol_m2_s"
             changed_value = float(propensity_rows[0][field]) * 2.0
             propensity_rows[0][field] = str(changed_value)
             propensity_rows[0][
-                "log10_expected_gross_si_flux_from_propensity_mol_m2_s"
+                "log10_expected_lattice_origin_si_flux_from_propensity_mol_m2_s"
             ] = str(math.log10(changed_value))
             closure._write_csv_atomic(propensity_path, fields, propensity_rows)
             propensity_receipt_path = changed_propensity / "verification.json"

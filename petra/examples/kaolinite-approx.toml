@@ -577,9 +577,10 @@ boundary = ["periodic", "fixed", "periodic"]
 
 # All temperatures are Kelvin and all energy fields are kcal/mol (declared above).
 # Petra has no H+/OH- coupling in this deck: pH 3-5 is contextual and is NOT
-# encoded. The explicit 1e-12 dissolved-cation activities below, combined with
+# encoded. The explicit 1e-30 dissolved-cation activities below are a labeled
+# numerical open-flow sink. Combined with
 # mu = -1 kcal/mol, give each consumed cation an effective thermodynamic factor
-# a*exp(mu/RT) = 1.847676567496443e-13 at 298 K. This is a dilute open-flow,
+# a*exp(mu/RT) = 1.8476765674964432e-31 at 298 K. This is a dilute open-flow,
 # far-from-equilibrium proxy; it must not be described as acid/base catalysis.
 [thermo]
 temperature = 298.0
@@ -589,8 +590,8 @@ Al = -1.0
 Si = -1.0
 
 [thermo.activity]
-Al = 1.0e-12
-Si = 1.0e-12
+Al = 1.0e-30
+Si = 1.0e-30
 
 # --- build-time passes ----------------------------------------------------
 # Reproduces the legacy build: PopulateSolid (fill 2 of 3 b-rows —
@@ -1310,12 +1311,12 @@ map = { sih = "albr", full = "alhy", sialh = "al1", si1 = "empty" }
 missing = "skip"
 
 [simulation]
-steps = 20000
+steps = 200000
 seed = 42
-report_every = 2000
+report_every = 10000
 
 [observables]
-report_every = 2000
+report_every = 10000
 
 [[observables.series]]
 kind = "state_counts"

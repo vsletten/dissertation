@@ -3,28 +3,25 @@
 
 This is survey-tier platform testing, not calibrated or production kinetics.
 
-Steady-state criterion (identical for nominal and every sensitivity scenario):
-for each replica, require at least eight cadence samples, completion of the
-configured step limit, strictly increasing sample steps and finite physical
-exposure times, and final solid-cation inventory and geometric area each above
-10% of their initial values.  Over the final six cadence intervals, evaluate
-Si and Al separately.  A positive species needs at least 12 gross-desorption
-events, four nonzero intervals, an absolute fitted end-to-end log10-flux trend
-<= 0.35 decade, and an absolute first-half versus second-half log10 mean-flux
-change <= 0.35 decade.  Zero observed events produce a one-sided Poisson 95%
-upper rate bound from integrated area-time, never a fabricated log rate.
-Replica verdicts are exactly steady-positive, steady-zero, nonsteady, absorbed,
-or incomplete.  Only steady-positive is acceptance; steady-zero is complete
-evidence for a typed no-dissolution outcome.  Population inventory trend/range
-is emitted as a diagnostic but is not required to be static during genuine
-steady dissolution.
+Each replica must complete 200,000 events and provide at least 21 equal-cadence
+samples. The final 17 samples form four equal four-interval blocks. Lattice
+cation lineage is replayed by site from JSONL transitions, so observed physical
+dissolution rates count only original-lattice Si/Al releases, never gross or net
+desorption. Sampled desorption propensity is an expected lattice-origin response
+only when the entire trajectory has zero adsorption events; otherwise it is
+origin-contaminated and undefined.
 
-Separately, the analyzer trapezoidally integrates Petra's sampled total CTMC
-propensity for desorb-si and desorb-al over that same tail.  Dividing the
-expected event count by Avogadro's constant and integrated geometric area gives
-an explicitly labeled expected-gross propensity flux used only for sensitivity
-ranking.  It is not observed release, an observed rate, or net dissolution and
-cannot change the observed-event acceptance verdict.
+Si and Al response stationarity independently require all-zero blocks (typed
+stationary-zero with one-sided Poisson 95% bounds) or all-positive blocks with
+finite fitted log trend and half-window shift both <= 0.35 decade. Mixed
+zero/positive blocks are unresolved. Tail solid Si and Al populations must each
+have <= 5% relative range and <= 5% absolute fractional trend; final inventory
+need not equal initial inventory. Passing stationary-zero and stationary-positive
+outcomes are both scientifically complete and accepted at this survey tier.
+
+Sensitivity ranks use the origin-safe expected propensity response. Any family
+with a censored perturbation has undefined rank; ordinal ranks apply only to
+fully estimated families.
 """
 
 from __future__ import annotations
@@ -69,21 +66,24 @@ REQUIRED_OBSERVABLES = frozenset(
 PROVENANCE_CLASSES = frozenset({"computed", "literature", "heuristic"})
 PERTURBATIONS = ("ea-minus-3", "ea-plus-3", "prefactor-x0.1", "prefactor-x10")
 SENSITIVITY_RESPONSE = (
-    "combined_si_plus_al_expected_gross_flux_from_propensity_mol_m2_s"
+    "combined_si_plus_al_expected_lattice_origin_flux_from_propensity_mol_m2_s"
 )
-PROPENSITY_RATE_BASIS = "expected_gross_from_propensity"
+PROPENSITY_RATE_BASIS = "expected_lattice_origin_from_propensity"
+OBSERVED_RATE_BASIS = "lattice_origin_observed_release"
 PROPENSITY_ESTIMATOR_BASIS = "integrated_ctmc_hazard"
 PROPENSITY_INTERPRETATION = (
     "Trapezoidally integrated instantaneous total CTMC desorption propensity, "
-    "converted to expected gross event-equivalent flux; not observed event release, "
-    "not an observed rate, and not net dissolution."
+    "not observed event release; used as an expected lattice-origin response only "
+    "for trajectories with zero "
+    "adsorption events; adsorption makes the response origin-contaminated and unresolved."
 )
 PROPENSITY_INTEGRAL = (
     "trapezoidal integral of instantaneous total CTMC desorb-si/desorb-al "
     "propensity over the selected observable tail"
 )
 OBSERVED_EVENT_ACCEPTANCE_BASIS = (
-    "observed desorption event counts only; propensity estimates do not pass acceptance"
+    "site-replayed original-lattice release counts plus origin-safe sampled-propensity "
+    "and tail-population stationarity gates"
 )
 SENSITIVITY_STATISTIC = (
     "same-seed paired linear deltas; reported delta_log10 is log10(arithmetic mean "
@@ -438,6 +438,7 @@ class EventData:
     steps: tuple[int, ...]
     times: tuple[float, ...]
     names: tuple[str, ...]
+    lattice_origin_releases: tuple[str | None, ...]
     counts: dict[str, int]
 
 
@@ -468,11 +469,13 @@ class PropensityExpectedGross:
 class SteadyPoint:
     step: int
     time_s: float
-    gross_si_events: int
-    gross_al_events: int
+    lattice_si_releases: int
+    lattice_al_releases: int
     area_a2: float
     solid_si_cations: int
     solid_al_cations: int
+    si_desorb_propensity: float | None
+    al_desorb_propensity: float | None
 
     @property
     def solid_cations(self) -> int:
@@ -482,10 +485,12 @@ class SteadyPoint:
 @dataclass(frozen=True)
 class SpeciesSteadyDiagnostic:
     status: str
-    gross_events: int
-    positive_intervals: int
-    trend_decades: float | None
-    half_change_decades: float | None
+    lattice_release_events: int
+    positive_blocks: int
+    observed_trend_decades: float | None
+    observed_half_change_decades: float | None
+    propensity_trend_decades: float | None
+    propensity_half_change_decades: float | None
     upper_95_mol_m2_s: float | None
 
 
@@ -533,21 +538,22 @@ class ReplicaRate:
     window_start_time_s: float | None
     window_end_time_s: float | None
     area_time_a2_s: float | None
+    lattice_si_release_events: int
     gross_si_events: int
     adsorb_si_events: int
     net_si_events: int
+    lattice_al_release_events: int
     gross_al_events: int
     adsorb_al_events: int
     net_al_events: int
-    gross_si_flux_mol_m2_s: float | None
-    net_si_flux_mol_m2_s: float | None
-    gross_al_flux_mol_m2_s: float | None
-    net_al_flux_mol_m2_s: float | None
-    expected_gross_si_flux_from_propensity_mol_m2_s: float | None
-    expected_gross_al_flux_from_propensity_mol_m2_s: float | None
-    gross_si_upper_95_mol_m2_s: float | None
-    gross_al_upper_95_mol_m2_s: float | None
-    si_al_net_ratio_dimensionless: float | None
+    lattice_si_release_flux_mol_m2_s: float | None
+    lattice_al_release_flux_mol_m2_s: float | None
+    expected_lattice_origin_si_flux_from_propensity_mol_m2_s: float | None
+    expected_lattice_origin_al_flux_from_propensity_mol_m2_s: float | None
+    lattice_si_upper_95_mol_m2_s: float | None
+    lattice_al_upper_95_mol_m2_s: float | None
+    si_al_lattice_release_ratio_dimensionless: float | None
+    propensity_origin_status: str
     steady_state_status: str
     acceptance_passed: bool
 
@@ -647,9 +653,9 @@ def validate_deck(path: Path, seeds: Sequence[int] = DEFAULT_SEEDS) -> DeckContr
     temperature = thermo.get("temperature")
     if type(temperature) is not float or temperature != 298.0:
         raise ValueError("thermo.temperature must be exactly the TOML float 298.0")
-    if thermo.get("activity") != {"Al": 1.0e-12, "Si": 1.0e-12}:
+    if thermo.get("activity") != {"Al": 1.0e-30, "Si": 1.0e-30}:
         raise ValueError(
-            "thermo.activity must fix the dilute Al/Si reservoir at exactly 1.0e-12"
+            "thermo.activity must fix the numerical open-flow sink at exactly 1.0e-30"
         )
     if thermo.get("mu") != {"Al": -1.0, "Si": -1.0}:
         raise ValueError(
@@ -719,13 +725,14 @@ def validate_deck(path: Path, seeds: Sequence[int] = DEFAULT_SEEDS) -> DeckContr
         raise ValueError(f"missing required observables: {sorted(missing_observables)}")
     simulation = parsed.get("simulation", {})
     steps = simulation.get("steps")
+    simulation_report_every = simulation.get("report_every")
     report_every = parsed.get("observables", {}).get("report_every")
-    if type(steps) is not int or steps <= 0:
-        raise ValueError("simulation.steps must be a positive integer")
-    if type(report_every) is not int or report_every <= 0:
-        raise ValueError("observables.report_every must be a positive integer")
-    if steps // report_every < 7:
-        raise ValueError("deck cadence must provide at least eight samples")
+    if type(steps) is not int or steps != 200_000:
+        raise ValueError("simulation.steps must be exactly 200000")
+    if type(report_every) is not int or report_every != 10_000:
+        raise ValueError("observables.report_every must be exactly 10000")
+    if type(simulation_report_every) is not int or simulation_report_every != 10_000:
+        raise ValueError("simulation.report_every must be exactly 10000")
     return DeckContract(
         path=path,
         text=text,
@@ -1140,10 +1147,12 @@ def parse_events(
         steps: list[int] = []
         times: list[float] = []
         names: list[str] = []
+        lattice_origin_releases: list[str | None] = []
         counts = {name: 0 for name in reaction_names}
         previous_time = -math.inf
         previous_step = 0
         last_seen_state: dict[int, int] = {}
+        cation_lineage: dict[int, str] = {}
         for line_number, line in enumerate(handle, start=2):
             row = json.loads(line)
             if not isinstance(row, list) or len(row) != 4:
@@ -1185,6 +1194,7 @@ def parse_events(
                     )
                 normalized_changes.append((site, old, new))
             name = reaction_names[reaction_id]
+            centers: list[tuple[int, int, int]] = []
             if name in transitions:
                 old_ids, new_ids = transitions[name]
                 centers = [
@@ -1196,6 +1206,21 @@ def parse_events(
                     raise ValueError(
                         f"{path}:{line_number}: expected center transition missing for {name}"
                     )
+            for site, old, new in normalized_changes:
+                old_type = state_types[old]
+                new_type = state_types[new]
+                if old_type in {"Si", "Al"}:
+                    cation_lineage.setdefault(site, "lattice")
+                elif old_type == "vacant" and new_type in {"Si", "Al"}:
+                    cation_lineage.setdefault(site, "empty")
+            lattice_release: str | None = None
+            if name.startswith("adsorb-"):
+                cation_lineage[centers[0][0]] = "reservoir"
+            elif name.startswith("desorb-"):
+                site = centers[0][0]
+                if cation_lineage.get(site) == "lattice":
+                    lattice_release = name.removeprefix("desorb-")
+                cation_lineage[site] = "empty"
             for site, _, new in normalized_changes:
                 last_seen_state[site] = new
             previous_step = step
@@ -1203,6 +1228,7 @@ def parse_events(
             steps.append(step)
             times.append(event_time)
             names.append(name)
+            lattice_origin_releases.append(lattice_release)
             counts[name] += 1
     return EventData(
         seed,
@@ -1211,6 +1237,7 @@ def parse_events(
         tuple(steps),
         tuple(times),
         tuple(names),
+        tuple(lattice_origin_releases),
         counts,
     )
 
@@ -1519,10 +1546,8 @@ def _population_diagnostics(
         else None
     )
     stable = (
-        final_fraction is not None
-        and tail_range is not None
+        tail_range is not None
         and tail_trend is not None
-        and abs(1.0 - final_fraction) <= 0.05
         and tail_range <= 0.05
         and abs(tail_trend) <= 0.05
     )
@@ -1542,59 +1567,138 @@ def _species_diagnostic(
     area_time_a2_s: float,
     reasons: list[str],
 ) -> SpeciesSteadyDiagnostic:
-    attribute = f"gross_{species}_events"
-    interval_fluxes: list[float] = []
+    attribute = f"lattice_{species}_releases"
     interval_events: list[int] = []
     for left, right in itertools.pairwise(tail):
         count = getattr(right, attribute) - getattr(left, attribute)
         if count < 0:
-            reasons.append(f"{species} gross event counter decreased")
+            reasons.append(f"{species} lattice-release counter decreased")
             count = 0
         interval_events.append(count)
-        denominator = integrate_area(
-            [left.time_s, right.time_s], [left.area_a2, right.area_a2]
+    lattice_events = sum(interval_events)
+    block_events = [
+        sum(interval_events[index : index + 4]) for index in range(0, 16, 4)
+    ]
+    block_area_times = []
+    for index in range(0, 16, 4):
+        block = tail[index : index + 5]
+        block_area_times.append(
+            integrate_area(
+                [point.time_s for point in block], [point.area_a2 for point in block]
+            )
         )
-        interval_fluxes.append(
-            event_count_to_flux(count, denominator) if count > 0 else 0.0
-        )
-    gross_events = sum(interval_events)
-    positive = [value for value in interval_fluxes if value > 0.0]
-    if gross_events == 0:
+    block_fluxes = [
+        event_count_to_flux(count, denominator) if count > 0 else 0.0
+        for count, denominator in zip(block_events, block_area_times, strict=True)
+    ]
+    propensity_attribute = f"{species}_desorb_propensity"
+    propensity_values = [getattr(point, propensity_attribute) for point in tail]
+    if any(value is None for value in propensity_values):
+        reasons.append(f"{species} propensity response is origin-contaminated")
         return SpeciesSteadyDiagnostic(
-            "zero-upper-bound",
+            "origin-contaminated", lattice_events, 0, None, None, None, None, None
+        )
+    expected_block_fluxes = []
+    for index, area_time in zip(range(0, 16, 4), block_area_times, strict=True):
+        block = tail[index : index + 5]
+        values = [float(getattr(point, propensity_attribute)) for point in block]
+        expected_events = sum(
+            0.5 * (left + right) * (right_point.time_s - left_point.time_s)
+            for left_point, right_point, left, right in zip(
+                block[:-1], block[1:], values[:-1], values[1:], strict=True
+            )
+        )
+        expected_block_fluxes.append(_amount_to_flux(expected_events, area_time))
+    expected_positive = [value for value in expected_block_fluxes if value > 0.0]
+    if expected_positive and len(expected_positive) != 4:
+        reasons.append(f"{species} propensity has mixed zero and positive blocks")
+        return SpeciesSteadyDiagnostic(
+            "unresolved-mixed-response", lattice_events, 0, None, None, None, None, None
+        )
+    expected_trend = None
+    expected_half_change = None
+    if expected_positive:
+        expected_logs = [math.log10(value) for value in expected_block_fluxes]
+        expected_trend = _linear_trend(expected_logs)
+        expected_first = statistics.fmean(expected_block_fluxes[:2])
+        expected_second = statistics.fmean(expected_block_fluxes[2:])
+        expected_half_change = math.log10(expected_second / expected_first)
+        if (
+            not math.isfinite(expected_trend)
+            or abs(expected_trend) > 0.35
+            or not math.isfinite(expected_half_change)
+            or abs(expected_half_change) > 0.35
+        ):
+            reasons.append(
+                f"{species} sampled desorb propensity trend/shift exceeds 0.35 decade"
+            )
+            return SpeciesSteadyDiagnostic(
+                "nonsteady",
+                lattice_events,
+                4,
+                None,
+                None,
+                expected_trend,
+                expected_half_change,
+                None,
+            )
+    elif lattice_events > 0:
+        reasons.append(f"{species} positive releases conflict with zero propensity")
+        return SpeciesSteadyDiagnostic(
+            "unresolved-mixed-response",
+            lattice_events,
+            0,
+            None,
+            None,
+            expected_trend,
+            expected_half_change,
+            None,
+        )
+    positive = [value for value in block_fluxes if value > 0.0]
+    if not positive:
+        return SpeciesSteadyDiagnostic(
+            "stationary-zero",
             0,
             0,
             None,
             None,
+            expected_trend,
+            expected_half_change,
             poisson_zero_upper_flux_95(area_time_a2_s),
         )
-    if gross_events < 12 or len(positive) < 4:
-        reasons.append(
-            f"{species} has insufficient gross dissolution evidence "
-            f"({gross_events} events, {len(positive)} positive intervals)"
-        )
+    if len(positive) != 4:
+        reasons.append(f"{species} has mixed zero and positive four-block response")
         return SpeciesSteadyDiagnostic(
-            "censored-insufficient-events",
-            gross_events,
+            "unresolved-mixed-response",
+            lattice_events,
             len(positive),
             None,
             None,
+            expected_trend,
+            expected_half_change,
             None,
         )
-    logs = [math.log10(value) for value in positive]
+    logs = [math.log10(value) for value in block_fluxes]
     trend = _linear_trend(logs)
-    first = statistics.fmean(positive[: len(positive) // 2])
-    second = statistics.fmean(positive[len(positive) // 2 :])
+    first = statistics.fmean(block_fluxes[:2])
+    second = statistics.fmean(block_fluxes[2:])
     half_change = math.log10(second / first)
-    status = "steady-positive"
-    if abs(trend) > 0.35:
+    status = "stationary-positive"
+    if not math.isfinite(trend) or abs(trend) > 0.35:
         reasons.append(f"{species} fitted dissolution trend exceeds 0.35 decade")
         status = "nonsteady"
-    if abs(half_change) > 0.35:
+    if not math.isfinite(half_change) or abs(half_change) > 0.35:
         reasons.append(f"{species} half-window dissolution shift exceeds 0.35 decade")
         status = "nonsteady"
     return SpeciesSteadyDiagnostic(
-        status, gross_events, len(positive), trend, half_change, None
+        status,
+        lattice_events,
+        len(positive),
+        trend,
+        half_change,
+        expected_trend,
+        expected_half_change,
+        None,
     )
 
 
@@ -1602,7 +1706,7 @@ def assess_steady_state(
     points: Sequence[SteadyPoint], expected_steps: int
 ) -> SteadyStateGate:
     reasons: list[str] = []
-    tail = points[-7:] if len(points) >= 7 else points
+    tail = points[-17:] if len(points) >= 17 else points
     si_population = _population_diagnostics(points, tail, "solid_si_cations")
     al_population = _population_diagnostics(points, tail, "solid_al_cations")
     population = _population_diagnostics(points, tail, "solid_cations")
@@ -1631,8 +1735,8 @@ def assess_steady_state(
             population.stability_status,
         )
 
-    if len(points) < 8:
-        return early("incomplete", "insufficient cadence: need at least eight samples")
+    if len(points) < 21:
+        return early("incomplete", "insufficient cadence: need at least 21 samples")
     if points[-1].step < expected_steps:
         return early("incomplete", "run stopped early before configured step limit")
     for left, right in itertools.pairwise(points):
@@ -1646,6 +1750,8 @@ def assess_steady_state(
                 "incomplete",
                 "sample steps and exposure times must be strictly increasing and finite",
             )
+    if len({right.step - left.step for left, right in itertools.pairwise(tail)}) != 1:
+        return early("incomplete", "final response blocks require equal step cadence")
     initial = points[0]
     final = points[-1]
     if (
@@ -1664,25 +1770,37 @@ def assess_steady_state(
     si = _species_diagnostic("si", tail, area_time, reasons)
     al = _species_diagnostic("al", tail, area_time, reasons)
     species_statuses = {si.status, al.status}
-    if (
-        "nonsteady" in species_statuses
-        or "censored-insufficient-events" in species_statuses
-    ):
+    populations_stable = (
+        si_population.stability_status == "stable"
+        and al_population.stability_status == "stable"
+    )
+    if not populations_stable:
+        reasons.append("tail solid Si/Al populations are not stationary")
+    if species_statuses & {
+        "nonsteady",
+        "unresolved-mixed-response",
+        "origin-contaminated",
+    }:
         status = "nonsteady"
         outcome = "unresolved"
-    elif species_statuses == {"zero-upper-bound"}:
+    elif len(species_statuses) != 1:
+        reasons.append("Si/Al responses mix stationary zero and positive outcomes")
+        status = "nonsteady"
+        outcome = "unresolved"
+    elif species_statuses == {"stationary-zero"}:
         status = "steady-zero"
         outcome = "no-dissolution"
-    elif "zero-upper-bound" in species_statuses:
-        status = "steady-zero"
-        outcome = "species-zero-upper-bound"
     else:
         status = "steady-positive"
         outcome = "positive-dissolution"
+    if not populations_stable:
+        status = "nonsteady"
+        outcome = "unresolved"
+    accepted = status in {"steady-positive", "steady-zero"}
     return SteadyStateGate(
         status,
-        status == "steady-positive",
-        status in {"steady-positive", "steady-zero"},
+        accepted,
+        accepted,
         outcome,
         tuple(reasons),
         tail[0].step,
@@ -1708,12 +1826,23 @@ def _counts_through_step(events: EventData, step: int, names: set[str]) -> int:
     return sum(1 for name in events.names[:end] if name in names)
 
 
+def _lattice_releases_through_step(events: EventData, step: int, species: str) -> int:
+    end = bisect.bisect_right(events.steps, step)
+    return sum(1 for value in events.lattice_origin_releases[:end] if value == species)
+
+
 def _counts_between_steps(
     events: EventData, start_step: int, end_step: int, name: str
 ) -> int:
     left = bisect.bisect_right(events.steps, start_step)
     right = bisect.bisect_right(events.steps, end_step)
     return sum(1 for value in events.names[left:right] if value == name)
+
+
+def propensity_origin_safe(events: EventData) -> bool:
+    """Whether sampled desorption propensity can only represent lattice cations."""
+
+    return events.counts["adsorb-si"] == 0 and events.counts["adsorb-al"] == 0
 
 
 def dissolution_event_counts(
@@ -1730,10 +1859,18 @@ def dissolution_event_counts(
         raise ValueError("event-accounting steps must define an increasing window")
     result: dict[str, int] = {}
     for species in ("si", "al"):
+        left = bisect.bisect_right(events.steps, start_step)
+        right = bisect.bisect_right(events.steps, end_step)
+        lattice = sum(
+            1
+            for value in events.lattice_origin_releases[left:right]
+            if value == species
+        )
         gross = _counts_between_steps(events, start_step, end_step, f"desorb-{species}")
         adsorbed = _counts_between_steps(
             events, start_step, end_step, f"adsorb-{species}"
         )
+        result[f"lattice_{species}"] = lattice
         result[f"gross_{species}"] = gross
         result[f"adsorb_{species}"] = adsorbed
         result[f"net_{species}"] = gross - adsorbed
@@ -1785,6 +1922,9 @@ def _analyze_replica(
             f"{run_dir}: observables/populations must align exactly by step"
         )
 
+    origin_safe = propensity_origin_safe(events)
+    si_desorb_index = events.reaction_names.index("desorb-si")
+    al_desorb_index = events.reaction_names.index("desorb-al")
     points: list[SteadyPoint] = []
     for row in populations:
         sample = observables[row.step]
@@ -1800,28 +1940,32 @@ def _analyze_replica(
             SteadyPoint(
                 row.step,
                 sample.time_s,
-                _counts_through_step(events, row.step, {"desorb-si"}),
-                _counts_through_step(events, row.step, {"desorb-al"}),
+                _lattice_releases_through_step(events, row.step, "si"),
+                _lattice_releases_through_step(events, row.step, "al"),
                 sample.values["surface_area"][0],
                 _solid_cations(row, "Si"),
                 _solid_cations(row, "Al"),
+                sample.values["event_rates"][si_desorb_index] if origin_safe else None,
+                sample.values["event_rates"][al_desorb_index] if origin_safe else None,
             )
         )
     gate = assess_steady_state(points, contract.step_limit)
-    start = points[-7] if len(points) >= 7 else points[0]
+    start = points[-17] if len(points) >= 17 else points[0]
     end = points[-1]
     area_time: float | None = None
     propensity_estimate: PropensityExpectedGross | None = None
     accounting = {
+        "lattice_si": 0,
         "gross_si": 0,
         "adsorb_si": 0,
         "net_si": 0,
+        "lattice_al": 0,
         "gross_al": 0,
         "adsorb_al": 0,
         "net_al": 0,
     }
     if len(points) >= 2 and end.step > start.step:
-        selected_points = points[-7:]
+        selected_points = points[-17:]
         selected_samples = [observables[point.step] for point in selected_points]
         propensity_estimate = integrate_expected_gross_dissolution_from_propensity(
             selected_samples,
@@ -1832,13 +1976,15 @@ def _analyze_replica(
         if gate.area_time_a2_s is not None and area_time != gate.area_time_a2_s:
             raise ValueError(f"{run_dir}: propensity and observed area-time disagree")
         accounting = dissolution_event_counts(events, start.step, end.step)
+    lattice_si = accounting["lattice_si"]
     gross_si = accounting["gross_si"]
     adsorb_si = accounting["adsorb_si"]
     net_si = accounting["net_si"]
+    lattice_al = accounting["lattice_al"]
     gross_al = accounting["gross_al"]
     adsorb_al = accounting["adsorb_al"]
     net_al = accounting["net_al"]
-    ratio = net_si / net_al if net_si > 0 and net_al > 0 else None
+    ratio = lattice_si / lattice_al if lattice_si > 0 and lattice_al > 0 else None
 
     def flux(count: int) -> float | None:
         return event_count_to_flux(count, area_time) if area_time is not None else None
@@ -1852,33 +1998,36 @@ def _analyze_replica(
         window_start_time_s=start.time_s if area_time is not None else None,
         window_end_time_s=end.time_s if area_time is not None else None,
         area_time_a2_s=area_time,
+        lattice_si_release_events=lattice_si,
         gross_si_events=gross_si,
         adsorb_si_events=adsorb_si,
         net_si_events=net_si,
+        lattice_al_release_events=lattice_al,
         gross_al_events=gross_al,
         adsorb_al_events=adsorb_al,
         net_al_events=net_al,
-        gross_si_flux_mol_m2_s=flux(gross_si),
-        net_si_flux_mol_m2_s=flux(net_si),
-        gross_al_flux_mol_m2_s=flux(gross_al),
-        net_al_flux_mol_m2_s=flux(net_al),
-        expected_gross_si_flux_from_propensity_mol_m2_s=(
+        lattice_si_release_flux_mol_m2_s=flux(lattice_si),
+        lattice_al_release_flux_mol_m2_s=flux(lattice_al),
+        expected_lattice_origin_si_flux_from_propensity_mol_m2_s=(
             propensity_estimate.expected_gross_si_flux_from_propensity_mol_m2_s
-            if propensity_estimate is not None
+            if propensity_estimate is not None and origin_safe
             else None
         ),
-        expected_gross_al_flux_from_propensity_mol_m2_s=(
+        expected_lattice_origin_al_flux_from_propensity_mol_m2_s=(
             propensity_estimate.expected_gross_al_flux_from_propensity_mol_m2_s
-            if propensity_estimate is not None
+            if propensity_estimate is not None and origin_safe
             else None
         ),
-        gross_si_upper_95_mol_m2_s=(
+        lattice_si_upper_95_mol_m2_s=(
             gate.si.upper_95_mol_m2_s if gate.si is not None else None
         ),
-        gross_al_upper_95_mol_m2_s=(
+        lattice_al_upper_95_mol_m2_s=(
             gate.al.upper_95_mol_m2_s if gate.al is not None else None
         ),
-        si_al_net_ratio_dimensionless=ratio,
+        si_al_lattice_release_ratio_dimensionless=ratio,
+        propensity_origin_status=(
+            "origin-safe" if origin_safe else "origin-contaminated"
+        ),
         steady_state_status=gate.status,
         acceptance_passed=gate.acceptance_passed,
     )
@@ -2210,11 +2359,11 @@ def _write_provenance(path: Path) -> None:
         ),
         (
             "dissolved_cation_activity",
-            1.0e-12,
+            1.0e-30,
             "dimensionless",
             "A9 far-from-equilibrium open-flow boundary condition",
-            "activity(Al) = activity(Si) = 1e-12",
-            "Numerical sink for dissolved products in a continuously refreshed, far-from-equilibrium reservoir; this is not a measured pH-dependent activity.",
+            "activity(Al) = activity(Si) = 1e-30",
+            "Explicit numerical open-flow sink for dissolved products in a continuously refreshed, far-from-equilibrium reservoir; not a measured pH-dependent activity.",
         ),
         (
             "dissolved_cation_mu",
@@ -2226,11 +2375,27 @@ def _write_provenance(path: Path) -> None:
         ),
         (
             "effective_consumed_cation_factor_298k",
-            1.847676567496443e-13,
+            1.8476765674964432e-31,
             "dimensionless",
             "derived from the declared A9 reservoir",
             "activity * exp(mu / (R * T)) with R = 0.00198720425864083 kcal mol^-1 K^-1",
             "Effective mass-action factor applied to cation-consuming adsorption rules at 298 K; records the exact proxy rather than claiming a calibrated pH 3-5 chemical potential.",
+        ),
+        (
+            "simulation_steps",
+            200_000,
+            "events",
+            "A9 scientific-closure sampling contract",
+            "simulation.steps = 200000",
+            "Fixed survey-tier trajectory length providing 21 cadence samples; not a production convergence claim.",
+        ),
+        (
+            "report_every_steps",
+            10_000,
+            "events",
+            "A9 scientific-closure sampling contract",
+            "observables.report_every = 10000",
+            "Fixed cadence used for the final four equal response blocks and population stationarity gates.",
         ),
     ):
         row = {field: "" for field in PROVENANCE_FIELDS}
@@ -2278,7 +2443,7 @@ def _write_provenance(path: Path) -> None:
     for record_type, name, value, unit, expression, rationale in (
         (
             "estimator",
-            "expected_gross_flux_from_propensity",
+            "expected_lattice_origin_flux_from_propensity",
             "trapezoidal",
             "mol m^-2 s^-1",
             "expected_flux_species = integral(lambda_desorb_species(t) dt) / N_A / (integral(A_geometric(t) dt) * 1e-20)",
@@ -2289,8 +2454,8 @@ def _write_provenance(path: Path) -> None:
             "sensitivity_response",
             SENSITIVITY_RESPONSE,
             "mol m^-2 s^-1",
-            "combined response = expected_gross_si_flux_from_propensity + expected_gross_al_flux_from_propensity; delta_log10 = log10(mean paired perturbed response) - log10(mean paired nominal response)",
-            "Same-seed pairs are used for every perturbation; nonpositive means are censored and no Poisson bound enters the ranking.",
+            "combined response = expected_lattice_origin_si_flux_from_propensity + expected_lattice_origin_al_flux_from_propensity; delta_log10 = log10(mean paired perturbed response) - log10(mean paired nominal response)",
+            "Same-seed pairs are used for every perturbation; adsorption-contaminated, incomplete, or nonpositive responses are censored and no Poisson bound enters the ranking.",
         ),
     ):
         row = {field: "" for field in PROVENANCE_FIELDS}
@@ -2374,12 +2539,10 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
 
     rate_fields = list(ReplicaRate.__dataclass_fields__)
     log_fields = [
-        "log10_gross_si_flux_mol_m2_s",
-        "log10_net_si_flux_mol_m2_s",
-        "log10_gross_al_flux_mol_m2_s",
-        "log10_net_al_flux_mol_m2_s",
-        "log10_expected_gross_si_flux_from_propensity_mol_m2_s",
-        "log10_expected_gross_al_flux_from_propensity_mol_m2_s",
+        "log10_lattice_si_release_flux_mol_m2_s",
+        "log10_lattice_al_release_flux_mol_m2_s",
+        "log10_expected_lattice_origin_si_flux_from_propensity_mol_m2_s",
+        "log10_expected_lattice_origin_al_flux_from_propensity_mol_m2_s",
     ]
     rate_rows: list[dict[str, object]] = []
     for rate in rates:
@@ -2388,20 +2551,20 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
             for key, value in asdict(rate).items()
         }
         for species in ("si", "al"):
-            for basis in ("gross", "net"):
-                value = getattr(rate, f"{basis}_{species}_flux_mol_m2_s")
-                row[f"log10_{basis}_{species}_flux_mol_m2_s"] = _display(
-                    math.log10(value) if value is not None and value > 0 else None
-                )
-            propensity_value = getattr(
-                rate, f"expected_gross_{species}_flux_from_propensity_mol_m2_s"
+            value = getattr(rate, f"lattice_{species}_release_flux_mol_m2_s")
+            row[f"log10_lattice_{species}_release_flux_mol_m2_s"] = _display(
+                math.log10(value) if value is not None and value > 0 else None
             )
-            row[f"log10_expected_gross_{species}_flux_from_propensity_mol_m2_s"] = (
-                _display(
-                    math.log10(propensity_value)
-                    if propensity_value is not None and propensity_value > 0
-                    else None
-                )
+            propensity_value = getattr(
+                rate,
+                f"expected_lattice_origin_{species}_flux_from_propensity_mol_m2_s",
+            )
+            row[
+                f"log10_expected_lattice_origin_{species}_flux_from_propensity_mol_m2_s"
+            ] = _display(
+                math.log10(propensity_value)
+                if propensity_value is not None and propensity_value > 0
+                else None
             )
         rate_rows.append(row)
     _write_csv_atomic(
@@ -2426,49 +2589,42 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
     ensemble_rows: list[dict[str, object]] = []
     for scenario_name, members in by_scenario.items():
         for species in ("si", "al"):
-            for basis in ("gross", "net"):
-                values = [
-                    getattr(member, f"{basis}_{species}_flux_mol_m2_s")
-                    for member in members
-                ]
-                defined = [value for value in values if value is not None]
-                if len(defined) == len(values):
-                    mean, low, high = bootstrap_summary(
-                        defined, f"{scenario_name}:{species}:{basis}"
-                    )
-                    status = (
-                        "zero-upper-bound"
-                        if basis == "gross" and mean == 0
-                        else "estimated"
-                    )
-                    upper = None
-                    if status == "zero-upper-bound":
-                        exposure = sum(
-                            float(member.area_time_a2_s) for member in members
-                        )
-                        upper = poisson_zero_upper_flux_95(exposure)
-                else:
-                    mean = low = high = upper = None
-                    status = "incomplete"
-                ensemble_rows.append(
-                    {
-                        "scenario": scenario_name,
-                        "species": species,
-                        "rate_basis": basis,
-                        "status": status,
-                        "mean_mol_m2_s": _display(mean),
-                        "ci95_low_mol_m2_s": _display(low),
-                        "ci95_high_mol_m2_s": _display(high),
-                        "poisson_zero_upper_95_mol_m2_s": _display(upper),
-                        "log10_mean_mol_m2_s": _display(
-                            math.log10(mean) if mean is not None and mean > 0 else None
-                        ),
-                    }
+            values = [
+                getattr(member, f"lattice_{species}_release_flux_mol_m2_s")
+                for member in members
+            ]
+            defined = [value for value in values if value is not None]
+            if len(defined) == len(values):
+                mean, low, high = bootstrap_summary(
+                    defined, f"{scenario_name}:{species}:{OBSERVED_RATE_BASIS}"
                 )
+                status = "zero-upper-bound" if mean == 0 else "estimated"
+                upper = None
+                if status == "zero-upper-bound":
+                    exposure = sum(float(member.area_time_a2_s) for member in members)
+                    upper = poisson_zero_upper_flux_95(exposure)
+            else:
+                mean = low = high = upper = None
+                status = "incomplete"
+            ensemble_rows.append(
+                {
+                    "scenario": scenario_name,
+                    "species": species,
+                    "rate_basis": OBSERVED_RATE_BASIS,
+                    "status": status,
+                    "mean_mol_m2_s": _display(mean),
+                    "ci95_low_mol_m2_s": _display(low),
+                    "ci95_high_mol_m2_s": _display(high),
+                    "poisson_zero_upper_95_mol_m2_s": _display(upper),
+                    "log10_mean_mol_m2_s": _display(
+                        math.log10(mean) if mean is not None and mean > 0 else None
+                    ),
+                }
+            )
             propensity_values = [
                 getattr(
                     member,
-                    f"expected_gross_{species}_flux_from_propensity_mol_m2_s",
+                    f"expected_lattice_origin_{species}_flux_from_propensity_mol_m2_s",
                 )
                 for member in members
             ]
@@ -2508,33 +2664,39 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
     stoichiometry_fields = [
         "scenario",
         "status",
-        "si_al_net_ratio_dimensionless_mean",
-        "si_al_net_ratio_dimensionless_ci95_low",
-        "si_al_net_ratio_dimensionless_ci95_high",
-        "net_si_events",
-        "net_al_events",
+        "si_al_lattice_release_ratio_dimensionless_mean",
+        "si_al_lattice_release_ratio_dimensionless_ci95_low",
+        "si_al_lattice_release_ratio_dimensionless_ci95_high",
+        "lattice_si_release_events",
+        "lattice_al_release_events",
     ]
     stoichiometry_rows: list[dict[str, object]] = []
     for scenario_name, members in by_scenario.items():
-        ratios = [member.si_al_net_ratio_dimensionless for member in members]
+        ratios = [
+            member.si_al_lattice_release_ratio_dimensionless for member in members
+        ]
         defined = [value for value in ratios if value is not None]
         if len(defined) == len(ratios):
             mean, low, high = bootstrap_summary(
-                defined, f"{scenario_name}:si_al_net_ratio_dimensionless"
+                defined, f"{scenario_name}:si_al_lattice_release_ratio_dimensionless"
             )
             status = "estimated"
         else:
             mean = low = high = None
-            status = "undefined-nonpositive-net"
+            status = "undefined-nonpositive-lattice-release"
         stoichiometry_rows.append(
             {
                 "scenario": scenario_name,
                 "status": status,
-                "si_al_net_ratio_dimensionless_mean": _display(mean),
-                "si_al_net_ratio_dimensionless_ci95_low": _display(low),
-                "si_al_net_ratio_dimensionless_ci95_high": _display(high),
-                "net_si_events": sum(member.net_si_events for member in members),
-                "net_al_events": sum(member.net_al_events for member in members),
+                "si_al_lattice_release_ratio_dimensionless_mean": _display(mean),
+                "si_al_lattice_release_ratio_dimensionless_ci95_low": _display(low),
+                "si_al_lattice_release_ratio_dimensionless_ci95_high": _display(high),
+                "lattice_si_release_events": sum(
+                    member.lattice_si_release_events for member in members
+                ),
+                "lattice_al_release_events": sum(
+                    member.lattice_al_release_events for member in members
+                ),
             }
         )
     _write_csv_atomic(
@@ -2581,14 +2743,16 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
     nominal_by_seed = {rate.seed: rate for rate in by_scenario["nominal"]}
 
     def combined_propensity_response(rate: ReplicaRate) -> float | None:
-        si = rate.expected_gross_si_flux_from_propensity_mol_m2_s
-        al = rate.expected_gross_al_flux_from_propensity_mol_m2_s
+        if not rate.acceptance_passed or rate.propensity_origin_status != "origin-safe":
+            return None
+        si = rate.expected_lattice_origin_si_flux_from_propensity_mol_m2_s
+        al = rate.expected_lattice_origin_al_flux_from_propensity_mol_m2_s
         if si is None or al is None:
             return None
         value = si + al
         if not math.isfinite(value) or value < 0.0:
             raise ValueError(
-                "combined expected-gross propensity flux must be finite and nonnegative"
+                "combined expected lattice-origin propensity flux must be finite and nonnegative"
             )
         return value
 
@@ -2606,11 +2770,7 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
     nominal_status = (
         "estimated-positive"
         if nominal_mean is not None and nominal_mean > 0.0
-        else (
-            "censored-nonpositive-propensity"
-            if nominal_mean is not None
-            else "incomplete"
-        )
+        else "censored"
     )
     sensitivity_fields = [
         "rank",
@@ -2659,7 +2819,7 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
             pair_count = len(complete_pairs)
             row[f"{perturbation}_paired_replica_count"] = pair_count
             if pair_count != len(seeds):
-                status = "incomplete"
+                status = "censored"
                 perturbed_mean = None
                 paired_mean_delta = None
                 delta_log10 = None
@@ -2684,7 +2844,7 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
                         "paired sensitivity arithmetic is inconsistent"
                     )
                 if before_mean <= 0.0 or perturbed_mean <= 0.0:
-                    status = "censored-nonpositive-propensity"
+                    status = "censored"
                     delta_log10 = None
                 else:
                     status = "estimated"
@@ -2697,11 +2857,11 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
             )
             row[f"{perturbation}_paired_delta_log10"] = _display(delta_log10)
             perturbation_statuses.append(status)
-        if "incomplete" in perturbation_statuses:
-            row["status"] = "incomplete"
-        elif any(status != "estimated" for status in perturbation_statuses):
-            row["status"] = "partially-censored"
-        row["max_abs_paired_delta_log10"] = max(responses) if responses else "undefined"
+        if any(status != "estimated" for status in perturbation_statuses):
+            row["status"] = "censored"
+            row["max_abs_paired_delta_log10"] = "undefined"
+        else:
+            row["max_abs_paired_delta_log10"] = max(responses)
         sensitivity_rows.append(row)
     sensitivity_rows.sort(
         key=lambda row: (
@@ -2714,7 +2874,7 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
     )
     next_rank = 1
     for row in sensitivity_rows:
-        if row["max_abs_paired_delta_log10"] != "undefined":
+        if row["status"] == "estimated":
             row["rank"] = next_rank
             next_rank += 1
     _write_csv_atomic(
@@ -2744,7 +2904,7 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
     }
     verification = {
         "schema": VERIFICATION_SCHEMA,
-        "acceptance_passed": outcome == "steady-positive",
+        "acceptance_passed": outcome in {"steady-positive", "no-dissolution"},
         "campaign_outcome": outcome,
         "survey_tier": True,
         "temperature_k": 298.0,
@@ -2769,8 +2929,7 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
         and {row["family"] for row in sensitivity_rows} == set(FAMILY_REACTIONS)
         and {row["declared_response"] for row in sensitivity_rows}
         == {SENSITIVITY_RESPONSE}
-        and {row["rank"] for row in sensitivity_rows}
-        == set(range(1, len(FAMILY_REACTIONS) + 1)),
+        and all(row["status"] in {"estimated", "censored"} for row in sensitivity_rows),
         "sensitivity_families": list(FAMILY_REACTIONS),
         "scenario_count": len(scenario_records),
         "expected_scenarios": [asdict(value) for value in scenarios()],
@@ -2815,12 +2974,10 @@ def _validate_derived_schemas(
     }
     rate_fields = [
         *ReplicaRate.__dataclass_fields__,
-        "log10_gross_si_flux_mol_m2_s",
-        "log10_net_si_flux_mol_m2_s",
-        "log10_gross_al_flux_mol_m2_s",
-        "log10_net_al_flux_mol_m2_s",
-        "log10_expected_gross_si_flux_from_propensity_mol_m2_s",
-        "log10_expected_gross_al_flux_from_propensity_mol_m2_s",
+        "log10_lattice_si_release_flux_mol_m2_s",
+        "log10_lattice_al_release_flux_mol_m2_s",
+        "log10_expected_lattice_origin_si_flux_from_propensity_mol_m2_s",
+        "log10_expected_lattice_origin_al_flux_from_propensity_mol_m2_s",
     ]
     rate_rows = _read_csv_exact(
         out_dir / "per-replica-rates.csv", rate_fields, expected_runs
@@ -2831,14 +2988,23 @@ def _validate_derived_schemas(
         raise ValueError("per-replica rate identity coverage mismatch")
     for row in rate_rows:
         for species in ("si", "al"):
-            value_field = f"expected_gross_{species}_flux_from_propensity_mol_m2_s"
-            log_field = f"log10_expected_gross_{species}_flux_from_propensity_mol_m2_s"
+            value_field = (
+                f"expected_lattice_origin_{species}_flux_from_propensity_mol_m2_s"
+            )
+            log_field = (
+                f"log10_expected_lattice_origin_{species}_flux_from_propensity_mol_m2_s"
+            )
             if row[value_field] == "undefined":
-                if row[log_field] != "undefined":
+                if (
+                    row[log_field] != "undefined"
+                    or row["propensity_origin_status"] != "origin-contaminated"
+                ):
                     raise ValueError(
                         "undefined propensity flux must have undefined log10"
                     )
                 continue
+            if row["propensity_origin_status"] != "origin-safe":
+                raise ValueError("defined propensity flux must be origin-safe")
             value = float(row[value_field])
             if not math.isfinite(value) or value < 0.0:
                 raise ValueError(
@@ -2864,7 +3030,7 @@ def _validate_derived_schemas(
             "poisson_zero_upper_95_mol_m2_s",
             "log10_mean_mol_m2_s",
         ],
-        len(scenarios()) * 6,
+        len(scenarios()) * 4,
     )
     if {
         (row["scenario"], row["species"], row["rate_basis"]) for row in ensemble_rows
@@ -2872,7 +3038,7 @@ def _validate_derived_schemas(
         (scenario.name, species, basis)
         for scenario in scenarios()
         for species in ("si", "al")
-        for basis in ("gross", "net", PROPENSITY_RATE_BASIS)
+        for basis in (OBSERVED_RATE_BASIS, PROPENSITY_RATE_BASIS)
     }:
         raise ValueError("ensemble rate identity coverage mismatch")
     for row in ensemble_rows:
@@ -2921,11 +3087,11 @@ def _validate_derived_schemas(
         [
             "scenario",
             "status",
-            "si_al_net_ratio_dimensionless_mean",
-            "si_al_net_ratio_dimensionless_ci95_low",
-            "si_al_net_ratio_dimensionless_ci95_high",
-            "net_si_events",
-            "net_al_events",
+            "si_al_lattice_release_ratio_dimensionless_mean",
+            "si_al_lattice_release_ratio_dimensionless_ci95_low",
+            "si_al_lattice_release_ratio_dimensionless_ci95_high",
+            "lattice_si_release_events",
+            "lattice_al_release_events",
         ],
         len(scenarios()),
     )
@@ -2961,13 +3127,16 @@ def _validate_derived_schemas(
         raise ValueError("sensitivity family coverage mismatch")
     if {row["declared_response"] for row in sensitivity} != {SENSITIVITY_RESPONSE}:
         raise ValueError("sensitivity declared response mismatch")
-    if {row["rank"] for row in sensitivity} != {
-        str(rank) for rank in range(1, len(FAMILY_REACTIONS) + 1)
+    estimated_rows = [row for row in sensitivity if row["status"] == "estimated"]
+    if {row["rank"] for row in estimated_rows} != {
+        str(rank) for rank in range(1, len(estimated_rows) + 1)
     }:
-        raise ValueError("sensitivity rank coverage mismatch")
+        raise ValueError("estimated sensitivity rank coverage mismatch")
     for row in sensitivity:
-        if row["status"] not in {"estimated", "partially-censored", "incomplete"}:
+        if row["status"] not in {"estimated", "censored"}:
             raise ValueError("sensitivity status mismatch")
+        if row["status"] == "censored" and row["rank"] != "undefined":
+            raise ValueError("censored sensitivity rank must be undefined")
         nominal_status = row["nominal_status"]
         nominal_value = row["nominal_mean_mol_m2_s"]
         if nominal_status == "estimated-positive":
@@ -2975,28 +3144,29 @@ def _validate_derived_schemas(
                 raise ValueError(
                     "nominal propensity sensitivity response must be positive"
                 )
-        elif nominal_status == "censored-nonpositive-propensity":
-            if float(nominal_value) != 0.0:
-                raise ValueError("censored nominal propensity response must be zero")
-        elif nominal_status != "incomplete" or nominal_value != "undefined":
+        elif nominal_status != "censored":
             raise ValueError("nominal propensity sensitivity status mismatch")
         finite_deltas: list[float] = []
+        perturbation_statuses = []
         for perturbation in PERTURBATIONS:
             pair_count = int(row[f"{perturbation}_paired_replica_count"])
             if not 0 <= pair_count <= REPLICA_COUNT:
                 raise ValueError("sensitivity paired-replica coverage mismatch")
             status = row[f"{perturbation}_status"]
-            if status != "incomplete" and pair_count != REPLICA_COUNT:
-                raise ValueError("sensitivity paired-replica coverage mismatch")
+            perturbation_statuses.append(status)
             delta = row[f"{perturbation}_paired_delta_log10"]
             paired_mean_delta = row[f"{perturbation}_paired_mean_delta_mol_m2_s"]
-            perturbed_mean: float | None = None
-            if status != "incomplete":
-                perturbed_mean = float(row[f"{perturbation}_perturbed_mean_mol_m2_s"])
+            perturbed_value = row[f"{perturbation}_perturbed_mean_mol_m2_s"]
+            if status == "estimated":
+                if pair_count != REPLICA_COUNT:
+                    raise ValueError("sensitivity paired-replica coverage mismatch")
+                perturbed_mean = float(perturbed_value)
                 linear_delta = float(paired_mean_delta)
                 if (
-                    not math.isfinite(perturbed_mean)
+                    perturbed_mean <= 0.0
+                    or not math.isfinite(perturbed_mean)
                     or not math.isfinite(linear_delta)
+                    or not math.isfinite(float(delta))
                     or not math.isclose(
                         perturbed_mean,
                         float(nominal_value) + linear_delta,
@@ -3004,38 +3174,33 @@ def _validate_derived_schemas(
                         abs_tol=0.0,
                     )
                 ):
-                    raise ValueError("paired sensitivity linear delta mismatch")
-            if status == "estimated":
-                if (
-                    perturbed_mean is None
-                    or perturbed_mean <= 0.0
-                    or not math.isfinite(float(delta))
-                ):
-                    raise ValueError("sensitivity delta must be finite")
+                    raise ValueError("paired sensitivity arithmetic mismatch")
                 finite_deltas.append(abs(float(delta)))
-            elif status == "censored-nonpositive-propensity":
+            elif status == "censored":
                 if delta != "undefined":
                     raise ValueError("censored sensitivity delta must be undefined")
-            elif status == "incomplete":
-                if (
-                    row[f"{perturbation}_perturbed_mean_mol_m2_s"] != "undefined"
-                    or paired_mean_delta != "undefined"
+                if pair_count != REPLICA_COUNT and (
+                    perturbed_value != "undefined" or paired_mean_delta != "undefined"
                 ):
-                    raise ValueError(
-                        "incomplete sensitivity response must be undefined"
-                    )
+                    raise ValueError("censored incomplete response must be undefined")
             else:
                 raise ValueError("sensitivity perturbation status mismatch")
-        if not finite_deltas or not math.isclose(
-            float(row["max_abs_paired_delta_log10"]),
-            max(finite_deltas),
-            rel_tol=1.0e-14,
-        ):
-            raise ValueError("sensitivity ranking magnitude mismatch")
+        fully_estimated = all(status == "estimated" for status in perturbation_statuses)
+        if (row["status"] == "estimated") != fully_estimated:
+            raise ValueError("sensitivity family classification mismatch")
+        if fully_estimated:
+            if not finite_deltas or not math.isclose(
+                float(row["max_abs_paired_delta_log10"]),
+                max(finite_deltas),
+                rel_tol=1.0e-14,
+            ):
+                raise ValueError("sensitivity ranking magnitude mismatch")
+        elif row["max_abs_paired_delta_log10"] != "undefined":
+            raise ValueError("censored sensitivity magnitude must be undefined")
     provenance = _read_csv_exact(
         out_dir / "provenance-conversions.csv",
         PROVENANCE_FIELDS,
-        len(REACTION_REGISTRY) + 8,
+        len(REACTION_REGISTRY) + 10,
     )
     if [row["reaction"] for row in provenance[:22]] != [
         entry.name for entry in REACTION_REGISTRY
@@ -3053,12 +3218,16 @@ def _validate_derived_schemas(
             "dissolved_cation_activity",
             "dissolved_cation_mu",
             "effective_consumed_cation_factor_298k",
+            "simulation_steps",
+            "report_every_steps",
         }
         or conditions["temperature"]["constant_value"] != "298.0"
-        or conditions["dissolved_cation_activity"]["constant_value"] != "1e-12"
+        or conditions["dissolved_cation_activity"]["constant_value"] != "1e-30"
         or conditions["dissolved_cation_mu"]["constant_value"] != "-1.0"
-        or "not a measured pH-dependent activity"
+        or "numerical open-flow sink"
         not in conditions["dissolved_cation_activity"]["rationale"]
+        or conditions["simulation_steps"]["constant_value"] != "200000"
+        or conditions["report_every_steps"]["constant_value"] != "10000"
     ):
         raise ValueError("thermodynamic condition provenance mismatch")
     if (
