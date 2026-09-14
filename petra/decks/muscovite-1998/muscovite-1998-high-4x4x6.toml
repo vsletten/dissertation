@@ -1,11 +1,12 @@
-# E2 full muscovite mechanism: scheduled, species- and defect-resolved.
-# Published anchors and proxy barriers are documented in
-# docs/program/results/E2-muscovite-full-mechanism.md.
+# E4 Sletten-Onstott 1998 comparison deck.
+# E3a incomplete-convergence Ar-hop estimates integrated explicitly;
+# E2 delamination/trap proxies retained where E3a emitted no value;
+# schedule/data limits: petra/data/muscovite-1998/README.md.
 [deck]
-name = "muscovite-full-mechanism"
+name = "muscovite-1998-high-4x4x6"
 schema = 2
 units = "kcal/mol"
-comment = "mechanism comparison; proxy brackets are not computed kinetics"
+comment = "E4 qualitative comparison; retained delamination proxy 63.000 kcal/mol; E3a Ar hops incomplete-convergence"
 
 [structure]
 kind = "cell"
@@ -353,13 +354,13 @@ target = "neighbor"
 select = { kind = "OH_acceptor", label = "oh_pair", state = ["OH"] }
 set = "O_residual"
 
-# Explicit interface transition. 58 kcal/mol is a sensitivity proxy,
-# not a computed barrier; analysis brackets it by ±5 kcal/mol.
+# E2 delamination sensitivity proxy: 63.000 kcal/mol (high, 58 ± 5).
+# E3a state: incomplete-input-contract; no delamination barrier emitted.
 [[dynamics.rules]]
 name = "delaminate_interface"
 center = { kind = "Interface", state = ["bonded"] }
 guards = [{ kind = "OH_acceptor", label = "delam_driver", state = ["O_residual"], min = 1 }]
-rate = { eyring = { dh = 58.0, ds = 0.0 } }
+rate = { eyring = { dh = 63.000, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "delaminated"
@@ -401,8 +402,8 @@ target = "neighbor"
 select = { kind = "K_gallery_A", label = "trap_gallery", state = ["vacant"] }
 set = "Ar39"
 
-# pristine reservoir hops: 66 kcal/mol. Extended-zone value is
-# the Nteme-2023 six-order enhancement mapped to a proxy barrier.
+# E3a local-dehydroxylate Ar hop: 64.095991 kcal/mol.
+# State: incomplete-convergence; bounded classical sensitivity value.
 [[dynamics.rules]]
 name = "hop_pristine_Ar40_A_to_B_intra"
 center = { kind = "K_gallery_A", state = ["Ar40"] }
@@ -412,7 +413,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
 ]
-rate = { eyring = { dh = 66.0, ds = 0.0 } }
+rate = { eyring = { dh = 64.095991, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -429,7 +430,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
 ]
-rate = { eyring = { dh = 66.0, ds = 0.0 } }
+rate = { eyring = { dh = 64.095991, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -446,7 +447,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
 ]
-rate = { eyring = { dh = 66.0, ds = 0.0 } }
+rate = { eyring = { dh = 64.095991, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -463,7 +464,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
 ]
-rate = { eyring = { dh = 66.0, ds = 0.0 } }
+rate = { eyring = { dh = 64.095991, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -480,7 +481,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
 ]
-rate = { eyring = { dh = 66.0, ds = 0.0 } }
+rate = { eyring = { dh = 64.095991, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -497,7 +498,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
 ]
-rate = { eyring = { dh = 66.0, ds = 0.0 } }
+rate = { eyring = { dh = 64.095991, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -514,7 +515,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
 ]
-rate = { eyring = { dh = 66.0, ds = 0.0 } }
+rate = { eyring = { dh = 64.095991, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -531,7 +532,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
 ]
-rate = { eyring = { dh = 66.0, ds = 0.0 } }
+rate = { eyring = { dh = 64.095991, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -548,7 +549,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
 ]
-rate = { eyring = { dh = 66.0, ds = 0.0 } }
+rate = { eyring = { dh = 64.095991, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -565,7 +566,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
 ]
-rate = { eyring = { dh = 66.0, ds = 0.0 } }
+rate = { eyring = { dh = 64.095991, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -582,7 +583,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
 ]
-rate = { eyring = { dh = 66.0, ds = 0.0 } }
+rate = { eyring = { dh = 64.095991, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -599,7 +600,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["pristine"], min = 1 },
 ]
-rate = { eyring = { dh = 66.0, ds = 0.0 } }
+rate = { eyring = { dh = 64.095991, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -608,8 +609,8 @@ target = "neighbor"
 select = { kind = "K_gallery_A", label = "gallery_inter", state = ["vacant"] }
 set = "Ar36"
 
-# extended reservoir hops: 40 kcal/mol. Extended-zone value is
-# the Nteme-2023 six-order enhancement mapped to a proxy barrier.
+# E3a extended-zone Ar hop: 68.410690 kcal/mol (lowest geometry).
+# State: incomplete-convergence; bounded classical sensitivity value.
 [[dynamics.rules]]
 name = "hop_extended_Ar40_A_to_B_intra"
 center = { kind = "K_gallery_A", state = ["Ar40"] }
@@ -619,7 +620,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
 ]
-rate = { eyring = { dh = 40.0, ds = 0.0 } }
+rate = { eyring = { dh = 68.41069, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -636,7 +637,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
 ]
-rate = { eyring = { dh = 40.0, ds = 0.0 } }
+rate = { eyring = { dh = 68.41069, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -653,7 +654,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
 ]
-rate = { eyring = { dh = 40.0, ds = 0.0 } }
+rate = { eyring = { dh = 68.41069, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -670,7 +671,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
 ]
-rate = { eyring = { dh = 40.0, ds = 0.0 } }
+rate = { eyring = { dh = 68.41069, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -687,7 +688,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
 ]
-rate = { eyring = { dh = 40.0, ds = 0.0 } }
+rate = { eyring = { dh = 68.41069, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -704,7 +705,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
 ]
-rate = { eyring = { dh = 40.0, ds = 0.0 } }
+rate = { eyring = { dh = 68.41069, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -721,7 +722,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
 ]
-rate = { eyring = { dh = 40.0, ds = 0.0 } }
+rate = { eyring = { dh = 68.41069, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -738,7 +739,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
 ]
-rate = { eyring = { dh = 40.0, ds = 0.0 } }
+rate = { eyring = { dh = 68.41069, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -755,7 +756,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
 ]
-rate = { eyring = { dh = 40.0, ds = 0.0 } }
+rate = { eyring = { dh = 68.41069, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -772,7 +773,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
 ]
-rate = { eyring = { dh = 40.0, ds = 0.0 } }
+rate = { eyring = { dh = 68.41069, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -789,7 +790,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
 ]
-rate = { eyring = { dh = 40.0, ds = 0.0 } }
+rate = { eyring = { dh = 68.41069, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -806,7 +807,7 @@ guards = [
   { kind = "OH_acceptor", label = "local_structure", state = ["O_residual"], min = 1 },
   { kind = "Defect_zone", label = "local_defect", state = ["extended"], min = 1 },
 ]
-rate = { eyring = { dh = 40.0, ds = 0.0 } }
+rate = { eyring = { dh = 68.41069, ds = 0.0 } }
 [[dynamics.rules.effects]]
 target = "center"
 set = "vacant"
@@ -879,6 +880,36 @@ temperature = 923.15
 duration = 600.0
 [[execution.schedule]]
 temperature = 973.15
+duration = 600.0
+[[execution.schedule]]
+temperature = 1023.15
+duration = 600.0
+[[execution.schedule]]
+temperature = 1073.15
+duration = 600.0
+[[execution.schedule]]
+temperature = 1123.15
+duration = 600.0
+[[execution.schedule]]
+temperature = 1173.15
+duration = 600.0
+[[execution.schedule]]
+temperature = 1223.15
+duration = 600.0
+[[execution.schedule]]
+temperature = 1273.15
+duration = 600.0
+[[execution.schedule]]
+temperature = 1323.15
+duration = 600.0
+[[execution.schedule]]
+temperature = 1373.15
+duration = 600.0
+[[execution.schedule]]
+temperature = 1423.15
+duration = 600.0
+[[execution.schedule]]
+temperature = 1473.15
 duration = 600.0
 [execution.stop]
 steps = 250000

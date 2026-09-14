@@ -1,0 +1,191 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="920" viewBox="0 0 1200 920">
+<rect width="100%" height="100%" fill="white"/>
+<text x="600" y="28" text-anchor="middle" font-family="sans-serif" font-size="21" font-weight="700">E4b isothermal cumulative release and cylinder D/a²</text>
+<rect x="75" y="70" width="500" height="320" fill="#fafafa" stroke="#475569"/>
+<text x="325" y="58" text-anchor="middle" font-family="sans-serif" font-size="16">500 °C — cumulative ⁴⁰Ar fraction</text>
+<line x1="75.0" y1="70" x2="75.0" y2="390" stroke="#e2e8f0"/>
+<text x="75.0" y="404" text-anchor="middle" font-family="sans-serif" font-size="10">0</text>
+<line x1="200.0" y1="70" x2="200.0" y2="390" stroke="#e2e8f0"/>
+<text x="200.0" y="404" text-anchor="middle" font-family="sans-serif" font-size="10">15</text>
+<line x1="325.0" y1="70" x2="325.0" y2="390" stroke="#e2e8f0"/>
+<text x="325.0" y="404" text-anchor="middle" font-family="sans-serif" font-size="10">30</text>
+<line x1="450.0" y1="70" x2="450.0" y2="390" stroke="#e2e8f0"/>
+<text x="450.0" y="404" text-anchor="middle" font-family="sans-serif" font-size="10">45</text>
+<line x1="575.0" y1="70" x2="575.0" y2="390" stroke="#e2e8f0"/>
+<text x="575.0" y="404" text-anchor="middle" font-family="sans-serif" font-size="10">60</text>
+<line x1="75" y1="390.0" x2="575" y2="390.0" stroke="#e2e8f0"/>
+<text x="68" y="393.0" text-anchor="end" font-family="sans-serif" font-size="10">0.00</text>
+<line x1="75" y1="310.0" x2="575" y2="310.0" stroke="#e2e8f0"/>
+<text x="68" y="313.0" text-anchor="end" font-family="sans-serif" font-size="10">0.25</text>
+<line x1="75" y1="230.0" x2="575" y2="230.0" stroke="#e2e8f0"/>
+<text x="68" y="233.0" text-anchor="end" font-family="sans-serif" font-size="10">0.50</text>
+<line x1="75" y1="150.0" x2="575" y2="150.0" stroke="#e2e8f0"/>
+<text x="68" y="153.0" text-anchor="end" font-family="sans-serif" font-size="10">0.75</text>
+<line x1="75" y1="70.0" x2="575" y2="70.0" stroke="#e2e8f0"/>
+<text x="68" y="73.0" text-anchor="end" font-family="sans-serif" font-size="10">1.00</text>
+<polygon points="108.3,386.7 125.0,381.0 141.7,363.6 158.3,342.0 200.0,338.8 241.7,335.5 325.0,325.5 408.3,305.5 491.7,303.6 575.0,302.6 575.0,266.6 491.7,266.6 408.3,276.6 325.0,276.6 241.7,283.7 200.0,285.1 158.3,296.2 141.7,312.6 125.0,328.6 108.3,362.9" fill="#2563eb" fill-opacity="0.13" stroke="none"/>
+<polyline points="91.7,386.7 108.3,374.3 125.0,357.6 141.7,337.9 158.3,317.5 200.0,309.5 241.7,306.1 325.0,296.1 408.3,289.5 491.7,282.8 575.0,282.8" fill="none" stroke="#2563eb" stroke-width="2.5"/>
+<polygon points="108.3,381.0 125.0,350.2 141.7,324.2 158.3,317.4 200.0,301.9 241.7,299.3 325.0,295.4 408.3,293.2 491.7,289.5 575.0,290.1 575.0,255.5 491.7,254.9 408.3,257.7 325.0,259.6 241.7,265.8 200.0,265.3 158.3,282.9 141.7,291.8 125.0,324.0 108.3,365.9" fill="#16a34a" fill-opacity="0.13" stroke="none"/>
+<polyline points="91.7,388.0 108.3,373.6 125.0,337.7 141.7,308.7 158.3,300.9 200.0,284.9 241.7,284.0 325.0,279.4 408.3,277.3 491.7,274.4 575.0,274.4" fill="none" stroke="#16a34a" stroke-width="2.5"/>
+<polygon points="91.7,389.1 108.3,368.6 125.0,339.2 141.7,321.6 158.3,301.1 200.0,291.6 241.7,290.0 325.0,288.1 408.3,282.7 491.7,282.3 575.0,280.6 575.0,247.9 491.7,251.0 408.3,252.2 325.0,259.3 241.7,263.1 200.0,268.3 158.3,277.9 141.7,297.2 125.0,323.2 108.3,360.5 91.7,386.7" fill="#dc2626" fill-opacity="0.13" stroke="none"/>
+<polyline points="91.7,387.8 108.3,364.4 125.0,331.7 141.7,309.4 158.3,289.1 200.0,279.8 241.7,276.6 325.0,273.2 408.3,267.3 491.7,266.0 575.0,264.3" fill="none" stroke="#dc2626" stroke-width="2.5"/>
+<circle cx="91.7" cy="389.7" r="2.4" fill="#111827"/>
+<circle cx="116.7" cy="389.4" r="2.4" fill="#111827"/>
+<circle cx="158.3" cy="389.0" r="2.4" fill="#111827"/>
+<circle cx="200.0" cy="388.8" r="2.4" fill="#111827"/>
+<circle cx="241.7" cy="388.5" r="2.4" fill="#111827"/>
+<circle cx="283.3" cy="388.1" r="2.4" fill="#111827"/>
+<circle cx="350.0" cy="387.6" r="2.4" fill="#111827"/>
+<circle cx="408.3" cy="387.1" r="2.4" fill="#111827"/>
+<circle cx="491.7" cy="386.7" r="2.4" fill="#111827"/>
+<circle cx="91.7" cy="386.2" r="2.4" fill="#111827"/>
+<circle cx="116.7" cy="382.0" r="2.4" fill="#111827"/>
+<circle cx="158.3" cy="376.2" r="2.4" fill="#111827"/>
+<circle cx="241.7" cy="369.8" r="2.4" fill="#111827"/>
+<circle cx="325.0" cy="366.0" r="2.4" fill="#111827"/>
+<circle cx="408.3" cy="362.2" r="2.4" fill="#111827"/>
+<circle cx="491.7" cy="359.3" r="2.4" fill="#111827"/>
+<circle cx="575.0" cy="357.0" r="2.4" fill="#111827"/>
+<circle cx="91.7" cy="380.4" r="2.4" fill="#111827"/>
+<circle cx="116.7" cy="364.4" r="2.4" fill="#111827"/>
+<circle cx="158.3" cy="338.8" r="2.4" fill="#111827"/>
+<circle cx="241.7" cy="313.2" r="2.4" fill="#111827"/>
+<circle cx="325.0" cy="294.0" r="2.4" fill="#111827"/>
+<circle cx="408.3" cy="281.2" r="2.4" fill="#111827"/>
+<circle cx="491.7" cy="270.0" r="2.4" fill="#111827"/>
+<text x="325.0" y="420" text-anchor="middle" font-family="sans-serif" font-size="13">√time (min½); black = 1998 digitization ± source CSV uncertainty</text>
+<rect x="660" y="70" width="500" height="320" fill="#fafafa" stroke="#475569"/>
+<text x="910" y="58" text-anchor="middle" font-family="sans-serif" font-size="16">700 °C — cumulative ⁴⁰Ar fraction</text>
+<line x1="660.0" y1="70" x2="660.0" y2="390" stroke="#e2e8f0"/>
+<text x="660.0" y="404" text-anchor="middle" font-family="sans-serif" font-size="10">0</text>
+<line x1="785.0" y1="70" x2="785.0" y2="390" stroke="#e2e8f0"/>
+<text x="785.0" y="404" text-anchor="middle" font-family="sans-serif" font-size="10">15</text>
+<line x1="910.0" y1="70" x2="910.0" y2="390" stroke="#e2e8f0"/>
+<text x="910.0" y="404" text-anchor="middle" font-family="sans-serif" font-size="10">30</text>
+<line x1="1035.0" y1="70" x2="1035.0" y2="390" stroke="#e2e8f0"/>
+<text x="1035.0" y="404" text-anchor="middle" font-family="sans-serif" font-size="10">45</text>
+<line x1="1160.0" y1="70" x2="1160.0" y2="390" stroke="#e2e8f0"/>
+<text x="1160.0" y="404" text-anchor="middle" font-family="sans-serif" font-size="10">60</text>
+<line x1="660" y1="390.0" x2="1160" y2="390.0" stroke="#e2e8f0"/>
+<text x="653" y="393.0" text-anchor="end" font-family="sans-serif" font-size="10">0.00</text>
+<line x1="660" y1="310.0" x2="1160" y2="310.0" stroke="#e2e8f0"/>
+<text x="653" y="313.0" text-anchor="end" font-family="sans-serif" font-size="10">0.25</text>
+<line x1="660" y1="230.0" x2="1160" y2="230.0" stroke="#e2e8f0"/>
+<text x="653" y="233.0" text-anchor="end" font-family="sans-serif" font-size="10">0.50</text>
+<line x1="660" y1="150.0" x2="1160" y2="150.0" stroke="#e2e8f0"/>
+<text x="653" y="153.0" text-anchor="end" font-family="sans-serif" font-size="10">0.75</text>
+<line x1="660" y1="70.0" x2="1160" y2="70.0" stroke="#e2e8f0"/>
+<text x="653" y="73.0" text-anchor="end" font-family="sans-serif" font-size="10">1.00</text>
+<polygon points="676.7,316.9 693.3,301.2 710.0,301.9 726.7,302.1 743.3,303.1 785.0,302.1 826.7,301.4 910.0,301.5 993.3,301.9 1076.7,303.3 1160.0,302.7 1160.0,247.7 1076.7,246.6 993.3,247.5 910.0,249.4 826.7,247.7 785.0,246.3 743.3,248.2 726.7,246.6 710.0,248.8 693.3,246.6 676.7,270.9" fill="#2563eb" fill-opacity="0.13" stroke="none"/>
+<polyline points="676.7,292.8 693.3,275.8 710.0,275.8 726.7,275.8 743.3,275.8 785.0,275.8 826.7,275.8 910.0,275.8 993.3,275.8 1076.7,275.8 1160.0,275.8" fill="none" stroke="#2563eb" stroke-width="2.5"/>
+<polygon points="676.7,284.7 693.3,259.4 710.0,255.9 726.7,257.3 743.3,257.2 785.0,256.4 826.7,256.8 910.0,256.9 993.3,257.3 1076.7,257.2 1160.0,256.8 1160.0,217.4 1076.7,216.9 993.3,216.0 910.0,216.9 826.7,217.0 785.0,216.2 743.3,216.9 726.7,215.3 710.0,216.0 693.3,221.6 676.7,236.3" fill="#16a34a" fill-opacity="0.13" stroke="none"/>
+<polyline points="676.7,264.0 693.3,242.3 710.0,238.6 726.7,238.6 743.3,238.6 785.0,238.6 826.7,238.6 910.0,238.6 993.3,238.6 1076.7,238.6 1160.0,238.6" fill="none" stroke="#16a34a" stroke-width="2.5"/>
+<polygon points="676.7,259.7 693.3,247.7 710.0,245.6 726.7,245.1 743.3,246.1 785.0,246.0 826.7,246.0 910.0,245.6 993.3,245.7 1076.7,245.2 1160.0,246.1 1160.0,220.7 1076.7,220.7 993.3,220.1 910.0,220.1 826.7,221.1 785.0,220.3 743.3,220.4 726.7,220.4 710.0,220.1 693.3,221.2 676.7,242.0" fill="#dc2626" fill-opacity="0.13" stroke="none"/>
+<polyline points="676.7,251.2 693.3,235.2 710.0,233.4 726.7,233.4 743.3,233.4 785.0,233.4 826.7,233.4 910.0,233.4 993.3,233.4 1076.7,233.4 1160.0,233.4" fill="none" stroke="#dc2626" stroke-width="2.5"/>
+<circle cx="676.7" cy="385.2" r="2.4" fill="#111827"/>
+<circle cx="701.7" cy="377.8" r="2.4" fill="#111827"/>
+<circle cx="743.3" cy="367.6" r="2.4" fill="#111827"/>
+<circle cx="785.0" cy="361.2" r="2.4" fill="#111827"/>
+<circle cx="826.7" cy="356.4" r="2.4" fill="#111827"/>
+<circle cx="910.0" cy="351.6" r="2.4" fill="#111827"/>
+<circle cx="993.3" cy="343.6" r="2.4" fill="#111827"/>
+<circle cx="1076.7" cy="332.4" r="2.4" fill="#111827"/>
+<circle cx="1160.0" cy="322.8" r="2.4" fill="#111827"/>
+<text x="910.0" y="420" text-anchor="middle" font-family="sans-serif" font-size="13">√time (min½); black = 1998 digitization ± source CSV uncertainty</text>
+<rect x="75" y="480" width="500" height="320" fill="#fafafa" stroke="#475569"/>
+<text x="325" y="468" text-anchor="middle" font-family="sans-serif" font-size="16">500 °C — log10 D/a² (s⁻¹)</text>
+<line x1="75.0" y1="480" x2="75.0" y2="800" stroke="#e2e8f0"/>
+<text x="75.0" y="814" text-anchor="middle" font-family="sans-serif" font-size="10">0</text>
+<line x1="200.0" y1="480" x2="200.0" y2="800" stroke="#e2e8f0"/>
+<text x="200.0" y="814" text-anchor="middle" font-family="sans-serif" font-size="10">15</text>
+<line x1="325.0" y1="480" x2="325.0" y2="800" stroke="#e2e8f0"/>
+<text x="325.0" y="814" text-anchor="middle" font-family="sans-serif" font-size="10">30</text>
+<line x1="450.0" y1="480" x2="450.0" y2="800" stroke="#e2e8f0"/>
+<text x="450.0" y="814" text-anchor="middle" font-family="sans-serif" font-size="10">45</text>
+<line x1="575.0" y1="480" x2="575.0" y2="800" stroke="#e2e8f0"/>
+<text x="575.0" y="814" text-anchor="middle" font-family="sans-serif" font-size="10">60</text>
+<line x1="75" y1="800.0" x2="575" y2="800.0" stroke="#e2e8f0"/>
+<text x="68" y="803.0" text-anchor="end" font-family="sans-serif" font-size="10">-10.07</text>
+<line x1="75" y1="720.0" x2="575" y2="720.0" stroke="#e2e8f0"/>
+<text x="68" y="723.0" text-anchor="end" font-family="sans-serif" font-size="10">-8.63</text>
+<line x1="75" y1="640.0" x2="575" y2="640.0" stroke="#e2e8f0"/>
+<text x="68" y="643.0" text-anchor="end" font-family="sans-serif" font-size="10">-7.19</text>
+<line x1="75" y1="560.0" x2="575" y2="560.0" stroke="#e2e8f0"/>
+<text x="68" y="563.0" text-anchor="end" font-family="sans-serif" font-size="10">-5.74</text>
+<line x1="75" y1="480.0" x2="575" y2="480.0" stroke="#e2e8f0"/>
+<text x="68" y="483.0" text-anchor="end" font-family="sans-serif" font-size="10">-4.30</text>
+<polygon points="108.3,608.2 141.7,601.0 141.7,540.9 108.3,550.3" fill="#2563eb" fill-opacity="0.13" stroke="none"/>
+<polyline points="91.7,581.7 108.3,569.3 125.0,542.3 141.7,558.5 158.3,552.9 200.0,591.5 241.7,621.8 325.0,624.7 408.3,671.8 491.7,636.7" fill="none" stroke="#2563eb" stroke-width="2.5"/>
+<polygon points="108.3,596.2 125.0,551.9 141.7,548.2 158.3,577.9 200.0,588.6 325.0,660.7 325.0,616.5 200.0,561.9 158.3,555.5 141.7,523.4 125.0,526.4 108.3,559.8" fill="#16a34a" fill-opacity="0.13" stroke="none"/>
+<polyline points="91.7,624.8 108.3,573.4 125.0,536.5 141.7,533.3 158.3,564.3 200.0,573.2 241.7,658.1 325.0,631.2 408.3,662.9 491.7,662.2" fill="none" stroke="#16a34a" stroke-width="2.5"/>
+<polygon points="91.7,661.3 108.3,567.0 125.0,544.4 141.7,551.0 158.3,548.2 200.0,606.3 241.7,643.5 325.0,656.9 408.3,644.7 575.0,701.4 575.0,654.8 408.3,624.0 325.0,623.9 241.7,599.1 200.0,570.5 158.3,535.5 141.7,528.9 125.0,528.4 108.3,552.4 91.7,630.8" fill="#dc2626" fill-opacity="0.13" stroke="none"/>
+<polyline points="91.7,641.2 108.3,558.9 125.0,535.6 141.7,538.5 158.3,541.0 200.0,584.7 241.7,614.1 325.0,637.0 408.3,632.3 491.7,672.2 575.0,668.2" fill="none" stroke="#dc2626" stroke-width="2.5"/>
+<circle cx="100.0" cy="786.1" r="2.4" fill="#111827"/>
+<circle cx="116.7" cy="739.5" r="2.4" fill="#111827"/>
+<circle cx="158.3" cy="772.8" r="2.4" fill="#111827"/>
+<circle cx="241.7" cy="777.8" r="2.4" fill="#111827"/>
+<circle cx="325.0" cy="773.9" r="2.4" fill="#111827"/>
+<circle cx="408.3" cy="758.4" r="2.4" fill="#111827"/>
+<circle cx="491.7" cy="770.1" r="2.4" fill="#111827"/>
+<circle cx="116.7" cy="493.9" r="2.4" fill="#111827"/>
+<circle cx="158.3" cy="507.7" r="2.4" fill="#111827"/>
+<circle cx="241.7" cy="527.1" r="2.4" fill="#111827"/>
+<circle cx="325.0" cy="549.3" r="2.4" fill="#111827"/>
+<circle cx="91.7" cy="593.7" r="2.4" fill="#111827"/>
+<circle cx="116.7" cy="599.2" r="2.4" fill="#111827"/>
+<circle cx="158.3" cy="598.1" r="2.4" fill="#111827"/>
+<circle cx="241.7" cy="613.1" r="2.4" fill="#111827"/>
+<circle cx="325.0" cy="623.1" r="2.4" fill="#111827"/>
+<circle cx="408.3" cy="628.6" r="2.4" fill="#111827"/>
+<circle cx="575.0" cy="630.8" r="2.4" fill="#111827"/>
+<circle cx="100.0" cy="613.1" r="2.4" fill="#111827"/>
+<circle cx="116.7" cy="649.2" r="2.4" fill="#111827"/>
+<circle cx="158.3" cy="646.4" r="2.4" fill="#111827"/>
+<circle cx="241.7" cy="668.6" r="2.4" fill="#111827"/>
+<circle cx="408.3" cy="689.6" r="2.4" fill="#111827"/>
+<circle cx="575.0" cy="699.1" r="2.4" fill="#111827"/>
+<circle cx="91.7" cy="554.9" r="2.4" fill="#111827"/>
+<circle cx="116.7" cy="579.8" r="2.4" fill="#111827"/>
+<circle cx="158.3" cy="577.1" r="2.4" fill="#111827"/>
+<circle cx="241.7" cy="599.2" r="2.4" fill="#111827"/>
+<circle cx="325.0" cy="610.3" r="2.4" fill="#111827"/>
+<circle cx="491.7" cy="629.7" r="2.4" fill="#111827"/>
+<text x="325.0" y="830" text-anchor="middle" font-family="sans-serif" font-size="13">√time (min½); black = 1998 digitization ± source CSV uncertainty</text>
+<rect x="660" y="480" width="500" height="320" fill="#fafafa" stroke="#475569"/>
+<text x="910" y="468" text-anchor="middle" font-family="sans-serif" font-size="16">700 °C — log10 D/a² (s⁻¹)</text>
+<line x1="660.0" y1="480" x2="660.0" y2="800" stroke="#e2e8f0"/>
+<text x="660.0" y="814" text-anchor="middle" font-family="sans-serif" font-size="10">0</text>
+<line x1="785.0" y1="480" x2="785.0" y2="800" stroke="#e2e8f0"/>
+<text x="785.0" y="814" text-anchor="middle" font-family="sans-serif" font-size="10">15</text>
+<line x1="910.0" y1="480" x2="910.0" y2="800" stroke="#e2e8f0"/>
+<text x="910.0" y="814" text-anchor="middle" font-family="sans-serif" font-size="10">30</text>
+<line x1="1035.0" y1="480" x2="1035.0" y2="800" stroke="#e2e8f0"/>
+<text x="1035.0" y="814" text-anchor="middle" font-family="sans-serif" font-size="10">45</text>
+<line x1="1160.0" y1="480" x2="1160.0" y2="800" stroke="#e2e8f0"/>
+<text x="1160.0" y="814" text-anchor="middle" font-family="sans-serif" font-size="10">60</text>
+<line x1="660" y1="800.0" x2="1160" y2="800.0" stroke="#e2e8f0"/>
+<text x="653" y="803.0" text-anchor="end" font-family="sans-serif" font-size="10">-7.88</text>
+<line x1="660" y1="720.0" x2="1160" y2="720.0" stroke="#e2e8f0"/>
+<text x="653" y="723.0" text-anchor="end" font-family="sans-serif" font-size="10">-6.78</text>
+<line x1="660" y1="640.0" x2="1160" y2="640.0" stroke="#e2e8f0"/>
+<text x="653" y="643.0" text-anchor="end" font-family="sans-serif" font-size="10">-5.67</text>
+<line x1="660" y1="560.0" x2="1160" y2="560.0" stroke="#e2e8f0"/>
+<text x="653" y="563.0" text-anchor="end" font-family="sans-serif" font-size="10">-4.57</text>
+<line x1="660" y1="480.0" x2="1160" y2="480.0" stroke="#e2e8f0"/>
+<text x="653" y="483.0" text-anchor="end" font-family="sans-serif" font-size="10">-3.47</text>
+<polygon points="676.7,536.5 693.3,635.9 693.3,550.6 676.7,508.7" fill="#2563eb" fill-opacity="0.13" stroke="none"/>
+<polyline points="676.7,519.1 693.3,577.2" fill="none" stroke="#2563eb" stroke-width="2.5"/>
+<polygon points="676.7,517.2 693.3,599.9 710.0,688.4 710.0,602.6 693.3,553.9 676.7,486.9" fill="#16a34a" fill-opacity="0.13" stroke="none"/>
+<polyline points="676.7,501.4 693.3,570.2 710.0,626.7" fill="none" stroke="#16a34a" stroke-width="2.5"/>
+<polygon points="676.7,502.9 693.3,585.6 710.0,694.6 710.0,638.7 693.3,559.6 676.7,493.7" fill="#dc2626" fill-opacity="0.13" stroke="none"/>
+<polyline points="676.7,498.1 693.3,570.7 710.0,656.1" fill="none" stroke="#dc2626" stroke-width="2.5"/>
+<circle cx="676.7" cy="689.1" r="2.4" fill="#111827"/>
+<circle cx="701.7" cy="736.2" r="2.4" fill="#111827"/>
+<circle cx="743.3" cy="732.6" r="2.4" fill="#111827"/>
+<circle cx="826.7" cy="761.6" r="2.4" fill="#111827"/>
+<circle cx="910.0" cy="781.9" r="2.4" fill="#111827"/>
+<circle cx="993.3" cy="771.0" r="2.4" fill="#111827"/>
+<circle cx="1160.0" cy="776.1" r="2.4" fill="#111827"/>
+<text x="910.0" y="830" text-anchor="middle" font-family="sans-serif" font-size="13">√time (min½); black = 1998 digitization ± source CSV uncertainty</text>
+<text x="600" y="900" text-anchor="middle" font-family="sans-serif" font-size="13">colored: 4×4×6 / 8×8×6 / 12×12×6 model volumes; no physical grain-size equivalence is claimed</text>
+</svg>

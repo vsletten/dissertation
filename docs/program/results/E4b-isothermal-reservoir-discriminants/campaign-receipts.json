@@ -1,0 +1,278 @@
+[
+  {
+    "condition": "vacuum",
+    "dims": [
+      4,
+      4,
+      6
+    ],
+    "elapsed_seconds": 0.23329783300869167,
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987,
+      19988
+    ],
+    "temperature_c": 500,
+    "total_events": 2166
+  },
+  {
+    "condition": "vacuum",
+    "dims": [
+      8,
+      8,
+      6
+    ],
+    "elapsed_seconds": 0.26122183399274945,
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987,
+      19988
+    ],
+    "temperature_c": 500,
+    "total_events": 8677
+  },
+  {
+    "condition": "vacuum",
+    "dims": [
+      12,
+      12,
+      6
+    ],
+    "elapsed_seconds": 0.243852874962613,
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987,
+      19988
+    ],
+    "temperature_c": 500,
+    "total_events": 19280
+  },
+  {
+    "condition": "hydrothermal-2kbar-screen",
+    "dims": [
+      4,
+      4,
+      6
+    ],
+    "elapsed_seconds": 0.2808075409848243,
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987,
+      19988
+    ],
+    "temperature_c": 500,
+    "total_events": 547
+  },
+  {
+    "condition": "hydrothermal-2kbar-screen",
+    "dims": [
+      8,
+      8,
+      6
+    ],
+    "elapsed_seconds": 0.13610162492841482,
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987,
+      19988
+    ],
+    "temperature_c": 500,
+    "total_events": 2314
+  },
+  {
+    "condition": "hydrothermal-2kbar-screen",
+    "dims": [
+      12,
+      12,
+      6
+    ],
+    "elapsed_seconds": 0.2802623750176281,
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987,
+      19988
+    ],
+    "temperature_c": 500,
+    "total_events": 5035
+  },
+  {
+    "condition": "vacuum",
+    "dims": [
+      4,
+      4,
+      6
+    ],
+    "elapsed_seconds": 0.163996750023216,
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987,
+      19988
+    ],
+    "temperature_c": 700,
+    "total_events": 3163
+  },
+  {
+    "condition": "vacuum",
+    "dims": [
+      8,
+      8,
+      6
+    ],
+    "elapsed_seconds": 0.2801283751614392,
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987,
+      19988
+    ],
+    "temperature_c": 700,
+    "total_events": 12914
+  },
+  {
+    "condition": "vacuum",
+    "dims": [
+      12,
+      12,
+      6
+    ],
+    "elapsed_seconds": 0.27680200012400746,
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987,
+      19988
+    ],
+    "temperature_c": 700,
+    "total_events": 29332
+  },
+  {
+    "condition": "hydrothermal-2kbar-screen",
+    "dims": [
+      4,
+      4,
+      6
+    ],
+    "elapsed_seconds": 0.2801624999847263,
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987,
+      19988
+    ],
+    "temperature_c": 700,
+    "total_events": 2574
+  },
+  {
+    "condition": "hydrothermal-2kbar-screen",
+    "dims": [
+      8,
+      8,
+      6
+    ],
+    "elapsed_seconds": 0.21877562487497926,
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987,
+      19988
+    ],
+    "temperature_c": 700,
+    "total_events": 10916
+  },
+  {
+    "condition": "hydrothermal-2kbar-screen",
+    "dims": [
+      12,
+      12,
+      6
+    ],
+    "elapsed_seconds": 0.203854207880795,
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987,
+      19988
+    ],
+    "temperature_c": 700,
+    "total_events": 24332
+  }
+]

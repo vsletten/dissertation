@@ -1,0 +1,734 @@
+[
+  {
+    "barrier_kcal_mol": 53.0,
+    "barrier_label": "low",
+    "command": [
+      "nice",
+      "-n",
+      "10",
+      "/Users/vsletten/.hermes/cache/cargo-target/vsletten-dissertation-da68ebaefa3a/release/petra",
+      "petra/decks/muscovite-1998/muscovite-1998-low-4x4x6.toml",
+      "--seed",
+      "19980",
+      "--ensemble",
+      "8",
+      "--out",
+      "/Volumes/DATA/hermes/run-outputs/TASK-312-E4a2-20260913-2025/low-4x4x6",
+      "--paranoid"
+    ],
+    "deck_artifact": {
+      "bytes": 28702,
+      "sha256": "fd356fffbd37d32540f653a0bb9643c737b352f6d299e383dc38551fb45e6c1d"
+    },
+    "dims": [
+      4,
+      4,
+      6
+    ],
+    "elapsed_seconds": 0.26769216707907617,
+    "petra_binary_artifact": {
+      "bytes": 1808672,
+      "sha256": "540b4a3f62c4b4141158b45f1de54d870c30ba2d1294739e1bc74d8726553ff7"
+    },
+    "primary_artifacts": {
+      "ensemble-summary.csv": {
+        "bytes": 1561,
+        "sha256": "0ca6a5bbfe5d14660aee25b04604b9eb3b7fc2389db8ae3c2216a1cbaa05383e"
+      },
+      "ensemble.csv": {
+        "bytes": 1054,
+        "sha256": "d912674a6423e6902a0ebbb6c1b8352d9ca3b67add315240545ad36fa3eeb49f"
+      },
+      "observables.csv": {
+        "bytes": 407902,
+        "sha256": "9aa517d6367f37a01261135bca9e9fa9bef12c5c0a5e141861440f083bbb4086"
+      }
+    },
+    "primary_prefix_replay_artifacts": {
+      "ensemble.csv": {
+        "primary": {
+          "rows": 2,
+          "sha256": "c2fa162388bbeb04971d2c532cf344e5734f7bb9b4da0eb210d997031eb08ddc"
+        },
+        "replay_a": {
+          "rows": 2,
+          "sha256": "c2fa162388bbeb04971d2c532cf344e5734f7bb9b4da0eb210d997031eb08ddc"
+        },
+        "replay_b": {
+          "rows": 2,
+          "sha256": "c2fa162388bbeb04971d2c532cf344e5734f7bb9b4da0eb210d997031eb08ddc"
+        }
+      },
+      "observables.csv": {
+        "primary": {
+          "rows": 1856,
+          "sha256": "ded7956fa4fe4f50c802a544dcc8b0d7d4fb016fa2b0b1ce36864c3c3fb732a0"
+        },
+        "replay_a": {
+          "rows": 1856,
+          "sha256": "ded7956fa4fe4f50c802a544dcc8b0d7d4fb016fa2b0b1ce36864c3c3fb732a0"
+        },
+        "replay_b": {
+          "rows": 1856,
+          "sha256": "ded7956fa4fe4f50c802a544dcc8b0d7d4fb016fa2b0b1ce36864c3c3fb732a0"
+        }
+      }
+    },
+    "replay_artifacts": {
+      "ensemble-summary.csv": {
+        "replay_a": {
+          "bytes": 1231,
+          "sha256": "12af3d90b4fa580175709d009e0a062671eca6947ca490514d7586b09dc7a366"
+        },
+        "replay_b": {
+          "bytes": 1231,
+          "sha256": "12af3d90b4fa580175709d009e0a062671eca6947ca490514d7586b09dc7a366"
+        }
+      },
+      "ensemble.csv": {
+        "replay_a": {
+          "bytes": 598,
+          "sha256": "8f0471a16edf18244cfa3db54a72146291d24161b12873d224e8478de60c0142"
+        },
+        "replay_b": {
+          "bytes": 598,
+          "sha256": "8f0471a16edf18244cfa3db54a72146291d24161b12873d224e8478de60c0142"
+        }
+      },
+      "observables.csv": {
+        "replay_a": {
+          "bytes": 102006,
+          "sha256": "1e3b1a9aad2a8456ae48050a8567b096db31f4e5a59182c5cbffec2532dcb90c"
+        },
+        "replay_b": {
+          "bytes": 102006,
+          "sha256": "1e3b1a9aad2a8456ae48050a8567b096db31f4e5a59182c5cbffec2532dcb90c"
+        }
+      }
+    },
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19980,
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987
+    ],
+    "sites": 768,
+    "total_events": 2975
+  },
+  {
+    "barrier_kcal_mol": 53.0,
+    "barrier_label": "low",
+    "command": [
+      "nice",
+      "-n",
+      "10",
+      "/Users/vsletten/.hermes/cache/cargo-target/vsletten-dissertation-da68ebaefa3a/release/petra",
+      "petra/decks/muscovite-1998/muscovite-1998-low-8x8x6.toml",
+      "--seed",
+      "19980",
+      "--ensemble",
+      "8",
+      "--out",
+      "/Volumes/DATA/hermes/run-outputs/TASK-312-E4a2-20260913-2025/low-8x8x6",
+      "--paranoid"
+    ],
+    "deck_artifact": {
+      "bytes": 28702,
+      "sha256": "c55187ac7c3826ceb0657eb50153555197414f1c1e763ce715b85b5066dbabde"
+    },
+    "dims": [
+      8,
+      8,
+      6
+    ],
+    "elapsed_seconds": 0.26558229117654264,
+    "petra_binary_artifact": {
+      "bytes": 1808672,
+      "sha256": "540b4a3f62c4b4141158b45f1de54d870c30ba2d1294739e1bc74d8726553ff7"
+    },
+    "primary_artifacts": {
+      "ensemble-summary.csv": {
+        "bytes": 1649,
+        "sha256": "402c4414da5c9b88651f1b65df15714959811f97b926846d6cf01fd0c52b5f4e"
+      },
+      "ensemble.csv": {
+        "bytes": 1126,
+        "sha256": "0bd81937030e0a6adc1392f818c0245fdc31478acc3dd5d7c995b4c5ca3a617e"
+      },
+      "observables.csv": {
+        "bytes": 440439,
+        "sha256": "2fbb94d596ca38a2a5d6af6b5551d52903a4d0887256a9b19bf462791e03225f"
+      }
+    },
+    "primary_prefix_replay_artifacts": {
+      "ensemble.csv": {
+        "primary": {
+          "rows": 2,
+          "sha256": "169dee367ae75b909c99d90886ff172984f282b05d5756e20d1782c6c50b2d83"
+        },
+        "replay_a": {
+          "rows": 2,
+          "sha256": "169dee367ae75b909c99d90886ff172984f282b05d5756e20d1782c6c50b2d83"
+        },
+        "replay_b": {
+          "rows": 2,
+          "sha256": "169dee367ae75b909c99d90886ff172984f282b05d5756e20d1782c6c50b2d83"
+        }
+      },
+      "observables.csv": {
+        "primary": {
+          "rows": 1972,
+          "sha256": "63144522d08dc105210460cc93c5eee0c1681d22ae4a055e4091e9b86980a798"
+        },
+        "replay_a": {
+          "rows": 1972,
+          "sha256": "63144522d08dc105210460cc93c5eee0c1681d22ae4a055e4091e9b86980a798"
+        },
+        "replay_b": {
+          "rows": 1972,
+          "sha256": "63144522d08dc105210460cc93c5eee0c1681d22ae4a055e4091e9b86980a798"
+        }
+      }
+    },
+    "replay_artifacts": {
+      "ensemble-summary.csv": {
+        "replay_a": {
+          "bytes": 1271,
+          "sha256": "96fdab2fabbb85e550d744ee962ce6dea161fbd4509a308f7b71a343ba55234e"
+        },
+        "replay_b": {
+          "bytes": 1271,
+          "sha256": "96fdab2fabbb85e550d744ee962ce6dea161fbd4509a308f7b71a343ba55234e"
+        }
+      },
+      "ensemble.csv": {
+        "replay_a": {
+          "bytes": 616,
+          "sha256": "b222bfea051715e47f9083835ed9609231aeac5a5357af1716777f9004557bda"
+        },
+        "replay_b": {
+          "bytes": 616,
+          "sha256": "b222bfea051715e47f9083835ed9609231aeac5a5357af1716777f9004557bda"
+        }
+      },
+      "observables.csv": {
+        "replay_a": {
+          "bytes": 110141,
+          "sha256": "599d5efd373675b9d3a08fc7ed74fa7317bb0ce9fadc1e51e99cf0a213fe29bf"
+        },
+        "replay_b": {
+          "bytes": 110141,
+          "sha256": "599d5efd373675b9d3a08fc7ed74fa7317bb0ce9fadc1e51e99cf0a213fe29bf"
+        }
+      }
+    },
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19980,
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987
+    ],
+    "sites": 3072,
+    "total_events": 11931
+  },
+  {
+    "barrier_kcal_mol": 53.0,
+    "barrier_label": "low",
+    "command": [
+      "nice",
+      "-n",
+      "10",
+      "/Users/vsletten/.hermes/cache/cargo-target/vsletten-dissertation-da68ebaefa3a/release/petra",
+      "petra/decks/muscovite-1998/muscovite-1998-low-12x12x6.toml",
+      "--seed",
+      "19980",
+      "--ensemble",
+      "8",
+      "--out",
+      "/Volumes/DATA/hermes/run-outputs/TASK-312-E4a2-20260913-2025/low-12x12x6",
+      "--paranoid"
+    ],
+    "deck_artifact": {
+      "bytes": 28710,
+      "sha256": "21d6dc88d7fdd00624e2b998c5597f13621df301f41c16ef36d9fc154ecf9e41"
+    },
+    "dims": [
+      12,
+      12,
+      6
+    ],
+    "elapsed_seconds": 0.3290266660042107,
+    "petra_binary_artifact": {
+      "bytes": 1808672,
+      "sha256": "540b4a3f62c4b4141158b45f1de54d870c30ba2d1294739e1bc74d8726553ff7"
+    },
+    "primary_artifacts": {
+      "ensemble-summary.csv": {
+        "bytes": 1666,
+        "sha256": "f146225637cd53cd377b242d34c814365a51768b8fd1989ed6427cb48fe86213"
+      },
+      "ensemble.csv": {
+        "bytes": 1139,
+        "sha256": "8c281d0317776462fdd90d8096557cac2956918c3db4ae046bb583eeca559cf8"
+      },
+      "observables.csv": {
+        "bytes": 493073,
+        "sha256": "a15b09d03913699e187b2687a1a8db594ac2b57894b38c4ee1261ead2562b379"
+      }
+    },
+    "primary_prefix_replay_artifacts": {
+      "ensemble.csv": {
+        "primary": {
+          "rows": 2,
+          "sha256": "17ae3c3c00cd002970213da9260c8c03b5b4ea203b3f480b36c231dda94d38a5"
+        },
+        "replay_a": {
+          "rows": 2,
+          "sha256": "17ae3c3c00cd002970213da9260c8c03b5b4ea203b3f480b36c231dda94d38a5"
+        },
+        "replay_b": {
+          "rows": 2,
+          "sha256": "17ae3c3c00cd002970213da9260c8c03b5b4ea203b3f480b36c231dda94d38a5"
+        }
+      },
+      "observables.csv": {
+        "primary": {
+          "rows": 2204,
+          "sha256": "ca0bc052529fda3d6ca3ace3910350ac6b9f8161deeee8daa45b18a62c067093"
+        },
+        "replay_a": {
+          "rows": 2204,
+          "sha256": "ca0bc052529fda3d6ca3ace3910350ac6b9f8161deeee8daa45b18a62c067093"
+        },
+        "replay_b": {
+          "rows": 2204,
+          "sha256": "ca0bc052529fda3d6ca3ace3910350ac6b9f8161deeee8daa45b18a62c067093"
+        }
+      }
+    },
+    "replay_artifacts": {
+      "ensemble-summary.csv": {
+        "replay_a": {
+          "bytes": 1278,
+          "sha256": "bfcfea60ae8c9eb9864ed4f4f6c5c6bd35edf01bb34d3eb146ec6e8be798ef25"
+        },
+        "replay_b": {
+          "bytes": 1278,
+          "sha256": "bfcfea60ae8c9eb9864ed4f4f6c5c6bd35edf01bb34d3eb146ec6e8be798ef25"
+        }
+      },
+      "ensemble.csv": {
+        "replay_a": {
+          "bytes": 619,
+          "sha256": "3bded731d68fcbddc2ca228c220eedd3663b81edf13156a00dd7ae108f83ea8b"
+        },
+        "replay_b": {
+          "bytes": 619,
+          "sha256": "3bded731d68fcbddc2ca228c220eedd3663b81edf13156a00dd7ae108f83ea8b"
+        }
+      },
+      "observables.csv": {
+        "replay_a": {
+          "bytes": 123301,
+          "sha256": "6c78eff15aea2791eb99a0f97eacb0d2b1ad4f5c9f6ff45ec247a7d2717b6d1f"
+        },
+        "replay_b": {
+          "bytes": 123301,
+          "sha256": "6c78eff15aea2791eb99a0f97eacb0d2b1ad4f5c9f6ff45ec247a7d2717b6d1f"
+        }
+      }
+    },
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19980,
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987
+    ],
+    "sites": 6912,
+    "total_events": 26907
+  },
+  {
+    "barrier_kcal_mol": 63.0,
+    "barrier_label": "high",
+    "command": [
+      "nice",
+      "-n",
+      "10",
+      "/Users/vsletten/.hermes/cache/cargo-target/vsletten-dissertation-da68ebaefa3a/release/petra",
+      "petra/decks/muscovite-1998/muscovite-1998-high-4x4x6.toml",
+      "--seed",
+      "19980",
+      "--ensemble",
+      "8",
+      "--out",
+      "/Volumes/DATA/hermes/run-outputs/TASK-312-E4a2-20260913-2025/high-4x4x6",
+      "--paranoid"
+    ],
+    "deck_artifact": {
+      "bytes": 28704,
+      "sha256": "9847bd4574c3b9bc572e1278f07e134f0f08b1309602cdf1b9f6ee58a8145d24"
+    },
+    "dims": [
+      4,
+      4,
+      6
+    ],
+    "elapsed_seconds": 0.26663129194639623,
+    "petra_binary_artifact": {
+      "bytes": 1808672,
+      "sha256": "540b4a3f62c4b4141158b45f1de54d870c30ba2d1294739e1bc74d8726553ff7"
+    },
+    "primary_artifacts": {
+      "ensemble-summary.csv": {
+        "bytes": 1561,
+        "sha256": "0ca6a5bbfe5d14660aee25b04604b9eb3b7fc2389db8ae3c2216a1cbaa05383e"
+      },
+      "ensemble.csv": {
+        "bytes": 1054,
+        "sha256": "a5f6318712f10f535f302fc3e6e2b4e78478f230c6c66d03559dd8aefa2bb128"
+      },
+      "observables.csv": {
+        "bytes": 407255,
+        "sha256": "06db595cae7af3929233d6cf2ac503c84176e5770dc66c82d048ffe23b1d7ae5"
+      }
+    },
+    "primary_prefix_replay_artifacts": {
+      "ensemble.csv": {
+        "primary": {
+          "rows": 2,
+          "sha256": "807217730e81181a363af128516ac0c6291f915a36543bac3e37a5468c54516b"
+        },
+        "replay_a": {
+          "rows": 2,
+          "sha256": "807217730e81181a363af128516ac0c6291f915a36543bac3e37a5468c54516b"
+        },
+        "replay_b": {
+          "rows": 2,
+          "sha256": "807217730e81181a363af128516ac0c6291f915a36543bac3e37a5468c54516b"
+        }
+      },
+      "observables.csv": {
+        "primary": {
+          "rows": 1856,
+          "sha256": "892d97dc8d79382b346691b7a244451c3e9f2c6c28102e9f493a5e8e2bde1e31"
+        },
+        "replay_a": {
+          "rows": 1856,
+          "sha256": "892d97dc8d79382b346691b7a244451c3e9f2c6c28102e9f493a5e8e2bde1e31"
+        },
+        "replay_b": {
+          "rows": 1856,
+          "sha256": "892d97dc8d79382b346691b7a244451c3e9f2c6c28102e9f493a5e8e2bde1e31"
+        }
+      }
+    },
+    "replay_artifacts": {
+      "ensemble-summary.csv": {
+        "replay_a": {
+          "bytes": 1231,
+          "sha256": "12af3d90b4fa580175709d009e0a062671eca6947ca490514d7586b09dc7a366"
+        },
+        "replay_b": {
+          "bytes": 1231,
+          "sha256": "12af3d90b4fa580175709d009e0a062671eca6947ca490514d7586b09dc7a366"
+        }
+      },
+      "ensemble.csv": {
+        "replay_a": {
+          "bytes": 598,
+          "sha256": "6b5c1874d24bd58437f34597e60794b3675467d67509589fd2c7d6f39d5ba32e"
+        },
+        "replay_b": {
+          "bytes": 598,
+          "sha256": "6b5c1874d24bd58437f34597e60794b3675467d67509589fd2c7d6f39d5ba32e"
+        }
+      },
+      "observables.csv": {
+        "replay_a": {
+          "bytes": 101866,
+          "sha256": "5e26e9b4171fd9172871ed3e7c581d2e8e1502683eff618401b3206b9e17588a"
+        },
+        "replay_b": {
+          "bytes": 101866,
+          "sha256": "5e26e9b4171fd9172871ed3e7c581d2e8e1502683eff618401b3206b9e17588a"
+        }
+      }
+    },
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19980,
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987
+    ],
+    "sites": 768,
+    "total_events": 3031
+  },
+  {
+    "barrier_kcal_mol": 63.0,
+    "barrier_label": "high",
+    "command": [
+      "nice",
+      "-n",
+      "10",
+      "/Users/vsletten/.hermes/cache/cargo-target/vsletten-dissertation-da68ebaefa3a/release/petra",
+      "petra/decks/muscovite-1998/muscovite-1998-high-8x8x6.toml",
+      "--seed",
+      "19980",
+      "--ensemble",
+      "8",
+      "--out",
+      "/Volumes/DATA/hermes/run-outputs/TASK-312-E4a2-20260913-2025/high-8x8x6",
+      "--paranoid"
+    ],
+    "deck_artifact": {
+      "bytes": 28704,
+      "sha256": "72eb3e4875e62e06dbb863300cedc181d8f559bdb8cf69e2a65f151edfd8c4c5"
+    },
+    "dims": [
+      8,
+      8,
+      6
+    ],
+    "elapsed_seconds": 0.26981008308939636,
+    "petra_binary_artifact": {
+      "bytes": 1808672,
+      "sha256": "540b4a3f62c4b4141158b45f1de54d870c30ba2d1294739e1bc74d8726553ff7"
+    },
+    "primary_artifacts": {
+      "ensemble-summary.csv": {
+        "bytes": 1649,
+        "sha256": "402c4414da5c9b88651f1b65df15714959811f97b926846d6cf01fd0c52b5f4e"
+      },
+      "ensemble.csv": {
+        "bytes": 1126,
+        "sha256": "733174602e5dfb9a658764e131a0edc54f669700793a7725df3346f9d0fbe86d"
+      },
+      "observables.csv": {
+        "bytes": 440379,
+        "sha256": "ab7f5403247066d9ed0929d0dbb32e4dcbc23ae21383fb531172acffe0daf244"
+      }
+    },
+    "primary_prefix_replay_artifacts": {
+      "ensemble.csv": {
+        "primary": {
+          "rows": 2,
+          "sha256": "6b877b7192f79e4334281e6cdb9d18a7378e2d42c687cfe9134446a03d062146"
+        },
+        "replay_a": {
+          "rows": 2,
+          "sha256": "6b877b7192f79e4334281e6cdb9d18a7378e2d42c687cfe9134446a03d062146"
+        },
+        "replay_b": {
+          "rows": 2,
+          "sha256": "6b877b7192f79e4334281e6cdb9d18a7378e2d42c687cfe9134446a03d062146"
+        }
+      },
+      "observables.csv": {
+        "primary": {
+          "rows": 1972,
+          "sha256": "dd8f1d91d7104f59e4cfbccbbe0e9c16b8874403e80d3d8aad8cd0c169e706a0"
+        },
+        "replay_a": {
+          "rows": 1972,
+          "sha256": "dd8f1d91d7104f59e4cfbccbbe0e9c16b8874403e80d3d8aad8cd0c169e706a0"
+        },
+        "replay_b": {
+          "rows": 1972,
+          "sha256": "dd8f1d91d7104f59e4cfbccbbe0e9c16b8874403e80d3d8aad8cd0c169e706a0"
+        }
+      }
+    },
+    "replay_artifacts": {
+      "ensemble-summary.csv": {
+        "replay_a": {
+          "bytes": 1271,
+          "sha256": "96fdab2fabbb85e550d744ee962ce6dea161fbd4509a308f7b71a343ba55234e"
+        },
+        "replay_b": {
+          "bytes": 1271,
+          "sha256": "96fdab2fabbb85e550d744ee962ce6dea161fbd4509a308f7b71a343ba55234e"
+        }
+      },
+      "ensemble.csv": {
+        "replay_a": {
+          "bytes": 616,
+          "sha256": "061f00291e5ab53c44a9c3697889cdaf35e03cdc68fbe718649a7dc3319c1771"
+        },
+        "replay_b": {
+          "bytes": 616,
+          "sha256": "061f00291e5ab53c44a9c3697889cdaf35e03cdc68fbe718649a7dc3319c1771"
+        }
+      },
+      "observables.csv": {
+        "replay_a": {
+          "bytes": 110117,
+          "sha256": "caef5d33e277cd5358f9082b6574fad79b1481fab9605838daccce96ccd6fa9f"
+        },
+        "replay_b": {
+          "bytes": 110117,
+          "sha256": "caef5d33e277cd5358f9082b6574fad79b1481fab9605838daccce96ccd6fa9f"
+        }
+      }
+    },
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19980,
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987
+    ],
+    "sites": 3072,
+    "total_events": 12233
+  },
+  {
+    "barrier_kcal_mol": 63.0,
+    "barrier_label": "high",
+    "command": [
+      "nice",
+      "-n",
+      "10",
+      "/Users/vsletten/.hermes/cache/cargo-target/vsletten-dissertation-da68ebaefa3a/release/petra",
+      "petra/decks/muscovite-1998/muscovite-1998-high-12x12x6.toml",
+      "--seed",
+      "19980",
+      "--ensemble",
+      "8",
+      "--out",
+      "/Volumes/DATA/hermes/run-outputs/TASK-312-E4a2-20260913-2025/high-12x12x6",
+      "--paranoid"
+    ],
+    "deck_artifact": {
+      "bytes": 28712,
+      "sha256": "de3601fecdbbc411d03ea795e5e436e4c67308c731a8ec5fbd972ff7c5601937"
+    },
+    "dims": [
+      12,
+      12,
+      6
+    ],
+    "elapsed_seconds": 0.3294995001051575,
+    "petra_binary_artifact": {
+      "bytes": 1808672,
+      "sha256": "540b4a3f62c4b4141158b45f1de54d870c30ba2d1294739e1bc74d8726553ff7"
+    },
+    "primary_artifacts": {
+      "ensemble-summary.csv": {
+        "bytes": 1666,
+        "sha256": "f146225637cd53cd377b242d34c814365a51768b8fd1989ed6427cb48fe86213"
+      },
+      "ensemble.csv": {
+        "bytes": 1139,
+        "sha256": "d8bc73e472b4df7a95f58462d982b0a1f906bad3058228b8e7d417c936bc42e9"
+      },
+      "observables.csv": {
+        "bytes": 492734,
+        "sha256": "615af880128cfac28268c6fcf8bf20b17473228ad2965360f64087b8ca492151"
+      }
+    },
+    "primary_prefix_replay_artifacts": {
+      "ensemble.csv": {
+        "primary": {
+          "rows": 2,
+          "sha256": "54e514ffc91156a04665ea682793543d0c85723892d2d67ea331b403bdb3d8dd"
+        },
+        "replay_a": {
+          "rows": 2,
+          "sha256": "54e514ffc91156a04665ea682793543d0c85723892d2d67ea331b403bdb3d8dd"
+        },
+        "replay_b": {
+          "rows": 2,
+          "sha256": "54e514ffc91156a04665ea682793543d0c85723892d2d67ea331b403bdb3d8dd"
+        }
+      },
+      "observables.csv": {
+        "primary": {
+          "rows": 2204,
+          "sha256": "cc4cd5cfad49ab429e7d8485fe5012f3f453573a9e0b013b0b81768aad598223"
+        },
+        "replay_a": {
+          "rows": 2204,
+          "sha256": "cc4cd5cfad49ab429e7d8485fe5012f3f453573a9e0b013b0b81768aad598223"
+        },
+        "replay_b": {
+          "rows": 2204,
+          "sha256": "cc4cd5cfad49ab429e7d8485fe5012f3f453573a9e0b013b0b81768aad598223"
+        }
+      }
+    },
+    "replay_artifacts": {
+      "ensemble-summary.csv": {
+        "replay_a": {
+          "bytes": 1278,
+          "sha256": "bfcfea60ae8c9eb9864ed4f4f6c5c6bd35edf01bb34d3eb146ec6e8be798ef25"
+        },
+        "replay_b": {
+          "bytes": 1278,
+          "sha256": "bfcfea60ae8c9eb9864ed4f4f6c5c6bd35edf01bb34d3eb146ec6e8be798ef25"
+        }
+      },
+      "ensemble.csv": {
+        "replay_a": {
+          "bytes": 619,
+          "sha256": "e90d8f8bf5ce3b99bf0ad70346849b4bd220fa42df8c07a9f70097d2649c08b6"
+        },
+        "replay_b": {
+          "bytes": 619,
+          "sha256": "e90d8f8bf5ce3b99bf0ad70346849b4bd220fa42df8c07a9f70097d2649c08b6"
+        }
+      },
+      "observables.csv": {
+        "replay_a": {
+          "bytes": 123217,
+          "sha256": "d65157d950550f6b4934df8a289f37f13bfeb36db01682e9494ef158be2c671b"
+        },
+        "replay_b": {
+          "bytes": 123217,
+          "sha256": "d65157d950550f6b4934df8a289f37f13bfeb36db01682e9494ef158be2c671b"
+        }
+      }
+    },
+    "replay_verified": true,
+    "replicas": 8,
+    "seeds": [
+      19980,
+      19981,
+      19982,
+      19983,
+      19984,
+      19985,
+      19986,
+      19987
+    ],
+    "sites": 6912,
+    "total_events": 27508
+  }
+]

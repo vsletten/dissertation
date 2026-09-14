@@ -80,7 +80,11 @@ def render_deck(dims: tuple[int, int, int] = (4, 4, 6)) -> str:
         ("Interface", "bonded", (("bonded", "vacant"), ("delaminated", "vacant"))),
         ("Defect_zone", "pristine", (("pristine", "vacant"), ("extended", "vacant"))),
         ("Octahedral_trap", "vacant", (("vacant", "vacant"), ("Ar39_trapped", "Ar39"))),
-        ("Surface_gate", "closed", (("closed", "vacant"), ("open", "vacant"))),
+        (
+            "Surface_gate",
+            "closed",
+            (("closed", "vacant"), ("edge", "vacant"), ("open", "vacant")),
+        ),
     )
     for kind, initial, states in kinds:
         add("", "[[structure.kinds]]", f'name = "{kind}"', f'initial = "{initial}"')
@@ -139,13 +143,16 @@ def render_deck(dims: tuple[int, int, int] = (4, 4, 6)) -> str:
         bond(gallery, 7, (0, 0, 0), "surface_gate")
     bond(4, 3, (0, 0, 0), "delam_driver")
     bond(4, 3, (0, 0, -1), "delam_driver")
+    bond(4, 7, (0, 0, 0), "gate_interface")
+    bond(7, 7, (1, 0, 0), "lateral_front")
+    bond(7, 7, (0, 1, 0), "lateral_front")
     bond(6, 0, (0, 0, 0), "trap_gallery")
 
     add(
         "",
         "[structure.lattice]",
         f"dims = [{na}, {nb}, {n_layers}]",
-        'boundary = ["periodic", "periodic", "open"]',
+        'boundary = ["open", "open", "open"]',
     )
 
     def init(
@@ -173,22 +180,20 @@ def render_deck(dims: tuple[int, int, int] = (4, 4, 6)) -> str:
         init(f"ar39-{suffix}", gallery, "K", 0.55, "Ar39")
         init(f"ar36-{suffix}", gallery, "K", 0.55, "Ar36")
     init("recoil-octahedral-ar39", "Octahedral_trap", "vacant", 0.35, "Ar39_trapped")
-    init(
-        "lower-basal-surface",
-        "Surface_gate",
-        "closed",
-        1.0,
-        "open",
-        "{ axis = 2, min = 0, max = 0 }",
-    )
-    init(
-        "upper-basal-surface",
-        "Surface_gate",
-        "closed",
-        1.0,
-        "open",
-        f"{{ axis = 2, min = {n_layers - 1}, max = {n_layers - 1} }}",
-    )
+    for name, axis, coordinate in (
+        ("a-min-lateral-edge", 0, 0),
+        ("a-max-lateral-edge", 0, na - 1),
+        ("b-min-lateral-edge", 1, 0),
+        ("b-max-lateral-edge", 1, nb - 1),
+    ):
+        init(
+            name,
+            "Surface_gate",
+            "closed",
+            1.0,
+            "edge",
+            f"{{ axis = {axis}, min = {coordinate}, max = {coordinate} }}",
+        )
 
     add(
         "",
@@ -222,6 +227,29 @@ def render_deck(dims: tuple[int, int, int] = (4, 4, 6)) -> str:
         "[[dynamics.rules.effects]]",
         'target = "center"',
         'set = "delaminated"',
+        "",
+        "# Lateral edge sites seed release only after their local interface delaminates.",
+        "[[dynamics.rules]]",
+        'name = "open_lateral_edge_after_delamination"',
+        'center = { kind = "Surface_gate", state = ["edge"] }',
+        'guards = [{ kind = "Interface", label = "gate_interface", state = ["delaminated"], min = 1 }]',
+        "rate = { constant = 1.0 }",
+        "[[dynamics.rules.effects]]",
+        'target = "center"',
+        'set = "open"',
+        "",
+        "# The front advances only through a laterally connected chain of delaminated interfaces.",
+        "[[dynamics.rules]]",
+        'name = "advance_surface_connected_front"',
+        'center = { kind = "Surface_gate", state = ["closed"] }',
+        "guards = [",
+        '  { kind = "Interface", label = "gate_interface", state = ["delaminated"], min = 1 },',
+        '  { kind = "Surface_gate", label = "lateral_front", state = ["open"], min = 1 },',
+        "]",
+        "rate = { constant = 1.0 }",
+        "[[dynamics.rules.effects]]",
+        'target = "center"',
+        'set = "open"',
         "",
         "# Recoil 39Ar escape is likewise a phase-2 proxy pending phase-3 NEB.",
         "[[dynamics.rules]]",
@@ -275,20 +303,16 @@ def render_deck(dims: tuple[int, int, int] = (4, 4, 6)) -> str:
     for isotope in ("Ar40", "Ar39", "Ar36"):
         for gallery in ("K_gallery_A", "K_gallery_B"):
             suffix = gallery[-1]
-            for mechanism, gate_kind, gate_label, gate_state in (
-                ("surface", "Surface_gate", "surface_gate", "open"),
-                ("delamination", "Interface", "gallery_interface", "delaminated"),
-            ):
-                add(
-                    "[[dynamics.rules]]",
-                    f'name = "release_{isotope}_{mechanism}_{suffix}"',
-                    f'center = {{ kind = "{gallery}", state = ["{isotope}"] }}',
-                    f'guards = [{{ kind = "{gate_kind}", label = "{gate_label}", state = ["{gate_state}"], min = 1 }}]',
-                    "rate = { constant = 1.0 }",
-                    "[[dynamics.rules.effects]]",
-                    'target = "center"',
-                    'set = "vacant"',
-                )
+            add(
+                "[[dynamics.rules]]",
+                f'name = "release_{isotope}_surface_{suffix}"',
+                f'center = {{ kind = "{gallery}", state = ["{isotope}"] }}',
+                'guards = [{ kind = "Surface_gate", label = "surface_gate", state = ["open"], min = 1 }]',
+                "rate = { constant = 1.0 }",
+                "[[dynamics.rules.effects]]",
+                'target = "center"',
+                'set = "vacant"',
+            )
 
     add(
         "",

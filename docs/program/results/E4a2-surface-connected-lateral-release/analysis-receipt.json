@@ -1,0 +1,48 @@
+{
+  "campaign_input": {
+    "bytes": 21066,
+    "sha256": "83afe1f8f87824d5e109811500068b0a07ae50928612e77727bcebc7671aba73"
+  },
+  "data_inputs": {
+    "figure3-and-5-age-spectra.csv": {
+      "bytes": 2881,
+      "sha256": "a1248f41255cc39bd618ff25865db771f25a2c426cf0fbbd6bf5ce1f72e61394"
+    },
+    "figure4-release-rates.csv": {
+      "bytes": 4109,
+      "sha256": "7a9da2c2fbc60cefab4046f8d66171b690ba7f3afeb0237656bfc3a116c063cf"
+    }
+  },
+  "result_artifacts": {
+    "campaign-receipts.json": {
+      "bytes": 21066,
+      "sha256": "83afe1f8f87824d5e109811500068b0a07ae50928612e77727bcebc7671aba73"
+    },
+    "comparison.json": {
+      "bytes": 3275,
+      "sha256": "108da3cf33e381ddfb872164a4962fcb2f6504578036ad0f635a538344bbdd12"
+    },
+    "comparison.svg": {
+      "bytes": 5291,
+      "sha256": "cdc5d6445a8e7f515d6af69cb2b5cb23f19088b25110bc8bf1239b36ab32d070"
+    },
+    "synthetic-spectra.csv": {
+      "bytes": 11652,
+      "sha256": "4d141de5eae242311fa09ca40fd87cb30157328239f5806bbc0308016f0f5d12"
+    }
+  },
+  "script_inputs": {
+    "build_muscovite_full_deck.py": {
+      "bytes": 13113,
+      "sha256": "1ecec84a63a61db292ddcab852fab8b06d991bd19542d0010f9303631c34145c"
+    },
+    "muscovite_1998_comparison.py": {
+      "bytes": 35054,
+      "sha256": "4200b6f7fd96a348d098ad57784be67df3b1e5057f7f3fb1c5e275afd2edac2d"
+    },
+    "muscovite_full_analysis.py": {
+      "bytes": 30302,
+      "sha256": "f22f5e158f632010f0e6f1a7450d609e01aeb606e5227e2db969e898f68659f6"
+    }
+  }
+}

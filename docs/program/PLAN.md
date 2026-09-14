@@ -82,9 +82,16 @@ on main). Priority P0 > P1 > P2 within READY.
 | [E2b-grain-size-sweep](cards/E2b-grain-size-sweep.md) | E | P1 | any | done | E2 ✅, B4 ✅ |
 | [E3a-classical-neb-barriers](cards/E3a-classical-neb-barriers.md) | E | P1 | any | done | — |
 | [E3b-periodic-dft-spot-checks](cards/E3b-periodic-dft-spot-checks.md) | E | P2 | workstation | ready | E3a ✅ |
-| [E4-1998-comparison](cards/E4-1998-comparison.md) | E | P1 | any | ready | E3a ✅, E2b ✅, A8 ✅ |
+| [E4-1998-comparison](cards/E4-1998-comparison.md) | E | P1 | any | done | E3a ✅, E2b ✅, A8 ✅ |
+| [E4a-surface-gated-release](cards/E4a-surface-gated-release.md) | E | P1 | any | done | E4 ✅, B5 ✅; NO-GO — local basal gating did not recover the grain-size crossover |
+| [E4a2-surface-connected-lateral-release](cards/E4a2-surface-connected-lateral-release.md) | E | P1 | any | done | E4a ✅; PRs #131 + #132; NO-GO under inherited gate timescale + proxy-size ladder |
+| [E4b-isothermal-reservoir-discriminants](cards/E4b-isothermal-reservoir-discriminants.md) | E | P1 | any | done | E4a ✅; §5.1/.4/.7 partial, §5.2 not reproduced |
 
-**Done** (acceptance verified on main): A3j-calc005-si-n1-verification,
+**Done** (acceptance verified on main): A9-approximate-rate-closure,
+E4a-surface-gated-release (PR #129;
+NO-GO — local basal gating did not recover the grain-size crossover),
+E4-1998-comparison (PR #127),
+A3j-calc005-si-n1-verification,
 E3a-classical-neb-barriers
 (bounded reconstructed route-1 gate 68.414811 vs 67.644151 kcal/mol, +1.1393%;
 all six NEBs honestly `incomplete-convergence`), A8a-legacy-kmc-conformance (five replays complete;
