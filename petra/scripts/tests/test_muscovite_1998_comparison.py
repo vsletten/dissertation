@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import tempfile
 import unittest
@@ -33,6 +34,59 @@ comparison = load_module(
 
 
 class ComparisonDeckTests(unittest.TestCase):
+    def test_replay_evidence_records_matching_sizes_and_hashes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            roots = [Path(temporary) / suffix for suffix in ("a", "b")]
+            for root in roots:
+                root.mkdir()
+                for filename in comparison.REPLAY_ARTIFACTS:
+                    (root / filename).write_bytes(b"same-seed-output\n")
+
+            evidence = comparison._replay_evidence(roots)
+
+        self.assertEqual(set(evidence), set(comparison.REPLAY_ARTIFACTS))
+        for pair in evidence.values():
+            self.assertEqual(pair["replay_a"], pair["replay_b"])
+            self.assertEqual(pair["replay_a"]["bytes"], 17)
+            self.assertEqual(len(pair["replay_a"]["sha256"]), 64)
+
+    def test_replay_evidence_rejects_divergence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            roots = [Path(temporary) / suffix for suffix in ("a", "b")]
+            for root in roots:
+                root.mkdir()
+                for filename in comparison.REPLAY_ARTIFACTS:
+                    (root / filename).write_bytes(b"same-seed-output\n")
+            (roots[1] / "observables.csv").write_bytes(b"different\n")
+
+            with self.assertRaisesRegex(RuntimeError, "observables.csv"):
+                comparison._replay_evidence(roots)
+
+    def test_replica_prefix_evidence_ignores_later_ensemble_members(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = [Path(temporary) / name for name in ("primary.csv", "replay.csv")]
+            paths[0].write_text(
+                "replica,seed,value\n0,10,a\n1,11,b\n2,12,c\n", encoding="utf-8"
+            )
+            paths[1].write_text(
+                "replica,seed,value\n0,10,a\n1,11,b\n", encoding="utf-8"
+            )
+
+            self.assertEqual(
+                comparison._replica_prefix_evidence(paths[0]),
+                comparison._replica_prefix_evidence(paths[1]),
+            )
+
+    def test_artifact_verification_rejects_post_run_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "observables.csv"
+            path.write_bytes(b"campaign-output\n")
+            evidence = comparison._artifact_evidence(path)
+            path.write_bytes(b"tampered-output\n")
+
+            with self.assertRaisesRegex(RuntimeError, "artifact drift"):
+                comparison._verify_artifact(path, evidence)
+
     def test_all_six_tracked_decks_are_deterministically_generated(self) -> None:
         expected = []
         for barrier_label in comparison.DELAMINATION_SENSITIVITY_KCAL_MOL:
@@ -78,6 +132,73 @@ class ComparisonDeckTests(unittest.TestCase):
             paths = comparison.generate_decks(Path(temporary))
             self.assertEqual(len(paths), 6)
             self.assertEqual(len({path.read_bytes() for path in paths}), 6)
+
+    def test_analyze_campaign_rejects_recorded_prefix_replay_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            raw_root = Path(temporary) / "raw"
+            out_dir = Path(temporary) / "out"
+            stem = "low-4x4x6"
+            csv_body = "replica,seed,value\n0,19980,a\n1,19981,b\n"
+            for name in (stem, f"replay-{stem}-a", f"replay-{stem}-b"):
+                directory = raw_root / name
+                directory.mkdir(parents=True)
+                for filename in comparison.REPLAY_ARTIFACTS:
+                    (directory / filename).write_text(csv_body, encoding="utf-8")
+            fabricated = {
+                filename: {
+                    key: {"rows": 2, "sha256": "0" * 64}
+                    for key in ("primary", "replay_a", "replay_b")
+                }
+                for filename in comparison.REPLICA_PREFIX_ARTIFACTS
+            }
+            honest = {
+                filename: {
+                    "primary": comparison._replica_prefix_evidence(
+                        raw_root / stem / filename
+                    ),
+                    "replay_a": comparison._replica_prefix_evidence(
+                        raw_root / f"replay-{stem}-a" / filename
+                    ),
+                    "replay_b": comparison._replica_prefix_evidence(
+                        raw_root / f"replay-{stem}-b" / filename
+                    ),
+                }
+                for filename in comparison.REPLICA_PREFIX_ARTIFACTS
+            }
+            self.assertNotEqual(honest, fabricated)
+            receipt = {
+                "barrier_label": "low",
+                "dims": [4, 4, 6],
+                "replicas": 2,
+                "seeds": [19980, 19981],
+                "deck_artifact": comparison._artifact_evidence(
+                    DECKS / "muscovite-1998-low-4x4x6.toml"
+                ),
+                "primary_artifacts": {
+                    filename: comparison._artifact_evidence(raw_root / stem / filename)
+                    for filename in comparison.REPLAY_ARTIFACTS
+                },
+                "replay_artifacts": {
+                    filename: {
+                        "replay_a": comparison._artifact_evidence(
+                            raw_root / f"replay-{stem}-a" / filename
+                        ),
+                        "replay_b": comparison._artifact_evidence(
+                            raw_root / f"replay-{stem}-b" / filename
+                        ),
+                    }
+                    for filename in comparison.REPLAY_ARTIFACTS
+                },
+                "primary_prefix_replay_artifacts": fabricated,
+            }
+            (raw_root / "campaign.json").write_text(
+                json.dumps([receipt]) + "\n", encoding="utf-8"
+            )
+
+            with self.assertRaisesRegex(
+                RuntimeError, "primary_prefix_replay_artifacts"
+            ):
+                comparison.analyze_campaign(raw_root, DECKS, DATA, out_dir)
 
 
 class DigitizedDataTests(unittest.TestCase):

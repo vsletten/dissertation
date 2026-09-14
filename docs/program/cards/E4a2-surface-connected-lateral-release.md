@@ -1,6 +1,6 @@
 # E4a2-surface-connected-lateral-release — test the missing in-plane length scale
 
-- status: active
+- status: done
 - track: E (muscovite / the perfect circle)
 - priority: P1
 - machine: any (CPU ensembles)
@@ -39,6 +39,34 @@ path. Rerun the exact E4 campaign to determine whether the existing in-plane
 
 ## Progress
 
+- 2026-09-13 20:17 PDT (hermes-macbot-one; profile=laptop) — Cold review found
+  that the replay receipt exposed only a boolean assertion. Added byte-count and
+  SHA-256 evidence for the three primary/replay summary CSVs, cross-checked the
+  eight-replica primary prefixes against both same-seed replays, bound analysis
+  inputs to committed products, and added divergence/drift tests. An independent
+  72-replica run on this host reproduced the exact 84,585-event total and
+  unchanged NO-GO comparison. The compiled gate regression now proves a
+  two-interior-hop path from both opposite `a` edges; the deck regression pins
+  both axes and all four lateral faces. Also
+  documented that the universal 1.0 s⁻¹ gate timescale is inherited unchanged
+  from E4a rather than introduced or fitted by E4a2; this result excludes the
+  connectivity intervention under that inherited timescale, not every possible
+  propagation law.
+
+- 2026-09-13 20:41 PDT (hermes-macbot-one; profile=laptop) — Published the
+  evidence-hardening follow-up as
+  [PR #132](https://github.com/vsletten/dissertation/pull/132) after PR #131
+  merged; cloud Hermes now owns review, CI, merge, and branch deletion for the
+  follow-up.
+
+- 2026-09-13 19:57 PDT (hermes-macbot-one; profile=laptop) — Opened
+  [PR #131](https://github.com/vsletten/dissertation/pull/131) from the prepared
+  pushed branch after confirming the committed user-visible outcome: the
+  connected lateral front still yields 500/500/500 °C and 600/600/600 °C
+  volume-ladder peaks rather than the observed 700→800→1025 °C ordering.
+  Marked card and board DONE in the PR; cloud Hermes now owns review, CI, and
+  merge.
+
 - 2026-09-13 18:39 PDT (hermes-macbot-zero; profile=laptop) — Implementation,
   campaign evidence, final verification, and independent review are complete and
   pushed, but PR creation could not finish. Existing `gh` auth is invalid;
@@ -67,6 +95,12 @@ path. Rerun the exact E4 campaign to determine whether the existing in-plane
 
 ## Result
 
+- 2026-09-13 20:41 PDT (hermes-macbot-one; profile=laptop) — Published the
+  review-driven evidence and scope hardening as
+  [PR #132](https://github.com/vsletten/dissertation/pull/132); the original
+  intervention implementation is merged in PR #131.
+- 2026-09-13 19:57 PDT (hermes-macbot-one; profile=laptop) — Published the
+  completed slice as [PR #131](https://github.com/vsletten/dissertation/pull/131).
 - Implementation: `petra/scripts/build_muscovite_full_deck.py`, the tracked full
   deck, and all six tracked E4 campaign decks.
 - Regressions: `petra/crates/petra-deck/tests/surface_connected_release.rs`
@@ -74,9 +108,10 @@ path. Rerun the exact E4 campaign to determine whether the existing in-plane
   engine; `test_surface_release_requires_edge_connected_delamination_front`
   pins the generated campaign-deck structure.
 - Evidence: `docs/program/results/E4a2-surface-connected-lateral-release.md` and
-  its committed `campaign-receipts.json`, `comparison.json`, `comparison.svg`,
-  and `synthetic-spectra.csv` products.
-- Verification: 38 Python script tests passed; the Petra Rust workspace tests and
+  its committed `campaign-receipts.json`, `analysis-receipt.json`,
+  `comparison.json`, `comparison.svg`, and `synthetic-spectra.csv` products.
+- Verification: 42 Python script tests passed; the Petra Rust workspace tests and
   doc-tests passed; changed-file Ruff check/format and `git diff --check` passed.
-- Verdict: **NO-GO** on the 700→800→1025 °C trend. The next discriminator is the
-  already-READY `E4b-isothermal-reservoir-discriminants` card.
+- Verdict: **NO-GO** on the 700→800→1025 °C trend for the inherited E4a gate
+  timescale, tracked schedule, and proxy-size ladder. The next discriminator is
+  the already-READY `E4b-isothermal-reservoir-discriminants` card.

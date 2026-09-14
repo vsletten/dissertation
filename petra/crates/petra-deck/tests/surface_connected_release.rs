@@ -1,17 +1,20 @@
 //! Behavioral gate for E4a2's surface-connected lateral release front.
 
-fn fixture(connected_to_edge: bool) -> String {
-    let connected_init = if connected_to_edge {
-        r#"
+fn fixture(edge_cell: Option<usize>) -> String {
+    let connected_init = if let Some(cell_a) = edge_cell {
+        format!(
+            r#"
 [[structure.init]]
 name = "connect-left-edge"
-center = { kind = "Interface", state = ["bonded"] }
-sites = [[0, 0, 0, 1]]
+center = {{ kind = "Interface", state = ["bonded"] }}
+sites = [[{cell_a}, 0, 0, 1]]
 set = "delaminated"
-"#
+"#,
+        )
     } else {
-        ""
+        String::new()
     };
+    let isotope_cell = if edge_cell == Some(3) { 1 } else { 2 };
     format!(
         r#"
 [deck]
@@ -89,23 +92,23 @@ dcell = [1, 0, 0]
 label = "lateral_front"
 
 [structure.lattice]
-dims = [3, 1, 1]
+dims = [4, 1, 1]
 boundary = ["open", "periodic", "periodic"]
 
 [[structure.init]]
 name = "lateral-edges"
 center = {{ kind = "Surface_gate", state = ["closed"] }}
-sites = [[0, 0, 0, 2], [2, 0, 0, 2]]
+sites = [[0, 0, 0, 2], [3, 0, 0, 2]]
 set = "edge"
 [[structure.init]]
 name = "interior-isotope"
 center = {{ kind = "Gallery", state = ["vacant"] }}
-sites = [[1, 0, 0, 0]]
+sites = [[{isotope_cell}, 0, 0, 0]]
 set = "Ar40"
 [[structure.init]]
 name = "isolated-interior-pocket"
 center = {{ kind = "Interface", state = ["bonded"] }}
-sites = [[1, 0, 0, 1]]
+sites = [[1, 0, 0, 1], [2, 0, 0, 1]]
 set = "delaminated"
 {connected_init}
 
@@ -154,9 +157,8 @@ report_every = 1
     )
 }
 
-fn compiled(connected_to_edge: bool) -> petra_deck::CompiledDeck {
-    let parsed: petra_deck::DeckFile =
-        toml::from_str(&fixture(connected_to_edge)).expect("fixture parses");
+fn compiled(edge_cell: Option<usize>) -> petra_deck::CompiledDeck {
+    let parsed: petra_deck::DeckFile = toml::from_str(&fixture(edge_cell)).expect("fixture parses");
     petra_deck::compile(&parsed).expect("fixture compiles")
 }
 
@@ -172,51 +174,52 @@ fn state_name<'a>(
 
 #[test]
 fn isotope_release_requires_a_delaminated_path_connected_to_a_lateral_edge() {
-    let isolated = compiled(false);
+    let isolated = compiled(None);
     let mut isolated_engine = isolated.build_engine(None).expect("isolated engine builds");
     assert!(
         matches!(isolated_engine.step(), Err(petra_core::Stop::NoEvents)),
         "an isolated interior delaminated pocket must stop specifically because no event exists"
     );
     assert_eq!(
-        state_name(&isolated, &isolated_engine, 1, 2),
+        state_name(&isolated, &isolated_engine, 2, 2),
         "Surface_gate.closed"
     );
     assert_eq!(
-        state_name(&isolated, &isolated_engine, 1, 0),
+        state_name(&isolated, &isolated_engine, 2, 0),
         "Gallery.Ar40"
     );
 
-    let connected = compiled(true);
-    let mut connected_engine = connected
-        .build_engine(None)
-        .expect("connected engine builds");
-    let mut fired = Vec::new();
-    while let Ok(event) = connected_engine.step() {
-        fired.push(connected.reactions[event.reaction as usize].name.as_str());
-        assert!(
-            fired.len() <= 3,
-            "fixture must terminate after the three intended events"
+    for (edge_cell, first_inner, second_inner, isotope_cell) in [(0, 1, 2, 2), (3, 2, 1, 1)] {
+        let connected = compiled(Some(edge_cell));
+        let mut connected_engine = connected
+            .build_engine(None)
+            .expect("connected engine builds");
+        let mut fired = Vec::new();
+        while let Ok(event) = connected_engine.step() {
+            fired.push(connected.reactions[event.reaction as usize].name.as_str());
+            assert!(
+                fired.len() <= 4,
+                "fixture must terminate after the four intended events"
+            );
+        }
+        assert_eq!(
+            fired,
+            [
+                "open_lateral_edge_after_delamination",
+                "advance_surface_connected_front",
+                "advance_surface_connected_front",
+                "release_Ar40_surface",
+            ]
+        );
+        for cell_a in [edge_cell, first_inner, second_inner] {
+            assert_eq!(
+                state_name(&connected, &connected_engine, cell_a, 2),
+                "Surface_gate.open"
+            );
+        }
+        assert_eq!(
+            state_name(&connected, &connected_engine, isotope_cell, 0),
+            "Gallery.vacant"
         );
     }
-    assert_eq!(
-        fired,
-        [
-            "open_lateral_edge_after_delamination",
-            "advance_surface_connected_front",
-            "release_Ar40_surface",
-        ]
-    );
-    assert_eq!(
-        state_name(&connected, &connected_engine, 0, 2),
-        "Surface_gate.open"
-    );
-    assert_eq!(
-        state_name(&connected, &connected_engine, 1, 2),
-        "Surface_gate.open"
-    );
-    assert_eq!(
-        state_name(&connected, &connected_engine, 1, 0),
-        "Gallery.vacant"
-    );
 }
