@@ -1,6 +1,6 @@
 # E3b1-periodic-dft-evidence-contract — close calibration evidence gates
 
-- status: ready
+- status: done
 - track: E (muscovite / the perfect circle)
 - priority: P2
 - machine: workstation
@@ -43,6 +43,18 @@ review before any DFT barrier or correction can be banked.
 
 ## Progress
 
+- 2026-09-14 11:17 PDT — `(hermes-custom-build-001; profile=workstation)` —
+  DONE after the single cold review's six must-fix findings were regression-
+  closed and final verification passed: 30 focused tests, Ruff check/format,
+  compile, and diff checks. A real 334-atom reconstructed-Ar PBE-D3
+  `ENERGY_FORCE` probe converged in 780.622 s under a bounded transient unit
+  (4 MPI × 4 OpenMP, 48 GiB, 3700 s ceiling); its atomic receipt binds the
+  method, exact input/dependencies, raw output, elapsed time, resources, and
+  cleanup. Final evidence SHA-256 is
+  `cc199ab545fa29e9d6ceb5c24db84f9229f0d0208f12008631dda561f1d721e3`;
+  details: `docs/program/results/E3b1-periodic-dft-evidence-contract.md`.
+  This is planning/evidence-contract proof, not a DFT BAND barrier.
+
 - 2026-09-14 10:42 PDT — `(hermes-custom-build-001; profile=workstation)` —
   Implemented and locally verified the E3b1 evidence machinery. Prepared inputs
   now execute only from an isolated copied runtime tree; timing receipts bind
@@ -62,3 +74,11 @@ review before any DFT barrier or correction can be banked.
   Filed from E3b's cold review. E3b already corrected the cell to valid 2×2,
   disabled manual-observation promotion, and rejects incomplete E3a references;
   this card owns the remaining executable evidence path and review follow-ups.
+
+## Result
+
+Done. Native, hash-bound CP2K/LAMMPS parsing; immutable prepared/runtime
+separation; incomplete E3a-anchor rejection; the chemical five-coordinate-Al
+criterion; and the completed bounded 2×2 reconstructed-Ar timing probe are
+verified. E3b is unblocked but remains at 0/3 DFT barriers; no barrier,
+correction, endorsement, or BAND lower bound is claimed by this card.
