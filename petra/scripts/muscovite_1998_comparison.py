@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import os
@@ -30,7 +31,7 @@ E3A_LOCAL_DEHYDROXYLATE_HOP_KCAL_MOL = 64.095991
 E3A_EXTENDED_ZONE_HOP_KCAL_MOL = 68.410690
 # E2b periodic comparison volumes: a finite-size ladder, not recovered physical
 # grain diameters. Overlay against the 1998 58/165/3000 µm series is qualitative;
-# E4a owns surface-gated release on this same ladder.
+# E4a2 owns the surface-connected lateral release front on this same ladder.
 COMPARISON_SIZES = ((4, 4, 6), (8, 8, 6), (12, 12, 6))
 COMPARISON_SCHEDULE = tuple(
     (temperature + 273.15, 600.0) for temperature in range(500, 1201, 50)
@@ -38,6 +39,8 @@ COMPARISON_SCHEDULE = tuple(
 DEFAULT_REPLICAS = 8
 DEFAULT_BASE_SEED = 19_980
 SITES_PER_CELL = 8
+REPLAY_ARTIFACTS = ("ensemble.csv", "ensemble-summary.csv", "observables.csv")
+REPLICA_PREFIX_ARTIFACTS = ("ensemble.csv", "observables.csv")
 
 
 def _slug(dims: tuple[int, int, int]) -> str:
@@ -195,6 +198,88 @@ def _petra_command(
     ]
 
 
+def _artifact_evidence(path: Path) -> dict[str, int | str]:
+    """Return independently re-checkable size and SHA-256 evidence for one file."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return {"bytes": path.stat().st_size, "sha256": digest.hexdigest()}
+
+
+def _verify_artifact(path: Path, expected: dict[str, int | str]) -> None:
+    actual = _artifact_evidence(path)
+    if actual != expected:
+        raise RuntimeError(
+            f"artifact drift for {path}: expected {expected}, observed {actual}"
+        )
+
+
+def _verify_prefix_replay_artifacts(
+    raw_root: Path, stem: str, receipt: dict[str, object]
+) -> None:
+    recorded = receipt["primary_prefix_replay_artifacts"]
+    computed = {
+        filename: {
+            "primary": _replica_prefix_evidence(raw_root / stem / filename),
+            "replay_a": _replica_prefix_evidence(
+                raw_root / f"replay-{stem}-a" / filename
+            ),
+            "replay_b": _replica_prefix_evidence(
+                raw_root / f"replay-{stem}-b" / filename
+            ),
+        }
+        for filename in REPLICA_PREFIX_ARTIFACTS
+    }
+    if computed != recorded:
+        raise RuntimeError(
+            f"primary_prefix_replay_artifacts drift for {stem}: "
+            f"expected {recorded}, observed {computed}"
+        )
+
+
+def _replica_prefix_evidence(path: Path, replicas: int = 2) -> dict[str, int | str]:
+    """Hash canonical CSV rows for the first replicas, independent of ensemble size."""
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        if not reader.fieldnames:
+            raise ValueError(f"CSV header missing from {path}")
+        rows = list(reader)
+    if "replica" in reader.fieldnames:
+        rows = [row for row in rows if int(row["replica"]) < replicas]
+    elif "seed" in reader.fieldnames:
+        rows = rows[:replicas]
+    else:
+        raise ValueError(f"replica and seed columns missing from {path}")
+    encoded = json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
+    return {"rows": len(rows), "sha256": hashlib.sha256(encoded).hexdigest()}
+
+
+def _replay_evidence(
+    replay_paths: list[Path],
+) -> dict[str, dict[str, dict[str, int | str]]]:
+    """Prove both same-seed replay directories contain byte-identical artifacts."""
+    if len(replay_paths) != 2:
+        raise ValueError("same-seed verification requires exactly two replay paths")
+    evidence = {
+        filename: {
+            "replay_a": _artifact_evidence(replay_paths[0] / filename),
+            "replay_b": _artifact_evidence(replay_paths[1] / filename),
+        }
+        for filename in REPLAY_ARTIFACTS
+    }
+    mismatches = [
+        filename
+        for filename, pair in evidence.items()
+        if pair["replay_a"] != pair["replay_b"]
+    ]
+    if mismatches:
+        raise RuntimeError(
+            "same-seed replay diverged for artifacts: " + ", ".join(mismatches)
+        )
+    return evidence
+
+
 def run_campaign(
     petra_root: Path,
     petra_bin: Path,
@@ -234,18 +319,25 @@ def run_campaign(
                     logs / f"replay-{stem}-{suffix}.log",
                 )
                 replay_paths.append(replay)
-            replay_verified = all(
-                (replay_paths[0] / filename).read_bytes()
-                == (replay_paths[1] / filename).read_bytes()
-                for filename in (
-                    "ensemble.csv",
-                    "ensemble-summary.csv",
-                    "observables.csv",
-                )
-            )
-            if not replay_verified:
-                raise RuntimeError(f"same-seed replay diverged for {stem}")
+            replay_artifacts = _replay_evidence(replay_paths)
+            primary_prefix_replay_artifacts = {}
+            for filename in REPLICA_PREFIX_ARTIFACTS:
+                primary_prefix = _replica_prefix_evidence(output / filename)
+                replay_a_prefix = _replica_prefix_evidence(replay_paths[0] / filename)
+                replay_b_prefix = _replica_prefix_evidence(replay_paths[1] / filename)
+                if not primary_prefix == replay_a_prefix == replay_b_prefix:
+                    raise RuntimeError(
+                        f"primary/replay replica-prefix divergence for {stem}/{filename}"
+                    )
+                primary_prefix_replay_artifacts[filename] = {
+                    "primary": primary_prefix,
+                    "replay_a": replay_a_prefix,
+                    "replay_b": replay_b_prefix,
+                }
             rows = ensemble_rows(output / "ensemble.csv", replicas)
+            primary_command = _petra_command(
+                petra_bin, deck, output, replicas, base_seed
+            )
             receipt = {
                 "barrier_label": barrier_label,
                 "barrier_kcal_mol": barrier,
@@ -256,6 +348,15 @@ def run_campaign(
                 "elapsed_seconds": elapsed,
                 "total_events": sum(int(row["steps"]) for row in rows),
                 "replay_verified": True,
+                "command": primary_command,
+                "deck_artifact": _artifact_evidence(deck),
+                "petra_binary_artifact": _artifact_evidence(petra_bin),
+                "primary_artifacts": {
+                    filename: _artifact_evidence(output / filename)
+                    for filename in REPLAY_ARTIFACTS
+                },
+                "replay_artifacts": replay_artifacts,
+                "primary_prefix_replay_artifacts": primary_prefix_replay_artifacts,
             }
             receipts.append(receipt)
             (output / "receipt.json").write_text(
@@ -392,6 +493,7 @@ def evaluate(
         )
         for name, rows in observed_groups.items()
     }
+    old_step_count = 0
     for barrier_label in DELAMINATION_SENSITIVITY_KCAL_MOL:
         rows = [row for row in synthetic if row["barrier_label"] == barrier_label]
         peaks = {
@@ -408,6 +510,7 @@ def evaluate(
         old_steps = {
             _slug(dims): _old_step_signature(rows, dims) for dims in COMPARISON_SIZES
         }
+        old_step_count += sum(bool(value[0]) for value in old_steps.values())
         recoil = {
             _slug(dims): _recoil_signature(rows, dims) for dims in COMPARISON_SIZES
         }
@@ -430,22 +533,28 @@ def evaluate(
     if crossover_count == len(by_barrier):
         crossover_verdict = "reproduced"
         crossover_mechanism = (
-            "delamination-gated basal surface accessibility recovers the monotonic "
+            "surface-connected lateral release recovers the monotonic "
             "volume crossover in both retained proxy brackets"
         )
     elif crossover_count:
         crossover_verdict = "partially_reproduced"
         crossover_mechanism = (
-            "delamination-gated basal surface accessibility recovers the monotonic "
+            "surface-connected lateral release recovers the monotonic "
             "volume crossover in only one retained proxy bracket"
         )
     else:
         crossover_verdict = "not_reproduced"
         crossover_mechanism = (
-            "delamination-gated basal surface accessibility leaves the volume peaks "
-            "unordered; next discriminate lateral edge access or a connected "
-            "delamination front"
+            "surface-connected lateral release leaves the volume peaks unordered; "
+            "next discriminate isothermal reservoir kinetics rather than tune the front"
         )
+    family_count = len(by_barrier) * len(COMPARISON_SIZES)
+    if old_step_count == family_count:
+        old_step_verdict = "reproduced"
+    elif old_step_count:
+        old_step_verdict = "partially_reproduced"
+    else:
+        old_step_verdict = "not_reproduced"
     return {
         "scope": "qualitative discrimination, not fit",
         "observed": {
@@ -461,7 +570,7 @@ def evaluate(
         "section_5_claims": {
             "1_two_stage_non_fickian_loss": {
                 "verdict": "not_reproduced",
-                "mechanism": "delamination-gated basal surface release still does not recover a resolvable late stage",
+                "mechanism": "surface-connected lateral release still does not recover a resolvable late stage",
             },
             "2_distinct_reservoir_diffusivity_ratio": {
                 "verdict": "not_reproduced",
@@ -476,8 +585,11 @@ def evaluate(
                 "mechanism": "E2 has no complete Xe state and release mechanism",
             },
             "5_recoil_old_initial_steps": {
-                "verdict": "partially_reproduced",
-                "mechanism": "recoil distortion emerges; only one volume per sensitivity crosses the old-step gate",
+                "verdict": old_step_verdict,
+                "mechanism": (
+                    f"recoil distortion emerges; {old_step_count} of {family_count} "
+                    "volume/sensitivity families cross the old-step gate"
+                ),
             },
             "6_grain_size_delamination_fraction": {
                 "verdict": crossover_verdict,
@@ -522,7 +634,7 @@ def comparison_svg(
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
         f'<rect width="{width}" height="{height}" fill="#fbfaf7"/>',
-        '<text x="550" y="30" text-anchor="middle" font-family="sans-serif" font-size="21" font-weight="700">E4 qualitative comparison: Sletten–Onstott 1998 vs Petra</text>',
+        '<text x="550" y="30" text-anchor="middle" font-family="sans-serif" font-size="21" font-weight="700">E4a2 lateral-front comparison: Sletten–Onstott 1998 vs Petra</text>',
     ]
     # Panel A: release profile, normalized because raster digitization is in rate units.
     left, top, plot_w, plot_h = 75, 70, 950, 280
@@ -663,12 +775,20 @@ def analyze_campaign(
         barrier_label = receipt["barrier_label"]
         dims = tuple(receipt["dims"])
         stem = f"{barrier_label}-{_slug(dims)}"
+        deck = deck_dir / f"muscovite-1998-{stem}.toml"
+        _verify_artifact(deck, receipt["deck_artifact"])
+        for filename, expected in receipt["primary_artifacts"].items():
+            _verify_artifact(raw_root / stem / filename, expected)
+        for filename, pair in receipt["replay_artifacts"].items():
+            _verify_artifact(raw_root / f"replay-{stem}-a" / filename, pair["replay_a"])
+            _verify_artifact(raw_root / f"replay-{stem}-b" / filename, pair["replay_b"])
+        _verify_prefix_replay_artifacts(raw_root, stem, receipt)
         if receipt["seeds"] != list(
             range(receipt["seeds"][0], receipt["seeds"][0] + receipt["replicas"])
         ):
             raise ValueError(f"non-contiguous seeds in {stem}")
         result = analyze_ensemble(
-            deck_dir / f"muscovite-1998-{stem}.toml",
+            deck,
             raw_root / stem / "observables.csv",
             dims=dims,
             j_factor=0.01,
@@ -690,6 +810,39 @@ def analyze_campaign(
     )
     (out_dir / "campaign-receipts.json").write_text(
         json.dumps(receipts, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    result_artifacts = {
+        filename: _artifact_evidence(out_dir / filename)
+        for filename in (
+            "campaign-receipts.json",
+            "comparison.json",
+            "comparison.svg",
+            "synthetic-spectra.csv",
+        )
+    }
+    analysis_receipt = {
+        "campaign_input": _artifact_evidence(raw_root / "campaign.json"),
+        "data_inputs": {
+            filename: _artifact_evidence(data_dir / filename)
+            for filename in (
+                "figure3-and-5-age-spectra.csv",
+                "figure4-release-rates.csv",
+            )
+        },
+        "script_inputs": {
+            "build_muscovite_full_deck.py": _artifact_evidence(
+                Path(__file__).with_name("build_muscovite_full_deck.py")
+            ),
+            "muscovite_1998_comparison.py": _artifact_evidence(Path(__file__)),
+            "muscovite_full_analysis.py": _artifact_evidence(
+                Path(__file__).with_name("muscovite_full_analysis.py")
+            ),
+        },
+        "result_artifacts": result_artifacts,
+    }
+    (out_dir / "analysis-receipt.json").write_text(
+        json.dumps(analysis_receipt, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
     )
     print(json.dumps(verdict, indent=2, sort_keys=True))
 
