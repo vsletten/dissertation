@@ -35,6 +35,21 @@ endorsement, so E4 runs on numbers whose error bars mean something.
 
 ## Progress
 
+- 2026-09-14 12:04 PDT — `(hermes-custom-build-001; profile=workstation)` —
+  Launched the first scientific stage for the required five-coordinate-Al route:
+  dehydroxylate-lattice `cp2k_initial` in bounded transient unit
+  `task320-e3b-dehydroxylate-initial.service` (invocation
+  `6c9b8c4dd3d14d4893e29b65535a0d8f`). The envelope is 4 MPI × 4 OpenMP,
+  `Nice=10`, `CPUQuota=1600%`, 48 GiB container memory, a 1,800 s internal
+  timeout, and `RuntimeMaxSec=1,920`; atomic completion receipt:
+  `/mnt/data/vsletten/dissertation-data/e3b-periodic-dft-calibration-20260914/receipts/dehydroxylate-cp2k-initial-02.json`.
+  Prelaunch load15 was 0.87 with 40,608,508 KiB available; the pinned CP2K
+  container and growing native stdout were observed live. Runner SHA-256 is
+  `0277a43756af7d6f493a94a14726f57b7dc9e9b280f874e6027a223f269fd1e5`.
+  A preceding launch with the obsolete model alias `dehydroxylate-screen`
+  failed before container construction or compute and emitted no receipt; the
+  corrected launch uses the exact prepared model identity.
+
 - 2026-09-14 11:17 PDT — `(hermes-custom-build-001; profile=workstation)` —
   UNBLOCKED by E3b1's completed evidence contract and a converged 334-atom
   reconstructed-Ar timing probe (780.622 s). The corrected native-output gates
