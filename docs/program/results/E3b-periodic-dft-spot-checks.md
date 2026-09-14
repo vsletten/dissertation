@@ -1,106 +1,140 @@
-# E3b periodic-DFT spot checks — preparation result
+# E3b periodic-DFT spot checks — completed frozen-path survey
 
-**State:** `blocked: E3b1-periodic-dft-evidence-contract`; no DFT barrier or correction emitted  
-**Run date:** 2026-09-14  
+**State:** done; 3/3 PBE-D3 frozen-path profiles and 3/3 matched-cell classical profiles complete
+**Run date:** 2026-09-14
 **Operator:** `(hermes-custom-build-001; profile=workstation)`
 
 ## Verdict
 
-E3b is **not complete**: **0/3 periodic-DFT barriers were checked**. The work
-produced a valid, deterministic 2×2×1 preparation harness and exercised CP2K,
-but it did not produce a converged energy/force evaluation, endpoint, BAND, or
-calibration number.
+E3b is complete under the POLICY §12 platform-test amendment. All three
+immutable eight-image paths have hash-bound PBE-D3 single-point profiles and
+fresh LAMMPS profiles on the exact same coordinates. The survey comparison is:
+
+| Route | PBE-D3 frozen-path rise (kcal/mol) | Classical same-path rise (kcal/mol) | DFT − classical (kcal/mol) | Verdict |
+|---|---:|---:|---:|---|
+| dehydroxylate-lattice Ar | 297.913659 | 9877.633000 | -9579.719341 | `disagrees` |
+| reconstructed-replication Ar | 305.946204 | 9877.629000 | -9571.682796 | `disagrees` |
+| xenon-divacancy | 425.854862 | 39166.519000 | -38740.664138 | `disagrees` |
+
+`close-enough` means an absolute difference no greater than the repository's
+5.0 kcal/mol transfer tolerance. Every route exceeds it by thousands of
+kcal/mol, so all three verdicts are `disagrees`. The classical potential is not
+endorsed by this coordinate-matched survey, and these numbers are not applied
+as corrections or deck replacements.
+
+These are energy rises along immutable classical paths. They are **not**
+DFT-relaxed activation barriers, converged DFT minimum-energy paths, CI-NEB
+results, or production energetics. The unusually large rises are reported
+rather than laundered into a more attractive quantity: the coordinate-matched
+classical evaluator and PBE-D3 both see highly unfavorable interior images, but
+their scales disagree catastrophically.
+
+## Acceptance evidence
+
+### PBE-D3 profiles
+
+Each route completed 8/8 CP2K single points with converged SCF, normal
+termination, coordinate/input/native-output hashes, bounded controller
+identity, and confirmed container cleanup:
+
+| Route | Elapsed (s) | Frozen-path rise (kcal/mol) | Receipt SHA-256 |
+|---|---:|---:|---|
+| dehydroxylate-lattice | 2412.217 | 297.913659 | `87a6775e8d78efc663ffdaa5abce71ba9906f49bd07d8fe8934e23e6506c85a8` |
+| reconstructed-replication | 2248.029 | 305.946204 | `dcc8a92c2b66f212baefd962a1431d1e0b1b3f8c01abc810a9b86b5c1d55bbb3` |
+| xenon-divacancy | 2618.104 | 425.854862 | `aa5d6860b19855ba91c9bcea8d32daf065f35bf72d05cf9cf6a9bb58bd311459` |
+
+The dehydroxylate preparation's typed criterion identifies source Al atoms 10
+and 11 as transformed from six- to five-coordinate by loss of source oxygen 76
+with no gained neighbor. The moving Ar enters the declared 6.0 Å interaction
+shell in images 0–5 for both sites. Thus the required five-coordinate-Al
+interaction gate passes; this is a local post-dehydroxylation Ar hop, not the
+dehydroxylation reaction itself.
+
+### Matched-cell classical profiles
+
+`scripts/e3b_classical_frozen_path.py` binds each ordered XYZ row to the
+explicit source atom ID in `atom-map.json`, rewrites only those coordinates in
+the prepared LAMMPS topology, and runs a bounded zero-step energy evaluation.
+All three routes completed 8/8 images in about five seconds each. The runner
+emits no profile number after any timeout, nonzero return, malformed identity,
+non-finite energy, missing normal termination, or prepared-manifest drift.
+
+| Route | Runtime-manifest SHA-256 | Receipt SHA-256 |
+|---|---|---|
+| dehydroxylate-lattice | `4ac1048830471a14836d953c9220f91c57c520c6080356f396b4024d300b97a4` | `700004e307ac47056c3c28d4d0c4b556bce25f48f3086fc0ab0d7ba6351296a5` |
+| reconstructed-replication | `ed325856e21bd28236556e9a064376fb1e1af9c6996937800ca0970e892e985d` | `e25840dc27bc289098a89c526721a0c5a4c96d382a1a869aad010f4f1dfc0ba6` |
+| xenon-divacancy | `a89dacff84fae60e6b79d9b737638288833652d4f29873a2649abf15d23b0d14` | `729189c9bba8e3298b6f16473bfeeaab8e7ce51beba6c84bbc251e78e7ded9b7` |
+
+## Scope deviation
+
+The original card requested three fully relaxed endpoint calculations and
+periodic CI-NEBs. The first 331-atom dehydroxylate endpoint GEO_OPT ran for
+1830.018 s, completed ten converged SCF/geometry cycles, and timed out without
+endpoint convergence or normal termination. Its typed
+`incomplete-timeout` receipt emitted no numeric barrier.
+
+POLICY §12 supersedes that multi-day route on this one-workstation platform
+test: survey-tier methods are the banked value, one QM unit is capped at four
+hours, and a card requiring more than roughly one day of workstation compute
+must be narrowed. E3b therefore banks the six complete coordinate-matched
+profiles above and makes no full-CI-NEB feasibility claim.
 
 The earlier 3×2 timing-based “outside the workstation envelope” conclusion was
-rejected by the card's one allowed cold review. A wrapped, neutral 2×2 route
-cell exists, and an unfinished single-image timing attempt cannot establish a
-BAND iteration floor. This result therefore makes **no claim that E3b cannot fit
-the workstation envelope** and does not request a compute-rental decision.
+also rejected by the card's one prior cold review. A wrapped, neutral 2×2 route
+cell exists, and an unfinished force evaluation cannot establish a BAND
+iteration floor. No compute-rental decision follows from this card.
 
-The E3a classical values remain unchanged and explicitly incomplete:
-68.414811 kcal/mol for reconstructed divacancy Ar, 64.095991 kcal/mol for the
-local-dehydroxylate Ar hop, and 90.744700 kcal/mol for the Xe screen. They are
-planning references, not converged calibration anchors.
+## Preparation and method
 
-## Corrected 2×2 preparation
+The authoritative crop is the periodic wrapped 2×2×1 window beginning at
+source tile `(5,2)`, containing tiles `(5,2)`, `(0,2)`, `(5,0)`, and `(0,0)`.
+It retains Nteme route 1 (moving site 3; vacancies 4 and 88), exact four-unit-
+cell stoichiometry, net charge `1.78e-15 e`, and minimum pair distance
+`1.007 Å`. The three prepared systems contain 331, 334, and 334 atoms.
 
-The authoritative crop is the periodic wrapped window beginning at source tile
-`(5,2)`, containing tiles `(5,2)`, `(0,2)`, `(5,0)`, and `(0,0)`. It retains
-Nteme route 1 (moving site 3; vacancies 4 and 88), exact four-unit-cell
-stoichiometry, net charge `1.78e-15 e`, and minimum pair distance `1.007 Å`.
-
-| Check | Atoms | E3a reference status | Preparation gate |
-|---|---:|---|---|
-| reconstructed divacancy Ar | 334 | incomplete-convergence | pass |
-| local-dehydroxylate Ar | 331 | incomplete-convergence | pass |
-| reconstructed divacancy Xe | 334 | incomplete-convergence | pass |
-
-The cell is 10.3002083 × 17.8316813 × 19.549356 Å with the source triclinic
-angles. The dehydroxylate model preserves five-coordinate Al source IDs 10 and
-11. All three models pass composition, neutrality, route, atom-identity,
-minimum-distance, electron-parity, and topology preparation gates.
-
-The generated method is CP2K 2024.3, periodic GPW PBE-D3 zero damping,
-DZVP-MOLOPT-SR-GTH/GTH-PBE, Γ point, 600 Ry cutoff, 60 Ry relative cutoff, and
-eight CI-NEB replicas. The container is pinned to
+The PBE-D3 method is CP2K 2024.3 periodic GPW, DZVP-MOLOPT-SR-GTH/GTH-PBE,
+Γ point, 600 Ry cutoff, 60 Ry relative cutoff, D3 zero damping, with image
 `cp2k/cp2k@sha256:979e011c2ea15a2a56eae16b5f3a2d214142bb74fe644bfb302d366dddc2a443`.
+The classical method is the prepared E3a matched-cell LAMMPS force field in
+`real` units, evaluated without minimization on the same eight coordinates.
 
-## Live CP2K evidence
+Prepared evidence root:
 
-A 4-MPI × 4-OpenMP `ENERGY_FORCE` attempt on the 334-atom reconstructed-Ar
-initial state remained unfinished when the execution channel reached its
-420-second hard ceiling. No `ENERGY| Total FORCE_EVAL` line or normal program
-termination was emitted. The still-running container was detected and stopped;
-no CP2K container or process remained afterward.
+`/mnt/data/vsletten/dissertation-data/e3b1-periodic-dft-evidence-contract-20260914/prepared-reviewed/`
 
-This establishes only that the full-method single-image probe takes more than
-the available inline channel window on this machine. It is **not** a completed
-timing, a BAND lower bound, or a campaign-feasibility verdict.
+Prepared manifest SHA-256:
+`d796a30ce3e49b0150b4dcd42e625177ae7f44c4ab0ce5969e3e6d770c4a7ab0`.
 
-## Fail-closed corrections
+## Durable receipts
 
-The cold review found two paths that could have emitted an unsupported number.
-Both are closed in the branch:
+Calibration root:
 
-1. the analyzer now refuses manually entered observation booleans/barriers and
-   returns `incomplete-unverified-observation` until raw CP2K and LAMMPS parsers
-   with artifact hashes exist;
-2. an E3a source reference not typed `converged` returns
-   `incomplete-source-classical`, so the three current incomplete E3a values
-   cannot be promoted into a correction or endorsement.
+`/mnt/data/vsletten/dissertation-data/e3b-periodic-dft-calibration-20260914/`
 
-`E3b1-periodic-dft-evidence-contract` owns the remaining evidence work: separate
-immutable inputs from runtime outputs, parse/hash raw solver evidence, resolve
-the incomplete classical anchors, define the five-coordinate interaction
-criterion, and run a bounded completed 2×2 timing probe.
+The independent replay of all 48 image records, both runtime manifests per
+route, all receipt arithmetic, every immutable coordinate hash, all CP2K
+termination/SCF/cleanup gates, and all LAMMPS normal-termination/energy gates is:
 
-## Artifacts
+`receipts/comparison-verification-02.json`
 
-Authoritative 2×2 evidence root:
+SHA-256:
+`b0f7b58bd3bf7a79e6d86365f04cea16a57eaeb07f5efc0f0b92e2351e5a8cc9`.
 
-`/mnt/data/vsletten/dissertation-data/e3b-periodic-dft-spot-checks-2x2-20260914/`
-
-- root evidence manifest: 71 files / 57,403,263 bytes
-- manifest SHA-256: `1c2e837b8c3dc4afeda8d31a564695a9eb8ec1675c958029ea77ea5ece7eb529`
-- `prepared/preparation.json`: `f7b776a19b138b68228809fde75201042abc3208ff8956cb4f06667dfeb97093`
-- initial prepared-manifest SHA-256:
-  `46fe4d03c50693e6a681f9a6bda500455d7695289412c6f3e84debf75755c5fe`
-- incomplete 2×2 smoke log SHA-256:
-  `fa4d4a541d1e3409dc085b4db805ed73f5c8db22414c2117097a8e15bab2f5a8`
-
-The initial prepared manifest is intentionally reported as **not reusable after
-execution** because CP2K wrote runtime restart data inside that tree. E3b1 must
-separate immutable inputs from outputs before further campaign work.
-
-The superseded 3×2 exploratory evidence remains under
-`/mnt/data/vsletten/dissertation-data/e3b-periodic-dft-spot-checks-20260914/` for
-audit only; it does not support this verdict.
+The single POLICY §13 cold review found and closed three delivery-changing
+issues: arbitrary five-number diagnostics could supersede the declared LAMMPS
+thermo row; the receipt copied rather than recomputed atom-map identity; and no
+deck decision fragment recorded which value E4 used. The corrected runner was
+replayed for all 24 classical images with unchanged results. Non-blocking
+runner/revision attestation is deliberately deferred to
+`E3b2-classical-receipt-code-binding`.
 
 ## Verification
 
-- `uv run --with openpyxl --with pytest ...`: **33 passed** after the cold-review
-  corrections.
-- Ruff check/format, Python compilation, and `git diff --check`: pass.
-- The 2×2 real-input preparation generated 334/331/334-atom models with all
-  preparation gates true.
-- Post-probe cleanup: zero CP2K containers and zero CP2K/`mpirun` processes.
+- E3-focused PBE-D3/evidence-contract/classical-runner suite: **60 passed**.
+- Ruff check and format, Python compilation, and `git diff --check`: pass.
+- Receipt replay: **48/48 images** hash-bound and complete; profile arithmetic
+  independently recomputed.
+- Cleanup: every recorded CP2K container ID is absent; no CP2K container or
+  solver process survives.
+- No numeric correction, classical endorsement, relaxed DFT barrier, CI-NEB,
+  or production-energy claim is emitted.

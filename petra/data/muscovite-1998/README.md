@@ -64,3 +64,13 @@ the A8 thesis archive. E4 therefore uses an explicit **comparison schedule** of
 support and preserves E2's 600 s dwell convention, but it is not represented as
 the original furnace controller log. Any quantitative fit requires recovery of
 the original GD150/source data or the full methods table.
+
+## E3b calibration decision fragment
+
+`e3b-calibration-fragment.toml` records all three coordinate-matched E3b
+`disagrees` verdicts and the value-selection decision for E4. The PBE-D3 and
+classical numbers are frozen-path rises, not relaxed barriers, so E4 applies
+none of them as corrections. Its existing local-dehydroxylate rule retains the
+64.095991 kcal/mol E3a incomplete-convergence value strictly as a bounded
+sensitivity; the reconstructed-replication and Xe E3b numbers are not consumed
+by the current Ar-only E4 decks.
