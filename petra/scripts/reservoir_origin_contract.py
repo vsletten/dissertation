@@ -26,6 +26,15 @@ SCHEMA_VERSION = 1
 LEGACY_SINK = 1.0e-30
 SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
+EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
+EVIDENCE_SCHEMA = "petra-a9b-reservoir-origin-v1"
+ORIGIN_ACCOUNTING = {
+    "initial_occupied_cation": "original_lattice",
+    "adsorbed_cation": "reservoir",
+    "surface_state_transition": "preserve origin",
+    "desorption_numerator": "increment only for original_lattice",
+    "reservoir_desorption": "gross release only; never physical dissolution",
+}
 CONTRACT_KEYS = {
     "schema_version",
     "name",
@@ -242,6 +251,16 @@ def _profile_payload(profile: ReservoirProfile) -> dict[str, object]:
     }
 
 
+def _resolve_named_input(name: object, *roots: Path) -> Path:
+    if not isinstance(name, str) or SAFE_NAME.fullmatch(name) is None:
+        raise ValueError("reservoir evidence source name is not authentic")
+    for root in (*roots, EXAMPLES):
+        candidate = root / name
+        if candidate.is_file():
+            return candidate
+    raise ValueError(f"reservoir evidence cannot resolve {name}")
+
+
 def verify_evidence(deck_path: Path, evidence_path: Path) -> dict[str, object]:
     evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
     if not isinstance(evidence, dict):
@@ -251,6 +270,46 @@ def verify_evidence(deck_path: Path, evidence_path: Path) -> dict[str, object]:
         raise ValueError("reservoir evidence does not match the generated deck")
     if evidence.get("generated_deck") != deck_path.name:
         raise ValueError("reservoir evidence generated_deck name does not match")
+    if evidence.get("schema") != EVIDENCE_SCHEMA:
+        raise ValueError("reservoir evidence schema is not authentic")
+    if evidence.get("origin_accounting") != ORIGIN_ACCOUNTING:
+        raise ValueError("reservoir evidence origin_accounting is not authentic")
+
+    parsed = tomllib.loads(deck_path.read_text(encoding="utf-8"))
+    selected = evidence.get("selected_profile")
+    if not isinstance(selected, dict):
+        raise ValueError("reservoir evidence selected_profile is not authentic")
+    activities = selected.get("activities")
+    if activities != parsed.get("thermo", {}).get("activity"):
+        raise ValueError(
+            "reservoir evidence selected_profile does not match the generated deck"
+        )
+    ph = selected.get("ph")
+    if (
+        type(ph) is not int
+        or not isinstance(activities, dict)
+        or activities.get("H_plus") != 10.0 ** (-ph)
+    ):
+        raise ValueError("reservoir evidence selected_profile is not authentic")
+
+    contract_file = _resolve_named_input(
+        evidence.get("contract_path"), deck_path.parent, evidence_path.parent
+    )
+    contract_hash = hashlib.sha256(contract_file.read_bytes()).hexdigest()
+    if evidence.get("contract_sha256") != contract_hash:
+        raise ValueError("reservoir evidence contract hash is not authentic")
+    reservoir = load_contract(contract_file)
+    if evidence.get("contract") != reservoir.name:
+        raise ValueError("reservoir evidence contract is not authentic")
+    if selected != _profile_payload(reservoir.profiles[ph]):
+        raise ValueError("reservoir evidence selected_profile is not authentic")
+
+    source_file = _resolve_named_input(
+        evidence.get("source_deck"), deck_path.parent, evidence_path.parent
+    )
+    source_hash = hashlib.sha256(source_file.read_bytes()).hexdigest()
+    if evidence.get("source_deck_sha256") != source_hash:
+        raise ValueError("reservoir evidence source hash is not authentic")
     return evidence
 
 
@@ -360,7 +419,7 @@ H_plus = {profile.activities["H_plus"]:.1e}
     _write_atomic(out_deck, generated)
     deck_hash = hashlib.sha256(out_deck.read_bytes()).hexdigest()
     evidence: dict[str, object] = {
-        "schema": "petra-a9b-reservoir-origin-v1",
+        "schema": EVIDENCE_SCHEMA,
         "contract": reservoir.name,
         "temperature_k": reservoir.temperature_k,
         "boundary": reservoir.boundary,
@@ -379,13 +438,7 @@ H_plus = {profile.activities["H_plus"]:.1e}
         },
         "approximations": list(reservoir.approximations),
         "sources": list(reservoir.sources),
-        "origin_accounting": {
-            "initial_occupied_cation": "original_lattice",
-            "adsorbed_cation": "reservoir",
-            "surface_state_transition": "preserve origin",
-            "desorption_numerator": "increment only for original_lattice",
-            "reservoir_desorption": "gross release only; never physical dissolution",
-        },
+        "origin_accounting": dict(ORIGIN_ACCOUNTING),
         "source_deck": base_deck.name,
         "source_deck_sha256": source_hash,
         "contract_path": contract_path.name,

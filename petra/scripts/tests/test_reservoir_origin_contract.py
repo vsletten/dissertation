@@ -156,6 +156,47 @@ class ReservoirContractTests(unittest.TestCase):
                     drifted, RESERVOIRS, 4, root / "out.toml", root / "out.json"
                 )
 
+    def test_verify_evidence_rejects_tampered_receipt_without_changing_deck(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            deck_path = root / "ph4.toml"
+            evidence_path = root / "ph4.json"
+            contract.materialize(BASE_DECK, RESERVOIRS, 4, deck_path, evidence_path)
+            original = json.loads(evidence_path.read_text(encoding="utf-8"))
+            deck_bytes = deck_path.read_bytes()
+            tampers: list[tuple[str, object]] = [
+                ("schema", "petra-a9b-reservoir-origin-v0"),
+                ("selected_profile", {**original["selected_profile"], "ph": 3}),
+                ("contract_sha256", "0" * 64),
+                ("source_deck_sha256", "0" * 64),
+                (
+                    "origin_accounting",
+                    {
+                        **original["origin_accounting"],
+                        "adsorbed_cation": "original_lattice",
+                    },
+                ),
+            ]
+            for key, value in tampers:
+                tampered = dict(original)
+                tampered[key] = value
+                self.assertEqual(tampered["generated_deck"], original["generated_deck"])
+                self.assertEqual(
+                    tampered["generated_deck_sha256"],
+                    original["generated_deck_sha256"],
+                )
+                evidence_path.write_text(
+                    json.dumps(tampered, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+                with self.assertRaisesRegex(
+                    ValueError, "not authentic|does not match|receipt"
+                ):
+                    contract.verify_evidence(deck_path, evidence_path)
+                self.assertEqual(deck_path.read_bytes(), deck_bytes)
+
     def test_materialize_rejects_output_paths_that_overwrite_source_inputs(self) -> None:
         original_base = BASE_DECK.read_bytes()
         original_contract = RESERVOIRS.read_bytes()
