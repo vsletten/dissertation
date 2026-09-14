@@ -47,8 +47,8 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A1i-acid-production-tier-bridge-side-revisit](cards/A1i-acid-production-tier-bridge-side-revisit.md) | A | P1 | workstation | blocked: A2 | A1g ✅, A2 |
 | [A9-approximate-rate-closure](cards/A9-approximate-rate-closure.md) | A | P0 | any | done | honest partial: zero observed lattice release; all seven families censored/unrankable |
 | [A9b-mechanism-reachability](cards/A9b-mechanism-reachability.md) | A | P0 | any | ready | A9 ✅; path census + finite rare-event method |
-| [A9b-reservoir-origin-contract](cards/A9b-reservoir-origin-contract.md) | A | P0 | any | ready | A9 ✅; realistic pH 3–5 activities + lineage |
-| [A9b-sensitivity-ranking](cards/A9b-sensitivity-ranking.md) | A | P0 | workstation | blocked: A9b reachability + reservoir | corrected 29 × 8 ranking after both contracts |
+| [A9b-reservoir-origin-contract](cards/A9b-reservoir-origin-contract.md) | A | P0 | any | done | A9 ✅; pH 3–5 open-flow contract + origin-safe release accounting |
+| [A9b-sensitivity-ranking](cards/A9b-sensitivity-ranking.md) | A | P0 | workstation | blocked: A9b reachability | reservoir contract ✅; corrected 29 × 8 ranking after reachability |
 | [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | blocked: A9b-sensitivity-ranking | final top-k/irrelevant verdict |
 | [A3a-reactant-minimum-recovery](cards/A3a-reactant-minimum-recovery.md) | A | P1 | workstation | done | terminal microstate rejection; no minimum promoted |
 | [A3b-osa-neutral-n1-proton-microstate-stability](cards/A3b-osa-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; H52 became third mobile owner |

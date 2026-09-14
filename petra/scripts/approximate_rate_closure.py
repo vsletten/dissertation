@@ -729,9 +729,18 @@ def validate_deck(path: Path, seeds: Sequence[int] = DEFAULT_SEEDS) -> DeckContr
     temperature = thermo.get("temperature")
     if type(temperature) is not float or temperature != 298.0:
         raise ValueError("thermo.temperature must be exactly the TOML float 298.0")
-    if thermo.get("activity") != {"Al": 1.0e-30, "Si": 1.0e-30}:
+    activity = thermo.get("activity")
+    legacy_sink = activity == {"Al": 1.0e-30, "Si": 1.0e-30}
+    a9b_profile = (
+        isinstance(activity, dict)
+        and set(activity) == {"Al", "Si", "H_plus"}
+        and activity.get("Al") == 1.0e-6
+        and activity.get("Si") == 1.0e-6
+        and activity.get("H_plus") in {1.0e-3, 1.0e-4, 1.0e-5}
+    )
+    if not (legacy_sink or a9b_profile):
         raise ValueError(
-            "thermo.activity must fix the numerical open-flow sink at exactly 1.0e-30"
+            "thermo.activity must be the historical numerical open-flow sink or an A9b pH 3-5 trace-product profile"
         )
     if thermo.get("mu") != {"Al": -1.0, "Si": -1.0}:
         raise ValueError(
@@ -773,6 +782,9 @@ def validate_deck(path: Path, seeds: Sequence[int] = DEFAULT_SEEDS) -> DeckContr
 
     barriers: dict[str, float] = {}
     prefactors: dict[str, float] = {}
+    profile_ph = (
+        {1.0e-3: 3, 1.0e-4: 4, 1.0e-5: 5}[activity["H_plus"]] if a9b_profile else None
+    )
     for reaction, entry in zip(reactions, REACTION_REGISTRY, strict=True):
         name = reaction["name"]
         try:
@@ -787,9 +799,18 @@ def validate_deck(path: Path, seeds: Sequence[int] = DEFAULT_SEEDS) -> DeckContr
             )
         if prefactor != ARRHENIUS_PREFACTOR:
             raise ValueError(f"{name} prefactor must be exactly 1e13 s^-1")
-        if barrier != entry.ea_kcal_mol:
+        expected_barrier = entry.ea_kcal_mol
+        if profile_ph is not None and name in {"desorb-al", "desorb-si"}:
+            expected_barrier += (
+                0.00198720425864083 * 298.0 * math.log(10.0) * 0.777 * (profile_ph - 4)
+            )
+        if not math.isclose(barrier, expected_barrier, rel_tol=0.0, abs_tol=5.0e-10):
+            if profile_ph is None:
+                raise ValueError(
+                    f"{name} Ea must exactly match registry value {entry.ea_kcal_mol} kcal/mol"
+                )
             raise ValueError(
-                f"{name} Ea must exactly match registry value {entry.ea_kcal_mol} kcal/mol"
+                f"{name} Ea must match the selected reservoir value {expected_barrier} kcal/mol"
             )
         barriers[name] = barrier
         prefactors[name] = prefactor
@@ -2825,7 +2846,10 @@ def bind_checkout_source_deck(manifest: Mapping[str, object]) -> Path:
     if not _valid_sha256(expected):
         raise ValueError("source deck binding is missing")
     recorded = Path(str(manifest.get("source_deck", "")))
-    for candidate in (recorded, CHECKOUT_SOURCE_DECK):
+    # Prefer this checkout even when a historical absolute path happens to be
+    # mounted; hashes bind content, while the current checkout keeps analysis
+    # portable and prevents stale worktree paths from leaking into new output.
+    for candidate in (CHECKOUT_SOURCE_DECK, recorded):
         if candidate.is_file() and sha256_file(candidate) == expected:
             return candidate.resolve()
     raise ValueError("source deck binding is missing")
@@ -3063,7 +3087,29 @@ def _validate_raw_campaign(
     return manifest, seeds, scenario_records, nominal, raw_hashes
 
 
-def _write_provenance(path: Path) -> None:
+def _write_provenance(path: Path, nominal: DeckContract) -> None:
+    activity_map = nominal.parsed["thermo"]["activity"]
+    dissolved_activity = float(activity_map["Al"])
+    if dissolved_activity == 1.0e-30:
+        activity_source = "A9 historical numerical open-flow boundary condition"
+        activity_expression = "activity(Al) = activity(Si) = 1e-30"
+        activity_rationale = (
+            "Explicit numerical open-flow sink preserved for historical A9 evidence; "
+            "not a measured pH-dependent activity."
+        )
+    else:
+        activity_source = "A9b pH 3-5 open-flow reservoir contract"
+        activity_expression = (
+            f"activity(Al) = activity(Si) = 1e-6; "
+            f"activity(H+) = {float(activity_map['H_plus']):.0e}"
+        )
+        activity_rationale = (
+            "Declared trace-product open-flow sensitivity boundary selected from "
+            "kaolinite-reservoirs.toml; not a measured universal composition."
+        )
+    effective_activity = dissolved_activity * math.exp(
+        -1.0 / (0.00198720425864083 * 298.0)
+    )
     rows: list[dict[str, object]] = []
     for entry in REACTION_REGISTRY:
         row: dict[str, object] = {field: "" for field in PROVENANCE_FIELDS}
@@ -3071,7 +3117,7 @@ def _write_provenance(path: Path) -> None:
             {
                 "record_type": "reaction",
                 "reaction": entry.name,
-                "ea_kcal_mol": entry.ea_kcal_mol,
+                "ea_kcal_mol": nominal.barriers[entry.name],
                 "family": entry.family,
                 "provenance_class": entry.provenance_class,
                 "source": entry.source,
@@ -3092,11 +3138,11 @@ def _write_provenance(path: Path) -> None:
         ),
         (
             "dissolved_cation_activity",
-            1.0e-30,
+            dissolved_activity,
             "dimensionless",
-            "A9 far-from-equilibrium open-flow boundary condition",
-            "activity(Al) = activity(Si) = 1e-30",
-            "Explicit numerical open-flow sink for dissolved products in a continuously refreshed, far-from-equilibrium reservoir; not a measured pH-dependent activity.",
+            activity_source,
+            activity_expression,
+            activity_rationale,
         ),
         (
             "dissolved_cation_mu",
@@ -3108,7 +3154,7 @@ def _write_provenance(path: Path) -> None:
         ),
         (
             "effective_consumed_cation_factor_298k",
-            1.8476765674964432e-31,
+            effective_activity,
             "dimensionless",
             "derived from the declared A9 reservoir",
             "activity * exp(mu / (R * T)) with R = 0.00198720425864083 kcal mol^-1 K^-1",
@@ -3627,7 +3673,7 @@ def analyze_campaign(raw_root: Path, out_dir: Path) -> dict:
         out_dir / "steady-state-gates.json",
         {"schema": "a9-steady-state-gates-v3", "gates": gates},
     )
-    _write_provenance(out_dir / "provenance-conversions.csv")
+    _write_provenance(out_dir / "provenance-conversions.csv", nominal)
 
     status_counts = {
         status: sum(gate["status"] == status for gate in gates)
@@ -4059,10 +4105,15 @@ def _validate_derived_schemas(
             "report_every_steps",
         }
         or conditions["temperature"]["constant_value"] != "298.0"
-        or conditions["dissolved_cation_activity"]["constant_value"] != "1e-30"
+        or conditions["dissolved_cation_activity"]["constant_value"]
+        != format(float(nominal.parsed["thermo"]["activity"]["Al"]), ".15g")
         or conditions["dissolved_cation_mu"]["constant_value"] != "-1.0"
-        or "numerical open-flow sink"
-        not in conditions["dissolved_cation_activity"]["rationale"]
+        or (
+            "numerical open-flow sink"
+            not in conditions["dissolved_cation_activity"]["rationale"]
+            and "trace-product open-flow sensitivity boundary"
+            not in conditions["dissolved_cation_activity"]["rationale"]
+        )
         or conditions["simulation_steps"]["constant_value"] != "200000"
         or conditions["report_every_steps"]["constant_value"] != "10000"
     ):

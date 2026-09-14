@@ -1,0 +1,58 @@
+schema_version = 1
+name = "kaolinite-ph3-5-open-flow-v1"
+base_deck_sha256 = "8356fa4ee648a9a3b8581aa5693e467aa5c7e7e6fd9d62c592795008464ccaf7"
+temperature_k = 298.0
+boundary = "open_flow_constant_activity"
+product_activity = 1.0e-6
+product_activity_unit = "dimensionless (1 molal standard-state proxy)"
+product_activity_basis = "Declared 1 micromolal trace-product inflow ceiling for a continuously refreshed far-from-equilibrium reactor; a modeling boundary, not a measured universal kaolinite solution composition."
+acid_rate_order = 0.777
+acid_rate_anchor_ph = 4
+acid_scaled_reactions = ["desorb-al", "desorb-si"]
+al_species = "Al3+ (total-Al proxy)"
+si_species = "H4SiO4(aq) (total-Si proxy)"
+
+approximations = [
+  "Activity coefficients are fixed at unity; numerical activities are dilute-solution molality proxies.",
+  "Total dissolved Al is represented by Al3+; hydrolyzed and polynuclear Al species are excluded.",
+  "Total dissolved Si is represented by neutral H4SiO4(aq); deprotonated silicate and polymerized silica are excluded at pH 3-5.",
+  "The P&K H+ order is applied to terminal cation-release barriers as a bounded survey surrogate; it is not a proton-explicit elementary mechanism.",
+  "The open-flow boundary holds inflow activities constant and removes released products; released lattice cations do not change the reservoir activities.",
+  "The 1e-6 product activity is a declared trace-inflow sensitivity condition, not a solubility or equilibrium calculation."
+]
+
+[[sources]]
+id = "pk2004-table-29-p39"
+citation = "Palandri, J. L., and Kharaka, Y. K. (2004), USGS OFR 2004-1068, Table 29, p. 39"
+url = "https://pubs.usgs.gov/of/2004/1068/pdf/OFR_2004_1068.pdf"
+use = "Kaolinite acid/neutral/base far-from-equilibrium rate-law ledger and H+ reaction order."
+
+[[sources]]
+id = "cama-metz-ganor-2002"
+citation = "Cama, Metz, and Ganor (2002), Geochimica et Cosmochimica Acta 66, 3913-3926"
+url = "https://doi.org/10.1016/S0016-7037%2802%2900966-3"
+use = "Laboratory pH/temperature dependence under acidic, far-from-equilibrium kaolinite dissolution conditions."
+
+[[sources]]
+id = "yang-steefel-2008"
+citation = "Yang and Steefel (2008), Geochimica et Cosmochimica Acta 72, 99-116"
+url = "https://doi.org/10.1016/j.gca.2007.10.011"
+use = "Continuously stirred flow-through kaolinite dissolution/precipitation experiment at 22 C and pH 4."
+
+[[profiles]]
+ph = 3
+H_plus = 1.0e-3
+Al = 1.0e-6
+Si = 1.0e-6
+
+[[profiles]]
+ph = 4
+H_plus = 1.0e-4
+Al = 1.0e-6
+Si = 1.0e-6
+
+[[profiles]]
+ph = 5
+H_plus = 1.0e-5
+Al = 1.0e-6
+Si = 1.0e-6
