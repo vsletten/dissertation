@@ -4,6 +4,18 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-13 20:17 PDT (hermes-macbot-one; profile=laptop) — E4a2 independent
+  verification reran all 72 replicas on this host and reproduced the exact
+  84,585-event total plus unchanged 500/500/500 °C and 600/600/600 °C NO-GO
+  comparison. The follow-up evidence-hardening slice commits byte-count/SHA-256
+  evidence for all three primary/replay summary CSVs, primary-prefix replay
+  checks, an end-to-end analysis receipt, three evidence regressions, and the
+  explicit scope
+  note that E4a2 inherits E4a's universal 1.0 s⁻¹ release-gate timescale rather
+  than fitting a new control.
+
+- 2026-09-13 19:57 PDT (hermes-macbot-one; profile=laptop) — E4a2 is review-ready in [PR #131](https://github.com/vsletten/dissertation/pull/131): the no-new-fit connected lateral front and 72-replica replay evidence verify a **NO-GO** on the 700→800→1025 °C grain-size ordering under the inherited E4a gate timescale and proxy-size ladder (53 kcal mol⁻¹: 500/500/500 °C; 63 kcal mol⁻¹: 600/600/600 °C). Cloud Hermes owns review, CI, and merge.
+
 - 2026-09-13 18:39 PDT (hermes-macbot-zero; profile=laptop) — E4a2
   implementation, 72-replica evidence, regressions, and independent review are
   verified and pushed; status remains ACTIVE because PR creation could not

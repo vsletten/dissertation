@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import os
@@ -38,6 +39,8 @@ COMPARISON_SCHEDULE = tuple(
 DEFAULT_REPLICAS = 8
 DEFAULT_BASE_SEED = 19_980
 SITES_PER_CELL = 8
+REPLAY_ARTIFACTS = ("ensemble.csv", "ensemble-summary.csv", "observables.csv")
+REPLICA_PREFIX_ARTIFACTS = ("ensemble.csv", "observables.csv")
 
 
 def _slug(dims: tuple[int, int, int]) -> str:
@@ -195,6 +198,65 @@ def _petra_command(
     ]
 
 
+def _artifact_evidence(path: Path) -> dict[str, int | str]:
+    """Return independently re-checkable size and SHA-256 evidence for one file."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return {"bytes": path.stat().st_size, "sha256": digest.hexdigest()}
+
+
+def _verify_artifact(path: Path, expected: dict[str, int | str]) -> None:
+    actual = _artifact_evidence(path)
+    if actual != expected:
+        raise RuntimeError(
+            f"artifact drift for {path}: expected {expected}, observed {actual}"
+        )
+
+
+def _replica_prefix_evidence(path: Path, replicas: int = 2) -> dict[str, int | str]:
+    """Hash canonical CSV rows for the first replicas, independent of ensemble size."""
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        if not reader.fieldnames:
+            raise ValueError(f"CSV header missing from {path}")
+        rows = list(reader)
+    if "replica" in reader.fieldnames:
+        rows = [row for row in rows if int(row["replica"]) < replicas]
+    elif "seed" in reader.fieldnames:
+        rows = rows[:replicas]
+    else:
+        raise ValueError(f"replica and seed columns missing from {path}")
+    encoded = json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
+    return {"rows": len(rows), "sha256": hashlib.sha256(encoded).hexdigest()}
+
+
+def _replay_evidence(
+    replay_paths: list[Path],
+) -> dict[str, dict[str, dict[str, int | str]]]:
+    """Prove both same-seed replay directories contain byte-identical artifacts."""
+    if len(replay_paths) != 2:
+        raise ValueError("same-seed verification requires exactly two replay paths")
+    evidence = {
+        filename: {
+            "replay_a": _artifact_evidence(replay_paths[0] / filename),
+            "replay_b": _artifact_evidence(replay_paths[1] / filename),
+        }
+        for filename in REPLAY_ARTIFACTS
+    }
+    mismatches = [
+        filename
+        for filename, pair in evidence.items()
+        if pair["replay_a"] != pair["replay_b"]
+    ]
+    if mismatches:
+        raise RuntimeError(
+            "same-seed replay diverged for artifacts: " + ", ".join(mismatches)
+        )
+    return evidence
+
+
 def run_campaign(
     petra_root: Path,
     petra_bin: Path,
@@ -234,18 +296,25 @@ def run_campaign(
                     logs / f"replay-{stem}-{suffix}.log",
                 )
                 replay_paths.append(replay)
-            replay_verified = all(
-                (replay_paths[0] / filename).read_bytes()
-                == (replay_paths[1] / filename).read_bytes()
-                for filename in (
-                    "ensemble.csv",
-                    "ensemble-summary.csv",
-                    "observables.csv",
-                )
-            )
-            if not replay_verified:
-                raise RuntimeError(f"same-seed replay diverged for {stem}")
+            replay_artifacts = _replay_evidence(replay_paths)
+            primary_prefix_replay_artifacts = {}
+            for filename in REPLICA_PREFIX_ARTIFACTS:
+                primary_prefix = _replica_prefix_evidence(output / filename)
+                replay_a_prefix = _replica_prefix_evidence(replay_paths[0] / filename)
+                replay_b_prefix = _replica_prefix_evidence(replay_paths[1] / filename)
+                if not primary_prefix == replay_a_prefix == replay_b_prefix:
+                    raise RuntimeError(
+                        f"primary/replay replica-prefix divergence for {stem}/{filename}"
+                    )
+                primary_prefix_replay_artifacts[filename] = {
+                    "primary": primary_prefix,
+                    "replay_a": replay_a_prefix,
+                    "replay_b": replay_b_prefix,
+                }
             rows = ensemble_rows(output / "ensemble.csv", replicas)
+            primary_command = _petra_command(
+                petra_bin, deck, output, replicas, base_seed
+            )
             receipt = {
                 "barrier_label": barrier_label,
                 "barrier_kcal_mol": barrier,
@@ -256,6 +325,15 @@ def run_campaign(
                 "elapsed_seconds": elapsed,
                 "total_events": sum(int(row["steps"]) for row in rows),
                 "replay_verified": True,
+                "command": primary_command,
+                "deck_artifact": _artifact_evidence(deck),
+                "petra_binary_artifact": _artifact_evidence(petra_bin),
+                "primary_artifacts": {
+                    filename: _artifact_evidence(output / filename)
+                    for filename in REPLAY_ARTIFACTS
+                },
+                "replay_artifacts": replay_artifacts,
+                "primary_prefix_replay_artifacts": primary_prefix_replay_artifacts,
             }
             receipts.append(receipt)
             (output / "receipt.json").write_text(
@@ -674,12 +752,19 @@ def analyze_campaign(
         barrier_label = receipt["barrier_label"]
         dims = tuple(receipt["dims"])
         stem = f"{barrier_label}-{_slug(dims)}"
+        deck = deck_dir / f"muscovite-1998-{stem}.toml"
+        _verify_artifact(deck, receipt["deck_artifact"])
+        for filename, expected in receipt["primary_artifacts"].items():
+            _verify_artifact(raw_root / stem / filename, expected)
+        for filename, pair in receipt["replay_artifacts"].items():
+            _verify_artifact(raw_root / f"replay-{stem}-a" / filename, pair["replay_a"])
+            _verify_artifact(raw_root / f"replay-{stem}-b" / filename, pair["replay_b"])
         if receipt["seeds"] != list(
             range(receipt["seeds"][0], receipt["seeds"][0] + receipt["replicas"])
         ):
             raise ValueError(f"non-contiguous seeds in {stem}")
         result = analyze_ensemble(
-            deck_dir / f"muscovite-1998-{stem}.toml",
+            deck,
             raw_root / stem / "observables.csv",
             dims=dims,
             j_factor=0.01,
@@ -701,6 +786,39 @@ def analyze_campaign(
     )
     (out_dir / "campaign-receipts.json").write_text(
         json.dumps(receipts, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    result_artifacts = {
+        filename: _artifact_evidence(out_dir / filename)
+        for filename in (
+            "campaign-receipts.json",
+            "comparison.json",
+            "comparison.svg",
+            "synthetic-spectra.csv",
+        )
+    }
+    analysis_receipt = {
+        "campaign_input": _artifact_evidence(raw_root / "campaign.json"),
+        "data_inputs": {
+            filename: _artifact_evidence(data_dir / filename)
+            for filename in (
+                "figure3-and-5-age-spectra.csv",
+                "figure4-release-rates.csv",
+            )
+        },
+        "script_inputs": {
+            "build_muscovite_full_deck.py": _artifact_evidence(
+                Path(__file__).with_name("build_muscovite_full_deck.py")
+            ),
+            "muscovite_1998_comparison.py": _artifact_evidence(Path(__file__)),
+            "muscovite_full_analysis.py": _artifact_evidence(
+                Path(__file__).with_name("muscovite_full_analysis.py")
+            ),
+        },
+        "result_artifacts": result_artifacts,
+    }
+    (out_dir / "analysis-receipt.json").write_text(
+        json.dumps(analysis_receipt, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
     )
     print(json.dumps(verdict, indent=2, sort_keys=True))
 
