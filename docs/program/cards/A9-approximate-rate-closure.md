@@ -1,11 +1,11 @@
 # A9-approximate-rate-closure — run the kaolinite deck with approximate absolute rates
 
-- status: ready
+- status: done
 - track: A (geochemistry)
 - priority: P0
 - machine: any
 - depends: —
-- claimed-by:
+- claimed-by: hermes-macbot-zero
 
 ## Objective
 
@@ -42,7 +42,15 @@ defect/terrace contrast. Close the loop once with real-shaped rates:
 
 ## Acceptance
 
-Acceptance. `docs/program/results/A9-approximate-rate-closure.md` with the
+**2026-09-13 scope ruling for this closeout:** the original calibrated-rate and
+ordinal-ranking gate below is superseded as A9's terminal done criterion. Ship
+one review-ready PR containing the 298 K deck/runner, the preserved zero-release
+campaign and conversions, an explicit censored/unrankable verdict with
+stationarity and reservoir/origin caveats, and executable follow-up cards for
+each unresolved finding. No new campaign or review gate belongs on this branch.
+
+Historical acceptance (not scientifically satisfied; transferred to the A9b
+follow-ups): `docs/program/results/A9-approximate-rate-closure.md` with the
 provenance table (including lattice-to-m^2 and event-to-moles conversions),
 rate + stoichiometry with ensemble bands, the lab-rate comparison, and the
 ranked sensitivity table; deck + runner script committed; ONE PR. Deck
@@ -54,4 +62,20 @@ RuntimeMaxSec`) with a `file:` receipt if any ensemble exceeds 30 min.
 
 ## Progress
 
+- 2026-09-13 20:52 PDT (hermes-macbot-zero; profile=laptop) — DONE BY SCOPE RULING / REVIEW-READY CLOSEOUT: no further runner hardening or campaign replay was performed. The branch ships the observed zero original-lattice Si/Al release, zero historical origin-safe expected propensity flux, pooled detection bounds, censored/unrankable seven-family sensitivity table, and explicit caveats: ranked-response stationarity was not established under the corrected gates, the old `1e-30` sink is not a realistic pH 3–5 reservoir, and no final top-k or irrelevant-family ranking is supported. Follow-up cards `A9b-mechanism-reachability`, `A9b-reservoir-origin-contract`, and blocked `A9b-sensitivity-ranking` own those gaps. A9 itself is closed as an honest partial/negative result so the work reaches review instead of accumulating more gates.
+
+- 2026-09-13 20:26 PDT (hermes-custom-build-001; profile=workstation) — CONTINUATION: the pushed diagnostic-gate slice now requires a contiguous complete event stream, validates production-shaped PGIF state/kind/type/frozen/edge data, anchors lattice/reservoir lineage to the initial snapshot, excludes frozen targets, detects transient event-level `Si.oh4`/`Al.l6` eligibility, cross-checks event/population/observable timestamps, gates the complete per-kind state distribution, types unsampled mechanisms as unresolved across per-replica and ensemble products, exits nonzero on failed campaign acceptance, and enforces the aggregate 16-thread cap. Independent cold review's five concrete false-green findings were regression-closed. Fresh QA: 72 Python tests, focused Ruff/format, full Petra workspace tests/check, Rust format, and diff check pass; a real 200,000-event run is correctly rejected as `mechanism-unsampled`. Card acceptance still requires a validated rare-event/stiffness method plus realistic pH 3–5 reservoir/origin contract and a regenerated 29 x 8 ranking; no PR, QM, GPU, live service, database, or credential action occurred.
+
+- 2026-09-13 18:54 PDT (hermes-macbot-one; profile=laptop) — CONTINUATION: corrected origin lineage, response gates, censor-aware ranking, macOS sidecar-safe declared hashing, and the full 29-scenario × 8-seed × 200,000-event campaign are preserved. Verification reproduces `no-dissolution`, `sensitivity_complete=True`, `ordinal_ranking_complete=False`, `acceptance_passed=False`; all seven families are censored and there is no defensible top-k. Cold review also found that 10,000-event sampling cannot prove transient eligibility absence, total-cation population gates do not establish state-distribution stationarity, and the `1e-30` sink does not satisfy realistic pH 3–5 adsorption sensitivity. DEVIATION: the actual 27.0/32.2 kcal/mol survey anchors are B3LYP/def2-SVP/DF, not the card's stale r2SCAN-3c label. Raw data and 232 receipts remain at `/Volumes/DATA/hermes/run-outputs/TASK-309-A9-20260913-1740`. Resume from pushed branch `agents/A9-approximate-rate-closure` with event-level eligibility/reachability, state-distribution convergence, a defensible reservoir/origin contract, then rerun before completion. No QM or GPU work ran.
+
+- 2026-09-13 16:29 PDT (hermes-custom-build-001; profile=workstation) — CONTINUATION: the implementation, 232-run preliminary campaign, strict raw/derived verifier, and condition provenance are preserved, but independent stage-1 review rejected completion. The current 20,000-event windows do not establish stationarity of the ranked propensity response; two perturbations are censored yet receive forced ordinal ranks; and nominal desorption eligibility came from adsorbed solution Si rather than proven lattice-Si hydrolysis, invalidating the provisional laboratory-rate comparison. Resume on this branch/worktree with an origin-aware dissolution observable, response/population stationarity gates, adaptive finite runs, and censor-aware sensitivity ordering. Evidence and exact hashes: `docs/program/results/A9-approximate-rate-closure.md`. No QM or GPU work ran.
+
 - 2026-09-13 12:04 PDT (hermes-custom-build-001; profile=workstation) — Card created verbatim from Victor's TASK-274 ruling. A9 is READY at P0 and machine-any; the board feeder owns its mission-control pointer after this PR merges.
+
+## Result
+
+2026-09-13 20:52 PDT (hermes-macbot-zero; profile=laptop) — **DONE as an honest partial/negative survey result under the 20:50 ship-it ruling; not accepted as calibrated kinetics.** The committed deck is fixed at 298 K and carries source-classed approximate barriers. The historical 29-scenario × 8-seed campaign completed 46.4 million events and observed zero original-lattice Si release and zero original-lattice Al release; its pooled zero-event upper bound is `7.3623390865168e-12 mol m^-2 s^-1` per species. Historical origin-safe expected Si/Al propensity fluxes were also zero, but the corrected complete-event/PGIF/lineage gate classifies a real 200,000-event trajectory `mechanism-unsampled`, so ranked-response stationarity is not established and the old bundle is not acceptance evidence under the final schema.
+
+All seven barrier families are censored/unrankable. The data can rank **no** family, demonstrate **no** family irrelevant at this tier, and support **no** final A2/A3 QM top-k; the temporary QM target set is empty. The laboratory comparison is likewise caveated because the `1e-30` dissolved-cation activity was an origin-isolating numerical sink, not a realistic pH 3–5 reservoir. The preserved result and generated bundle are under `docs/program/results/A9-approximate-rate-closure.md` and `docs/program/results/a9-approximate-rate-closure/`.
+
+Three executable follow-ups own every unresolved review finding: READY `A9b-mechanism-reachability`, READY `A9b-reservoir-origin-contract`, and BLOCKED `A9b-sensitivity-ranking` after both merge. A3, A2, and A2b now block on the ranking follow-up rather than on closed A9.
