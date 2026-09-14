@@ -12,6 +12,7 @@ readonly A9B_SYSTEMD_UNIT_NAME=a9b-sensitivity-campaign
 readonly A9B_RUNTIME_MAX_SEC=86400
 export A9B_RUNTIME_MAX_SEC
 SCRIPT_DIR=$(cd -- "$(/usr/bin/dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+SCRIPT_PATH="$SCRIPT_DIR/$(/usr/bin/basename -- "${BASH_SOURCE[0]}")"
 PETRA_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 REPO_ROOT=$(cd -- "$PETRA_ROOT/.." && pwd)
 CARGO_TARGET_DIR=/home/vsletten/.hermes/cache/cargo-target/vsletten-dissertation-da68ebaefa3a
@@ -41,7 +42,7 @@ SYSTEMD_PROOF=$(
   unset A9B_SYSTEMD_INNER A9B_SYSTEMD_UNIT INVOCATION_ID
   exec systemd-run --user --unit="$A9B_SYSTEMD_UNIT_NAME" --collect --wait --pipe \
     --property="RuntimeMaxSec=$A9B_RUNTIME_MAX_SEC" \
-    /usr/bin/nice -n 10 "$0" "$@"
+    /usr/bin/nice -n 10 "$SCRIPT_PATH" "$@"
 }
 read -r A9B_LIVE_RUNTIME_MAX_USEC A9B_LIVE_INVOCATION_ID A9B_LIVE_NICENESS <<<"$SYSTEMD_PROOF"
 if [[ ! $A9B_LIVE_RUNTIME_MAX_USEC =~ ^[1-9][0-9]*$ || ! $A9B_LIVE_INVOCATION_ID =~ ^[0-9a-f]{32}$ || ! $A9B_LIVE_NICENESS =~ ^-?[0-9]+$ ]]; then
@@ -51,7 +52,7 @@ fi
 
 # Re-exec if needed, then require a fresh /proc attestation before workload.
 if (( A9B_LIVE_NICENESS < 10 )); then
-  exec /usr/bin/nice -n 10 "$0" "$@"
+  exec /usr/bin/nice -n 10 "$SCRIPT_PATH" "$@"
 fi
 SYSTEMD_PROOF=$(
   /usr/bin/python3 -I "$SCRIPT_DIR/a9b_bounded_launch_guard.py" \

@@ -1043,10 +1043,11 @@ class LauncherContractTests(unittest.TestCase):
                 "A9B_TEST_CAPTURE": str(capture),
             }
             completed = subprocess.run(
-                [str(launcher), str(root / "campaign"), "3"],
+                [f"./{launcher.name}", str(root / "campaign"), "3"],
                 check=False,
                 capture_output=True,
                 text=True,
+                cwd=launcher.parent,
                 env=environment,
             )
             self.assertEqual(completed.returncode, 0, completed.stderr)
