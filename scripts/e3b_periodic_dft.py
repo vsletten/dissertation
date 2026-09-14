@@ -2,7 +2,7 @@
 """Prepare and analyze bounded E3b periodic CP2K spot checks.
 
 This harness performs no DFT during ``prepare`` or ``analyze``. It derives three
-3x2x1 models from the hash-pinned E3a source, emits PBE-D3 CP2K endpoint and
+2x2x1 models from the hash-pinned E3a source, emits PBE-D3 CP2K endpoint and
 8-image CI-NEB inputs plus matched-cell classical inputs, and fail-closes any
 calibration whose execution, SCF, NEB, atom-identity, or cell-transfer evidence
 is incomplete. The ``smoke`` command is the only execution path and is limited
@@ -456,7 +456,10 @@ def _route_base(
 ]:
     by_id = {atom.id: atom for atom in pristine}
     if {route.moving_site, route.vacancy_1, route.vacancy_2} - set(by_id):
-        raise ValueError("selected 3x2 cell does not contain the pinned E3a route")
+        raise ValueError(
+            f"selected {TARGET_SUPERCELL[0]}x{TARGET_SUPERCELL[1]} cell "
+            "does not contain the pinned E3a route"
+        )
     moving = by_id[route.moving_site]
     destination = by_id[route.vacancy_1]
     removed_ids = {route.vacancy_1, route.vacancy_2}
@@ -495,7 +498,8 @@ def _route_base(
             ],
             "remote_charge_compensation": compensation,
             "charge_compensation_provenance": (
-                "reconstructed-charge-compensation in the neutral 3x2 route cell; "
+                "reconstructed-charge-compensation in the neutral "
+                f"{TARGET_SUPERCELL[0]}x{TARGET_SUPERCELL[1]} route cell; "
                 "not Nteme's undisclosed production compensator placement"
             ),
         },
@@ -517,7 +521,8 @@ def build_spot_models(
             **ar_metadata,
             "published_barrier_kcal_mol": route.barrier_kcal_mol,
             "limitation": (
-                "This is a neutral reconstructed 3x2 calibration cell, not the "
+                "This is a neutral reconstructed "
+                f"{TARGET_SUPERCELL[0]}x{TARGET_SUPERCELL[1]} calibration cell, not the "
                 "unpublished Nteme production structure or the E3a 6x3 cell."
             ),
         },
@@ -580,7 +585,8 @@ def build_spot_models(
         metadata={
             **xe_metadata,
             "limitation": (
-                "The DFT result can test the E3a Xe screen, but one 3x2 route "
+                "The DFT result can test the E3a Xe screen, but one "
+                f"{TARGET_SUPERCELL[0]}x{TARGET_SUPERCELL[1]} route "
                 "does not validate all dry-muscovite Xe environments."
             ),
         },
