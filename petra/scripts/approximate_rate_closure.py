@@ -949,6 +949,7 @@ def _run_one(
     started = time.monotonic()
     with log_path.open("x", encoding="utf-8") as log:
         # argv sequence, shell=False; the executable and deck are explicit local paths.
+        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
         subprocess.run(
             command,
             cwd=cwd,
