@@ -215,6 +215,29 @@ def _verify_artifact(path: Path, expected: dict[str, int | str]) -> None:
         )
 
 
+def _verify_prefix_replay_artifacts(
+    raw_root: Path, stem: str, receipt: dict[str, object]
+) -> None:
+    recorded = receipt["primary_prefix_replay_artifacts"]
+    computed = {
+        filename: {
+            "primary": _replica_prefix_evidence(raw_root / stem / filename),
+            "replay_a": _replica_prefix_evidence(
+                raw_root / f"replay-{stem}-a" / filename
+            ),
+            "replay_b": _replica_prefix_evidence(
+                raw_root / f"replay-{stem}-b" / filename
+            ),
+        }
+        for filename in REPLICA_PREFIX_ARTIFACTS
+    }
+    if computed != recorded:
+        raise RuntimeError(
+            f"primary_prefix_replay_artifacts drift for {stem}: "
+            f"expected {recorded}, observed {computed}"
+        )
+
+
 def _replica_prefix_evidence(path: Path, replicas: int = 2) -> dict[str, int | str]:
     """Hash canonical CSV rows for the first replicas, independent of ensemble size."""
     with path.open(newline="", encoding="utf-8") as handle:
@@ -759,6 +782,7 @@ def analyze_campaign(
         for filename, pair in receipt["replay_artifacts"].items():
             _verify_artifact(raw_root / f"replay-{stem}-a" / filename, pair["replay_a"])
             _verify_artifact(raw_root / f"replay-{stem}-b" / filename, pair["replay_b"])
+        _verify_prefix_replay_artifacts(raw_root, stem, receipt)
         if receipt["seeds"] != list(
             range(receipt["seeds"][0], receipt["seeds"][0] + receipt["replicas"])
         ):
