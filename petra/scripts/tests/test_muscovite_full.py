@@ -46,7 +46,7 @@ class FullMechanismDeckTests(unittest.TestCase):
         self.assertEqual(sized["structure"]["lattice"]["dims"], [6, 8, 10])
         self.assertEqual(
             sized["structure"]["init"][-1]["region"],
-            {"axis": 2, "min": 9, "max": 9},
+            {"axis": 1, "min": 7, "max": 7},
         )
         self.assertEqual(sized["deck"]["name"], "muscovite-full-6x8x10")
         self.assertEqual(rendered, builder.render_deck(dims=(6, 8, 10)))
@@ -80,35 +80,84 @@ class FullMechanismDeckTests(unittest.TestCase):
         )
         self.assertNotIn("modifier", delamination)
 
-    def test_surface_release_requires_local_delamination_accessibility(self) -> None:
+    def test_surface_release_rules_require_explicit_open_gate(self) -> None:
         kinds = {kind["name"]: kind for kind in self.deck["structure"]["kinds"]}
         gate = kinds["Surface_gate"]
-        self.assertEqual(gate["initial"], "inert")
+        self.assertEqual(gate["initial"], "closed")
         self.assertEqual(
             {state["name"] for state in gate["states"]},
-            {"inert", "closed", "open"},
-        )
-
-        surface_initializers = [
-            item
-            for item in self.deck["structure"]["init"]
-            if item["center"]["kind"] == "Surface_gate"
-        ]
-        self.assertEqual(len(surface_initializers), 2)
-        self.assertTrue(
-            all(
-                item["center"]["state"] == ["inert"] and item["set"] == "closed"
-                for item in surface_initializers
-            )
+            {"closed", "edge", "open"},
         )
 
         rules = {rule["name"]: rule for rule in self.deck["dynamics"]["rules"]}
-        opening = rules["open_surface_after_delamination"]
-        self.assertEqual(
-            opening["center"], {"kind": "Surface_gate", "state": ["closed"]}
+        release_rules = [
+            rule for name, rule in rules.items() if name.startswith("release_")
+        ]
+        self.assertEqual(len(release_rules), 6)
+        self.assertTrue(
+            all(
+                rule["guards"]
+                == [
+                    {
+                        "kind": "Surface_gate",
+                        "label": "surface_gate",
+                        "state": ["open"],
+                        "min": 1,
+                    }
+                ]
+                for rule in release_rules
+            )
         )
+
+    def test_surface_release_requires_edge_connected_delamination_front(self) -> None:
+        rendered = builder.render_deck(dims=(5, 5, 3))
+        deck = tomllib.loads(rendered)
         self.assertEqual(
-            opening["guards"],
+            deck["structure"]["lattice"]["boundary"],
+            ["open", "open", "open"],
+        )
+
+        kinds = {kind["name"]: kind for kind in deck["structure"]["kinds"]}
+        gate = kinds["Surface_gate"]
+        self.assertEqual(gate["initial"], "closed")
+        self.assertEqual(
+            {state["name"] for state in gate["states"]},
+            {"closed", "edge", "open"},
+        )
+
+        edge_initializers = [
+            item
+            for item in deck["structure"]["init"]
+            if item["center"]["kind"] == "Surface_gate"
+        ]
+        self.assertEqual(
+            [
+                (
+                    item["region"]["axis"],
+                    item["region"].get("min"),
+                    item["region"].get("max"),
+                )
+                for item in edge_initializers
+            ],
+            [(0, 0, 0), (0, 4, 4), (1, 0, 0), (1, 4, 4)],
+        )
+        self.assertTrue(all(item["set"] == "edge" for item in edge_initializers))
+
+        lateral_bonds = [
+            bond
+            for bond in deck["structure"]["cell"]["bonds"]
+            if bond.get("label") == "lateral_front"
+        ]
+        self.assertEqual(
+            {(bond["i"], bond["j"], tuple(bond["dcell"])) for bond in lateral_bonds},
+            {(7, 7, (1, 0, 0)), (7, 7, (0, 1, 0))},
+        )
+
+        rules = {rule["name"]: rule for rule in deck["dynamics"]["rules"]}
+        edge_opening = rules["open_lateral_edge_after_delamination"]
+        self.assertEqual(edge_opening["center"]["state"], ["edge"])
+        self.assertEqual(
+            edge_opening["guards"],
             [
                 {
                     "kind": "Interface",
@@ -118,12 +167,31 @@ class FullMechanismDeckTests(unittest.TestCase):
                 }
             ],
         )
-        self.assertEqual(opening["effects"], [{"target": "center", "set": "open"}])
+
+        advancing = rules["advance_surface_connected_front"]
+        self.assertEqual(advancing["center"]["state"], ["closed"])
+        self.assertEqual(
+            advancing["guards"],
+            [
+                {
+                    "kind": "Interface",
+                    "label": "gate_interface",
+                    "state": ["delaminated"],
+                    "min": 1,
+                },
+                {
+                    "kind": "Surface_gate",
+                    "label": "lateral_front",
+                    "state": ["open"],
+                    "min": 1,
+                },
+            ],
+        )
+        self.assertEqual(advancing["effects"], [{"target": "center", "set": "open"}])
 
         release_rules = [
             rule for name, rule in rules.items() if name.startswith("release_")
         ]
-        self.assertEqual(len(release_rules), 6)
         self.assertTrue(
             all(
                 rule["guards"]

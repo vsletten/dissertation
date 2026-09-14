@@ -161,14 +161,22 @@ class EvaluationTests(unittest.TestCase):
             ],
             "reproduced",
         )
+        self.assertEqual(
+            verdict["section_5_claims"]["5_recoil_old_initial_steps"]["verdict"],
+            "reproduced",
+        )
         self.assertIn(
-            "delamination-gated basal surface",
+            "6 of 6 volume/sensitivity families",
+            verdict["section_5_claims"]["5_recoil_old_initial_steps"]["mechanism"],
+        )
+        self.assertIn(
+            "surface-connected lateral",
             verdict["section_5_claims"]["6_grain_size_delamination_fraction"][
                 "mechanism"
             ],
         )
         self.assertIn(
-            "delamination-gated basal surface",
+            "surface-connected lateral",
             verdict["section_5_claims"]["1_two_stage_non_fickian_loss"]["mechanism"],
         )
         self.assertTrue(verdict["synthetic"]["low"]["grain_size_crossover_reproduced"])

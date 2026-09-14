@@ -4,6 +4,15 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-13 18:14 PDT (hermes-macbot-zero; profile=laptop) — E4a2 DONE with a
+  verified **NO-GO**: a parameter-free release front now starts at open `a/b`
+  edges and advances only through connected `Interface.delaminated` cells, but
+  the exact six-deck/72-replica E4 rerun still peaks at 500/500/500 °C for the
+  53 kcal mol⁻¹ proxy and 600/600/600 °C for the 63 kcal mol⁻¹ proxy rather
+  than 700→800→1025 °C. All six same-seed replay pairs are byte-identical;
+  evidence: `docs/program/results/E4a2-surface-connected-lateral-release.md`.
+  E4b remains READY as the next time-domain reservoir discriminator.
+
 - 2026-09-13 17:07 PDT (hermes-custom-build-001; profile=workstation) — Closed
   E4a as DONE after independently verifying its tracked NO-GO result, merged
   [PR #129](https://github.com/vsletten/dissertation/pull/129), and deleted remote

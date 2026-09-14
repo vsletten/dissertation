@@ -117,12 +117,12 @@ occupant = "Ar39"
 
 [[structure.kinds]]
 name = "Surface_gate"
-initial = "inert"
-[[structure.kinds.states]]
-name = "inert"
-occupant = "vacant"
+initial = "closed"
 [[structure.kinds.states]]
 name = "closed"
+occupant = "vacant"
+[[structure.kinds.states]]
+name = "edge"
 occupant = "vacant"
 [[structure.kinds.states]]
 name = "open"
@@ -240,6 +240,16 @@ j = 7
 dcell = [0, 0, 0]
 label = "gate_interface"
 [[structure.cell.bonds]]
+i = 7
+j = 7
+dcell = [1, 0, 0]
+label = "lateral_front"
+[[structure.cell.bonds]]
+i = 7
+j = 7
+dcell = [0, 1, 0]
+label = "lateral_front"
+[[structure.cell.bonds]]
 i = 6
 j = 0
 dcell = [0, 0, 0]
@@ -247,7 +257,7 @@ label = "trap_gallery"
 
 [structure.lattice]
 dims = [4, 4, 6]
-boundary = ["periodic", "periodic", "open"]
+boundary = ["open", "open", "open"]
 [[structure.init]]
 name = "extended-defect-zones"
 center = { kind = "Defect_zone", state = ["pristine"] }
@@ -299,17 +309,29 @@ center = { kind = "Octahedral_trap", state = ["vacant"] }
 probability = 0.35
 set = "Ar39_trapped"
 [[structure.init]]
-name = "lower-basal-surface"
-center = { kind = "Surface_gate", state = ["inert"] }
-region = { axis = 2, min = 0, max = 0 }
+name = "a-min-lateral-edge"
+center = { kind = "Surface_gate", state = ["closed"] }
+region = { axis = 0, min = 0, max = 0 }
 probability = 1.0
-set = "closed"
+set = "edge"
 [[structure.init]]
-name = "upper-basal-surface"
-center = { kind = "Surface_gate", state = ["inert"] }
-region = { axis = 2, min = 5, max = 5 }
+name = "a-max-lateral-edge"
+center = { kind = "Surface_gate", state = ["closed"] }
+region = { axis = 0, min = 3, max = 3 }
 probability = 1.0
-set = "closed"
+set = "edge"
+[[structure.init]]
+name = "b-min-lateral-edge"
+center = { kind = "Surface_gate", state = ["closed"] }
+region = { axis = 1, min = 0, max = 0 }
+probability = 1.0
+set = "edge"
+[[structure.init]]
+name = "b-max-lateral-edge"
+center = { kind = "Surface_gate", state = ["closed"] }
+region = { axis = 1, min = 3, max = 3 }
+probability = 1.0
+set = "edge"
 
 [dynamics.thermo]
 temperature = 773.15
@@ -342,12 +364,24 @@ rate = { eyring = { dh = 58.0, ds = 0.0 } }
 target = "center"
 set = "delaminated"
 
-# Basal release becomes accessible only after the adjacent interface delaminates.
-# Interior gate sites remain inert, preserving an explicit surface topology.
+# Lateral edge sites seed release only after their local interface delaminates.
 [[dynamics.rules]]
-name = "open_surface_after_delamination"
-center = { kind = "Surface_gate", state = ["closed"] }
+name = "open_lateral_edge_after_delamination"
+center = { kind = "Surface_gate", state = ["edge"] }
 guards = [{ kind = "Interface", label = "gate_interface", state = ["delaminated"], min = 1 }]
+rate = { constant = 1.0 }
+[[dynamics.rules.effects]]
+target = "center"
+set = "open"
+
+# The front advances only through a laterally connected chain of delaminated interfaces.
+[[dynamics.rules]]
+name = "advance_surface_connected_front"
+center = { kind = "Surface_gate", state = ["closed"] }
+guards = [
+  { kind = "Interface", label = "gate_interface", state = ["delaminated"], min = 1 },
+  { kind = "Surface_gate", label = "lateral_front", state = ["open"], min = 1 },
+]
 rate = { constant = 1.0 }
 [[dynamics.rules.effects]]
 target = "center"

@@ -1,0 +1,111 @@
+{
+  "observed": {
+    "grain_size_crossover": true,
+    "high_temperature_merge": true,
+    "old_initial_steps": true,
+    "peak_temperature_c": {
+      "500C_isothermal_large": 1025.0,
+      "500C_isothermal_medium": 800.0,
+      "500C_isothermal_small": 700.0
+    }
+  },
+  "scope": "qualitative discrimination, not fit",
+  "section_5_claims": {
+    "1_two_stage_non_fickian_loss": {
+      "mechanism": "surface-connected lateral release still does not recover a resolvable late stage",
+      "verdict": "not_reproduced"
+    },
+    "2_distinct_reservoir_diffusivity_ratio": {
+      "mechanism": "initialization alone does not create the measured kinetic separation",
+      "verdict": "not_reproduced"
+    },
+    "3_homogeneous_age_staircase": {
+      "mechanism": "ordered steps emerge but magnitude and late structure do not",
+      "verdict": "partially_reproduced"
+    },
+    "4_ar_xe_decoupling": {
+      "mechanism": "E2 has no complete Xe state and release mechanism",
+      "verdict": "not_reproduced"
+    },
+    "5_recoil_old_initial_steps": {
+      "mechanism": "recoil distortion emerges; 1 of 6 volume/sensitivity families cross the old-step gate",
+      "verdict": "partially_reproduced"
+    },
+    "6_grain_size_delamination_fraction": {
+      "mechanism": "surface-connected lateral release leaves the volume peaks unordered; next discriminate isothermal reservoir kinetics rather than tune the front",
+      "verdict": "not_reproduced"
+    },
+    "7_hydrothermal_contrast": {
+      "mechanism": "no H2O chemical-potential control exists in the current deck",
+      "verdict": "not_reproduced"
+    }
+  },
+  "synthetic": {
+    "high": {
+      "final_cumulative_ar40_fraction": {
+        "12x12x6": 1.0,
+        "4x4x6": 1.0,
+        "8x8x6": 1.0
+      },
+      "grain_size_crossover_reproduced": false,
+      "high_temperature_merge_reproduced": true,
+      "old_initial_step": {
+        "12x12x6": {
+          "excess_ma": 30.87951628726296,
+          "reproduced": false
+        },
+        "4x4x6": {
+          "excess_ma": 30.37743845254087,
+          "reproduced": false
+        },
+        "8x8x6": {
+          "excess_ma": 16.084609733260955,
+          "reproduced": false
+        }
+      },
+      "peak_temperature_c": {
+        "12x12x6": 600.0,
+        "4x4x6": 600.0,
+        "8x8x6": 600.0
+      },
+      "recoil_driven_distortion_reproduced": {
+        "12x12x6": true,
+        "4x4x6": true,
+        "8x8x6": true
+      }
+    },
+    "low": {
+      "final_cumulative_ar40_fraction": {
+        "12x12x6": 1.0,
+        "4x4x6": 1.0,
+        "8x8x6": 1.0
+      },
+      "grain_size_crossover_reproduced": false,
+      "high_temperature_merge_reproduced": true,
+      "old_initial_step": {
+        "12x12x6": {
+          "excess_ma": 41.672279397430664,
+          "reproduced": false
+        },
+        "4x4x6": {
+          "excess_ma": 78.76923639773482,
+          "reproduced": true
+        },
+        "8x8x6": {
+          "excess_ma": 44.4410698027796,
+          "reproduced": false
+        }
+      },
+      "peak_temperature_c": {
+        "12x12x6": 500.0,
+        "4x4x6": 500.0,
+        "8x8x6": 500.0
+      },
+      "recoil_driven_distortion_reproduced": {
+        "12x12x6": true,
+        "4x4x6": true,
+        "8x8x6": true
+      }
+    }
+  }
+}
