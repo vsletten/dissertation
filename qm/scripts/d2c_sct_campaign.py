@@ -100,7 +100,7 @@ DEFAULT_BUNDLE_ROOT = (
     / "D2c-instanton-tier"
     / "d2b-inputs"
 )
-FROZEN_D2B_SETTINGS: dict[str, Any] = {
+DFT_SETTINGS: dict[str, Any] = {
     "xc": "pwb6k",
     "basis": "def2-svp",
     "solvent": None,
@@ -109,12 +109,6 @@ FROZEN_D2B_SETTINGS: dict[str, Any] = {
     "grid_level": None,
     "density_fit": True,
     "use_gpu": True,
-}
-DFT_SETTINGS: dict[str, Any] = {
-    **FROZEN_D2B_SETTINGS,
-    # The frozen H+CO TS has a grid-3 spectator instability. Existing D2c
-    # convergence evidence shows grid 5 restores the single-negative-mode saddle.
-    "grid_level": 5,
 }
 DEPENDENCY_DISTRIBUTIONS = (
     "numpy",
@@ -5931,7 +5925,7 @@ def _route_inventory(bundle_root: Path, manifest: dict[str, Any]) -> dict[str, A
         if template is None:
             raise ValueError(f"missing existing reaction template: {route}")
         manifest_route = manifest["routes"][route]
-        if manifest_route.get("method") != FROZEN_D2B_SETTINGS:
+        if manifest_route.get("method") != DFT_SETTINGS:
             raise ValueError(f"frozen DFT settings drifted: {route}")
         expected_geometry_hash = TRUSTED_CANONICAL_TS_GEOMETRY_SHA256[route]
         declared_canonical_hashes = manifest_route.get(
