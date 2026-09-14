@@ -124,6 +124,23 @@ class AggregationTests(unittest.TestCase):
         self.assertEqual(e4b.mean_ci95([3.5], seed=42), (3.5, 3.5, 3.5))
         self.assertEqual(e4b.mean_ci95([], seed=42), (None, None, None))
 
+    def test_rise_fall_evaluates_finite_trajectory_when_complete_release_is_nan(
+        self,
+    ) -> None:
+        import math
+
+        rows = [
+            {"ar40_da2_per_s_mean": math.nan},
+            {"ar40_da2_per_s_mean": 1.0},
+            {"ar40_da2_per_s_mean": 2.0},
+            {"ar40_da2_per_s_mean": 10.0},
+            {"ar40_da2_per_s_mean": 10.0},
+            {"ar40_da2_per_s_mean": 0.1},
+            {"ar40_da2_per_s_mean": 0.1},
+            {"ar40_da2_per_s_mean": 0.1},
+        ]
+        self.assertTrue(e4b._rise_fall(rows))
+
 
 class CylinderInversionTests(unittest.TestCase):
     def test_hand_checkable_short_time_forward_inverse_vector(self) -> None:

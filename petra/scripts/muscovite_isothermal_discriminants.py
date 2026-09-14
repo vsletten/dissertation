@@ -525,6 +525,7 @@ def _rise_fall(rows: list[dict[str, object]]) -> bool:
         float(row["ar40_da2_per_s_mean"])
         for row in rows
         if row["ar40_da2_per_s_mean"] not in (None, 0.0)
+        and math.isfinite(float(row["ar40_da2_per_s_mean"]))
     ]
     if len(values) < 4:
         return False
