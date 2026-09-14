@@ -18,5 +18,7 @@ thiserror = { workspace = true }
 # parity-tested kmc-rs builder and compares Petra's build site-by-site.
 kaolinite = { path = "../../../kmc-rs/crates/kaolinite" }
 kmc-io = { path = "../../../kmc-rs/crates/kmc-io" }
+petra-io = { path = "../petra-io" }
+petra-observables = { path = "../petra-observables" }
 serde_json = "1"
 sha2 = "0.10"

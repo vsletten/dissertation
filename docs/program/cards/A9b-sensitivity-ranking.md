@@ -1,11 +1,11 @@
 # A9b-sensitivity-ranking — rerun corrected approximate-rate ensemble
 
-- status: blocked
+- status: active
 - track: A (geochemistry)
 - priority: P0
 - machine: workstation
 - depends: A9b-mechanism-reachability; A9b-reservoir-origin-contract
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## Objective
 
@@ -56,6 +56,8 @@ sensitivity deltas, censoring, and the top-k/irrelevant verdict. Until this pass
 all numerical conclusions are labeled `unverified`.
 
 ## Progress
+
+- 2026-09-14 05:53 PDT (hermes-custom-build-001; profile=workstation) — CHECKPOINT: implemented and independently reviewed the survey-tier 29 × 8 pH-4 importance-sampling campaign, complete raw event/likelihood/PGIF/lineage evidence, log-domain censor-aware analyzer, independent byte-regenerating verifier, and self-enforcing bounded systemd launcher. Focused Python tests, the full Petra script suite, Rust workspace tests/Clippy, formatting, and diff checks pass. A real transient-unit admission probe proved exact cgroup/InvocationID/RuntimeMaxUSec membership and niceness 10; forged out-of-unit admission failed closed. The full campaign has not started yet; next step is the bounded autonomous launch and receipt-backed independent result verification.
 
 - 2026-09-13 20:52 PDT (hermes-macbot-zero; profile=laptop) — Created from A9's review-ready closeout and blocked on the two upstream scientific contracts. A9's historical 29 × 8 bundle is preserved as negative evidence but predates the corrected mechanism-unsampled gate and cannot supply the requested ordinal ranking.
 

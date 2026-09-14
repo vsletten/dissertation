@@ -126,6 +126,23 @@ pub enum CtmcAdvance {
     Deadline { time: f64 },
 }
 
+/// Auditable likelihood contribution from one biased-CTMC advance.
+///
+/// The segment ends either at a fired event or at the caller's fixed
+/// physical-time deadline. Keeping both hazards lets an independent consumer
+/// replay every likelihood increment without trusting a cumulative summary.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LikelihoodSegment {
+    pub start_time: f64,
+    pub end_time: f64,
+    pub physical_total_rate: f64,
+    pub biased_total_rate: f64,
+    pub fired_reaction: Option<u16>,
+    pub fired_bias_factor: Option<f64>,
+    pub log_likelihood_increment: f64,
+    pub cumulative_log_likelihood: f64,
+}
+
 /// Construction errors for an importance-sampled CTMC bias vector.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum BiasError {
@@ -153,6 +170,7 @@ pub struct BiasedCtmc {
     factors: Vec<f64>,
     log_likelihood_ratio: f64,
     identity: bool,
+    last_segment: Option<LikelihoodSegment>,
 }
 
 impl BiasedCtmc {
@@ -178,6 +196,7 @@ impl BiasedCtmc {
             factors,
             log_likelihood_ratio: 0.0,
             identity,
+            last_segment: None,
         })
     }
 
@@ -187,6 +206,34 @@ impl BiasedCtmc {
 
     pub fn likelihood_ratio(&self) -> f64 {
         self.log_likelihood_ratio.exp()
+    }
+
+    /// The most recent successful advance's raw likelihood segment.
+    /// Failed advances leave the previous segment unchanged.
+    pub fn last_segment(&self) -> Option<&LikelihoodSegment> {
+        self.last_segment.as_ref()
+    }
+
+    fn record_segment(
+        &mut self,
+        start_time: f64,
+        end_time: f64,
+        physical_total_rate: f64,
+        biased_total_rate: f64,
+        fired_reaction: Option<u16>,
+        increment: f64,
+    ) {
+        let fired_bias_factor = fired_reaction.map(|reaction| self.factors[reaction as usize]);
+        self.last_segment = Some(LikelihoodSegment {
+            start_time,
+            end_time,
+            physical_total_rate,
+            biased_total_rate,
+            fired_reaction,
+            fired_bias_factor,
+            log_likelihood_increment: increment,
+            cumulative_log_likelihood: self.log_likelihood_ratio,
+        });
     }
 }
 
@@ -717,8 +764,11 @@ impl Engine {
             self.reactions.len(),
             "bias vector must match the engine reaction count"
         );
+        sampler.last_segment = None;
+        let start_time = self.time;
         if deadline == self.time {
             self.last_changes.clear();
+            sampler.record_segment(start_time, self.time, 0.0, 0.0, None, 0.0);
             return Ok(CtmcAdvance::Deadline { time: self.time });
         }
         if self.tree.total() <= 0.0 && self.site_events.iter().any(|events| !events.is_empty()) {
@@ -728,6 +778,7 @@ impl Engine {
         if base_total <= 0.0 {
             self.time = deadline;
             self.last_changes.clear();
+            sampler.record_segment(start_time, self.time, 0.0, 0.0, None, 0.0);
             return Ok(CtmcAdvance::Deadline { time: self.time });
         }
 
@@ -753,6 +804,7 @@ impl Engine {
             let Some((site, mut residual)) = self.tree.find(draw) else {
                 self.time = deadline;
                 self.last_changes.clear();
+                sampler.record_segment(start_time, self.time, base_total, biased_total, None, 0.0);
                 return Ok(CtmcAdvance::Deadline { time: self.time });
             };
             let events = &self.site_events[site];
@@ -799,6 +851,14 @@ impl Engine {
             sampler.log_likelihood_ratio += integrated_hazard;
             self.time = deadline;
             self.last_changes.clear();
+            sampler.record_segment(
+                start_time,
+                self.time,
+                base_total,
+                biased_total,
+                None,
+                integrated_hazard,
+            );
             return Ok(CtmcAdvance::Deadline { time: self.time });
         }
         let event_log_likelihood = integrated_hazard - sampler.factors[reaction as usize].ln();
@@ -830,6 +890,14 @@ impl Engine {
         if self.step_count.is_multiple_of(REBUILD_EVERY) {
             self.tree.rebuild();
         }
+        sampler.record_segment(
+            start_time,
+            self.time,
+            base_total,
+            biased_total,
+            Some(reaction),
+            event_log_likelihood,
+        );
         Ok(CtmcAdvance::Fired(Fired {
             step: self.step_count,
             time: self.time,

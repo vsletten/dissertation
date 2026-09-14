@@ -14,7 +14,8 @@ pub mod state;
 
 pub use engine::{
     ApplyHandle, AsyncMetropolis, BiasError, BiasedCtmc, CtmcAdvance, DiscreteTimePCA, Engine,
-    ExactCtmc, Fired, StepCtx, StepOutcome, Stop, Strategy, SynchronousCA, UpdateStrategy,
+    ExactCtmc, Fired, LikelihoodSegment, StepCtx, StepOutcome, Stop, Strategy, SynchronousCA,
+    UpdateStrategy,
 };
 pub use lattice::{Boundary, Lattice, SiteId};
 pub use state::{StateId, StateSet};
