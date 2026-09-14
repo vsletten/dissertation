@@ -49,6 +49,23 @@ periodic CI-NEB is outside this phase's acceptance and is not claimed.
 
 ## Progress
 
+- 2026-09-14 13:58 PDT — `(hermes-custom-build-001; profile=workstation)` —
+  The required dehydroxylate profile completed 8/8 converged PBE-D3 single
+  points in 2,412.217 s with a frozen-path rise of 297.913659 kcal/mol; the
+  receipt hashes every immutable coordinate, rendered input, and native output
+  and proves all containers absent. Launched the second profile,
+  `reconstructed-replication`, from verified pushed head
+  `e60fe5b427d89c11a300f1d062e746a7349bd720` in bounded transient unit
+  `task320-e3b-reconstructed-frozen-profile.service` (invocation
+  `08d86444aa3e4ace8248ab86e0970dd2`, `RuntimeMaxSec=14,400`, 4 MPI × 4
+  OpenMP, `Nice=10`, `CPUQuota=1600%`, 60 GiB controller / 48 GiB container
+  caps). Prelaunch load15 was 2.97 with 40,172,700 KiB available; the pinned
+  CP2K container and growing native image-00 output were observed live. Atomic
+  receipt:
+  `/mnt/data/vsletten/dissertation-data/e3b-periodic-dft-calibration-20260914/receipts/reconstructed-frozen-profile-01.json`.
+  Scientific acceptance is 1/3 pending this receipt, the Xe profile, and all
+  three fresh matched-cell classical profiles.
+
 - 2026-09-14 12:49 PDT — `(hermes-custom-build-001; profile=workstation)` —
   Launched the first narrowed survey profile, the required
   `dehydroxylate-lattice` five-coordinate-Al route, from pushed harness head
