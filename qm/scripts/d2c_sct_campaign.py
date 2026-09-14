@@ -5944,7 +5944,9 @@ def _loaded_literal_state_identity(module: Any, module_name: str, raw: bytes) ->
                 and isinstance(targets[0], ast.Name)
             ):
                 name = targets[0].id
-                if name in vars(module):
+                # Private module caches and registries are runtime state, not scientific
+                # constants. PySCF mutates these during a Hessian evaluation.
+                if not name.startswith("_") and name in vars(module):
                     require_equal(f"global.{name}", expected, vars(module)[name])
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             value = vars(module).get(node.name)
