@@ -1,12 +1,12 @@
 # A9 — Approximate Kaolinite Rate Closure
 
-**Result:** 2026-09-13 18:20 PDT (hermes-macbot-one; profile=laptop) — **INCOMPLETE / NOT ACCEPTED**. The corrected survey campaign is reproducible and classifies every finite trajectory as no-dissolution, but every sensitivity family is censored and no ordinal ranking exists. The card's ranked-sensitivity and realistic pH 3–5 acceptance criteria are not met.
+**Result:** 2026-09-13 20:52 PDT (hermes-macbot-zero; profile=laptop) — **DONE AS AN HONEST PARTIAL / NEGATIVE SURVEY RESULT BY SCOPE RULING; NOT CALIBRATED KINETICS**. The historical 29-scenario × 8-seed campaign observed zero original-lattice Si and Al releases, but every sensitivity family is censored, ranked-response stationarity is not established under the corrected gates, and no ordinal ranking exists.
 
 ## Recommendation
 
-Do **not yet** spend the next QM increment on any A9 barrier family, and do not consume this run as A9's final top-k verdict. First prove event-level reachability from an initialized lattice cation to a desorption-eligible state, add state-distribution stationarity, and replace the numerical sink with a defensible pH 3–5 reservoir/origin contract.
+Do **not** spend the next QM increment on an A9 barrier family from this result. The data can rank no family, show no family irrelevant at this tier, and support no final A2/A3 top-k; the temporary QM target set is empty. The three review findings are executable follow-up cards: `A9b-mechanism-reachability`, `A9b-reservoir-origin-contract`, and blocked `A9b-sensitivity-ranking` after both merge.
 
-This is useful negative evidence, not a completed closure or calibrated kinetics result. A9's purpose was to determine whether survey-tier barriers could support an absolute-rate and sensitivity decision. This finite campaign cannot.
+This is useful negative evidence and closes A9's current branch/PR, not a calibrated absolute-rate closure. The next ranking must first establish a finite reachability/sampling method and a defensible pH 3–5 reservoir/origin contract.
 
 ## Rationale
 
@@ -39,7 +39,7 @@ The campaign imposed a far-from-equilibrium numerical product sink (`activity(Al
 | Nominal expected origin-safe Al desorption propensity flux | `0 mol m^-2 s^-1` |
 | Si:Al release stoichiometry | undefined (0:0) |
 
-The zero-event upper bound is a detection limit, not an estimated positive dissolution rate.
+The zero-event upper bound is a detection limit, not an estimated positive dissolution rate. The two zero expected-propensity fluxes are historical diagnostics from the origin-safe bundle, not validated absolute rates: ranked-response stationarity was not established under the corrected complete-event/state-distribution gates, and the corrected real trajectory is `mechanism-unsampled`.
 
 ### Comparison to the literature/lab discussion
 
@@ -49,7 +49,7 @@ Using the kaolinite reference law in `kinetics-db/minerals/kaolinite.toml`, the 
 - pH 4: `6.9889e-14 mol m^-2 s^-1`
 - pH 5: `6.6708e-14 mol m^-2 s^-1`
 
-The A9 pooled zero-event upper bound is 82.8–110.4 times those values (1.92–2.04 log10 units higher). Therefore the finite campaign does **not** falsify laboratory rates: its event-level detection limit is too loose. But its stronger mechanistic signal is that the sampled CTMC desorption hazard itself remained zero, so the current deck cannot provide an absolute-rate estimate to compare with either laboratory or field rates.
+The A9 pooled zero-event upper bound is 82.8–110.4 times those values (1.92–2.04 log10 units higher). Therefore the finite campaign does **not** falsify laboratory rates: its event-level detection limit is too loose. Its sampled CTMC desorption hazard also remained zero, but that is a mechanism-sampling diagnostic rather than an absolute-rate comparison. The laboratory gap is not calibrated because the `1e-30` dissolved-cation sink is not a defensible pH 3–5 reservoir and the historical bundle cannot prove the corrected origin/reachability contract.
 
 The result also fails to reproduce the 1999 golden runs' nonzero cation-population evolution. A9's original-lattice Si and Al inventories remained unchanged in every scenario. The current absolute-rate deck is thus not yet phenomenologically equivalent to the legacy model.
 
@@ -65,7 +65,9 @@ All seven families are **censored / unrankable**:
 6. `adsorption`
 7. `cation-desorption`
 
-For every ±3 kcal/mol and ×/÷10 perturbation, the combined origin-safe Si+Al propensity response was zero in all eight same-seed pairs. Consequently `delta log10(rate)` is undefined, and assigning an ordinal rank would manufacture information. `sensitivity_complete=True` means only that every family/perturbation received a typed estimate-or-censor classification; `ordinal_ranking_complete=False` makes card acceptance fail. The temporary authorized QM target set is empty, but this is not the card's requested final ranking.
+For every ±3 kcal/mol and ×/÷10 perturbation, the historical combined origin-safe Si+Al propensity response was zero in all eight same-seed pairs. Consequently `delta log10(rate)` is undefined, and assigning an ordinal rank would manufacture information. `sensitivity_complete=True` means only that every family/perturbation received a typed estimate-or-censor classification; `ordinal_ranking_complete=False` remains the scientific verdict.
+
+**Ranking verdict:** this data can rank **none** of the seven families and cannot demonstrate **any** family irrelevant at this tier. There is no defensible top-k. The temporary QM target set is empty because the evidence is unresolved, not because seven families were shown insensitive.
 
 ## Trust and method corrections
 
@@ -95,16 +97,15 @@ The existing 232-run derived bundle predates this gate schema and was not regene
 - A longer run could tighten the Poisson bound, but it would not resolve the more important zero-hazard topology problem unless the mechanism begins reaching desorption-eligible states.
 - Survey barriers mix computed, literature-analogue, and heuristic values. The result must not be presented as production kinetics.
 
-## Next experiment
+## Follow-up ownership
 
-The fastest uncertainty-reduction experiment is a bounded mechanism reachability and reservoir-contract continuation, not another barrier calculation:
+A9 closes with this preserved partial result. Its three unresolved review findings are executable cards rather than more gates on this branch:
 
-1. Prove by graph/path analysis that each initialized surface Si and Al state has a legal path to `Si.oh4` / `Al.l6` and then `desorb-si` / `desorb-al`; record desorption eligibility at every event, not only the 10,000-event cadence.
-2. Gate stationarity on the relevant state-distribution vector, not only conserved total non-empty Si/Al inventory.
-3. Add a deterministic trajectory or state-seeding integration test that reaches each desorption transition while preserving lattice lineage.
-4. Define a realistic pH 3–5 reservoir with origin-safe attribution, then re-run the same 29 × 8 sensitivity design.
+1. READY `A9b-mechanism-reachability` proves lattice-cation paths to release and selects a finite rare-event/stiffness method without manufacturing rates.
+2. READY `A9b-reservoir-origin-contract` replaces the `1e-30` numerical sink with a cited pH 3–5 activity/origin model and adversarially proves reservoir re-entry cannot count as lattice dissolution.
+3. BLOCKED `A9b-sensitivity-ranking` reruns the 29 × 8 design after both contracts merge and owns the final censor-aware ranking or independently verified NO-GO.
 
-Until those conditions exist, A2 should report the survey barriers as unresolved and A3 should spend zero higher-level QM slots on A9 families. A9 remains READY for continuation rather than DONE.
+Until the ranking card closes, A2/A3 should spend zero higher-level QM slots on A9 families. The historical all-censored result is evidence, not a ranking.
 
 ## Artifacts
 

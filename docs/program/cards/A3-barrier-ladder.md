@@ -4,8 +4,8 @@
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaigns; cluster-builder code is machine-any)
-- depends: A9-approximate-rate-closure
-- blocked-on: A9
+- depends: A9b-sensitivity-ranking
+- blocked-on: A9b-sensitivity-ranking
 - claimed-by:
 
 ## Constraints
@@ -21,10 +21,10 @@ max-projected-gradient stationarity gate is retired for replication runs; use
 the optimizer's converged criteria as the paper did. One family per PR.
 
 POLICY v16 makes survey-tier and literature-replication values the banked
-numbers for this workstation platform test. A3 is blocked on A9's approximate
-rate closure and sensitivity ranking. After A9, replicate only the families it
-names as rate-sensitive; do not add a workstation higher-tier calibration or
-describe any workstation result as production-quality.
+numbers for this workstation platform test. A3 is blocked on the corrected
+`A9b-sensitivity-ranking` verdict. Replicate only the families it names as
+rate-sensitive; do not add a workstation higher-tier calibration or describe
+any workstation result as production-quality.
 
 ## Objective
 Confirm what existing research has already established; copy their setups. A3
@@ -181,6 +181,7 @@ OSS n=2–4. A3f closed the exact n=1 route; n=2–4 remains prohibited.
 - 2026-09-06 16:00 PDT (hermes-custom-build-001; profile=workstation) — An adversarial review round regression-closed stale approach/product reuse after TS incompatibility, quick-IRC frozen-coordinate drift, reduced lookalike Store schemas and inconsistent electronic barriers, bool/arbitrary-route acceptance, and missing physical all-rung Oaa builder coverage. Its 672-test count was superseded by the newer 16:19 closure. The failed first `uv run pytest` attempt used an uninstalled fresh worktree environment and collected 31 import errors; the required main-venv invocation then passed the complete suite.
 
 ## Progress
+- 2026-09-13 20:52 PDT (hermes-macbot-zero; profile=laptop) — A9 closed with an honest all-censored result that ranks no family. A3 now blocks on `A9b-sensitivity-ranking`; it may not infer "irrelevant" from non-observation or spend a QM slot until that follow-up names a supported target.
 - 2026-09-13 12:10 PDT (hermes-custom-build-001; profile=workstation) — Retired the separately stale `agents/A3j-calc005-si-n1-verification` lock after proving merged board state marks A3j done, GitHub has no PR for that head, and the remote branch existed only at historical SHA `5fbe0952a14d08e881b28e2071ae0ec29863b34b`; deletion was read back as absent.
 - 2026-09-13 12:09 PDT (hermes-custom-build-001; profile=workstation) — Docs-only amendment verification passed: A9's Objective and Acceptance match Victor's TASK-274 specification verbatim modulo Markdown whitespace; board/card status and dependency invariants pass; all 55 PLAN card links resolve; full fast QM QA is `928 passed`; whole-QM Ruff check/format, compileall, and `git diff --check` are green.
 - 2026-09-13 12:04 PDT (hermes-custom-build-001; profile=workstation) — POLICY v16/A9 AMENDMENT: A3 is BLOCKED on READY P0 A9. Survey-tier and literature-replication values are now the banked workstation numbers; A3 resumes only for families A9 ranks rate-sensitive, with one published-family replication per PR and no higher-tier workstation calibration.

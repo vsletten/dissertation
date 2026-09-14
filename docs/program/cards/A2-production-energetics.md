@@ -4,16 +4,16 @@
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation
-- depends: A9-approximate-rate-closure
-- blocked-on: A9
+- depends: A9b-sensitivity-ranking
+- blocked-on: A9b-sensitivity-ranking
 - claimed-by: hermes-custom-build-001
 
 
 ## Objective
 Close the final reaction ledger, functional/method ranking, Petra fragments,
 and `qm/CALCULATIONS.md` from the best available survey-tier calculations and
-published-family replications. A9's approximate-rate sensitivity ranking is the
-gate: spend workstation compute only on families it identifies as consequential.
+published-family replications. `A9b-sensitivity-ranking` is the gate: spend
+workstation compute only on families it identifies as consequential.
 
 POLICY v16 retires the former higher-tier workstation plan. Existing r2SCAN-3c,
 B3LYP/def2-SVP, literature-replication, and already completed comparison
@@ -44,6 +44,7 @@ replication is worth a separate bounded survey-tier card.
   higher-tier or coupled-cluster calculation is required by this card.
 
 ## Progress
+- 2026-09-13 20:52 PDT (hermes-macbot-zero; profile=laptop) — A9 closed with no defensible family ranking or top-k. A2 remains BLOCKED on `A9b-sensitivity-ranking`; the historical all-censored result authorizes no additional workstation calculation.
 - 2026-09-13 12:04 PDT (hermes-custom-build-001; profile=workstation) — POLICY v16/A9 AMENDMENT: replaced the obsolete higher-tier workstation objective with a banked survey/literature ledger gated by A9's sensitivity ranking. Historical receipts remain provenance only; no new coupled-cluster or def2-TZVPD/SMD calculation is required.
 - 2026-09-05 12:25 PDT (hermes-custom-build-001; profile=workstation) —
   Receipt-level inventory found that the completed A2a/si-neutral route is the

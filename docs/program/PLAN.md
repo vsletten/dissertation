@@ -45,8 +45,11 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A1f-acid-neutral-water-attacker-relay](cards/A1f-acid-neutral-water-attacker-relay.md) | A | P1 | workstation | done | exact donor migrated to relay |
 | [A1g-acid-bridge-side-hydronium-neutral-attacker](cards/A1g-acid-bridge-side-hydronium-neutral-attacker.md) | A | P1 | workstation | done | conclusive product-family rejection |
 | [A1i-acid-production-tier-bridge-side-revisit](cards/A1i-acid-production-tier-bridge-side-revisit.md) | A | P1 | workstation | blocked: A2 | A1g ✅, A2 |
-| [A9-approximate-rate-closure](cards/A9-approximate-rate-closure.md) | A | P0 | any | ready | continuation: reachability, state-distribution convergence, pH 3–5 reservoir |
-| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | blocked: A9 | A9 |
+| [A9-approximate-rate-closure](cards/A9-approximate-rate-closure.md) | A | P0 | any | done | honest partial: zero observed lattice release; all seven families censored/unrankable |
+| [A9b-mechanism-reachability](cards/A9b-mechanism-reachability.md) | A | P0 | any | ready | A9 ✅; path census + finite rare-event method |
+| [A9b-reservoir-origin-contract](cards/A9b-reservoir-origin-contract.md) | A | P0 | any | ready | A9 ✅; realistic pH 3–5 activities + lineage |
+| [A9b-sensitivity-ranking](cards/A9b-sensitivity-ranking.md) | A | P0 | workstation | blocked: A9b reachability + reservoir | corrected 29 × 8 ranking after both contracts |
+| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | blocked: A9b-sensitivity-ranking | final top-k/irrelevant verdict |
 | [A3a-reactant-minimum-recovery](cards/A3a-reactant-minimum-recovery.md) | A | P1 | workstation | done | terminal microstate rejection; no minimum promoted |
 | [A3b-osa-neutral-n1-proton-microstate-stability](cards/A3b-osa-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; H52 became third mobile owner |
 | [A3c-osa-neutral-n1-mobile-proton-triad-conditioning](cards/A3c-osa-neutral-n1-mobile-proton-triad-conditioning.md) | A | P1 | workstation | done | verified triad-conditioning failure; owners retained, projected gradients red |
@@ -58,9 +61,9 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A3i-calc005-si-n1-pilot](cards/A3i-calc005-si-n1-pilot.md) | A | P1 | workstation | done | terminal C-optimizer failure; no value emitted |
 | [A3j-calc005-si-n1-verification](cards/A3j-calc005-si-n1-verification.md) | A | P1 | workstation | done | closed by ruling; A3i receipt stands |
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
-| [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: A9 | A9; final banked survey/literature table, ranking, Petra/CALCULATIONS closeout |
+| [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: A9b-sensitivity-ranking | final banked survey/literature table after corrected ranking |
 | [A2a-si-neutral-production-path-rebuild](cards/A2a-si-neutral-production-path-rebuild.md) | A | P1 | workstation | done | exact r2SCAN-3c minima + A2 infrastructure ✅ |
-| [A2b-al-neutral-production-energetics](cards/A2b-al-neutral-production-energetics.md) | A | P1 | workstation | blocked: A9 | A9; banked r2SCAN-3c 32.2 kcal/mol survey value |
+| [A2b-al-neutral-production-energetics](cards/A2b-al-neutral-production-energetics.md) | A | P1 | workstation | blocked: A9b-sensitivity-ranking | banked B3LYP/def2-SVP/DF 32.2 kcal/mol survey value |
 | [A2b1-wb97mv-reactant-scf-recovery](cards/A2b1-wb97mv-reactant-scf-recovery.md) | A | P1 | workstation | done | independently verified finite SCF failure; no retry authorized |
 | [A2c-al-acid-production-energetics](cards/A2c-al-acid-production-energetics.md) | A | P1 | workstation | blocked: A2b | A1b banked one-water Al-acid route |
 | [A2d-oss-neutral-n4-production-energetics](cards/A2d-oss-neutral-n4-production-energetics.md) | A | P1 | workstation | blocked: A2c | documented embedded pilot; deterministic rebuild |
@@ -112,12 +115,7 @@ D2a-astro-rate-reproduction (PR #31 — verdict: GO gas-phase /
 NO-GO surface-LH), A7-kinetics-database (PR #27 — 36 minerals, 74
 mechanisms, validator green). **Blocked closeout branch**:
 `agents/A1b-acid-microsolvation` for A1b-acid-mechanisms.
-A9-approximate-rate-closure remains READY after the origin-safe 29-scenario
-campaign produced a reproducible but unaccepted all-censored result. Its next
-continuation must prove event-level desorption eligibility/reachability, gate
-the relevant state distribution, and replace the numerical sink with a
-defensible pH 3–5 reservoir before ranking families. A3, A2, and A2b remain
-blocked on A9. If the corrected result identifies a sensitive family, A3 rebuilds
+A9-approximate-rate-closure is DONE by the 2026-09-13 scope ruling with an honest partial/negative survey result: 46.4 million events observed zero original-lattice Si/Al release, the corrected gate types the mechanism unsampled, and all seven sensitivity families remain censored/unrankable. It names no top-k and no irrelevant family. READY follow-ups `A9b-mechanism-reachability` and `A9b-reservoir-origin-contract` own the sampling and realistic pH/origin gaps; workstation `A9b-sensitivity-ranking` is blocked on both and owns the corrected 29 × 8 verdict. A3, A2, and A2b remain blocked on that ranking follow-up. If the corrected result identifies a sensitive family, A3 rebuilds
 the closest published cluster and method and reproduces its observable within ±3
 kcal/mol; the survey-tier or literature-replication value is then banked. One
 family per PR carries the paper/replication/banked-value table and Petra

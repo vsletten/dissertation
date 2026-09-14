@@ -4,14 +4,14 @@
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaign)
-- depends: A9-approximate-rate-closure
+- depends: A9b-sensitivity-ranking
 - claimed-by: hermes-custom-build-001
-- blocked-on: A9
+- blocked-on: A9b-sensitivity-ranking
 
 ## Objective
 
 Bank the accepted neutral Si–O–Al survey result for the approximate-rate loop:
-32.2 kcal/mol at r2SCAN-3c, with the TASK-168 one-water sequential mechanism and
+32.2 kcal/mol at B3LYP/def2-SVP/DF, with the TASK-168 one-water sequential mechanism and
 its provenance. Preserve the quasi-barrierless uphill addition into the
 associative intermediate followed by the verified bridge-cleavage saddle. Do
 not resurrect the rejected two-imaginary-mode addition candidate, and do not
@@ -25,10 +25,10 @@ published-family replication is warranted.
 
 ## Execution
 
-1. Verify the existing r2SCAN-3c value, units, mechanism identity, and source
+1. Verify the existing B3LYP/def2-SVP/DF value, units, mechanism identity, and source
    hashes from the accepted evidence.
 2. Record 32.2 kcal/mol as the banked A9 input with survey-tier provenance.
-3. Make no new QM call on this card. If A9 ranks this family sensitive, a
+3. Make no new QM call on this card. If `A9b-sensitivity-ranking` ranks this family sensitive, a
    separate card may replicate the closest published family within POLICY v16's
    four-hour-per-unit envelope.
 
@@ -41,7 +41,7 @@ published-family replication is warranted.
 
 ## Acceptance
 
-- The 32.2 kcal/mol r2SCAN-3c value is recorded with exact source provenance and
+- The 32.2 kcal/mol B3LYP/def2-SVP/DF value is recorded with exact source provenance and
   identified as survey tier.
 - The accepted sequential mechanism remains unchanged and rejected saddles do
   not contribute.
@@ -50,6 +50,8 @@ published-family replication is warranted.
 - No new higher-tier energy, SCF retry, or workstation quality claim is made.
 
 ## Progress
+
+- 2026-09-13 20:52 PDT (hermes-macbot-zero; profile=laptop) — A9 closed with no defensible family ranking. A2b remains BLOCKED on `A9b-sensitivity-ranking`, authorizes no new QM, and corrects the banked 32.2 kcal/mol A9 anchor to its actual B3LYP/def2-SVP/DF provenance; older r2SCAN-3c stationary-point receipts remain historical mechanism evidence only.
 
 - 2026-09-13 12:04 PDT (hermes-custom-build-001; profile=workstation) — POLICY v16/A9 AMENDMENT: the accepted 32.2 kcal/mol r2SCAN-3c result is the banked survey-tier value for A9. The exhausted wB97M-V routes are historical evidence rather than a blocker to another workstation tier; A2b now waits only on A9's sensitivity verdict and authorizes no QM retry.
 
