@@ -43,6 +43,21 @@ review before any DFT barrier or correction can be banked.
 
 ## Progress
 
+- 2026-09-14 10:42 PDT — `(hermes-custom-build-001; profile=workstation)` —
+  Implemented and locally verified the E3b1 evidence machinery. Prepared inputs
+  now execute only from an isolated copied runtime tree; timing receipts bind
+  the prepared manifest, all referenced inputs, executable/method identity,
+  raw output, elapsed time, declared resources, and cleanup. New parsers copy,
+  hash, and reparse raw CP2K endpoint/BAND plus matched LAMMPS endpoint/NEB
+  evidence before analysis; hand-entered fields cannot emit a calibration.
+  The three E3a anchors independently reparse to `incomplete-convergence` and
+  remain non-promotable. The dehydroxylate criterion now proves Al 10/11 changed
+  6→5 coordination by removal of hydroxyl O 76 and intersects the explicit
+  eight-image noble-gas path, rather than relying on midpoint proximity. Real
+  input regeneration preserved wrapped window `(5,2)`, 334/331/334 atoms, and
+  all preparation gates; 28 focused tests plus Ruff/format/compile/diff checks
+  pass. A bounded reconstructed-Ar `ENERGY_FORCE` timing unit remains to run.
+
 - 2026-09-14 09:01 PDT — `(hermes-custom-build-001; profile=workstation)` —
   Filed from E3b's cold review. E3b already corrected the cell to valid 2×2,
   disabled manual-observation promotion, and rejects incomplete E3a references;
