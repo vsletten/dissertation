@@ -394,3 +394,13 @@ hardening, new CLI surfaces, or non-decisive diagnostics.
   PR exists. The bounded unit plus named retry are exhausted. Continue by
   removing the forbidden runtime-attestation obstruction from the scientific
   execution path before any newly authorized compute.
+- 2026-09-13 21:52 PDT (hermes-custom-build-001; profile=workstation) —
+  RE-AUTHORIZED SCT UNIT RUNNING: pushed `0976034` deletes the forbidden loaded-
+  Python/module-state and mapped-native-payload attestation machinery instead of
+  relocating it; scientific bundle/endpoint validation and GPU/dependency readiness
+  remain. Focused verification is `156 passed` with Ruff/format/diff clean, including
+  the sole analytic-Eckart regression. Fresh preflight v7 identity `0fbc9242…` binds
+  source `0976034`; bounded unit `task300-d2c-sct-0976034-r3.service` is verified
+  active with a four-hour cap, PID 2248184 at nice 10, 16-thread limits, and the QI2
+  GPU lease. Await `/mnt/data/vsletten/dissertation-data/task300-d2c-sct-0976034-r3/production-terminal.json`;
+  no IRC/path-Hessian completion, SCT number, verdict, or PR is claimed yet.
