@@ -266,6 +266,11 @@ def materialize(
         raise ValueError("selected pH must be one of 3, 4, or 5")
     if out_deck.resolve() == evidence_path.resolve():
         raise ValueError("generated deck and evidence paths must differ")
+    source_paths = {base_deck.resolve(), contract_path.resolve()}
+    if out_deck.resolve() in source_paths or evidence_path.resolve() in source_paths:
+        raise ValueError(
+            "generated output path must not overwrite the source base deck or contract"
+        )
     profile = reservoir.profiles[ph]
     source = base_deck.read_text(encoding="utf-8")
     source_hash = hashlib.sha256(source.encode("utf-8")).hexdigest()

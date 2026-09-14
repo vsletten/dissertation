@@ -156,6 +156,38 @@ class ReservoirContractTests(unittest.TestCase):
                     drifted, RESERVOIRS, 4, root / "out.toml", root / "out.json"
                 )
 
+    def test_materialize_rejects_output_paths_that_overwrite_source_inputs(self) -> None:
+        original_base = BASE_DECK.read_bytes()
+        original_contract = RESERVOIRS.read_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            copied_base = root / "base.toml"
+            copied_contract = root / "contract.toml"
+            copied_base.write_bytes(original_base)
+            copied_contract.write_bytes(original_contract)
+            evidence = root / "out.json"
+            with self.assertRaisesRegex(
+                ValueError, "must not overwrite the source base deck or contract"
+            ):
+                contract.materialize(
+                    copied_base, copied_contract, 4, copied_base, evidence
+                )
+            with self.assertRaisesRegex(
+                ValueError, "must not overwrite the source base deck or contract"
+            ):
+                contract.materialize(
+                    copied_base, copied_contract, 4, copied_contract, evidence
+                )
+            with self.assertRaisesRegex(
+                ValueError, "must not overwrite the source base deck or contract"
+            ):
+                contract.materialize(
+                    copied_base, copied_contract, 4, root / "out.toml", copied_base
+                )
+            self.assertEqual(copied_base.read_bytes(), original_base)
+            self.assertEqual(copied_contract.read_bytes(), original_contract)
+            self.assertFalse(evidence.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
