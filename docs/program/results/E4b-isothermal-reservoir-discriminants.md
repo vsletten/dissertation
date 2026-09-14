@@ -146,6 +146,13 @@ Executed locally:
 - full 12-cell `--paranoid` campaign, byte-replay verification, and analysis
   regeneration — pass.
 
+Python 3.13 and 3.14 are both supported. The reproduction commands and local
+record above use 3.14 (the Mac that ran the campaign). PR verification used
+Python 3.13. The regenerated overlay is byte-identical across those versions.
+The 132-row series has 18 Python-version float-rendering differences with
+maximum absolute delta `3.552713678800501e-15`; semantic JSON/CSV comparison
+passes at `1e-14` relative tolerance.
+
 This Mac does not have a Cargo toolchain. No Rust source changed, and the cached
 release engine compiled every generated deck and executed the full campaign,
 but the Rust workspace suite is honestly deferred to mandatory PR CI. The
