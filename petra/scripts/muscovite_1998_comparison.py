@@ -30,7 +30,7 @@ E3A_LOCAL_DEHYDROXYLATE_HOP_KCAL_MOL = 64.095991
 E3A_EXTENDED_ZONE_HOP_KCAL_MOL = 68.410690
 # E2b periodic comparison volumes: a finite-size ladder, not recovered physical
 # grain diameters. Overlay against the 1998 58/165/3000 µm series is qualitative;
-# E4a owns surface-gated release on this same ladder.
+# E4a2 owns the surface-connected lateral release front on this same ladder.
 COMPARISON_SIZES = ((4, 4, 6), (8, 8, 6), (12, 12, 6))
 COMPARISON_SCHEDULE = tuple(
     (temperature + 273.15, 600.0) for temperature in range(500, 1201, 50)
@@ -392,6 +392,7 @@ def evaluate(
         )
         for name, rows in observed_groups.items()
     }
+    old_step_count = 0
     for barrier_label in DELAMINATION_SENSITIVITY_KCAL_MOL:
         rows = [row for row in synthetic if row["barrier_label"] == barrier_label]
         peaks = {
@@ -408,6 +409,7 @@ def evaluate(
         old_steps = {
             _slug(dims): _old_step_signature(rows, dims) for dims in COMPARISON_SIZES
         }
+        old_step_count += sum(bool(value[0]) for value in old_steps.values())
         recoil = {
             _slug(dims): _recoil_signature(rows, dims) for dims in COMPARISON_SIZES
         }
@@ -430,22 +432,28 @@ def evaluate(
     if crossover_count == len(by_barrier):
         crossover_verdict = "reproduced"
         crossover_mechanism = (
-            "delamination-gated basal surface accessibility recovers the monotonic "
+            "surface-connected lateral release recovers the monotonic "
             "volume crossover in both retained proxy brackets"
         )
     elif crossover_count:
         crossover_verdict = "partially_reproduced"
         crossover_mechanism = (
-            "delamination-gated basal surface accessibility recovers the monotonic "
+            "surface-connected lateral release recovers the monotonic "
             "volume crossover in only one retained proxy bracket"
         )
     else:
         crossover_verdict = "not_reproduced"
         crossover_mechanism = (
-            "delamination-gated basal surface accessibility leaves the volume peaks "
-            "unordered; next discriminate lateral edge access or a connected "
-            "delamination front"
+            "surface-connected lateral release leaves the volume peaks unordered; "
+            "next discriminate isothermal reservoir kinetics rather than tune the front"
         )
+    family_count = len(by_barrier) * len(COMPARISON_SIZES)
+    if old_step_count == family_count:
+        old_step_verdict = "reproduced"
+    elif old_step_count:
+        old_step_verdict = "partially_reproduced"
+    else:
+        old_step_verdict = "not_reproduced"
     return {
         "scope": "qualitative discrimination, not fit",
         "observed": {
@@ -461,7 +469,7 @@ def evaluate(
         "section_5_claims": {
             "1_two_stage_non_fickian_loss": {
                 "verdict": "not_reproduced",
-                "mechanism": "delamination-gated basal surface release still does not recover a resolvable late stage",
+                "mechanism": "surface-connected lateral release still does not recover a resolvable late stage",
             },
             "2_distinct_reservoir_diffusivity_ratio": {
                 "verdict": "not_reproduced",
@@ -476,8 +484,11 @@ def evaluate(
                 "mechanism": "E2 has no complete Xe state and release mechanism",
             },
             "5_recoil_old_initial_steps": {
-                "verdict": "partially_reproduced",
-                "mechanism": "recoil distortion emerges; only one volume per sensitivity crosses the old-step gate",
+                "verdict": old_step_verdict,
+                "mechanism": (
+                    f"recoil distortion emerges; {old_step_count} of {family_count} "
+                    "volume/sensitivity families cross the old-step gate"
+                ),
             },
             "6_grain_size_delamination_fraction": {
                 "verdict": crossover_verdict,
@@ -522,7 +533,7 @@ def comparison_svg(
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
         f'<rect width="{width}" height="{height}" fill="#fbfaf7"/>',
-        '<text x="550" y="30" text-anchor="middle" font-family="sans-serif" font-size="21" font-weight="700">E4 qualitative comparison: Sletten–Onstott 1998 vs Petra</text>',
+        '<text x="550" y="30" text-anchor="middle" font-family="sans-serif" font-size="21" font-weight="700">E4a2 lateral-front comparison: Sletten–Onstott 1998 vs Petra</text>',
     ]
     # Panel A: release profile, normalized because raster digitization is in rate units.
     left, top, plot_w, plot_h = 75, 70, 950, 280

@@ -82,8 +82,8 @@ def render_deck(dims: tuple[int, int, int] = (4, 4, 6)) -> str:
         ("Octahedral_trap", "vacant", (("vacant", "vacant"), ("Ar39_trapped", "Ar39"))),
         (
             "Surface_gate",
-            "inert",
-            (("inert", "vacant"), ("closed", "vacant"), ("open", "vacant")),
+            "closed",
+            (("closed", "vacant"), ("edge", "vacant"), ("open", "vacant")),
         ),
     )
     for kind, initial, states in kinds:
@@ -144,13 +144,15 @@ def render_deck(dims: tuple[int, int, int] = (4, 4, 6)) -> str:
     bond(4, 3, (0, 0, 0), "delam_driver")
     bond(4, 3, (0, 0, -1), "delam_driver")
     bond(4, 7, (0, 0, 0), "gate_interface")
+    bond(7, 7, (1, 0, 0), "lateral_front")
+    bond(7, 7, (0, 1, 0), "lateral_front")
     bond(6, 0, (0, 0, 0), "trap_gallery")
 
     add(
         "",
         "[structure.lattice]",
         f"dims = [{na}, {nb}, {n_layers}]",
-        'boundary = ["periodic", "periodic", "open"]',
+        'boundary = ["open", "open", "open"]',
     )
 
     def init(
@@ -178,22 +180,20 @@ def render_deck(dims: tuple[int, int, int] = (4, 4, 6)) -> str:
         init(f"ar39-{suffix}", gallery, "K", 0.55, "Ar39")
         init(f"ar36-{suffix}", gallery, "K", 0.55, "Ar36")
     init("recoil-octahedral-ar39", "Octahedral_trap", "vacant", 0.35, "Ar39_trapped")
-    init(
-        "lower-basal-surface",
-        "Surface_gate",
-        "inert",
-        1.0,
-        "closed",
-        "{ axis = 2, min = 0, max = 0 }",
-    )
-    init(
-        "upper-basal-surface",
-        "Surface_gate",
-        "inert",
-        1.0,
-        "closed",
-        f"{{ axis = 2, min = {n_layers - 1}, max = {n_layers - 1} }}",
-    )
+    for name, axis, coordinate in (
+        ("a-min-lateral-edge", 0, 0),
+        ("a-max-lateral-edge", 0, na - 1),
+        ("b-min-lateral-edge", 1, 0),
+        ("b-max-lateral-edge", 1, nb - 1),
+    ):
+        init(
+            name,
+            "Surface_gate",
+            "closed",
+            1.0,
+            "edge",
+            f"{{ axis = {axis}, min = {coordinate}, max = {coordinate} }}",
+        )
 
     add(
         "",
@@ -228,12 +228,24 @@ def render_deck(dims: tuple[int, int, int] = (4, 4, 6)) -> str:
         'target = "center"',
         'set = "delaminated"',
         "",
-        "# Basal release becomes accessible only after the adjacent interface delaminates.",
-        "# Interior gate sites remain inert, preserving an explicit surface topology.",
+        "# Lateral edge sites seed release only after their local interface delaminates.",
         "[[dynamics.rules]]",
-        'name = "open_surface_after_delamination"',
-        'center = { kind = "Surface_gate", state = ["closed"] }',
+        'name = "open_lateral_edge_after_delamination"',
+        'center = { kind = "Surface_gate", state = ["edge"] }',
         'guards = [{ kind = "Interface", label = "gate_interface", state = ["delaminated"], min = 1 }]',
+        "rate = { constant = 1.0 }",
+        "[[dynamics.rules.effects]]",
+        'target = "center"',
+        'set = "open"',
+        "",
+        "# The front advances only through a laterally connected chain of delaminated interfaces.",
+        "[[dynamics.rules]]",
+        'name = "advance_surface_connected_front"',
+        'center = { kind = "Surface_gate", state = ["closed"] }',
+        "guards = [",
+        '  { kind = "Interface", label = "gate_interface", state = ["delaminated"], min = 1 },',
+        '  { kind = "Surface_gate", label = "lateral_front", state = ["open"], min = 1 },',
+        "]",
         "rate = { constant = 1.0 }",
         "[[dynamics.rules.effects]]",
         'target = "center"',

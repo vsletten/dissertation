@@ -4,6 +4,16 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-13 18:39 PDT (hermes-macbot-zero; profile=laptop) — E4a2
+  implementation, 72-replica evidence, regressions, and independent review are
+  verified and pushed; status remains ACTIVE because PR creation could not
+  complete. Existing `gh` auth is invalid, typed-browser access refused without
+  the user-controlled existing-profile opt-in, and native Chrome control could
+  not reach the authenticated window on another Space. No credential or grant
+  was configured. Scientific verdict is **NO-GO** (53 kcal mol⁻¹:
+  500/500/500 °C; 63 kcal mol⁻¹: 600/600/600 °C); evidence:
+  `docs/program/results/E4a2-surface-connected-lateral-release.md`.
+
 - 2026-09-13 17:07 PDT (hermes-custom-build-001; profile=workstation) — Closed
   E4a as DONE after independently verifying its tracked NO-GO result, merged
   [PR #129](https://github.com/vsletten/dissertation/pull/129), and deleted remote
