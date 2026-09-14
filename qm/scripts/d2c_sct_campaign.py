@@ -7422,7 +7422,7 @@ def _write_production_terminal(
 
 
 def execute_production_foundation(run_root: Path) -> dict[str, Any]:
-    """Resume the four authoritative routes and publish a finite terminal receipt."""
+    """Run the narrowed H+CO 1w C-side path and Hessian foundation."""
 
     root = _safe_absolute_root(run_root)
     terminal_path = root / PRODUCTION_TERMINAL
@@ -7434,12 +7434,12 @@ def execute_production_foundation(run_root: Path) -> dict[str, Any]:
             raise ValueError("unsupported production terminal receipt schema")
         return terminal
 
-    first_route = next(iter(ENDPOINT_ROUTE_STATES))
+    first_route = "h-co-1w-cside"
     preflight, _ = _validated_preflight(root, first_route)
     campaign_identity = preflight["identity"]
-    route_names = list(ENDPOINT_ROUTE_STATES)
-    if set(preflight["routes"]) != set(route_names):
-        raise ValueError("production preflight route inventory is not canonical")
+    route_names = [first_route]
+    if first_route not in preflight["routes"]:
+        raise ValueError("production preflight lacks the narrowed C-side route")
 
     completed: dict[str, dict[str, Any]] = {}
     phase = "starting"

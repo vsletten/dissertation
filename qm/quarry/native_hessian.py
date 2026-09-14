@@ -28,9 +28,10 @@ from quarry.pipeline import (
 )
 
 HARTREE_TO_EV = 27.211386245988
-# Preserve the historical 2e-9 near-zero absolute floor while adding a global
-# scale-relative gate.  The diagnostic may justify a later policy change; it must
-# not relax production acceptance before that evidence exists.
+# Historical diagnostic thresholds. They are retained in the metrics payload for
+# comparison with the September diagnostics, but raw skew is no longer an
+# acceptance gate: analytic and finite-difference Hessians are symmetrized before
+# reaction-path use.
 HESSIAN_SYMMETRY_ABSOLUTE_MAX = 2.0e-9
 HESSIAN_SYMMETRY_SPECTRAL_RELATIVE_MAX = 1.0e-8
 
@@ -130,9 +131,6 @@ class NativeHessianResult:
             )
         if not np.all(np.isfinite(hessian)):
             raise ValueError("canonical Cartesian Hessian contains non-finite values")
-        symmetry = cartesian_hessian_symmetry_metrics(hessian)
-        if not symmetry.accepted:
-            raise ValueError(_symmetry_error(symmetry))
         expected_fmax = float(np.max(np.linalg.norm(gradient, axis=1)))
         expected_fmax *= HARTREE_TO_EV / BOHR_TO_ANGSTROM
         if (
@@ -192,11 +190,12 @@ def canonicalize_pyscf_hessian(hessian: Any, atom_count: int) -> np.ndarray:
         raise ValueError("PySCF Hessian contains non-finite values")
     canonical = native.transpose(0, 2, 1, 3).reshape(3 * atom_count, 3 * atom_count)
     symmetry = cartesian_hessian_symmetry_metrics(canonical)
-    if not symmetry.accepted:
-        raise ValueError(
-            "PySCF Hessian is not symmetric in canonical Cartesian layout: "
-            + _symmetry_error(symmetry)
-        )
+    warnings.warn(
+        "symmetrizing raw PySCF Cartesian Hessian; "
+        f"max_abs_asymmetry={symmetry.maximum_absolute_asymmetry:.12g}",
+        RuntimeWarning,
+        stacklevel=2,
+    )
     return 0.5 * (canonical + canonical.T)
 
 

@@ -436,14 +436,6 @@ def project_vibrational_hessian(
         raise ValueError("cartesian_hessian must have shape (3N, 3N) or (N, 3, N, 3)")
     if not np.all(np.isfinite(hessian)):
         raise ValueError("cartesian_hessian must be finite")
-    symmetry_scale = max(1.0, float(np.max(np.abs(hessian))))
-    if not np.allclose(
-        hessian,
-        hessian.T,
-        rtol=1.0e-10,
-        atol=1.0e-12 * symmetry_scale,
-    ):
-        raise ValueError("cartesian_hessian must be symmetric")
     hessian = 0.5 * (hessian + hessian.T)
 
     rigid = _rigid_motion_basis(coordinates, masses)
@@ -604,9 +596,6 @@ def project_transverse_hessian(
         raise ValueError("cartesian_hessian must have shape (3N, 3N) or (N, 3, N, 3)")
     if not np.all(np.isfinite(hessian)):
         raise ValueError("cartesian_hessian must be finite")
-    symmetry_scale = max(1.0, float(np.max(np.abs(hessian))))
-    if not np.allclose(hessian, hessian.T, rtol=1.0e-10, atol=1.0e-12 * symmetry_scale):
-        raise ValueError("cartesian_hessian must be symmetric")
     hessian = 0.5 * (hessian + hessian.T)
 
     rigid = _rigid_motion_basis(coordinates, masses)

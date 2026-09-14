@@ -98,6 +98,51 @@ def test_ground_action_matches_square_barrier():
     assert result.ground_action == pytest.approx(expected, rel=3.0e-4)
 
 
+def test_sct_kappa_matches_analytic_eckart_barrier():
+    barrier_kj_mol = 80.0
+    mass_amu = 1.0
+    imaginary_frequency_cm = 300.0
+    amu_kg = 1.66053906660e-27
+    avogadro = 6.02214076e23
+    hbar = 1.054571817e-34
+    c_cm_s = 2.99792458e10
+    gas_constant_kj = 8.31446261815324e-3
+    barrier_j = barrier_kj_mol * 1000.0 / avogadro
+    omega = 2.0 * math.pi * c_cm_s * imaginary_frequency_cm
+    width_m = math.sqrt(2.0 * barrier_j / (mass_amu * amu_kg * omega**2))
+    width_a = width_m / 1.0e-10
+    coordinate = np.linspace(-10.0 * width_a, 10.0 * width_a, 16385)
+    potential = barrier_kj_mol / np.cosh(coordinate / width_a) ** 2
+    alpha = math.pi * width_m * math.sqrt(2.0 * mass_amu * amu_kg * barrier_j) / hbar
+    nodes, weights = np.polynomial.legendre.leggauss(384)
+    energies = 0.5 * (nodes + 1.0) * barrier_kj_mol
+    energy_weights = 0.5 * barrier_kj_mol * weights
+    transmission = np.exp(
+        -np.logaddexp(0.0, 2.0 * alpha * (1.0 - np.sqrt(energies / barrier_kj_mol)))
+    )
+
+    for temperature_k in (150.0, barrier_kj_mol / (2.0 * gas_constant_kj)):
+        beta = 1.0 / (gas_constant_kj * temperature_k)
+        expected = 1.0 + 2.0 * beta * float(
+            np.sum(
+                energy_weights
+                * transmission
+                * np.sinh(beta * (barrier_kj_mol - energies))
+            )
+        )
+        result = sct_kappa(
+            coordinate,
+            potential,
+            mass_amu,
+            temperature_k,
+            energy_floor_kj_mol=0.0,
+            quadrature_order=384,
+            path_grid_size=16385,
+        )
+        assert result.log_kappa == pytest.approx(math.log(expected), abs=1.0e-5)
+        assert result.ground_action == pytest.approx(alpha, rel=1.0e-4)
+
+
 @pytest.mark.parametrize(
     "coordinate,potential,mass",
     [

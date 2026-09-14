@@ -461,7 +461,7 @@ def test_production_foundation_runs_canonical_route_stages_and_writes_terminal(
 ):
     run_root = tmp_path / "run"
     run_root.mkdir()
-    routes = list(campaign.ENDPOINT_ROUTE_STATES)
+    routes = ["h-co-1w-cside"]
     calls = []
     preflight = {
         "identity": "c" * 64,
