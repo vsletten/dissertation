@@ -49,6 +49,23 @@ periodic CI-NEB is outside this phase's acceptance and is not claimed.
 
 ## Progress
 
+- 2026-09-14 15:07 PDT — `(hermes-custom-build-001; profile=workstation)` —
+  The reconstructed-replication profile completed 8/8 converged PBE-D3 single
+  points in 2,248.029 s with a hash-bound frozen-path rise of 305.946204
+  kcal/mol; independent replay verified every coordinate/input/output hash, all
+  normal-termination/SCF gates, and the receipt arithmetic. Launched the third
+  profile, `xenon-divacancy`, from exact clean pushed head
+  `d910d5617eece3b12da64c8c3b71df42bfcae39f` in bounded transient unit
+  `task320-e3b-xenon-frozen-profile.service` (invocation
+  `e0960c9d933b4c1e918d7afc3ad5d621`, `RuntimeMaxSec=14,400`, 4 MPI × 4
+  OpenMP, `Nice=10`, `CPUQuota=1600%`, 60 GiB controller / 48 GiB container
+  caps). Prelaunch load15 was 2.64 with 40,752,040 KiB available and no swap
+  growth; the pinned CP2K container and a growing image-00 native output were
+  observed live. Planned atomic receipt:
+  `/mnt/data/vsletten/dissertation-data/e3b-periodic-dft-calibration-20260914/receipts/xenon-frozen-profile-01.json`.
+  Scientific acceptance is 2/3 pending this receipt, then the three fresh
+  matched-cell classical profiles, synthesis, one allowed cold review, and PR.
+
 - 2026-09-14 13:58 PDT — `(hermes-custom-build-001; profile=workstation)` —
   The required dehydroxylate profile completed 8/8 converged PBE-D3 single
   points in 2,412.217 s with a frozen-path rise of 297.913659 kcal/mol; the

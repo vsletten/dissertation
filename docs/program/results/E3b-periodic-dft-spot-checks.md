@@ -1,12 +1,12 @@
 # E3b periodic-DFT spot checks — active survey calibration
 
-**State:** active; frozen-path survey profiles in progress; no DFT barrier or correction emitted
+**State:** active; 2/3 frozen-path survey profiles complete; Xe profile running; no DFT barrier or correction emitted
 **Run date:** 2026-09-14  
 **Operator:** `(hermes-custom-build-001; profile=workstation)`
 
 ## Verdict
 
-E3b is **not complete**: **0/3 frozen-path survey profiles are complete** and
+E3b is **not complete**: **2/3 frozen-path survey profiles are complete** and
 no DFT barrier or correction is emitted. The immutable 2×2×1 preparation and
 evidence contract remain valid. POLICY §12 now governs this platform-test phase:
 three full endpoint optimizations plus converged eight-image CI-NEBs would
@@ -20,6 +20,16 @@ minimum-energy path, or a production result. The result stays incomplete until
 all eight images and the corresponding matched-cell classical path pass.
 
 ## Current execution evidence
+
+The dehydroxylate-lattice and reconstructed-replication frozen-path profiles
+each completed 8/8 converged PBE-D3 single points with normal terminations,
+hash-bound coordinates/inputs/native outputs, and container cleanup. Their
+survey path rises are respectively 297.913659 and 305.946204 kcal/mol. These
+are frozen-classical-path energy rises, not DFT barriers or corrections. The
+third `xenon-divacancy` profile is running under bounded transient unit
+`task320-e3b-xenon-frozen-profile.service` (invocation
+`e0960c9d933b4c1e918d7afc3ad5d621`); its result remains pending until the
+atomic receipt exists and passes the same gates.
 
 The first dehydroxylate endpoint GEO_OPT ran in a bounded transient unit for
 1,830.018 s. Ten SCF/geometry cycles converged, but the geometry did not; the
