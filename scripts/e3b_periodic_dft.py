@@ -19,6 +19,7 @@ import os
 import pathlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -130,9 +131,33 @@ VALENCE_ELECTRONS = {
 }
 BASIS_SET = "DZVP-MOLOPT-SR-GTH"
 IMAGE_COUNT = 8
+HARTREE_TO_KCAL_MOL = 627.5094740631
 MINIMUM_DISTANCE_ANGSTROM = 0.70
 AL_O_CUTOFF_ANGSTROM = 2.30
 LOCAL_ROUTE_CUTOFF_ANGSTROM = 6.0
+MATCHED_CLASSICAL_FTOL_KCAL_MOL_ANGSTROM = 0.01
+LAMMPS_ENDPOINT_ENERGY_TOLERANCE_KCAL_MOL = 1.0e-6
+CP2K_REPLICA_OUTPUT_ROLES = tuple(
+    f"cp2k_replica_{index:02d}" for index in range(1, IMAGE_COUNT + 1)
+)
+RAW_OUTPUT_ROLES = (
+    "cp2k_initial",
+    "cp2k_endpoint",
+    "cp2k_band",
+    "cp2k_band_profile",
+    *CP2K_REPLICA_OUTPUT_ROLES,
+    "lammps_initial",
+    "lammps_endpoint",
+    "lammps_neb",
+)
+SOLVER_UNITS = (
+    "cp2k_initial",
+    "cp2k_endpoint",
+    "cp2k_band",
+    "lammps_initial",
+    "lammps_endpoint",
+    "lammps_neb",
+)
 DEFAULT_TRANSFER_TOLERANCE_KCAL_MOL = 5.0
 DEFAULT_ENDORSEMENT_TOLERANCE_KCAL_MOL = 5.0
 ALLOWED_OBSERVATION_STATUS = {
@@ -210,6 +235,18 @@ def prepare_output_dir(path: pathlib.Path) -> None:
     if path.exists() and (not path.is_dir() or any(path.iterdir())):
         raise ValueError(f"output path must be a new or empty directory: {path}")
     path.mkdir(parents=True, exist_ok=True)
+
+
+def require_outside_tree(
+    target: pathlib.Path, protected_root: pathlib.Path, *, label: str
+) -> None:
+    target_resolved = target.resolve()
+    protected_resolved = protected_root.resolve()
+    if (
+        target_resolved == protected_resolved
+        or protected_resolved in target_resolved.parents
+    ):
+        raise ValueError(f"{label} must live outside the prepared tree")
 
 
 def verify_e3a_inputs(
@@ -608,62 +645,200 @@ def atom_map(model: contract.Model) -> dict[str, Any]:
     return {"schema": "e3b-atom-map-v1", "model": model.name, "atoms": atoms}
 
 
-def _coordination_gate(model: contract.Model) -> dict[str, Any]:
+def _coordination_gate(
+    model: contract.Model, parent_model: contract.Model | None = None
+) -> dict[str, Any]:
     if model.name != "dehydroxylate-lattice":
         return {"coordination_pass": True, "five_coordinate_al_ids": []}
-    oxygen = [atom for atom in model.atoms if atom.element.startswith("O")]
-    al_coordination = {
+    if parent_model is None or parent_model.name != "reconstructed-replication":
+        raise ValueError(
+            "dehydroxylate coordination gate requires its parent route model"
+        )
+    transformation = model.metadata.get("transformation")
+    if not isinstance(transformation, Mapping):
+        raise TypeError("dehydroxylate model has no typed transformation")
+    selected_oxygen = {
+        int(value) for value in transformation.get("selected_oh_oxygen_ids", [])
+    }
+    residual_oxygen = int(transformation["residual_oxygen_site_id"])
+    removed_oxygen = sorted(selected_oxygen - {residual_oxygen})
+    if len(removed_oxygen) != 1:
+        raise ValueError("dehydroxylation must identify one removed hydroxyl oxygen")
+    declared_removed_sites = {
+        int(value) for value in transformation.get("removed_site_ids", [])
+    }
+    removed_oxygen_declared = all(
+        oxygen_id in declared_removed_sites for oxygen_id in removed_oxygen
+    )
+
+    parent_by_id = {atom.id: atom for atom in parent_model.atoms}
+    transformed_by_id = {atom.id: atom for atom in model.atoms}
+    parent_oxygen = [
+        atom for atom in parent_model.atoms if atom.element.startswith("O")
+    ]
+    transformed_oxygen = [atom for atom in model.atoms if atom.element.startswith("O")]
+    parent_coordination = {
         atom.id: sum(
-            contract.periodic_distance(atom, other, model.cell) <= AL_O_CUTOFF_ANGSTROM
-            for other in oxygen
+            contract.periodic_distance(atom, oxygen, parent_model.cell)
+            <= AL_O_CUTOFF_ANGSTROM
+            for oxygen in parent_oxygen
+        )
+        for atom in parent_model.atoms
+        if atom.element == "Al1"
+    }
+    transformed_coordination = {
+        atom.id: sum(
+            contract.periodic_distance(atom, oxygen, model.cell) <= AL_O_CUTOFF_ANGSTROM
+            for oxygen in transformed_oxygen
         )
         for atom in model.atoms
         if atom.element == "Al1"
     }
-    five_coordinate = sorted(
-        atom_id for atom_id, count in al_coordination.items() if count == 5
+    candidates = sorted(
+        atom_id for atom_id, count in transformed_coordination.items() if count == 5
     )
     unexpected = {
         atom_id: count
-        for atom_id, count in al_coordination.items()
+        for atom_id, count in transformed_coordination.items()
         if count not in {5, 6}
     }
-    route = model.metadata["route"]
-    assert isinstance(route, dict)
-    route_center = contract.periodic_midpoint(
-        next(atom for atom in model.atoms if atom.id == int(route["moving_site_id"])),
+
+    route = model.metadata.get("route")
+    if not isinstance(route, Mapping):
+        raise TypeError("dehydroxylate model has no typed route")
+    moving_id = int(route["moving_site_id"])
+    if model.endpoint_atoms is None:
+        raise ValueError("dehydroxylate route has no endpoint")
+    initial_moving = transformed_by_id[moving_id]
+    final_moving = next(atom for atom in model.endpoint_atoms if atom.id == moving_id)
+    route_positions = [
         contract.nteme_neb.Atom(
-            0,
-            "X",
-            *[float(value) for value in route["final_coordinate_angstrom"]],
-        ),
-        model.cell,
-    )
-    by_id = {atom.id: atom for atom in model.atoms}
-    route_distances = {
-        str(atom_id): contract.periodic_distance(
-            route_center, by_id[atom_id], model.cell
+            moving_id,
+            initial_moving.element,
+            *(
+                getattr(initial_moving, axis)
+                + index
+                / (IMAGE_COUNT - 1)
+                * (getattr(final_moving, axis) - getattr(initial_moving, axis))
+                for axis in ("x", "y", "z")
+            ),
         )
-        for atom_id in five_coordinate
+        for index in range(IMAGE_COUNT)
+    ]
+    candidate_records = []
+    for atom_id in candidates:
+        parent_al = parent_by_id[atom_id]
+        transformed_al = transformed_by_id[atom_id]
+        removed_distances = {
+            str(oxygen_id): contract.periodic_distance(
+                parent_al, parent_by_id[oxygen_id], parent_model.cell
+            )
+            for oxygen_id in removed_oxygen
+        }
+        route_distances = [
+            contract.periodic_distance(position, transformed_al, model.cell)
+            for position in route_positions
+        ]
+        interaction_images = [
+            index
+            for index, distance in enumerate(route_distances)
+            if distance <= LOCAL_ROUTE_CUTOFF_ANGSTROM
+        ]
+        parent_count = parent_coordination.get(atom_id)
+        transformed_count = transformed_coordination[atom_id]
+        parent_neighbor_ids = {
+            oxygen.id
+            for oxygen in parent_oxygen
+            if contract.periodic_distance(parent_al, oxygen, parent_model.cell)
+            <= AL_O_CUTOFF_ANGSTROM
+        }
+        transformed_neighbor_ids = {
+            oxygen.id
+            for oxygen in transformed_oxygen
+            if contract.periodic_distance(transformed_al, oxygen, model.cell)
+            <= AL_O_CUTOFF_ANGSTROM
+        }
+        lost_neighbor_ids = parent_neighbor_ids - transformed_neighbor_ids
+        gained_neighbor_ids = transformed_neighbor_ids - parent_neighbor_ids
+        exact_neighbor_change = lost_neighbor_ids == set(removed_oxygen) and not (
+            gained_neighbor_ids
+        )
+        removed_in_shell = any(
+            distance <= AL_O_CUTOFF_ANGSTROM for distance in removed_distances.values()
+        )
+        removed_absent = all(
+            oxygen_id not in transformed_by_id for oxygen_id in removed_oxygen
+        )
+        candidate_records.append(
+            {
+                "al_source_id": atom_id,
+                "parent_o_coordination": parent_count,
+                "transformed_o_coordination": transformed_count,
+                "removed_hydroxyl_o_distances_angstrom": removed_distances,
+                "removed_hydroxyl_o_in_parent_shell": removed_in_shell,
+                "removed_hydroxyl_o_declared_removed": removed_oxygen_declared,
+                "removed_hydroxyl_o_absent_from_transformed_model": removed_absent,
+                "parent_o_neighbor_source_ids": sorted(parent_neighbor_ids),
+                "transformed_o_neighbor_source_ids": sorted(transformed_neighbor_ids),
+                "lost_o_neighbor_source_ids": sorted(lost_neighbor_ids),
+                "gained_o_neighbor_source_ids": sorted(gained_neighbor_ids),
+                "exact_removed_o_neighbor_change": exact_neighbor_change,
+                "coordination_change_caused_by_transformation": (
+                    parent_count == 6
+                    and transformed_count == 5
+                    and removed_in_shell
+                    and removed_oxygen_declared
+                    and removed_absent
+                    and exact_neighbor_change
+                ),
+                "route_image_distances_angstrom": route_distances,
+                "minimum_route_distance_angstrom": min(route_distances),
+                "interaction_image_indices_zero_based": interaction_images,
+                "route_interaction_pass": bool(interaction_images),
+            }
+        )
+    criterion = {
+        "schema": "e3b-five-coordinate-al-criterion-v1",
+        "definition": (
+            "An Al involves the dehydroxylation route only when it changes from six "
+            "parent O neighbors to five transformed O neighbors with the removed "
+            "hydroxyl O as the only lost neighbor and no gained neighbor, and at least "
+            "one explicit noble-gas route image enters the declared Al interaction shell."
+        ),
+        "parent_model": parent_model.name,
+        "transformed_model": model.name,
+        "al_o_cutoff_angstrom": AL_O_CUTOFF_ANGSTROM,
+        "route_interaction_cutoff_angstrom": LOCAL_ROUTE_CUTOFF_ANGSTROM,
+        "route_position_source": (
+            "moving atom coordinates from initial plus six linearly interpolated "
+            "replicas plus final endpoint"
+        ),
+        "route_moving_atom_source_id": moving_id,
+        "removed_hydroxyl_oxygen_ids": removed_oxygen,
+        "candidate_al_source_ids": candidates,
+        "candidates": candidate_records,
     }
     passed = (
-        five_coordinate == [10, 11]
+        candidates == [10, 11]
         and not unexpected
         and all(
-            value <= LOCAL_ROUTE_CUTOFF_ANGSTROM for value in route_distances.values()
+            record["coordination_change_caused_by_transformation"] is True
+            and record["route_interaction_pass"] is True
+            for record in candidate_records
         )
     )
     return {
         "coordination_pass": passed,
-        "five_coordinate_al_ids": five_coordinate,
-        "al_o_cutoff_angstrom": AL_O_CUTOFF_ANGSTROM,
-        "distance_to_route_midpoint_angstrom": route_distances,
+        "five_coordinate_al_ids": candidates,
         "unexpected_al_coordination": unexpected,
+        "five_coordinate_al_criterion": criterion,
     }
 
 
 def validate_spot_model(
-    model: contract.Model, source_cell: contract.nteme_neb.Cell
+    model: contract.Model,
+    source_cell: contract.nteme_neb.Cell,
+    parent_model: contract.Model | None = None,
 ) -> dict[str, Any]:
     if model.endpoint_atoms is None:
         raise ValueError(f"{model.name}: missing endpoint")
@@ -732,7 +907,7 @@ def validate_spot_model(
             for axis, value in zip(("x", "y", "z"), final_coordinate, strict=True)
         )
     )
-    coordination = _coordination_gate(model)
+    coordination = _coordination_gate(model, parent_model)
     chemical_counts = Counter(CHEMICAL_ELEMENT[atom.element] for atom in model.atoms)
     valence_electrons = sum(
         count * VALENCE_ELECTRONS[element] for element, count in chemical_counts.items()
@@ -1063,22 +1238,184 @@ def write_matched_classical_inputs(
     )
 
 
-def _classical_reference(campaign: Mapping[str, Any], name: str) -> dict[str, Any]:
+def _classical_reference(
+    campaign: Mapping[str, Any],
+    name: str,
+    campaign_root: pathlib.Path,
+    campaign_manifest: Mapping[str, Any],
+) -> dict[str, Any]:
     models = campaign["models"]
     if not isinstance(models, dict) or not isinstance(models[name], dict):
         raise TypeError(f"E3a campaign has malformed model {name}")
-    neb = models[name].get("neb")
+    model_record = models[name]
+    neb = model_record.get("neb")
     if not isinstance(neb, dict):
         raise TypeError(f"E3a campaign model {name} has no NEB result")
     barrier = neb.get("computed_forward_barrier_kcal_mol")
     if not isinstance(barrier, (int, float)) or not math.isfinite(float(barrier)):
         raise ValueError(f"E3a campaign model {name} has no finite barrier")
-    converged = neb.get("converged_to_requested_ftol") is True
+    settings = campaign.get("settings")
+    if not isinstance(settings, Mapping):
+        raise TypeError("E3a campaign has no typed settings")
+    requested_ftol = settings.get("neb_ftol_kcal_mol_angstrom")
+    maximum_force = neb.get("max_replica_force_kcal_mol_angstrom")
+    if not isinstance(requested_ftol, (int, float)) or not isinstance(
+        maximum_force, (int, float)
+    ):
+        raise TypeError(f"E3a campaign model {name} has malformed convergence fields")
+    if not math.isfinite(float(requested_ftol)) or not math.isfinite(
+        float(maximum_force)
+    ):
+        raise ValueError(f"E3a campaign model {name} has non-finite convergence fields")
+    manifest_files = campaign_manifest.get("files")
+    if not isinstance(manifest_files, list):
+        raise TypeError("E3a campaign manifest has no typed files")
+
+    def unique_manifest_entry(
+        *, path: str | None = None, digest: str | None = None
+    ) -> dict[str, Any]:
+        matches = [
+            entry
+            for entry in manifest_files
+            if isinstance(entry, dict)
+            and (path is None or entry.get("path") == path)
+            and (digest is None or entry.get("sha256") == digest)
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                f"E3a manifest does not bind exactly one requested artifact: {path or digest}"
+            )
+        return dict(matches[0])
+
+    campaign_result = unique_manifest_entry(path="campaign-result.json")
+    raw_neb = unique_manifest_entry(digest=str(neb.get("screen_sha256")))
+    raw_endpoints = {
+        label: unique_manifest_entry(path=f"{name}/{label}.min.stdout.log")
+        for label in ("initial", "endpoint")
+    }
+    expected_prefix = f"{name}/"
+    if not str(raw_neb.get("path", "")).startswith(expected_prefix):
+        raise ValueError(f"E3a model {name} NEB output belongs to another model")
+    bound_artifacts = [
+        ("campaign result", campaign_result),
+        ("raw NEB", raw_neb),
+        *((f"raw {label} endpoint", entry) for label, entry in raw_endpoints.items()),
+    ]
+    for label, entry in bound_artifacts:
+        relative = entry.get("path")
+        digest = entry.get("sha256")
+        size = entry.get("bytes")
+        if (
+            not isinstance(relative, str)
+            or not isinstance(digest, str)
+            or not isinstance(size, int)
+        ):
+            raise TypeError(f"E3a {label} manifest record is malformed")
+        artifact = campaign_root / relative
+        require_sha256(artifact, digest, label=f"E3a {label}")
+        if artifact.stat().st_size != size:
+            raise ValueError(f"E3a {label} size mismatch")
+    raw_neb_path = campaign_root / str(raw_neb["path"])
+    independently_parsed_neb = e3a_campaign.parse_neb(
+        raw_neb_path, float(requested_ftol)
+    )
+    parsed_barrier = independently_parsed_neb.get("computed_forward_barrier_kcal_mol")
+    if not isinstance(parsed_barrier, (int, float)) or not math.isclose(
+        float(parsed_barrier), float(barrier), rel_tol=0.0, abs_tol=1.0e-9
+    ):
+        raise ValueError(f"E3a model {name} campaign barrier does not match raw NEB")
+    endpoint_ftol = settings.get("min_ftol_kcal_mol_angstrom")
+    if not isinstance(endpoint_ftol, (int, float)) or not math.isfinite(
+        float(endpoint_ftol)
+    ):
+        raise TypeError("E3a campaign endpoint force tolerance is malformed")
+    independently_parsed_endpoints = {
+        label: e3a_campaign.parse_last_thermo(campaign_root / str(entry["path"]))
+        for label, entry in raw_endpoints.items()
+    }
+    endpoint_normal_termination = {
+        label: (
+            "total wall time:"
+            in (campaign_root / str(entry["path"])).read_text(encoding="utf-8").lower()
+            or "loop time of"
+            in (campaign_root / str(entry["path"])).read_text(encoding="utf-8").lower()
+        )
+        for label, entry in raw_endpoints.items()
+    }
+    endpoint_force_pass = {
+        label: math.isfinite(parsed["force_norm_kcal_mol_angstrom"])
+        and parsed["force_norm_kcal_mol_angstrom"] <= float(endpoint_ftol)
+        and endpoint_normal_termination[label]
+        for label, parsed in independently_parsed_endpoints.items()
+    }
+    independent_maximum = independently_parsed_neb.get(
+        "max_replica_force_kcal_mol_angstrom"
+    )
+    if not isinstance(independent_maximum, (int, float)) or not math.isclose(
+        float(independent_maximum), float(maximum_force), rel_tol=0.0, abs_tol=1.0e-12
+    ):
+        raise ValueError(f"E3a model {name} campaign force does not match raw NEB")
+    if (independently_parsed_neb.get("converged_to_requested_ftol") is True) != (
+        neb.get("converged_to_requested_ftol") is True
+    ):
+        raise ValueError(
+            f"E3a model {name} campaign convergence does not match raw NEB"
+        )
+    expected_final_step = int(settings.get("neb_relax_steps", -1)) + int(
+        settings.get("neb_climb_steps", -1)
+    )
+    final_step = independently_parsed_neb.get("final_step")
+    complete_step_history = (
+        isinstance(final_step, int) and final_step == expected_final_step
+    )
+    independently_converged = (
+        independently_parsed_neb.get("converged_to_requested_ftol") is True
+        and math.isfinite(float(independent_maximum))
+        and float(independent_maximum) <= float(requested_ftol)
+        and complete_step_history
+        and all(endpoint_force_pass.values())
+    )
     return {
+        "schema": "e3a-source-barrier-reference-v1",
         "barrier_kcal_mol": float(barrier),
-        "status": "converged" if converged else "incomplete-convergence",
+        "status": "converged" if independently_converged else "incomplete-convergence",
         "source_cell": [6, 3, 1],
-        "result_sha256": CAMPAIGN_RESULT_SHA256,
+        "campaign_result": campaign_result,
+        "campaign_model_record_sha256": canonical_sha256(model_record),
+        "raw_neb_output": raw_neb,
+        "raw_endpoint_outputs": raw_endpoints,
+        "convergence": {
+            "independent_parser": "e3a_campaign.parse_last_thermo+parse_neb",
+            "requested_ftol_kcal_mol_angstrom": float(requested_ftol),
+            "max_replica_force_kcal_mol_angstrom": float(independent_maximum),
+            "converged_to_requested_ftol": independently_parsed_neb.get(
+                "converged_to_requested_ftol"
+            )
+            is True,
+            "final_step": independently_parsed_neb.get("final_step"),
+            "expected_final_step": expected_final_step,
+            "complete_step_history": complete_step_history,
+            "parsed_forward_barrier_kcal_mol": float(parsed_barrier),
+            "endpoint_requested_ftol_kcal_mol_angstrom": float(endpoint_ftol),
+            "initial_endpoint_force_pass": endpoint_force_pass["initial"],
+            "final_endpoint_force_pass": endpoint_force_pass["endpoint"],
+            "initial_endpoint_normal_termination": endpoint_normal_termination[
+                "initial"
+            ],
+            "final_endpoint_normal_termination": endpoint_normal_termination[
+                "endpoint"
+            ],
+            "initial_endpoint_force_norm_kcal_mol_angstrom": (
+                independently_parsed_endpoints["initial"][
+                    "force_norm_kcal_mol_angstrom"
+                ]
+            ),
+            "final_endpoint_force_norm_kcal_mol_angstrom": (
+                independently_parsed_endpoints["endpoint"][
+                    "force_norm_kcal_mol_angstrom"
+                ]
+            ),
+        },
     }
 
 
@@ -1139,17 +1476,23 @@ def prepare_campaign(
     method: MethodProvenance,
 ) -> dict[str, Any]:
     campaign = verify_e3a_inputs(workbook, campaign_root)
+    campaign_manifest = read_json(campaign_root / "manifest.json")
     prepare_output_dir(out)
     method_record = materialize_method_files(out, method)
     source_atoms, source_cell, barriers = contract.nteme_neb.read_workbook(workbook)
     route = contract.nteme_neb.select_route(barriers, "divacancy", 1)
     pristine, target_cell, reduction = reduce_pristine(source_atoms, source_cell)
     models = build_spot_models(pristine, target_cell, route)
+    models_by_name = {model.name: model for model in models}
     model_records: dict[str, Any] = {}
     models_root = out / "models"
     models_root.mkdir()
     for model in models:
-        gates = validate_spot_model(model, source_cell)
+        gates = validate_spot_model(
+            model,
+            source_cell,
+            models_by_name["reconstructed-replication"],
+        )
         mapping = atom_map(model)
         identity_sha = canonical_sha256(mapping["atoms"])
         model_dir = models_root / model.name
@@ -1181,16 +1524,8 @@ def prepare_campaign(
             CHEMICAL_ELEMENT[atom.element] for atom in model.atoms
         )
         artifacts = {
-            name: sha256(model_dir / name)
-            for name in (
-                "atom-map.json",
-                "initial.xyz",
-                "endpoint.xyz",
-                "initial-opt.inp",
-                "endpoint-opt.inp",
-                "smoke.inp",
-                "neb.inp",
-            )
+            str(path.relative_to(model_dir)): sha256(path)
+            for path in sorted(item for item in model_dir.rglob("*") if item.is_file())
         }
         model_records[model.name] = {
             "scientific_scope": SCIENTIFIC_SCOPE[model.name],
@@ -1199,12 +1534,18 @@ def prepare_campaign(
             "chemical_element_counts": dict(sorted(chemical_counts.items())),
             "supercell": list(TARGET_SUPERCELL),
             "periodic_cell": asdict(model.cell),
+            "periodic_cell_sha256": canonical_sha256(asdict(model.cell)),
             "route": model.metadata["route"],
             "transformation": model.metadata.get("transformation"),
             "limitation": model.metadata["limitation"],
             "gates": gates,
             "atom_identity_sha256": identity_sha,
-            "classical_reference": _classical_reference(campaign, model.name),
+            "classical_reference": _classical_reference(
+                campaign,
+                model.name,
+                campaign_root,
+                campaign_manifest,
+            ),
             "matched_classical": {
                 "status": "prepared-not-run",
                 "cell": list(TARGET_SUPERCELL),
@@ -1239,31 +1580,17 @@ def prepare_campaign(
     }
     preparation_path = out / "preparation.json"
     write_json(preparation_path, preparation)
-    observation_template = {
-        "schema": "e3b-cp2k-observations-v1",
-        "preparation_sha256": sha256(preparation_path),
+    raw_output_template = {
+        "schema": "e3b-raw-output-spec-v1",
         "models": {
             name: {
-                "atom_identity_sha256": record["atom_identity_sha256"],
-                "cp2k": {
-                    "status": "incomplete-execution",
-                    "timed_out": None,
-                    "scf_converged_all_images": None,
-                    "endpoints_converged": None,
-                    "neb_converged": None,
-                    "barrier_kcal_mol": None,
-                },
-                "matched_classical": {
-                    "status": "incomplete-execution",
-                    "timed_out": None,
-                    "neb_converged": None,
-                    "barrier_kcal_mol": None,
-                },
+                "execution_receipt": None,
+                "outputs": {role: None for role in RAW_OUTPUT_ROLES},
             }
-            for name, record in model_records.items()
+            for name in model_records
         },
     }
-    write_json(out / "observations.template.json", observation_template)
+    write_json(out / "raw-outputs.template.json", raw_output_template)
     write_manifest(out)
     return preparation
 
@@ -1283,6 +1610,8 @@ def classify_cp2k_output(
     energy = (
         float(energies[-1].replace("D", "E").replace("d", "e")) if energies else None
     )
+    if energy is not None and not math.isfinite(energy):
+        energy = None
     if timed_out:
         status = "incomplete-timeout"
     elif scf_failed or not scf_converged:
@@ -1301,69 +1630,1032 @@ def classify_cp2k_output(
     }
 
 
+def _cp2k_float(token: str, *, label: str) -> float:
+    try:
+        value = float(token.replace("D", "E").replace("d", "e"))
+    except ValueError as exc:
+        raise ValueError(f"{label} is malformed") from exc
+    if not math.isfinite(value):
+        raise ValueError(f"{label} is not finite")
+    return value
+
+
+def _cp2k_expected_vectors(cell: Mapping[str, Any]) -> dict[str, tuple[float, ...]]:
+    try:
+        value = contract.nteme_neb.Cell(
+            **{
+                key: float(cell[key])
+                for key in ("a", "b", "c", "alpha", "beta", "gamma")
+            }
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("prepared periodic cell record is malformed") from exc
+    lx, ly, lz, xy, xz, yz = value.restricted()
+    return {"a": (lx, 0.0, 0.0), "b": (xy, ly, 0.0), "c": (xz, yz, lz)}
+
+
+def _validate_cp2k_identity(
+    text: str,
+    *,
+    label: str,
+    expected_project: str | None,
+    expected_atom_count: int | None,
+    expected_cell: Mapping[str, Any] | None,
+    project_prefix: bool = False,
+) -> dict[str, Any]:
+    fatal = re.search(r"(?im)^\s*(?:\*+\s*)?(?:ERROR|FATAL|ABORT)\b", text)
+    if fatal:
+        raise ValueError(f"{label}: CP2K fatal/error output")
+    projects = re.findall(r"(?im)^\s*GLOBAL\|\s*Project name\s+(\S+)\s*$", text)
+    if expected_project is not None:
+        if not projects:
+            raise ValueError(f"{label}: missing CP2K project identity")
+        actual_project = projects[-1]
+        project_matches = (
+            actual_project.startswith(expected_project + "-BAND")
+            if project_prefix
+            else actual_project == expected_project
+        )
+        if not project_matches:
+            raise ValueError(
+                f"{label}: CP2K project {actual_project!r} does not match {expected_project!r}"
+            )
+    else:
+        actual_project = projects[-1] if projects else None
+
+    atom_matches = re.findall(r"(?im)^\s*(?:GLOBAL\|\s*)?-\s*Atoms:\s*(\d+)\s*$", text)
+    if expected_atom_count is not None:
+        if not atom_matches:
+            raise ValueError(f"{label}: missing CP2K atom count")
+        if int(atom_matches[-1]) != expected_atom_count:
+            raise ValueError(f"{label}: CP2K atom count does not match preparation")
+
+    parsed_vectors: dict[str, tuple[float, float, float]] = {}
+    vector_pattern = re.compile(
+        r"(?im)^\s*CELL\|\s*Vector\s+([abc])\s+\[angstrom\]:\s*"
+        r"([-+0-9.eEdD]+)\s+([-+0-9.eEdD]+)\s+([-+0-9.eEdD]+)"
+    )
+    for match in vector_pattern.finditer(text):
+        parsed_vectors[match.group(1).lower()] = tuple(
+            _cp2k_float(match.group(index), label=f"{label} cell vector")
+            for index in range(2, 5)
+        )
+    if expected_cell is not None:
+        if set(parsed_vectors) != {"a", "b", "c"}:
+            raise ValueError(f"{label}: incomplete CP2K periodic cell identity")
+        expected_vectors = _cp2k_expected_vectors(expected_cell)
+        if any(
+            not math.isclose(actual, expected, rel_tol=0.0, abs_tol=1.0e-8)
+            for axis in ("a", "b", "c")
+            for actual, expected in zip(
+                parsed_vectors[axis], expected_vectors[axis], strict=True
+            )
+        ):
+            raise ValueError(f"{label}: CP2K periodic cell does not match preparation")
+    return {
+        "project": actual_project,
+        "atom_count": int(atom_matches[-1]) if atom_matches else None,
+        "cell_vectors_angstrom": parsed_vectors or None,
+    }
+
+
+def _parse_cp2k_profile(path: pathlib.Path, expected_replicas: int) -> list[float]:
+    text = path.read_text(encoding="utf-8")
+    native_profiles: list[list[float]] = []
+    marker = re.compile(r"ENERGIES\s*\[au\]\s*=", re.IGNORECASE)
+    number = re.compile(
+        r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eEdD][-+]?\d+)?|[-+]?nan|[-+]?inf",
+        re.IGNORECASE,
+    )
+    for match in marker.finditer(text):
+        values: list[float] = []
+        remainder = text[match.end() :]
+        for line in remainder.splitlines():
+            tokens = line.split()
+            if not tokens:
+                continue
+            if not all(number.fullmatch(token) for token in tokens):
+                break
+            values.extend(
+                _cp2k_float(token, label="CP2K BAND profile energy") for token in tokens
+            )
+            if len(values) >= expected_replicas:
+                break
+        native_profiles.append(values)
+    if native_profiles:
+        profile = native_profiles[-1]
+    else:
+        numeric_rows: list[list[float]] = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            tokens = stripped.split()
+            if not all(number.fullmatch(token) for token in tokens):
+                continue
+            numeric_rows.append(
+                [
+                    _cp2k_float(token, label="CP2K .ener profile value")
+                    for token in tokens
+                ]
+            )
+        if len(numeric_rows) != expected_replicas:
+            raise ValueError(
+                "CP2K final native profile has wrong replica count: "
+                f"expected {expected_replicas}, parsed {len(numeric_rows)}"
+            )
+        profile = [row[4] if len(row) >= 5 else row[-1] for row in numeric_rows]
+    if len(profile) != expected_replicas:
+        raise ValueError(
+            "CP2K final native profile has wrong replica count: "
+            f"expected {expected_replicas}, parsed {len(profile)}"
+        )
+    if not all(math.isfinite(value) for value in profile):
+        raise ValueError("CP2K final native profile contains non-finite energy")
+    return profile
+
+
+def parse_cp2k_barrier(
+    *,
+    initial_log: pathlib.Path,
+    endpoint_log: pathlib.Path,
+    band_log: pathlib.Path,
+    profile_log: pathlib.Path,
+    replica_logs: Sequence[pathlib.Path],
+    expected_replicas: int = IMAGE_COUNT,
+    expected_model: str | None = None,
+    expected_atom_count: int | None = None,
+    expected_cell: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Parse CP2K-2024.3 endpoint and native CI-NEB output fail-closed."""
+
+    project_base = f"e3b-{expected_model}" if expected_model is not None else None
+
+    def parse_endpoint(path: pathlib.Path, label: str, suffix: str) -> dict[str, Any]:
+        text = path.read_text(encoding="utf-8")
+        lower = text.lower()
+        identity = _validate_cp2k_identity(
+            text,
+            label=label,
+            expected_project=f"{project_base}-{suffix}" if project_base else None,
+            expected_atom_count=expected_atom_count,
+            expected_cell=expected_cell,
+        )
+        if "program ended at" not in lower:
+            raise ValueError(f"{label}: missing CP2K normal termination")
+        if "scf run not converged" in lower or "scf run did not converge" in lower:
+            raise ValueError(f"{label}: SCF did not converge")
+        if not re.search(r"scf run converged in\s+\d+\s+steps", lower):
+            raise ValueError(f"{label}: missing converged SCF evidence")
+        if not re.search(r"geometry optimization (?:completed|converged)", lower):
+            raise ValueError(f"{label}: missing endpoint geometry convergence")
+        classified = classify_cp2k_output(text, returncode=0, timed_out=False)
+        energy = classified.get("energy_hartree")
+        if not isinstance(energy, (int, float)) or not math.isfinite(float(energy)):
+            raise ValueError(f"{label}: endpoint energy is not finite")
+        return {
+            "energy_hartree": float(energy),
+            "scf_converged": True,
+            "geometry_converged": True,
+            "normal_termination": True,
+            "identity": identity,
+        }
+
+    initial = parse_endpoint(initial_log, "initial endpoint", "initial")
+    endpoint = parse_endpoint(endpoint_log, "final endpoint", "endpoint")
+    band_text = band_log.read_text(encoding="utf-8")
+    band_lower = band_text.lower()
+    band_identity = _validate_cp2k_identity(
+        band_text,
+        label="BAND output",
+        expected_project=f"{project_base}-neb" if project_base else None,
+        expected_atom_count=expected_atom_count,
+        expected_cell=expected_cell,
+    )
+    if "program ended at" not in band_lower:
+        raise ValueError("BAND output is missing CP2K normal termination")
+    count_matches = re.findall(
+        r"NUMBER OF NEB REPLICA\s*=\s*(\d+)", band_text, re.IGNORECASE
+    )
+    if not count_matches or int(count_matches[-1]) != expected_replicas:
+        raise ValueError("CP2K BAND replica count does not match preparation")
+
+    criteria: dict[str, bool] = {}
+    for key, pattern in (
+        ("rms_displacement", r"RMS\s+DISPLACEMENT"),
+        ("max_displacement", r"MAX(?:IMUM)?\s+DISPLACEMENT"),
+        ("rms_force", r"RMS\s+FORCE"),
+        ("max_force", r"MAX(?:IMUM)?\s+FORCE"),
+    ):
+        matches = re.findall(rf"(?im)^.*{pattern}.*\((YES|NO)\)\s*$", band_text)
+        if not matches:
+            raise ValueError(f"CP2K BAND final convergence criteria incomplete: {key}")
+        criteria[key] = matches[-1].upper() == "YES"
+    if not all(criteria.values()):
+        raise ValueError("CP2K BAND final convergence criteria did not all pass")
+
+    if len(replica_logs) != expected_replicas:
+        raise ValueError(
+            "CP2K BAND replica log count does not match preparation: "
+            f"expected {expected_replicas}, supplied {len(replica_logs)}"
+        )
+    replica_records = []
+    for index, path in enumerate(replica_logs, 1):
+        text = path.read_text(encoding="utf-8")
+        lower = text.lower()
+        identity = _validate_cp2k_identity(
+            text,
+            label=f"replica {index}",
+            expected_project=f"{project_base}-neb" if project_base else None,
+            expected_atom_count=expected_atom_count,
+            expected_cell=expected_cell,
+            project_prefix=project_base is not None,
+        )
+        if "scf run not converged" in lower or "scf run did not converge" in lower:
+            raise ValueError(f"replica {index}: SCF did not converge")
+        converged_cycles = len(re.findall(r"scf run converged in\s+\d+\s+steps", lower))
+        if converged_cycles < 1:
+            raise ValueError(f"replica {index}: missing final converged SCF evidence")
+        normal_termination = "program ended at" in lower
+        if not normal_termination:
+            raise ValueError(f"replica {index}: missing CP2K normal termination")
+        replica_records.append(
+            {
+                "replica": index,
+                "scf_converged": True,
+                "scf_converged_cycles": converged_cycles,
+                "normal_termination": True,
+                "identity": identity,
+            }
+        )
+
+    profile = _parse_cp2k_profile(profile_log, expected_replicas)
+    if not math.isclose(
+        profile[0], initial["energy_hartree"], rel_tol=0.0, abs_tol=1.0e-6
+    ) or not math.isclose(
+        profile[-1], endpoint["energy_hartree"], rel_tol=0.0, abs_tol=1.0e-6
+    ):
+        raise ValueError("CP2K BAND endpoint energies do not match endpoint logs")
+    barrier_hartree = max(profile) - profile[0]
+    barrier_kcal_mol = barrier_hartree * HARTREE_TO_KCAL_MOL
+    if barrier_hartree < 0 or not math.isfinite(barrier_kcal_mol):
+        raise ValueError("CP2K barrier is not finite and non-negative")
+    return {
+        "status": "converged",
+        "expected_replicas": expected_replicas,
+        "parsed_replicas": len(profile),
+        "replica_outputs": replica_records,
+        "initial_endpoint": initial,
+        "final_endpoint": endpoint,
+        "band_identity": band_identity,
+        "final_convergence_criteria": criteria,
+        "replica_energies_hartree": profile,
+        "barrier_hartree": barrier_hartree,
+        "hartree_to_kcal_mol": HARTREE_TO_KCAL_MOL,
+        "barrier_kcal_mol": barrier_kcal_mol,
+        "band_converged": True,
+        "normal_termination": True,
+    }
+
+
+def parse_matched_classical_barrier(
+    *,
+    initial_log: pathlib.Path,
+    endpoint_log: pathlib.Path,
+    neb_log: pathlib.Path,
+    expected_replicas: int = IMAGE_COUNT,
+    ftol: float = MATCHED_CLASSICAL_FTOL_KCAL_MOL_ANGSTROM,
+) -> dict[str, Any]:
+    """Parse converged matched-cell LAMMPS endpoints and NEB screen output."""
+
+    def parse_endpoint(path: pathlib.Path, label: str) -> dict[str, float]:
+        text = path.read_text(encoding="utf-8")
+        if re.search(r"(?im)^\s*(?:ERROR|FATAL)\b", text):
+            raise ValueError(f"{label}: LAMMPS fatal/error output")
+        if (
+            "total wall time:" not in text.lower()
+            and "loop time of" not in text.lower()
+        ):
+            raise ValueError(f"{label}: missing LAMMPS normal termination")
+        parsed = e3a_campaign.parse_last_thermo(path)
+        numeric = [float(value) for value in parsed.values()]
+        if not all(math.isfinite(value) for value in numeric):
+            raise ValueError(f"{label}: non-finite endpoint thermo value")
+        if parsed["force_norm_kcal_mol_angstrom"] > ftol:
+            raise ValueError(f"{label}: endpoint force did not converge")
+        return parsed
+
+    initial = parse_endpoint(initial_log, "initial endpoint")
+    endpoint = parse_endpoint(endpoint_log, "final endpoint")
+    neb_text = neb_log.read_text(encoding="utf-8")
+    if re.search(r"(?im)^\s*(?:ERROR|FATAL)\b", neb_text):
+        raise ValueError("LAMMPS NEB output contains fatal/error output")
+    lines = neb_text.splitlines()
+    climb_markers = [
+        index
+        for index, line in enumerate(lines)
+        if re.search(r"Setting up climbing|Climbing replica\s*=", line, re.IGNORECASE)
+    ]
+    if not climb_markers:
+        raise ValueError("LAMMPS NEB output never entered climbing phase")
+    climb_start = climb_markers[0]
+    header_indices = [
+        index
+        for index, line in enumerate(lines)
+        if re.search(r"^\s*Step\s+MaxReplicaForce\s+MaxAtomForce\b", line)
+    ]
+    climb_headers = [index for index in header_indices if index > climb_start]
+    if len(header_indices) < 2 or not climb_headers:
+        raise ValueError("LAMMPS NEB output lacks the climbing progress header")
+    second_header = climb_headers[0]
+    climb_rows: list[tuple[int, list[float]]] = []
+    for index, line in enumerate(lines[second_header + 1 :], second_header + 1):
+        fields = line.split()
+        if len(fields) < 9:
+            continue
+        try:
+            values = [float(field) for field in fields]
+        except ValueError:
+            continue
+        climb_rows.append((index, values))
+    if not climb_rows:
+        raise ValueError("LAMMPS NEB climbing phase has no numeric progress row")
+    final_row_index, final_row = climb_rows[-1]
+    field_count = len(final_row)
+    expected_fields = 9 + 2 * expected_replicas
+    if field_count != expected_fields:
+        parsed_replicas = (field_count - 9) // 2 if field_count >= 9 else 0
+        raise ValueError(
+            "LAMMPS NEB replica count does not match preparation: "
+            f"expected {expected_replicas}, parsed {parsed_replicas}"
+        )
+    if not all(math.isfinite(value) for value in final_row):
+        raise ValueError("LAMMPS NEB contains a non-finite value")
+    footer_after_final = "\n".join(lines[final_row_index + 1 :]).lower()
+    if (
+        "total wall time:" not in footer_after_final
+        and "loop time of" not in footer_after_final
+    ):
+        raise ValueError("LAMMPS NEB output is missing normal termination after climb")
+    if final_row[1] > ftol:
+        raise ValueError("LAMMPS NEB did not converge to the requested force tolerance")
+    barrier = final_row[6]
+    if not math.isfinite(barrier):
+        raise ValueError("LAMMPS NEB barrier is not finite")
+    neb_initial_energy = final_row[10]
+    neb_endpoint_energy = final_row[8 + 2 * expected_replicas]
+    endpoint_deltas = {
+        "initial": abs(neb_initial_energy - initial["potential_energy_kcal_mol"]),
+        "endpoint": abs(neb_endpoint_energy - endpoint["potential_energy_kcal_mol"]),
+    }
+    if any(
+        delta > LAMMPS_ENDPOINT_ENERGY_TOLERANCE_KCAL_MOL
+        for delta in endpoint_deltas.values()
+    ):
+        raise ValueError("LAMMPS NEB endpoint energies do not match minimization logs")
+    neb = {
+        "final_step": int(final_row[0]),
+        "max_replica_force_kcal_mol_angstrom": final_row[1],
+        "max_atom_force_kcal_mol_angstrom": final_row[2],
+        "computed_forward_barrier_kcal_mol": barrier,
+        "computed_reverse_barrier_kcal_mol": final_row[7],
+        "converged_to_requested_ftol": True,
+        "screen_sha256": sha256(neb_log),
+    }
+    return {
+        "status": "converged",
+        "expected_replicas": expected_replicas,
+        "parsed_replicas": expected_replicas,
+        "ftol_kcal_mol_angstrom": ftol,
+        "initial_endpoint": initial,
+        "final_endpoint": endpoint,
+        "neb": neb,
+        "barrier_kcal_mol": float(barrier),
+        "climbing_phase": True,
+        "climbing_progress_header_line": second_header + 1,
+        "endpoint_energy_tolerance_kcal_mol": (
+            LAMMPS_ENDPOINT_ENERGY_TOLERANCE_KCAL_MOL
+        ),
+        "endpoint_energy_deltas_kcal_mol": endpoint_deltas,
+        "normal_termination": True,
+    }
+
+
+def _file_record(path: pathlib.Path, *, relative_to: pathlib.Path) -> dict[str, Any]:
+    return {
+        "path": str(path.relative_to(relative_to)),
+        "bytes": path.stat().st_size,
+        "sha256": sha256(path),
+    }
+
+
+def _absolute_file_record(path: pathlib.Path) -> dict[str, Any]:
+    resolved = path.resolve()
+    if not resolved.is_file():
+        raise ValueError(f"execution artifact is not a file: {path}")
+    return {
+        "path": str(resolved),
+        "bytes": resolved.stat().st_size,
+        "sha256": sha256(resolved),
+    }
+
+
+def _prepared_unit_paths(
+    prepared_root: pathlib.Path, model: str
+) -> dict[str, list[pathlib.Path]]:
+    model_root = prepared_root / "models" / model
+    cp2k_data = sorted(
+        path for path in (prepared_root / "cp2k-data").glob("*") if path.is_file()
+    )
+    images = sorted(
+        path for path in (model_root / "images").glob("*") if path.is_file()
+    )
+    matched = model_root / "matched-classical"
+    paths = {
+        "cp2k_initial": [
+            model_root / "initial-opt.inp",
+            model_root / "initial.xyz",
+            *cp2k_data,
+        ],
+        "cp2k_endpoint": [
+            model_root / "endpoint-opt.inp",
+            model_root / "endpoint.xyz",
+            *cp2k_data,
+        ],
+        "cp2k_band": [model_root / "neb.inp", *images, *cp2k_data],
+        "lammps_initial": [matched / "in.min.initial", matched / "initial.seed.data"],
+        "lammps_endpoint": [
+            matched / "in.min.endpoint",
+            matched / "endpoint.seed.data",
+        ],
+        "lammps_neb": [
+            matched / "in.neb",
+            matched / "initial.seed.data",
+            matched / "endpoint.seed.data",
+        ],
+    }
+    for unit, unit_paths in paths.items():
+        if not unit_paths or any(not path.is_file() for path in unit_paths):
+            missing = [str(path) for path in unit_paths if not path.is_file()]
+            raise ValueError(
+                f"{model}/{unit}: prepared inputs are incomplete: {missing}"
+            )
+    return paths
+
+
+def _resolved_executable_record(
+    requested: str | pathlib.Path, *, identity: str
+) -> dict[str, Any]:
+    if identity not in {"cp2k", "lammps", "wrapper", "test/fake", "unverified"}:
+        raise ValueError(f"unsupported executable identity: {identity!r}")
+    requested_text = str(requested)
+    resolved = pathlib.Path(shutil.which(requested_text) or requested_text).resolve()
+    record = _absolute_file_record(resolved)
+    return {
+        "requested": requested_text,
+        "identity": identity,
+        "identity_verification": (
+            "test-fixture" if identity == "test/fake" else "declared-not-verified"
+        ),
+        **record,
+    }
+
+
+def create_execution_receipt(
+    *,
+    prepared_root: pathlib.Path,
+    model: str,
+    raw_outputs: Mapping[str, pathlib.Path],
+    executables: Mapping[str, str | pathlib.Path],
+    executable_identities: Mapping[str, str],
+    commands: Mapping[str, Sequence[str]],
+    resources: Mapping[str, Mapping[str, Any]],
+    out: pathlib.Path,
+) -> dict[str, Any]:
+    """Create a post-execution sidecar binding prepared inputs to raw outputs."""
+    verify_manifest(prepared_root)
+    preparation_path = prepared_root / "preparation.json"
+    preparation = read_json(preparation_path)
+    models = preparation.get("models")
+    method = preparation.get("method")
+    if not isinstance(models, Mapping) or model not in models:
+        raise ValueError(f"unknown prepared execution model: {model}")
+    prepared_model = models[model]
+    if not isinstance(prepared_model, Mapping) or not isinstance(method, Mapping):
+        raise TypeError("preparation model/method record is malformed")
+    if set(raw_outputs) != set(RAW_OUTPUT_ROLES):
+        raise ValueError("execution receipt requires the complete raw-output role set")
+    if set(executables) != {"cp2k", "lammps"} or set(executable_identities) != {
+        "cp2k",
+        "lammps",
+    }:
+        raise ValueError(
+            "execution receipt requires CP2K and LAMMPS executable identities"
+        )
+    if set(commands) != set(SOLVER_UNITS) or set(resources) != set(SOLVER_UNITS):
+        raise ValueError(
+            "execution receipt requires command/resources for every solver unit"
+        )
+    unit_paths = _prepared_unit_paths(prepared_root, model)
+    units: dict[str, Any] = {}
+    for unit in SOLVER_UNITS:
+        command = commands[unit]
+        if (
+            not isinstance(command, Sequence)
+            or isinstance(command, (str, bytes))
+            or not command
+            or any(not isinstance(token, str) or not token for token in command)
+        ):
+            raise TypeError(f"{model}/{unit}: command must be a non-empty token list")
+        unit_resources = resources[unit]
+        if not isinstance(unit_resources, Mapping):
+            raise TypeError(f"{model}/{unit}: resources must be a typed mapping")
+        units[unit] = {
+            "solver": "cp2k" if unit.startswith("cp2k_") else "lammps",
+            "command": list(command),
+            "resources": dict(unit_resources),
+            "prepared_inputs": [
+                _file_record(path, relative_to=prepared_root)
+                for path in unit_paths[unit]
+            ],
+        }
+    cell = prepared_model.get("periodic_cell")
+    if not isinstance(cell, Mapping):
+        raise TypeError(f"{model}: prepared periodic cell is missing")
+    receipt = {
+        "schema": "e3b-model-execution-receipt-v1",
+        "preparation": {
+            "path": str(preparation_path.resolve()),
+            "sha256": sha256(preparation_path),
+            "manifest_sha256": sha256(prepared_root / "manifest.json"),
+        },
+        "model": model,
+        "atom_identity_sha256": prepared_model.get("atom_identity_sha256"),
+        "periodic_cell_record_sha256": canonical_sha256(cell),
+        "method": {
+            "record_sha256": canonical_sha256(method),
+            "cp2k_version": method.get("cp2k_version"),
+            "cp2k_image_digest": method.get("cp2k_image_digest"),
+        },
+        "executables": {
+            solver: _resolved_executable_record(
+                executables[solver], identity=executable_identities[solver]
+            )
+            for solver in ("cp2k", "lammps")
+        },
+        "units": units,
+        "raw_outputs": {
+            role: _absolute_file_record(pathlib.Path(raw_outputs[role]))
+            for role in RAW_OUTPUT_ROLES
+        },
+    }
+    write_json(out, receipt)
+    return receipt
+
+
+def verify_execution_receipt(
+    *,
+    receipt_path: pathlib.Path,
+    prepared_root: pathlib.Path,
+    model: str,
+    raw_outputs: Mapping[str, pathlib.Path],
+) -> dict[str, Any]:
+    receipt = read_json(receipt_path)
+    if receipt.get("schema") != "e3b-model-execution-receipt-v1":
+        raise ValueError(f"{model}: unexpected execution receipt schema")
+    preparation = read_json(prepared_root / "preparation.json")
+    models = preparation.get("models")
+    method = preparation.get("method")
+    if not isinstance(models, Mapping) or not isinstance(method, Mapping):
+        raise TypeError("preparation model/method record is malformed")
+    prepared_model = models.get(model)
+    if not isinstance(prepared_model, Mapping):
+        raise ValueError(f"{model}: model is absent from preparation")
+    binding = receipt.get("preparation")
+    if not isinstance(binding, Mapping) or (
+        binding.get("sha256") != sha256(prepared_root / "preparation.json")
+        or binding.get("manifest_sha256") != sha256(prepared_root / "manifest.json")
+    ):
+        raise ValueError(f"{model}: execution receipt preparation binding mismatch")
+    cell = prepared_model.get("periodic_cell")
+    if (
+        receipt.get("model") != model
+        or receipt.get("atom_identity_sha256")
+        != prepared_model.get("atom_identity_sha256")
+        or not isinstance(cell, Mapping)
+        or receipt.get("periodic_cell_record_sha256") != canonical_sha256(cell)
+    ):
+        raise ValueError(f"{model}: execution receipt model identity mismatch")
+    receipt_method = receipt.get("method")
+    if not isinstance(receipt_method, Mapping) or (
+        receipt_method.get("record_sha256") != canonical_sha256(method)
+        or receipt_method.get("cp2k_version") != method.get("cp2k_version")
+        or receipt_method.get("cp2k_image_digest") != method.get("cp2k_image_digest")
+    ):
+        raise ValueError(f"{model}: execution receipt method binding mismatch")
+    executables = receipt.get("executables")
+    if not isinstance(executables, Mapping) or set(executables) != {"cp2k", "lammps"}:
+        raise ValueError(f"{model}: executable identity records are incomplete")
+    for solver, record in executables.items():
+        if not isinstance(record, Mapping):
+            raise TypeError(f"{model}/{solver}: malformed executable record")
+        executable_path = pathlib.Path(str(record.get("path", "")))
+        require_sha256(
+            executable_path,
+            str(record.get("sha256", "")),
+            label=f"{model}/{solver} executable",
+        )
+        if executable_path.stat().st_size != record.get("bytes"):
+            raise ValueError(f"{model}/{solver}: executable size mismatch")
+    expected_unit_paths = _prepared_unit_paths(prepared_root, model)
+    units = receipt.get("units")
+    if not isinstance(units, Mapping) or set(units) != set(SOLVER_UNITS):
+        raise ValueError(f"{model}: execution unit records are incomplete")
+    for unit, expected_paths in expected_unit_paths.items():
+        record = units[unit]
+        if not isinstance(record, Mapping):
+            raise TypeError(f"{model}/{unit}: malformed execution unit")
+        command = record.get("command")
+        resources = record.get("resources")
+        inputs = record.get("prepared_inputs")
+        if (
+            not isinstance(command, list)
+            or not command
+            or not all(isinstance(token, str) and token for token in command)
+            or not isinstance(resources, Mapping)
+            or not isinstance(inputs, list)
+        ):
+            raise ValueError(
+                f"{model}/{unit}: command/resources/input binding is malformed"
+            )
+        expected_records = [
+            _file_record(path, relative_to=prepared_root) for path in expected_paths
+        ]
+        if inputs != expected_records:
+            raise ValueError(
+                f"{model}/{unit}: prepared input/dependency binding mismatch"
+            )
+    output_records = receipt.get("raw_outputs")
+    if not isinstance(output_records, Mapping) or set(output_records) != set(
+        RAW_OUTPUT_ROLES
+    ):
+        raise ValueError(f"{model}: execution receipt raw outputs are incomplete")
+    for role in RAW_OUTPUT_ROLES:
+        record = output_records[role]
+        if not isinstance(record, Mapping):
+            raise TypeError(f"{model}/{role}: malformed receipt output record")
+        supplied = pathlib.Path(raw_outputs[role]).resolve()
+        if pathlib.Path(str(record.get("path", ""))).resolve() != supplied:
+            raise ValueError(f"{model}/{role}: receipt output path mismatch")
+        require_sha256(supplied, str(record.get("sha256", "")), label=f"{model}/{role}")
+        if supplied.stat().st_size != record.get("bytes"):
+            raise ValueError(f"{model}/{role}: receipt output size mismatch")
+    return receipt
+
+
+def collect_evidence(
+    *,
+    prepared_root: pathlib.Path,
+    raw_outputs: Mapping[str, Mapping[str, pathlib.Path]],
+    execution_receipts: Mapping[str, pathlib.Path],
+    out: pathlib.Path,
+) -> dict[str, Any]:
+    """Copy raw outputs into a hash-manifested bundle and parse them."""
+    verify_manifest(prepared_root)
+    require_outside_tree(out, prepared_root, label="evidence output")
+    preparation_path = prepared_root / "preparation.json"
+    preparation = read_json(preparation_path)
+    prepared_models = preparation.get("models")
+    if not isinstance(prepared_models, Mapping):
+        raise TypeError("preparation has no typed model map")
+    if set(raw_outputs) != set(prepared_models):
+        raise ValueError("raw-output model set does not exactly match preparation")
+    if set(execution_receipts) != set(prepared_models):
+        raise ValueError(
+            "execution-receipt model set does not exactly match preparation"
+        )
+    prepare_output_dir(out)
+    evidence_models: dict[str, Any] = {}
+    for model, supplied in raw_outputs.items():
+        if pathlib.PurePath(model).name != model:
+            raise ValueError(f"unsafe model name in preparation: {model!r}")
+        if not isinstance(supplied, Mapping) or set(supplied) != set(RAW_OUTPUT_ROLES):
+            raise ValueError(
+                f"{model}: raw outputs must provide exactly {RAW_OUTPUT_ROLES}"
+            )
+        receipt = verify_execution_receipt(
+            receipt_path=pathlib.Path(execution_receipts[model]),
+            prepared_root=prepared_root,
+            model=model,
+            raw_outputs=supplied,
+        )
+        target_dir = out / "raw" / model
+        target_dir.mkdir(parents=True)
+        records: dict[str, Any] = {}
+        copied: dict[str, pathlib.Path] = {}
+        for role in RAW_OUTPUT_ROLES:
+            source = pathlib.Path(supplied[role])
+            if not source.is_file():
+                raise ValueError(f"{model}/{role}: raw output is not a file: {source}")
+            target = target_dir / f"{role}.log"
+            shutil.copyfile(source, target)
+            copied[role] = target
+            records[role] = _file_record(target, relative_to=out)
+        receipt_target = target_dir / "execution-receipt.json"
+        shutil.copyfile(execution_receipts[model], receipt_target)
+        receipt_record = _file_record(receipt_target, relative_to=out)
+        prepared_model = prepared_models[model]
+        if not isinstance(prepared_model, Mapping):
+            raise TypeError(f"{model}: malformed prepared model")
+        expected_atom_count = prepared_model.get("atom_count")
+        expected_cell = prepared_model.get("periodic_cell")
+        if not isinstance(expected_atom_count, int) or not isinstance(
+            expected_cell, Mapping
+        ):
+            raise TypeError(f"{model}: prepared native identity fields are missing")
+        cp2k = parse_cp2k_barrier(
+            initial_log=copied["cp2k_initial"],
+            endpoint_log=copied["cp2k_endpoint"],
+            band_log=copied["cp2k_band"],
+            profile_log=copied["cp2k_band_profile"],
+            replica_logs=[copied[role] for role in CP2K_REPLICA_OUTPUT_ROLES],
+            expected_model=model,
+            expected_atom_count=expected_atom_count,
+            expected_cell=expected_cell,
+        )
+        matched = parse_matched_classical_barrier(
+            initial_log=copied["lammps_initial"],
+            endpoint_log=copied["lammps_endpoint"],
+            neb_log=copied["lammps_neb"],
+        )
+        evidence_models[model] = {
+            "atom_identity_sha256": prepared_model.get("atom_identity_sha256"),
+            "raw_outputs": records,
+            "execution_receipt": receipt_record,
+            "execution_receipt_sha256": canonical_sha256(receipt),
+            "cp2k": cp2k,
+            "matched_classical": matched,
+        }
+    evidence = {
+        "schema": "e3b-parsed-evidence-v1",
+        "preparation_sha256": sha256(preparation_path),
+        "parser_contract": {
+            "cp2k": "endpoint-geo-opt-and-band-v1",
+            "matched_classical": "lammps-endpoint-and-neb-v1",
+            "expected_replicas": IMAGE_COUNT,
+            "hartree_to_kcal_mol": HARTREE_TO_KCAL_MOL,
+        },
+        "models": evidence_models,
+    }
+    write_json(out / "evidence.json", evidence)
+    write_manifest(out)
+    return evidence
+
+
+def _prepared_dependency_paths(
+    prepared_root: pathlib.Path, input_path: pathlib.Path
+) -> list[pathlib.Path]:
+    paths = {input_path.resolve()}
+    for line in input_path.read_text(encoding="utf-8").splitlines():
+        match = re.match(r"\s*[A-Z0-9_]*FILE_NAME\s+(\S+)", line, re.IGNORECASE)
+        if not match:
+            continue
+        value = match.group(1).strip("'\"")
+        candidate = (input_path.parent / value).resolve()
+        try:
+            candidate.relative_to(prepared_root.resolve())
+        except ValueError as exc:
+            raise ValueError(
+                f"smoke input references file outside prepared root: {value}"
+            ) from exc
+        if not candidate.is_file():
+            raise ValueError(f"smoke dependency is not a file: {value}")
+        paths.add(candidate)
+    return sorted(paths)
+
+
+def _validated_controller_evidence(
+    value: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if value.get("schema") != "e3b-controller-readback-v1":
+        raise ValueError("unexpected controller evidence schema")
+    if value.get("controller") not in {"systemd", "docker"}:
+        raise ValueError("controller evidence must be systemd or docker")
+    readback = value.get("readback")
+    if (
+        value.get("verified") is not True
+        or not isinstance(readback, Mapping)
+        or value.get("readback_sha256") != canonical_sha256(readback)
+    ):
+        raise ValueError("controller evidence lacks verified typed readback")
+    return dict(value)
+
+
 def run_smoke(
     *,
     executable: str,
-    input_path: pathlib.Path,
+    prepared_root: pathlib.Path,
+    model: str,
+    runtime_dir: pathlib.Path,
     receipt_path: pathlib.Path,
     timeout_seconds: float,
+    mpi_ranks: int = 1,
+    omp_threads: int = 1,
+    memory_limit_mib: int | None = None,
+    execution_method: str = "direct",
+    executable_identity: str = "unverified",
+    controller_evidence: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Run a planning-only smoke probe from an isolated disposable copy."""
     if timeout_seconds <= 0 or timeout_seconds > 14400:
         raise ValueError("smoke timeout must be in (0, 14400] seconds")
-    if not input_path.is_file():
-        raise ValueError(f"smoke input is not a file: {input_path}")
-    receipt_path.parent.mkdir(parents=True, exist_ok=True)
-    stdout_path = receipt_path.parent / "smoke.stdout.log"
-    started = time.monotonic()
+    if mpi_ranks <= 0 or omp_threads <= 0 or mpi_ranks * omp_threads > 16:
+        raise ValueError("smoke CPU resources must be positive and total at most 16")
+    if memory_limit_mib is not None and memory_limit_mib <= 0:
+        raise ValueError("smoke memory limit must be positive when declared")
+    if not execution_method.strip():
+        raise ValueError("smoke execution method must be explicit")
+    controller = _validated_controller_evidence(controller_evidence)
+    verify_manifest(prepared_root)
+    preparation_path = prepared_root / "preparation.json"
+    preparation = read_json(preparation_path)
+    prepared_models = preparation.get("models")
+    if not isinstance(prepared_models, Mapping) or model not in prepared_models:
+        raise ValueError(f"unknown prepared smoke model: {model}")
+    method = preparation.get("method")
+    if not isinstance(method, Mapping):
+        raise TypeError("preparation has no typed method record")
+    executable_record = _resolved_executable_record(
+        executable, identity=executable_identity
+    )
+    resolved_executable = str(executable_record["path"])
+    input_path = prepared_root / "models" / model / "smoke.inp"
+    dependencies = _prepared_dependency_paths(prepared_root, input_path)
+    require_outside_tree(runtime_dir, prepared_root, label="smoke runtime directory")
+    prepare_output_dir(runtime_dir)
+    if receipt_path.parent.resolve() != runtime_dir.resolve():
+        raise ValueError("smoke receipt must live directly in the runtime directory")
+    work_root = runtime_dir / "work"
+    work_model_dir = work_root / "models" / model
+    dependency_records = []
+    for source in dependencies:
+        relative = source.relative_to(prepared_root.resolve())
+        target = work_root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        dependency_records.append(
+            {
+                "prepared_path": str(relative),
+                "prepared_sha256": sha256(source),
+                "runtime_sha256": sha256(target),
+                "bytes": target.stat().st_size,
+            }
+        )
+    runtime_input = work_model_dir / "smoke.inp"
+    stdout_path = runtime_dir / "smoke.stdout.log"
     timed_out = False
     returncode: int | None = None
     output = ""
+    process: subprocess.Popen[str] | None = None
+    process_group_id: int | None = None
+    term_sent = False
+    kill_sent = False
+    process_reaped = False
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "OMP_NUM_THREADS": str(omp_threads),
+            "OPENBLAS_NUM_THREADS": "1",
+            "MKL_NUM_THREADS": "1",
+            "NUMEXPR_NUM_THREADS": "1",
+        }
+    )
+    command = [resolved_executable, "-i", runtime_input.name]
+    started = time.monotonic()
     try:
-        environment = os.environ.copy()
-        environment.update(
-            {
-                "OMP_NUM_THREADS": "1",
-                "OPENBLAS_NUM_THREADS": "1",
-                "MKL_NUM_THREADS": "1",
-            }
-        )
-        # Trusted local executable and fixed CP2K -i argument; never a shell string.
+        # Trusted caller-selected executable; arguments are fixed and shell=False.
         # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
-        completed = subprocess.run(
-            [executable, "-i", str(input_path.resolve())],
-            cwd=input_path.parent,
+        process = subprocess.Popen(
+            command,
+            cwd=work_model_dir,
             env=environment,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            check=False,
-            timeout=timeout_seconds,
             shell=False,
+            start_new_session=True,
         )
-        returncode = completed.returncode
-        output = completed.stdout
-    except subprocess.TimeoutExpired as exc:
-        timed_out = True
-        if isinstance(exc.stdout, bytes):
-            output = exc.stdout.decode(errors="replace")
-        else:
-            output = exc.stdout or ""
+        process_group_id = process.pid
+        try:
+            output, _unused = process.communicate(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            os.killpg(process_group_id, signal.SIGTERM)
+            term_sent = True
+            try:
+                output, _unused = process.communicate(timeout=0.5)
+            except subprocess.TimeoutExpired:
+                os.killpg(process_group_id, signal.SIGKILL)
+                kill_sent = True
+                output, _unused = process.communicate(timeout=1.0)
+        returncode = process.returncode
+        process_reaped = process.poll() is not None
+    finally:
+        if process is not None and process.poll() is None:
+            if process_group_id is not None:
+                os.killpg(process_group_id, signal.SIGKILL)
+                kill_sent = True
+            process.wait(timeout=1.0)
+            process_reaped = True
     elapsed = time.monotonic() - started
-    stdout_path.write_text(output, encoding="utf-8")
+    stdout_path.write_text(output or "", encoding="utf-8")
+    copied_runtime_paths = {
+        str((work_root / pathlib.Path(record["prepared_path"])).resolve())
+        for record in dependency_records
+    }
+    generated_outputs = [
+        _file_record(path, relative_to=work_root)
+        for path in sorted(item for item in work_root.rglob("*") if item.is_file())
+        if str(path.resolve()) not in copied_runtime_paths
+    ]
+    shutil.rmtree(work_root)
+    prepared_valid = True
+    try:
+        verify_manifest(prepared_root)
+    except (OSError, TypeError, ValueError):
+        prepared_valid = False
     receipt = {
         **classify_cp2k_output(
             output,
             returncode=returncode,
             timed_out=timed_out,
         ),
-        "schema": "e3b-cp2k-smoke-v1",
-        "command": [executable, "-i", str(input_path.resolve())],
+        "schema": "e3b-cp2k-smoke-v3",
+        "purpose": "planning-only ENERGY_FORCE timing evidence; not a BAND bound",
+        "preparation": {
+            "path": str(preparation_path.resolve()),
+            "sha256": sha256(preparation_path),
+            "manifest_sha256": sha256(prepared_root / "manifest.json"),
+        },
+        "model": model,
+        "atom_identity_sha256": prepared_models[model].get("atom_identity_sha256"),
+        "method": {
+            "prepared_declaration": dict(method),
+            "prepared_record_sha256": canonical_sha256(method),
+            "resolved_executable_before_launch": executable_record,
+        },
+        "command": command,
+        "execution_declaration": {
+            "value": execution_method,
+            "verification": "declared-not-enforced-by-generic-runner",
+        },
+        "external_controller_evidence": controller,
+        "working_directory_policy": "isolated copied tree outside prepared manifest",
+        "resource_declarations": {
+            "mpi_ranks": {
+                "value": mpi_ranks,
+                "verification": "declared-not-enforced-by-generic-runner",
+            },
+            "memory_limit_mib": {
+                "value": memory_limit_mib,
+                "verification": "declared-not-enforced-by-generic-runner",
+            },
+        },
+        "environment_controls": {
+            "omp_threads": {"value": omp_threads, "mechanism": "OMP_NUM_THREADS"},
+            "openblas_threads": {"value": 1, "mechanism": "OPENBLAS_NUM_THREADS"},
+            "mkl_threads": {"value": 1, "mechanism": "MKL_NUM_THREADS"},
+            "numexpr_threads": {"value": 1, "mechanism": "NUMEXPR_NUM_THREADS"},
+        },
         "timeout_seconds": timeout_seconds,
         "elapsed_seconds": elapsed,
-        "input_sha256": sha256(input_path),
-        "stdout_path": str(stdout_path.resolve()),
-        "stdout_sha256": sha256(stdout_path),
+        "input": _file_record(input_path, relative_to=prepared_root),
+        "dependencies": dependency_records,
+        "output": {
+            "stdout": _file_record(stdout_path, relative_to=runtime_dir),
+            "generated_before_cleanup": generated_outputs,
+        },
+        "cleanup": {
+            "policy": "remove disposable work tree after hashing generated files",
+            "work_directory_removed": not work_root.exists(),
+            "internal_process_group": {
+                "new_session": True,
+                "process_group_id": process_group_id,
+                "timeout_term_sent": term_sent,
+                "timeout_kill_sent": kill_sent,
+                "subprocess_reaped": process_reaped,
+            },
+        },
+        "post_run_state": {
+            "prepared_manifest_valid": prepared_valid,
+            "prepared_tree_modified": not prepared_valid,
+        },
     }
+    if not prepared_valid:
+        receipt["status"] = "incomplete-prepared-integrity"
+        receipt["energy_hartree"] = None
     write_json(receipt_path, receipt)
     return receipt
 
@@ -1376,21 +2668,201 @@ def _failure_result(outcome: str, reason: str) -> dict[str, Any]:
         "matched_cell_transfer_delta_kcal_mol": None,
         "matched_cell_correction_kcal_mol": None,
         "calibrated_barrier_kcal_mol": None,
+        "endorsement_delta_kcal_mol": None,
         "verdict": "no-correction",
     }
+
+
+def _validated_source_barrier(
+    reference: Mapping[str, Any], name: str, source: Mapping[str, Any]
+) -> float:
+    """Re-open, hash, and independently parse the pinned E3a source bundle."""
+    required = {
+        "workbook_path",
+        "workbook_sha256",
+        "campaign_root",
+        "campaign_manifest_sha256",
+        "campaign_result_sha256",
+    }
+    if not required <= set(source):
+        raise ValueError(f"{name}: preparation source paths/hashes are incomplete")
+    workbook = pathlib.Path(str(source["workbook_path"]))
+    campaign_root = pathlib.Path(str(source["campaign_root"]))
+    require_sha256(
+        workbook, str(source["workbook_sha256"]), label="E3a source workbook"
+    )
+    manifest_path = campaign_root / "manifest.json"
+    require_sha256(
+        manifest_path,
+        str(source["campaign_manifest_sha256"]),
+        label="E3a campaign manifest",
+    )
+    result_path = campaign_root / "campaign-result.json"
+    require_sha256(
+        result_path,
+        str(source["campaign_result_sha256"]),
+        label="E3a campaign result",
+    )
+    manifest = read_json(manifest_path)
+    campaign = read_json(result_path)
+    if campaign.get("schema") != "e3a-classical-neb-campaign-v1":
+        raise ValueError(f"{name}: unexpected E3a campaign schema")
+    campaign_source = campaign.get("source")
+    if not isinstance(campaign_source, Mapping) or campaign_source.get(
+        "source_sha256"
+    ) != source.get("workbook_sha256"):
+        raise ValueError(f"{name}: E3a campaign workbook binding mismatch")
+    files = manifest.get("files")
+    if not isinstance(files, list):
+        raise TypeError(f"{name}: E3a campaign manifest has no typed files")
+    result_entries = [
+        item
+        for item in files
+        if isinstance(item, Mapping) and item.get("path") == "campaign-result.json"
+    ]
+    if len(result_entries) != 1 or result_entries[0].get("sha256") != source.get(
+        "campaign_result_sha256"
+    ):
+        raise ValueError(f"{name}: E3a manifest campaign-result binding mismatch")
+    fresh = _classical_reference(campaign, name, campaign_root, manifest)
+    if canonical_sha256(fresh) != canonical_sha256(reference):
+        raise ValueError(
+            f"{name}: stored source reference does not match reparsed E3a files"
+        )
+    if fresh.get("status") != "converged":
+        raise ValueError(f"{name}: source barrier is not independently converged")
+    barrier = fresh.get("barrier_kcal_mol")
+    if not isinstance(barrier, (int, float)) or not math.isfinite(float(barrier)):
+        raise ValueError(f"{name}: reparsed source barrier is not finite")
+    return float(barrier)
+
+
+def _verified_evidence_paths(
+    evidence_root: pathlib.Path, records: Mapping[str, Any]
+) -> dict[str, pathlib.Path]:
+    if set(records) != set(RAW_OUTPUT_ROLES):
+        raise ValueError("raw evidence role set is incomplete")
+    resolved: dict[str, pathlib.Path] = {}
+    root = evidence_root.resolve()
+    for role in RAW_OUTPUT_ROLES:
+        record = records[role]
+        if not isinstance(record, Mapping):
+            raise ValueError(f"{role}: malformed raw evidence record")
+        relative = record.get("path")
+        expected_hash = record.get("sha256")
+        expected_size = record.get("bytes")
+        if not isinstance(relative, str) or not isinstance(expected_hash, str):
+            raise ValueError(f"{role}: untyped raw evidence record")
+        path = (root / relative).resolve()
+        try:
+            path.relative_to(root)
+        except ValueError as exc:
+            raise ValueError(f"{role}: unsafe raw evidence path") from exc
+        require_sha256(path, expected_hash, label=f"raw evidence {role}")
+        if path.stat().st_size != expected_size:
+            raise ValueError(f"{role}: raw evidence size mismatch")
+        resolved[role] = path
+    return resolved
+
+
+def _verify_bundled_execution_receipt(
+    *,
+    evidence_root: pathlib.Path,
+    observed: Mapping[str, Any],
+    prepared_root: pathlib.Path,
+    preparation: Mapping[str, Any],
+    model: str,
+    raw_records: Mapping[str, Any],
+) -> None:
+    record = observed.get("execution_receipt")
+    if not isinstance(record, Mapping):
+        raise ValueError(f"{model}: bundled execution receipt is missing")
+    relative = record.get("path")
+    expected_hash = record.get("sha256")
+    if not isinstance(relative, str) or not isinstance(expected_hash, str):
+        raise TypeError(f"{model}: bundled execution receipt record is malformed")
+    root = evidence_root.resolve()
+    path = (root / relative).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"{model}: unsafe bundled execution receipt path") from exc
+    require_sha256(path, expected_hash, label=f"{model} bundled execution receipt")
+    if path.stat().st_size != record.get("bytes"):
+        raise ValueError(f"{model}: bundled execution receipt size mismatch")
+    receipt = read_json(path)
+    if canonical_sha256(receipt) != observed.get("execution_receipt_sha256"):
+        raise ValueError(f"{model}: bundled execution receipt content mismatch")
+    models = preparation.get("models")
+    method = preparation.get("method")
+    if not isinstance(models, Mapping) or not isinstance(method, Mapping):
+        raise TypeError("preparation model/method record is malformed")
+    prepared_model = models.get(model)
+    if not isinstance(prepared_model, Mapping):
+        raise ValueError(f"{model}: prepared model is missing")
+    binding = receipt.get("preparation")
+    if not isinstance(binding, Mapping) or binding.get("sha256") != sha256(
+        prepared_root / "preparation.json"
+    ):
+        raise ValueError(f"{model}: bundled receipt preparation mismatch")
+    cell = prepared_model.get("periodic_cell")
+    receipt_method = receipt.get("method")
+    if (
+        receipt.get("model") != model
+        or receipt.get("atom_identity_sha256")
+        != prepared_model.get("atom_identity_sha256")
+        or not isinstance(cell, Mapping)
+        or receipt.get("periodic_cell_record_sha256") != canonical_sha256(cell)
+        or not isinstance(receipt_method, Mapping)
+        or receipt_method.get("record_sha256") != canonical_sha256(method)
+    ):
+        raise ValueError(f"{model}: bundled receipt model/method mismatch")
+    expected_unit_paths = _prepared_unit_paths(prepared_root, model)
+    units = receipt.get("units")
+    if not isinstance(units, Mapping) or set(units) != set(SOLVER_UNITS):
+        raise ValueError(f"{model}: bundled receipt units are incomplete")
+    for unit, expected_paths in expected_unit_paths.items():
+        unit_record = units[unit]
+        if not isinstance(unit_record, Mapping):
+            raise TypeError(f"{model}/{unit}: malformed bundled receipt unit")
+        if unit_record.get("prepared_inputs") != [
+            _file_record(item, relative_to=prepared_root) for item in expected_paths
+        ]:
+            raise ValueError(f"{model}/{unit}: bundled prepared inputs changed")
+        if not isinstance(unit_record.get("command"), list) or not isinstance(
+            unit_record.get("resources"), Mapping
+        ):
+            raise ValueError(f"{model}/{unit}: command/resources binding is missing")
+    receipt_outputs = receipt.get("raw_outputs")
+    if not isinstance(receipt_outputs, Mapping) or set(receipt_outputs) != set(
+        RAW_OUTPUT_ROLES
+    ):
+        raise ValueError(f"{model}: bundled receipt raw outputs are incomplete")
+    for role in RAW_OUTPUT_ROLES:
+        receipt_output = receipt_outputs[role]
+        evidence_output = raw_records[role]
+        if not isinstance(receipt_output, Mapping) or not isinstance(
+            evidence_output, Mapping
+        ):
+            raise TypeError(f"{model}/{role}: malformed output binding")
+        if receipt_output.get("sha256") != evidence_output.get(
+            "sha256"
+        ) or receipt_output.get("bytes") != evidence_output.get("bytes"):
+            raise ValueError(f"{model}/{role}: receipt/evidence output mismatch")
 
 
 def analyze_models(
     preparation: Mapping[str, Any],
     observations: Mapping[str, Any],
     *,
+    prepared_root: pathlib.Path | None = None,
+    evidence_root: pathlib.Path | None = None,
+    preparation_sha256: str | None = None,
     transfer_tolerance_kcal_mol: float = DEFAULT_TRANSFER_TOLERANCE_KCAL_MOL,
     endorsement_tolerance_kcal_mol: float = DEFAULT_ENDORSEMENT_TOLERANCE_KCAL_MOL,
 ) -> dict[str, Any]:
     if preparation.get("schema") != "e3b-cp2k-preparation-v1":
         raise ValueError("unexpected E3b preparation schema")
-    if observations.get("schema") != "e3b-cp2k-observations-v1":
-        raise ValueError("unexpected E3b observations schema")
     if (
         not math.isfinite(transfer_tolerance_kcal_mol)
         or not math.isfinite(endorsement_tolerance_kcal_mol)
@@ -1403,10 +2875,23 @@ def analyze_models(
     if not isinstance(prepared_models, Mapping) or not isinstance(
         observed_models, Mapping
     ):
-        raise TypeError("preparation and observations require typed model maps")
+        raise TypeError("preparation and evidence require typed model maps")
     if set(prepared_models) != set(observed_models):
-        raise ValueError("observed model set does not exactly match preparation")
+        raise ValueError("evidence model set does not exactly match preparation")
     results: dict[str, Any] = {}
+    is_parsed_evidence = observations.get("schema") == "e3b-parsed-evidence-v1"
+    if not is_parsed_evidence and observations.get("schema") != (
+        "e3b-cp2k-observations-v1"
+    ):
+        raise ValueError("unexpected E3b evidence schema")
+    if is_parsed_evidence:
+        if prepared_root is None or evidence_root is None or preparation_sha256 is None:
+            raise ValueError(
+                "parsed evidence analysis requires prepared/evidence roots and preparation hash"
+            )
+        if observations.get("preparation_sha256") != preparation_sha256:
+            raise ValueError("parsed evidence is not bound to this preparation")
+
     for name, prepared_value in prepared_models.items():
         observed_value = observed_models[name]
         if not isinstance(prepared_value, Mapping) or not isinstance(
@@ -1418,78 +2903,142 @@ def analyze_models(
         ):
             results[name] = _failure_result(
                 "incomplete-atom-identity",
-                "observed atom identity does not match the prepared path",
+                "evidence atom identity does not match the prepared path",
             )
             continue
-        cp2k = observed_value.get("cp2k")
-        matched = observed_value.get("matched_classical")
         reference = prepared_value.get("classical_reference")
-        if not isinstance(cp2k, Mapping) or not isinstance(matched, Mapping):
-            raise TypeError(f"{name}: missing typed CP2K or classical observation")
         if not isinstance(reference, Mapping):
             raise TypeError(f"{name}: missing classical reference")
         if reference.get("status") != "converged":
             results[name] = _failure_result(
                 "incomplete-source-classical",
-                "E3a source classical barrier is not typed converged",
+                "E3a source classical barrier is not independently converged",
             )
             continue
-        cp2k_status = cp2k.get("status")
-        matched_status = matched.get("status")
-        if cp2k_status not in ALLOWED_OBSERVATION_STATUS:
-            raise ValueError(f"{name}: unknown CP2K status {cp2k_status!r}")
-        if matched_status not in ALLOWED_OBSERVATION_STATUS:
-            raise ValueError(
-                f"{name}: unknown matched-classical status {matched_status!r}"
-            )
-        if cp2k_status != "converged":
-            results[name] = _failure_result(
-                str(cp2k_status), "CP2K result is not typed converged"
-            )
+
+        if not is_parsed_evidence:
+            cp2k = observed_value.get("cp2k")
+            matched = observed_value.get("matched_classical")
+            if not isinstance(cp2k, Mapping) or not isinstance(matched, Mapping):
+                raise TypeError(f"{name}: missing typed CP2K or classical observation")
+            cp2k_status = cp2k.get("status")
+            matched_status = matched.get("status")
+            if cp2k_status not in ALLOWED_OBSERVATION_STATUS:
+                raise ValueError(f"{name}: unknown CP2K status {cp2k_status!r}")
+            if matched_status not in ALLOWED_OBSERVATION_STATUS:
+                raise ValueError(
+                    f"{name}: unknown matched-classical status {matched_status!r}"
+                )
+            if cp2k_status != "converged":
+                results[name] = _failure_result(
+                    str(cp2k_status), "CP2K result is not typed converged"
+                )
+            elif matched_status != "converged":
+                results[name] = _failure_result(
+                    "incomplete-matched-classical",
+                    "matched 2x2 classical CI-NEB is not typed converged",
+                )
+            else:
+                results[name] = _failure_result(
+                    "incomplete-unverified-observation",
+                    "manual observations are not accepted as barrier evidence; "
+                    "hash-bound raw-output parsers are required",
+                )
             continue
-        if cp2k.get("timed_out") is not False:
-            results[name] = _failure_result(
-                "incomplete-timeout", "CP2K timeout state is not explicitly false"
+
+        try:
+            source = preparation.get("source")
+            if not isinstance(source, Mapping):
+                raise ValueError("preparation source binding is missing")
+            source_barrier = _validated_source_barrier(reference, name, source)
+            raw_records = observed_value.get("raw_outputs")
+            if not isinstance(raw_records, Mapping):
+                raise ValueError("raw evidence records are missing")
+            assert evidence_root is not None
+            assert prepared_root is not None
+            paths = _verified_evidence_paths(evidence_root, raw_records)
+            _verify_bundled_execution_receipt(
+                evidence_root=evidence_root,
+                observed=observed_value,
+                prepared_root=prepared_root,
+                preparation=preparation,
+                model=name,
+                raw_records=raw_records,
             )
-            continue
-        if cp2k.get("scf_converged_all_images") is not True:
-            results[name] = _failure_result(
-                "incomplete-scf", "not every endpoint/image has converged SCF evidence"
+            expected_atom_count = prepared_value.get("atom_count")
+            expected_cell = prepared_value.get("periodic_cell")
+            if not isinstance(expected_atom_count, int) or not isinstance(
+                expected_cell, Mapping
+            ):
+                raise ValueError(f"{name}: prepared native identity is missing")
+            reparsed_cp2k = parse_cp2k_barrier(
+                initial_log=paths["cp2k_initial"],
+                endpoint_log=paths["cp2k_endpoint"],
+                band_log=paths["cp2k_band"],
+                profile_log=paths["cp2k_band_profile"],
+                replica_logs=[paths[role] for role in CP2K_REPLICA_OUTPUT_ROLES],
+                expected_model=name,
+                expected_atom_count=expected_atom_count,
+                expected_cell=expected_cell,
             )
-            continue
-        if (
-            cp2k.get("endpoints_converged") is not True
-            or cp2k.get("neb_converged") is not True
-        ):
-            results[name] = _failure_result(
-                "incomplete-convergence", "CP2K endpoints or CI-NEB are not converged"
+            reparsed_matched = parse_matched_classical_barrier(
+                initial_log=paths["lammps_initial"],
+                endpoint_log=paths["lammps_endpoint"],
+                neb_log=paths["lammps_neb"],
             )
+            if canonical_sha256(observed_value.get("cp2k")) != canonical_sha256(
+                reparsed_cp2k
+            ) or canonical_sha256(
+                observed_value.get("matched_classical")
+            ) != canonical_sha256(reparsed_matched):
+                raise ValueError(
+                    "stored parser fields do not match reparsed raw outputs"
+                )
+        except (OSError, TypeError, ValueError) as exc:
+            results[name] = _failure_result("incomplete-evidence-integrity", str(exc))
             continue
-        if matched_status != "converged":
-            results[name] = _failure_result(
-                "incomplete-matched-classical",
-                "matched 2x2 classical CI-NEB is not typed converged",
+
+        cp2k_barrier = float(reparsed_cp2k["barrier_kcal_mol"])
+        matched_barrier = float(reparsed_matched["barrier_kcal_mol"])
+        transfer_delta = abs(matched_barrier - source_barrier)
+        transfer_pass = transfer_delta <= transfer_tolerance_kcal_mol
+        if not transfer_pass:
+            result = _failure_result(
+                "complete-transfer-rejected",
+                "matched-cell classical barrier does not transfer from the E3a cell",
             )
+            result["matched_cell_transfer_delta_kcal_mol"] = transfer_delta
+            results[name] = result
             continue
-        if (
-            matched.get("timed_out") is not False
-            or matched.get("neb_converged") is not True
-        ):
-            results[name] = _failure_result(
-                "incomplete-matched-classical",
-                "matched classical timeout/convergence evidence is incomplete",
-            )
-            continue
-        # Observation JSON is an operator worksheet, not executable evidence.
-        # Until the harness parses and hash-binds raw CP2K and LAMMPS outputs,
-        # it must never promote copied booleans/numbers into a calibration.
-        results[name] = _failure_result(
-            "incomplete-unverified-observation",
-            "manual observations are not accepted as barrier evidence; raw-output "
-            "parsers and hashes are required",
-        )
+        correction = cp2k_barrier - matched_barrier
+        calibrated = source_barrier + correction
+        endorsement_delta = abs(correction)
+        endorsed = endorsement_delta <= endorsement_tolerance_kcal_mol
+        results[name] = {
+            "typed_outcome": "complete-endorsed" if endorsed else "complete-corrected",
+            "reason": (
+                "hash-bound raw outputs passed all convergence and transfer gates"
+            ),
+            "source_classical_barrier_kcal_mol": source_barrier,
+            "matched_classical_barrier_kcal_mol": matched_barrier,
+            "cp2k_barrier_kcal_mol": cp2k_barrier,
+            "matched_cell_transfer_pass": True,
+            "matched_cell_transfer_delta_kcal_mol": transfer_delta,
+            "matched_cell_correction_kcal_mol": correction,
+            "calibrated_barrier_kcal_mol": calibrated,
+            "endorsement_delta_kcal_mol": endorsement_delta,
+            "verdict": "endorsed" if endorsed else "corrected",
+            "raw_output_sha256": {
+                role: raw_records[role]["sha256"] for role in RAW_OUTPUT_ROLES
+            },
+        }
     return {
         "schema": "e3b-cp2k-analysis-v1",
+        "evidence_contract": (
+            "hash-bound raw outputs reparsed during analysis"
+            if is_parsed_evidence
+            else "manual observations rejected"
+        ),
         "transfer_tolerance_kcal_mol": transfer_tolerance_kcal_mol,
         "endorsement_tolerance_kcal_mol": endorsement_tolerance_kcal_mol,
         "models": results,
@@ -1514,34 +3063,158 @@ def command_prepare(args: argparse.Namespace) -> int:
 
 
 def command_smoke(args: argparse.Namespace) -> int:
-    verify_manifest(args.prepared_root)
-    input_path = args.prepared_root / "models" / args.model / "smoke.inp"
+    controller = (
+        read_json(args.controller_evidence)
+        if args.controller_evidence is not None
+        else None
+    )
     receipt = run_smoke(
         executable=args.cp2k,
-        input_path=input_path,
-        receipt_path=args.receipt,
+        prepared_root=args.prepared_root,
+        model=args.model,
+        runtime_dir=args.runtime_dir,
+        receipt_path=args.runtime_dir / "smoke-result.json",
         timeout_seconds=args.timeout_seconds,
+        mpi_ranks=args.mpi_ranks,
+        omp_threads=args.omp_threads,
+        memory_limit_mib=args.memory_limit_mib,
+        execution_method=args.execution_method,
+        executable_identity=args.executable_identity,
+        controller_evidence=controller,
     )
     print(json.dumps(receipt, indent=2, sort_keys=True))
     return 0 if receipt["status"] == "converged" else 2
+
+
+def _spec_path(spec_path: pathlib.Path, value: str) -> pathlib.Path:
+    path = pathlib.Path(value)
+    return path if path.is_absolute() else spec_path.parent / path
+
+
+def command_create_receipt(args: argparse.Namespace) -> int:
+    raw_spec = read_json(args.raw_spec)
+    execution_spec = read_json(args.execution_spec)
+    models = raw_spec.get("models")
+    if raw_spec.get("schema") != "e3b-raw-output-spec-v1" or not isinstance(
+        models, Mapping
+    ):
+        raise ValueError("unexpected raw-output specification")
+    raw_model = models.get(args.model)
+    if not isinstance(raw_model, Mapping):
+        raise ValueError(f"raw-output specification lacks model {args.model}")
+    outputs = raw_model.get("outputs")
+    if not isinstance(outputs, Mapping):
+        raise TypeError(f"{args.model}: raw-output specification lacks outputs")
+    if execution_spec.get("schema") != "e3b-execution-declarations-v1":
+        raise ValueError("unexpected execution declaration schema")
+    executables = execution_spec.get("executables")
+    units = execution_spec.get("units")
+    if not isinstance(executables, Mapping) or not isinstance(units, Mapping):
+        raise TypeError("execution declarations lack executables/units")
+    executable_paths: dict[str, pathlib.Path] = {}
+    executable_identities: dict[str, str] = {}
+    for solver in ("cp2k", "lammps"):
+        record = executables.get(solver)
+        if (
+            not isinstance(record, Mapping)
+            or not isinstance(record.get("path"), str)
+            or not isinstance(record.get("identity"), str)
+        ):
+            raise TypeError(f"execution declaration lacks {solver} identity")
+        executable_paths[solver] = _spec_path(args.execution_spec, str(record["path"]))
+        executable_identities[solver] = str(record["identity"])
+    commands: dict[str, Sequence[str]] = {}
+    resources: dict[str, Mapping[str, Any]] = {}
+    for unit in SOLVER_UNITS:
+        record = units.get(unit)
+        if not isinstance(record, Mapping):
+            raise TypeError(f"execution declaration lacks unit {unit}")
+        command = record.get("command")
+        unit_resources = record.get("resources")
+        if not isinstance(command, list) or not isinstance(unit_resources, Mapping):
+            raise TypeError(f"execution declaration unit {unit} is malformed")
+        commands[unit] = command
+        resources[unit] = unit_resources
+    raw_outputs = {
+        role: _spec_path(args.raw_spec, str(outputs[role])) for role in RAW_OUTPUT_ROLES
+    }
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    receipt = create_execution_receipt(
+        prepared_root=args.prepared_root,
+        model=args.model,
+        raw_outputs=raw_outputs,
+        executables=executable_paths,
+        executable_identities=executable_identities,
+        commands=commands,
+        resources=resources,
+        out=args.out,
+    )
+    print(json.dumps(receipt, indent=2, sort_keys=True))
+    return 0
+
+
+def command_collect(args: argparse.Namespace) -> int:
+    raw_spec = read_json(args.raw_spec)
+    if raw_spec.get("schema") != "e3b-raw-output-spec-v1":
+        raise ValueError("unexpected raw-output specification schema")
+    models = raw_spec.get("models")
+    if not isinstance(models, Mapping):
+        raise TypeError("raw-output specification has no typed model map")
+    raw_outputs: dict[str, dict[str, pathlib.Path]] = {}
+    execution_receipts: dict[str, pathlib.Path] = {}
+    for model, value in models.items():
+        if not isinstance(model, str) or not isinstance(value, Mapping):
+            raise TypeError("raw-output specification model record is malformed")
+        outputs = value.get("outputs")
+        receipt_value = value.get("execution_receipt")
+        if not isinstance(outputs, Mapping) or not isinstance(receipt_value, str):
+            raise TypeError(f"{model}: outputs/receipt specification is malformed")
+        raw_outputs[model] = {}
+        for role, supplied in outputs.items():
+            if not isinstance(role, str) or not isinstance(supplied, str):
+                raise TypeError(f"{model}: raw-output paths must be strings")
+            raw_outputs[model][role] = _spec_path(args.raw_spec, supplied)
+        execution_receipts[model] = _spec_path(args.raw_spec, receipt_value)
+    evidence = collect_evidence(
+        prepared_root=args.prepared_root,
+        raw_outputs=raw_outputs,
+        execution_receipts=execution_receipts,
+        out=args.out,
+    )
+    print(json.dumps(evidence, indent=2, sort_keys=True))
+    return 0
 
 
 def command_analyze(args: argparse.Namespace) -> int:
     verify_manifest(args.prepared_root)
     preparation_path = args.prepared_root / "preparation.json"
     preparation = read_json(preparation_path)
-    observations = read_json(args.observations)
-    if observations.get("preparation_sha256") != sha256(preparation_path):
-        raise ValueError("observations are not hash-bound to this preparation")
+    evidence_root = getattr(args, "evidence_root", None)
+    observations_path = getattr(args, "observations", None)
+    if evidence_root is not None:
+        verify_manifest(evidence_root)
+        evidence_path = evidence_root / "evidence.json"
+        observations = read_json(evidence_path)
+    elif observations_path is not None:
+        evidence_path = observations_path
+        observations = read_json(evidence_path)
+        if observations.get("preparation_sha256") != sha256(preparation_path):
+            raise ValueError("observations are not hash-bound to this preparation")
+    else:
+        raise ValueError("analysis requires a parsed evidence bundle")
+    require_outside_tree(args.out, args.prepared_root, label="analysis output")
     prepare_output_dir(args.out)
     result = analyze_models(
         preparation,
         observations,
+        prepared_root=args.prepared_root,
+        evidence_root=evidence_root,
+        preparation_sha256=sha256(preparation_path),
         transfer_tolerance_kcal_mol=args.transfer_tolerance,
         endorsement_tolerance_kcal_mol=args.endorsement_tolerance,
     )
     result["preparation_sha256"] = sha256(preparation_path)
-    result["observations_sha256"] = sha256(args.observations)
+    result["evidence_sha256"] = sha256(evidence_path)
     write_json(args.out / "analysis.json", result)
     write_manifest(args.out)
     print(json.dumps(result, indent=2, sort_keys=True))
@@ -1572,15 +3245,57 @@ def build_parser() -> argparse.ArgumentParser:
     smoke.add_argument("--prepared-root", type=pathlib.Path, required=True)
     smoke.add_argument("--model", choices=MODEL_ORDER, required=True)
     smoke.add_argument("--cp2k", required=True)
-    smoke.add_argument("--receipt", type=pathlib.Path, required=True)
+    smoke.add_argument(
+        "--runtime-dir",
+        type=pathlib.Path,
+        required=True,
+        help="new directory outside the prepared tree for outputs and receipt",
+    )
     smoke.add_argument("--timeout-seconds", type=float, default=600.0)
+    smoke.add_argument("--mpi-ranks", type=int, default=1)
+    smoke.add_argument("--omp-threads", type=int, default=1)
+    smoke.add_argument("--memory-limit-mib", type=int)
+    smoke.add_argument(
+        "--execution-method",
+        default="direct",
+        help="unverified execution declaration recorded in the timing receipt",
+    )
+    smoke.add_argument(
+        "--executable-identity",
+        choices=("cp2k", "wrapper", "test/fake", "unverified"),
+        default="unverified",
+    )
+    smoke.add_argument(
+        "--controller-evidence",
+        type=pathlib.Path,
+        help="typed systemd/Docker readback produced by an external controller",
+    )
     smoke.set_defaults(func=command_smoke)
+
+    receipt = sub.add_parser(
+        "create-execution-receipt",
+        help="bind prepared inputs, commands/resources, executables, and raw outputs",
+    )
+    receipt.add_argument("--prepared-root", type=pathlib.Path, required=True)
+    receipt.add_argument("--model", required=True)
+    receipt.add_argument("--raw-spec", type=pathlib.Path, required=True)
+    receipt.add_argument("--execution-spec", type=pathlib.Path, required=True)
+    receipt.add_argument("--out", type=pathlib.Path, required=True)
+    receipt.set_defaults(func=command_create_receipt)
+
+    collect = sub.add_parser(
+        "collect-evidence", help="parse and hash-bind CP2K/LAMMPS raw outputs"
+    )
+    collect.add_argument("--prepared-root", type=pathlib.Path, required=True)
+    collect.add_argument("--raw-spec", type=pathlib.Path, required=True)
+    collect.add_argument("--out", type=pathlib.Path, required=True)
+    collect.set_defaults(func=command_collect)
 
     analyze = sub.add_parser(
         "analyze", help="apply only converged, matched-cell DFT corrections"
     )
     analyze.add_argument("--prepared-root", type=pathlib.Path, required=True)
-    analyze.add_argument("--observations", type=pathlib.Path, required=True)
+    analyze.add_argument("--evidence-root", type=pathlib.Path, required=True)
     analyze.add_argument("--out", type=pathlib.Path, required=True)
     analyze.add_argument(
         "--transfer-tolerance",

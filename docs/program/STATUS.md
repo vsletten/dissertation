@@ -4,6 +4,8 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-14 11:17 PDT — (hermes-custom-build-001; profile=workstation) — E3b1 DONE: immutable prepared/runtime separation, native hash-bound CP2K/LAMMPS parsing, incomplete E3a-anchor rejection, and the chemical five-coordinate-Al criterion are verified after one cold-review fix pass. A real 334-atom reconstructed-Ar PBE-D3 `ENERGY_FORCE` probe converged in 780.622 s under a bounded 4 MPI × 4 OpenMP transient unit; it is planning evidence, not a BAND lower bound. E3b is READY at 0/3 barriers. Evidence: `docs/program/results/E3b1-periodic-dft-evidence-contract.md`.
+
 - 2026-09-14 09:01 PDT — (hermes-custom-build-001; profile=workstation) — E3b BLOCKED ON E3b1 with 0/3 DFT barriers: cold review found a valid wrapped neutral 2×2 route cell and invalidated the prior 3×2 timing extrapolation. The corrected harness prepares 334/331/334-atom models, rejects manual barrier worksheets and incomplete E3a references, and a real 2×2 force probe remained unfinished at the execution channel's 420-second ceiling without supporting a campaign-feasibility verdict. E3b1 owns raw parsers, immutable run artifacts, converged classical anchors, the five-coordinate interaction criterion, and a bounded completed timing probe. Evidence: `docs/program/results/E3b-periodic-dft-spot-checks.md`.
 
 - 2026-09-14 07:24 PDT — (hermes-macbot-one; profile=laptop) — Tightened the program protocol so a mission-control queue pointer cannot close until the same PR records the board card's final `done`/`blocked` state and matching PLAN row; `[ORPHAN]` / `[DRIFT]` now name the enforced failure mode.

@@ -1,12 +1,11 @@
 # E3b-periodic-dft-spot-checks — route 2 calibration of the classical set
 
-- status: blocked
+- status: ready
 - track: E (muscovite / the perfect circle)
 - priority: P2
 - machine: workstation (periodic DFT; CP2K)
 - depends: E3a-classical-neb-barriers
-- claimed-by: hermes-custom-build-001
-- blocked-on: E3b1-periodic-dft-evidence-contract
+- claimed-by:
 
 ## Objective
 
@@ -36,6 +35,12 @@ endorsement, so E4 runs on numbers whose error bars mean something.
 
 ## Progress
 
+- 2026-09-14 11:17 PDT — `(hermes-custom-build-001; profile=workstation)` —
+  UNBLOCKED by E3b1's completed evidence contract and a converged 334-atom
+  reconstructed-Ar timing probe (780.622 s). The corrected native-output gates
+  are ready for bounded endpoint/BAND work. Scientific acceptance is unchanged:
+  0/3 DFT barriers, no correction/endorsement, and no BAND lower bound yet.
+
 - 2026-09-14 09:01 PDT — `(hermes-custom-build-001; profile=workstation)` —
   Cold review rejected the 3×2 compute-envelope verdict: a neutral wrapped
   2×2×1 route cell exists, and an unfinished force evaluation cannot establish
@@ -50,7 +55,7 @@ endorsement, so E4 runs on numbers whose error bars mean something.
 
 - 2026-08-27 — filed by Fable alongside E3a.
 
-## Result
+## Prior blocked result (superseded by the 2026-09-14 11:17 PDT unblock)
 
 Blocked on `E3b1-periodic-dft-evidence-contract`, not completed. The original
 acceptance remains **0/3 DFT barriers checked**. A valid 2×2 preparation exists,
