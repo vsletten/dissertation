@@ -2467,6 +2467,7 @@ def run_smoke(
     execution_method: str = "direct",
     executable_identity: str = "unverified",
     controller_evidence: Mapping[str, Any] | None = None,
+    timeout_ready_file: pathlib.Path | None = None,
 ) -> dict[str, Any]:
     """Run a planning-only smoke probe from an isolated disposable copy."""
     if timeout_seconds <= 0 or timeout_seconds > 14400:
@@ -2477,6 +2478,13 @@ def run_smoke(
         raise ValueError("smoke memory limit must be positive when declared")
     if not execution_method.strip():
         raise ValueError("smoke execution method must be explicit")
+    if timeout_ready_file is not None and executable_identity != "test/fake":
+        raise ValueError("timeout readiness synchronization is test-fixture only")
+    resolved_timeout_ready_file = (
+        timeout_ready_file.resolve() if timeout_ready_file is not None else None
+    )
+    if resolved_timeout_ready_file is not None and resolved_timeout_ready_file.exists():
+        raise ValueError("timeout readiness file must not exist before launch")
     controller = _validated_controller_evidence(controller_evidence)
     verify_manifest(prepared_root)
     preparation_path = prepared_root / "preparation.json"
@@ -2548,6 +2556,16 @@ def run_smoke(
             start_new_session=True,
         )
         process_group_id = process.pid
+        if resolved_timeout_ready_file is not None:
+            readiness_deadline = time.monotonic() + 5.0
+            while not resolved_timeout_ready_file.exists():
+                if process.poll() is not None:
+                    raise RuntimeError(
+                        "test fixture exited before advertising readiness"
+                    )
+                if time.monotonic() >= readiness_deadline:
+                    raise TimeoutError("test fixture did not advertise readiness")
+                time.sleep(0.001)
         try:
             output, _unused = process.communicate(timeout=timeout_seconds)
         except subprocess.TimeoutExpired:

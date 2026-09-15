@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import shlex
 import sys
 import time
 from dataclasses import replace
@@ -710,30 +711,37 @@ def test_smoke_receipt_labels_fake_and_unenforced_declarations(tmp_path: Path) -
 def test_smoke_timeout_terminates_descendant_process_group(tmp_path: Path) -> None:
     prepared = _write_smoke_prepared(tmp_path)
     marker = tmp_path / "descendant-survived"
-    child_code = (
-        "import signal,time,pathlib; "
-        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-        "time.sleep(1.2); "
-        f"pathlib.Path({str(marker)!r}).write_text('survived')"
+    child_ready = tmp_path / "descendant-ready"
+    parent_ready = tmp_path / "parent-relayed-ready"
+    smoke_input = prepared / "models" / "reconstructed-replication" / "smoke.inp"
+    smoke_input.write_text(
+        "(\n"
+        "  trap '' TERM\n"
+        f"  : > {shlex.quote(str(child_ready))}\n"
+        "  sleep 1.2\n"
+        f"  printf survived > {shlex.quote(str(marker))}\n"
+        ") &\n"
+        f"while [ ! -e {shlex.quote(str(child_ready))} ]; do :; done\n"
+        f": > {shlex.quote(str(parent_ready))}\n"
+        "printf 'started descendant\\n'\n"
+        "sleep 10\n",
+        encoding="utf-8",
     )
-    fake = _fake_executable(
-        tmp_path / "timeout-cp2k",
-        "import subprocess, sys, time\n"
-        f"subprocess.Popen([sys.executable, '-c', {child_code!r}])\n"
-        "print('started descendant', flush=True)\n"
-        "time.sleep(10)\n",
-    )
+    e3b.write_manifest(prepared)
     runtime = tmp_path / "timeout-runtime"
     receipt = e3b.run_smoke(
-        executable=str(fake),
+        executable="/bin/sh",
         executable_identity="test/fake",
         prepared_root=prepared,
         model="reconstructed-replication",
         runtime_dir=runtime,
         receipt_path=runtime / "smoke-result.json",
         timeout_seconds=0.1,
+        timeout_ready_file=parent_ready,
     )
     assert receipt["status"] == "incomplete-timeout"
+    assert child_ready.exists()
+    assert parent_ready.exists()
     cleanup = receipt["cleanup"]["internal_process_group"]
     assert cleanup["timeout_term_sent"] is True
     assert cleanup["timeout_kill_sent"] is True
