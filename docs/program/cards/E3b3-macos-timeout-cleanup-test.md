@@ -1,6 +1,6 @@
 # E3b3-macos-timeout-cleanup-test — synchronize descendant cleanup fixture
 
-- status: ready
+- status: done
 - track: E (muscovite / the perfect circle)
 - priority: P2
 - machine: any (synthetic test only)
@@ -42,3 +42,22 @@ child, and leaves no delayed marker.
   can receive SIGTERM before it installs `SIG_IGN`, so the receipt truthfully
   reports that SIGKILL escalation was unnecessary. E3b2's required classical
   receipt suite remains green 9/9.
+
+- 2026-09-14 19:56 PDT — `(hermes-macbot-zero; profile=laptop)` — DONE. Reproduced
+  the original macOS race, then made readiness causal: the shell descendant
+  installs its SIGTERM-ignore trap before signaling, the shell parent relays
+  readiness, and a fail-closed test-only gate starts the unchanged 0.1-second
+  cleanup timeout only after that relay. One cold review caught that merely
+  speeding up the fixture still left the outer timeout race; this gate is
+  rejected for every non-fixture executable identity, so production smoke
+  behavior is unchanged.
+
+## Result
+
+- The macOS focused timeout test passes 20/20 repeated runs while retaining
+  `timeout_term_sent`, `timeout_kill_sent`, direct-child reaping, and delayed-
+  marker assertions.
+- `tests/test_e3b_periodic_dft.py`: 30/30 passed.
+- Focused Ruff passed with baseline-only `C409`/`TRY004` findings ignored;
+  Ruff format, Python compile, and `git diff --check` passed. Linux execution
+  is covered by the repository PR CI gate.

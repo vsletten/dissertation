@@ -4,6 +4,8 @@
 appended by the PR that did it: `date — actor — what + pointer`.
 *Deviations get a `DEVIATION:` note; details live in the card.*
 
+- 2026-09-14 19:56 PDT — (hermes-macbot-zero; profile=laptop) — E3b3 DONE: the synthetic descendant installs its SIGTERM-ignore trap before signaling readiness, its parent relays that state, and the test-only readiness gate starts the unchanged 0.1-second timeout only afterward. The original macOS `timeout_kill_sent=False` race reproduces before the fix; afterward the focused cleanup contract passes 20/20, the E3b file passes 30/30, and production smoke behavior remains unchanged.
+
 - 2026-09-14 17:57 PDT — (hermes-macbot-zero; profile=laptop) — E3b2 DONE: classical frozen-path receipt schema v2 binds the exact executing Python runner bytes to a full Git revision and records explicit invocation/operator inputs. The source verifier fails closed on missing revisions, committed-byte drift, receipt hash tampering, and revision tampering; the required focused suite passes 9/9 plus Ruff, format, compile, and diff checks. Historical E3b numbers and `disagrees` verdicts are unchanged. An optional expanded E3 run found origin/main's macOS descendant-readiness race at 44/45; E3b3 is READY with the synchronization fix scoped under POLICY §13.
 
 - 2026-09-14 16:40 PDT — (hermes-custom-build-001; profile=workstation) — E3b REVIEW FIX: its one cold review found two fail-closed runner defects and the missing E4 decision fragment. Thermo parsing is now header-bound, atom-map identity is recomputed, all 24 classical images replayed with unchanged numbers, and the fragment records which value E4 uses and why. Non-blocking source-attestation hardening is READY as E3b2; comparison receipt v2 proves the shipped numbers and verdicts.
