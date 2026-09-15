@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import stat
+import subprocess
 import sys
 from pathlib import Path
 
@@ -114,6 +115,15 @@ def _fake_lammps(path: Path) -> Path:
 
 def _args(tmp_path: Path, prepared: Path, lammps: Path) -> argparse.Namespace:
     runtime = tmp_path / "runtime"
+    repo = SCRIPTS.parent
+    runner = SCRIPTS / "e3b_classical_frozen_path.py"
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     return argparse.Namespace(
         prepared_root=prepared,
         runtime_root=runtime,
@@ -121,6 +131,11 @@ def _args(tmp_path: Path, prepared: Path, lammps: Path) -> argparse.Namespace:
         model=MODEL,
         lammps=str(lammps),
         per_image_timeout=5.0,
+        repo_root=repo,
+        runner=runner,
+        git_revision=revision,
+        operator="synthetic-test",
+        invocation_id="pytest-e3b2",
     )
 
 
@@ -208,6 +223,41 @@ def test_profile_receipt_emits_like_for_like_classical_rise(tmp_path: Path) -> N
     )
     assert e3b.sha256(prepared / "manifest.json") == manifest_before
     assert (tmp_path / "runtime" / "receipt.json").is_file()
+
+
+def test_profile_receipt_binds_explicit_source_and_invocation(tmp_path: Path) -> None:
+    prepared = _prepared(tmp_path)
+    args = _args(tmp_path, prepared, _fake_lammps(tmp_path / "lmp"))
+    receipt = classical.run_profile(args)
+
+    assert receipt["schema"] == "e3b-classical-frozen-path-profile-v2"
+    assert receipt["source"] == {
+        "git_revision": args.git_revision,
+        "runner_path": "scripts/e3b_classical_frozen_path.py",
+        "runner_sha256": e3b.sha256(args.runner),
+    }
+    assert receipt["invocation"] == {
+        "id": "pytest-e3b2",
+        "operator": "synthetic-test",
+    }
+    assert classical.verify_receipt_source(receipt, args.repo_root) == receipt["source"]
+
+
+def test_receipt_source_verifier_rejects_hash_and_revision_tampering(
+    tmp_path: Path,
+) -> None:
+    prepared = _prepared(tmp_path)
+    args = _args(tmp_path, prepared, _fake_lammps(tmp_path / "lmp"))
+    receipt = classical.run_profile(args)
+
+    receipt["source"]["runner_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="runner hash"):
+        classical.verify_receipt_source(receipt, args.repo_root)
+
+    receipt["source"]["runner_sha256"] = e3b.sha256(args.runner)
+    receipt["source"]["git_revision"] = "f" * 40
+    with pytest.raises(ValueError, match="revision"):
+        classical.verify_receipt_source(receipt, args.repo_root)
 
 
 def test_failed_image_emits_no_numeric_profile(

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import math
 import os
@@ -47,6 +48,69 @@ def _file_record(path: pathlib.Path, root: pathlib.Path) -> dict[str, Any]:
         "bytes": resolved.stat().st_size,
         "sha256": e3b.sha256(resolved),
     }
+
+
+def _source_identity(
+    repo_root: pathlib.Path, runner: pathlib.Path, revision: str
+) -> dict[str, str]:
+    repo = repo_root.resolve()
+    runner = runner.resolve()
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError("git revision must be an exact 40-character lowercase SHA")
+    try:
+        runner_path = runner.relative_to(repo)
+    except ValueError as exc:
+        raise ValueError("runner must be inside the repository root") from exc
+    if not runner.is_file():
+        raise ValueError("runner source file does not exist")
+    try:
+        resolved_revision = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--verify", f"{revision}^{{commit}}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        committed_runner = subprocess.run(
+            ["git", "-C", str(repo), "show", f"{revision}:{runner_path.as_posix()}"],
+            check=True,
+            capture_output=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ValueError(
+            "git revision or committed runner identity is unavailable"
+        ) from exc
+    if resolved_revision != revision:
+        raise ValueError("git revision did not resolve exactly")
+    runner_sha256 = e3b.sha256(runner)
+    if hashlib.sha256(committed_runner).hexdigest() != runner_sha256:
+        raise ValueError("runner hash does not match the claimed git revision")
+    return {
+        "git_revision": revision,
+        "runner_path": runner_path.as_posix(),
+        "runner_sha256": runner_sha256,
+    }
+
+
+def verify_receipt_source(
+    receipt: dict[str, Any], repo_root: pathlib.Path
+) -> dict[str, str]:
+    """Verify a receipt's runner bytes against its exact committed revision."""
+    source = receipt.get("source")
+    if not isinstance(source, dict):
+        raise TypeError("receipt source identity is missing")
+    revision = source.get("git_revision")
+    runner_path = source.get("runner_path")
+    runner_sha256 = source.get("runner_sha256")
+    if not (
+        isinstance(revision, str)
+        and isinstance(runner_path, str)
+        and isinstance(runner_sha256, str)
+    ):
+        raise TypeError("receipt source identity is malformed")
+    verified = _source_identity(repo_root, repo_root.resolve() / runner_path, revision)
+    if verified["runner_sha256"] != runner_sha256:
+        raise ValueError("receipt runner hash does not match source identity")
+    return verified
 
 
 def parse_xyz(
@@ -205,6 +269,11 @@ def run_profile(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("per-image timeout must be in (0, 300] seconds")
     if args.model not in MODELS:
         raise ValueError(f"unsupported model: {args.model}")
+    if not args.operator.strip() or not args.invocation_id.strip():
+        raise ValueError("operator and invocation id must be explicit non-empty inputs")
+    if args.runner.resolve() != pathlib.Path(__file__).resolve():
+        raise ValueError("runner input must identify this executing Python runner")
+    source = _source_identity(args.repo_root, args.runner, args.git_revision)
 
     e3b.verify_manifest(prepared)
     preparation = e3b.read_json(prepared / "preparation.json")
@@ -344,8 +413,12 @@ def run_profile(args: argparse.Namespace) -> dict[str, Any]:
         if path.is_file() and path.resolve() != receipt_path
     ]
     receipt = {
-        "schema": "e3b-classical-frozen-path-profile-v1",
-        "operator": "(hermes-custom-build-001; profile=workstation)",
+        "schema": "e3b-classical-frozen-path-profile-v2",
+        "source": source,
+        "invocation": {
+            "id": args.invocation_id,
+            "operator": args.operator,
+        },
         "purpose": (
             "matched-cell LAMMPS energies on the immutable PBE-D3 survey path; "
             "not endpoint relaxation, classical NEB, or a production barrier"
@@ -405,6 +478,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", choices=MODELS, required=True)
     parser.add_argument("--lammps", default="lmp")
     parser.add_argument("--per-image-timeout", type=float, default=120.0)
+    parser.add_argument("--repo-root", type=pathlib.Path, required=True)
+    parser.add_argument("--runner", type=pathlib.Path, required=True)
+    parser.add_argument("--git-revision", required=True)
+    parser.add_argument("--operator", required=True)
+    parser.add_argument("--invocation-id", required=True)
     return parser
 
 
