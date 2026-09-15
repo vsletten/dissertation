@@ -259,6 +259,13 @@ def test_receipt_source_verifier_rejects_hash_and_revision_tampering(
     with pytest.raises(ValueError, match="revision"):
         classical.verify_receipt_source(receipt, args.repo_root)
 
+    receipt["source"]["git_revision"] = args.git_revision
+    other = args.repo_root / "docs/program/PLAN.md"
+    receipt["source"]["runner_path"] = "docs/program/PLAN.md"
+    receipt["source"]["runner_sha256"] = e3b.sha256(other)
+    with pytest.raises(ValueError, match="runner path"):
+        classical.verify_receipt_source(receipt, args.repo_root)
+
 
 def test_failed_image_emits_no_numeric_profile(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

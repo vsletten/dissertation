@@ -107,6 +107,10 @@ def verify_receipt_source(
         and isinstance(runner_sha256, str)
     ):
         raise TypeError("receipt source identity is malformed")
+    if runner_path != "scripts/e3b_classical_frozen_path.py":
+        raise ValueError(
+            "receipt runner path does not match classical frozen-path runner"
+        )
     verified = _source_identity(repo_root, repo_root.resolve() / runner_path, revision)
     if verified["runner_sha256"] != runner_sha256:
         raise ValueError("receipt runner hash does not match source identity")
