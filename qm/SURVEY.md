@@ -375,6 +375,16 @@ could never afford this layer; we get it for free, and it converts "which
 functional do we trust for Si–O–Al?" from a literature argument into a
 half-day calculation.
 
+**Addendum 2026-09-17 — Skala as a survey-tier candidate.** Microsoft
+Research's neural XC functional (Skala-1.1: meta-GGA cost, GMTKN55
+WTMAD-2 2.8 kcal/mol, MIT) ships a native `SkalaKS` for PySCF/GPU4PySCF
+1.8.1 and resolves against quarry's pinned stack with torch as the only
+new dependency. Because A2a banked a gas-phase CC focal barrier for
+si-neutral, one bounded set of single points ranks it against r²SCAN-3c
+and B3LYP under POLICY §12 without any new CC — card
+`A2e-skala-functional-spike`; rationale and the wider MSR scan in
+`docs/scoping/msr-ai4science-scan.md`. Outcome to be recorded here.
+
 ---
 
 ## 7. The domain literature since the dissertation
