@@ -668,6 +668,12 @@ def verify(args: argparse.Namespace) -> int:
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
     root.add_argument("--source-root", type=Path, default=SOURCE_ROOT)
+    # Accepted here because bootstrap_cli pre-parses and enforces them before
+    # heavy imports; the full parser must still consume the same argv.
+    root.add_argument("--threads", type=int, default=16)
+    root.add_argument("--nice", type=int, default=10)
+    root.add_argument("--log")
+    root.add_argument("--gpu-mem-gb", type=float, default=16.0)
     subparsers = root.add_subparsers(dest="command", required=True)
     run_parser = subparsers.add_parser("run")
     run_parser.add_argument("--run-dir", type=Path, required=True)
