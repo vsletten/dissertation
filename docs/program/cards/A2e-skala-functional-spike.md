@@ -1,12 +1,12 @@
 # A2e-skala-functional-spike — Skala-1.1 single points vs the banked si-neutral CC focal barrier
 
-- status: ready
+- status: done
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU single points; expected minutes, capped at the §12 4 h)
 - depends: A2a-si-neutral-production-path-rebuild ✅ (banked structures + CC receipt)
 - blocked-on: —
-- claimed-by:
+- claimed-by: hermes-custom-build-001
 
 ## Objective
 
@@ -111,8 +111,8 @@ language.
 6. **Closeout.** Results doc `docs/program/results/A2e-skala-functional-spike.md`
    with hash-bound receipts (`results.json`, new `store.sqlite`, teed log);
    this card `done` with a `## Result`; STATUS line; PLAN row; add a Skala
-   column/note to A2's Context (A2 stays blocked on Victor — this card
-   neither closes nor unblocks it); one sentence in `qm/SURVEY.md` §6.4
+   column/note to A2's Context (A2 stays blocked on its current named gate —
+   this card neither closes nor unblocks it); one sentence in `qm/SURVEY.md` §6.4
    recording the outcome.
 
 ## Acceptance
@@ -151,3 +151,28 @@ language.
   scan (`docs/scoping/msr-ai4science-scan.md`); Victor authorized the spike
   2026-09-17. Environment resolution verified by dry-run only; A2a receipts
   rehashed equal; no compute run.
+
+- 2026-09-18 00:42 PDT — (hermes-custom-build-001; profile=workstation) —
+  completed the exact 4 × 4 GPU matrix with 16/16 converged single points,
+  immutable A2a source hashes equal before/after, and a replay-verifiable
+  manifest. Both uncorrected Skala rows miss the focal barrier by more than
+  8.4 kJ/mol, so the pre-declared verdict is reject for this route.
+- 2026-09-18 00:53 PDT — (hermes-custom-build-001; profile=workstation) —
+  the one cold adversarial review independently reproduced all numbers and the
+  rejection verdict, then found a fail-open cross-artifact verifier path. The
+  final verifier now requires exact receipt/result/store agreement; its tamper
+  regression, full `935 passed` suite, whole-QM Ruff/format, compileall, and
+  live artifact verification are green.
+
+## Result
+
+2026-09-18 00:42 PDT — (hermes-custom-build-001; profile=workstation) —
+Skala-1.1 gives gas-phase electronic barriers of `143.632106 kJ/mol`
+(`def2-TZVP`) and `145.076794 kJ/mol` (`def2-TZVPD`) versus the banked
+`132.960133 kJ/mol` focal point: errors `10.671973` and `12.116661 kJ/mol`,
+both beyond the rejection boundary. A separately labelled, non-parameterized
+r²SCAN-damped D4 sensitivity gives `143.148973 kJ/mol`; gas-phase
+ωB97M-V/def2-TZVPD gives `125.214239 kJ/mol` as a comparator only. One route
+is not general validation. Evidence, hashes, table, caveats, and verification:
+`docs/program/results/A2e-skala-functional-spike.md`. The 16-job sum was
+`1073.573485 s`; no geometry, frequency, solvent, or coupled-cluster work ran.

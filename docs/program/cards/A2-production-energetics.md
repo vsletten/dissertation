@@ -32,6 +32,13 @@ stationary-point directory is no longer present and no hash-pinned external
 archive was found on 2026-09-05. A9 now decides whether any published-family
 replication is worth a separate bounded survey-tier card.
 
+A2e's exact-geometry Skala-1.1 spike is now banked as negative method evidence:
+gas-phase electronic barriers are `143.632106 kJ/mol` at def2-TZVP and
+`145.076794 kJ/mol` at def2-TZVPD versus the `132.960133 kJ/mol` focal point.
+Both exceed A2e's pre-declared `8.4 kJ/mol` rejection boundary. This one-route
+result neither validates Skala generally nor unblocks A2's current A9b gate;
+see `../results/A2e-skala-functional-spike.md`.
+
 ## Acceptance
 - A9 is done and its ranked sensitivity verdict is cited.
 - The final table uses only provenance-backed survey-tier calculations or
