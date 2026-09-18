@@ -14,6 +14,7 @@ import json
 import math
 import os
 import platform
+import shutil
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -373,15 +374,22 @@ def derive_rows(jobs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             "failed_roles": [job["role"] for job in failures],
         }
         if row["status"] == "complete":
-            reference = float(by_role["reactant"]["energy_hartree"])
+            reference = float(by_role["reactant"]["electronic_hartree"])
             row["delta_kj_mol"] = {
-                role: (float(record["energy_hartree"]) - reference) * HARTREE_TO_KJ
+                role: (float(record["electronic_hartree"]) - reference) * HARTREE_TO_KJ
                 for role, record in by_role.items()
                 if role != "reactant"
             }
             barrier = row["delta_kj_mol"]["addition-transition-state"]
             row["barrier_kj_mol"] = barrier
-            row["comparison_to_focal"] = classify_verdict(barrier)
+            if method["family"] == "skala":
+                row["comparison_to_focal"] = classify_verdict(barrier)
+            else:
+                row["comparison_to_focal"] = {
+                    "absolute_error_kj_mol": abs(barrier - FOCAL_BARRIER_KJ_MOL),
+                    "focal_barrier_kj_mol": FOCAL_BARRIER_KJ_MOL,
+                    "verdict": "comparator only; Skala verdict bands do not apply",
+                }
         rows[key] = row
     return rows
 
@@ -502,41 +510,29 @@ def _record_job(
     return receipt
 
 
-def run(args: argparse.Namespace) -> int:
-    run_dir = args.run_dir.resolve()
-    run_dir.mkdir(parents=True, exist_ok=False)
-    source_store = args.source_root.resolve() / "store.sqlite"
-    source_before = sha256_path(source_store)
-    structures = load_source_structures(source_store)
-    versions = package_versions()
-    jobs: list[dict[str, Any]] = []
-    store_path = run_dir / "store.sqlite"
-    receipt_dir = run_dir / "receipts"
-    with Store(store_path) as store:
-        structure_ids = {
-            structure.role: store.add_structure(
-                structure.name,
-                structure.formula,
-                structure.xyz,
-                charge=structure.charge,
-                spin=structure.spin,
-            )
-            for structure in structures
-        }
-        for method_key, method in METHODS.items():
-            for structure in structures:
-                jobs.append(
-                    _record_job(
-                        store,
-                        structure,
-                        structure_ids[structure.role],
-                        method_key,
-                        method,
-                        use_gpu=args.gpu,
-                        versions=versions,
-                        receipt_dir=receipt_dir,
-                    )
-                )
+def _finalize(
+    run_dir: Path,
+    source_store: Path,
+    jobs: list[dict[str, Any]],
+    *,
+    device: str,
+    versions: dict[str, str],
+    source_before: str,
+    compute_log: Path | None = None,
+) -> int:
+    expected_pairs = {
+        (method_key, role)
+        for method_key in METHODS
+        for role, _name, _digest in EXPECTED_STRUCTURES.values()
+    }
+    observed_pairs = {(str(job["method_key"]), str(job["role"])) for job in jobs}
+    if len(jobs) != 16 or observed_pairs != expected_pairs:
+        raise RuntimeError("job receipt matrix is not the exact 4 x 4 contract")
+    for job in jobs:
+        receipt_path = Path(str(job["receipt_path"]))
+        if sha256_path(receipt_path) != job["receipt_sha256"]:
+            raise RuntimeError(f"job receipt hash drift: {receipt_path}")
+
     source_after = sha256_path(source_store)
     if source_before != SOURCE_STORE_SHA256 or source_after != source_before:
         raise RuntimeError("A2a evidence store changed during the spike")
@@ -545,7 +541,7 @@ def run(args: argparse.Namespace) -> int:
         "generated_at": utc_now(),
         "wall_seconds": sum(float(job["wall_seconds"]) for job in jobs),
         "execution": {
-            "device": "cuda:0" if args.gpu else "cpu",
+            "device": device,
             "hostname": platform.node(),
             "python": platform.python_version(),
             "thread_environment": {
@@ -582,8 +578,9 @@ def run(args: argparse.Namespace) -> int:
         },
     }
     results_path = run_dir / "results.json"
+    store_path = run_dir / "store.sqlite"
     atomic_json(results_path, results)
-    manifest = {
+    manifest: dict[str, Any] = {
         "schema": "a2e-skala-artifact-manifest-v1",
         "generated_at": utc_now(),
         "results_json": {
@@ -601,11 +598,91 @@ def run(args: argparse.Namespace) -> int:
         "source_store_sha256_before": source_before,
         "source_store_sha256_after": source_after,
     }
+    if compute_log is not None:
+        if not compute_log.is_file():
+            raise RuntimeError(f"compute log is missing: {compute_log}")
+        archived_log = run_dir / "run.log"
+        if compute_log.resolve() != archived_log.resolve():
+            shutil.copyfile(compute_log, archived_log)
+        manifest["run_log"] = {
+            "path": str(archived_log),
+            "sha256": sha256_path(archived_log),
+        }
     atomic_json(run_dir / "manifest.json", manifest)
     failed = [job for job in jobs if job["status"] != "done"]
     print(f"results: {results_path}", flush=True)
     print(f"completed jobs: {len(jobs) - len(failed)}/{len(jobs)}", flush=True)
     return 0 if not failed else 2
+
+
+def run(args: argparse.Namespace) -> int:
+    run_dir = args.run_dir.resolve()
+    run_dir.mkdir(parents=True, exist_ok=False)
+    source_store = args.source_root.resolve() / "store.sqlite"
+    source_before = sha256_path(source_store)
+    structures = load_source_structures(source_store)
+    versions = package_versions()
+    jobs: list[dict[str, Any]] = []
+    store_path = run_dir / "store.sqlite"
+    receipt_dir = run_dir / "receipts"
+    with Store(store_path) as store:
+        structure_ids = {
+            structure.role: store.add_structure(
+                structure.name,
+                structure.formula,
+                structure.xyz,
+                charge=structure.charge,
+                spin=structure.spin,
+            )
+            for structure in structures
+        }
+        for method_key, method in METHODS.items():
+            for structure in structures:
+                jobs.append(
+                    _record_job(
+                        store,
+                        structure,
+                        structure_ids[structure.role],
+                        method_key,
+                        method,
+                        use_gpu=args.gpu,
+                        versions=versions,
+                        receipt_dir=receipt_dir,
+                    )
+                )
+    return _finalize(
+        run_dir,
+        source_store,
+        jobs,
+        device="cuda:0" if args.gpu else "cpu",
+        versions=versions,
+        source_before=source_before,
+    )
+
+
+def closeout(args: argparse.Namespace) -> int:
+    run_dir = args.run_dir.resolve()
+    receipt_dir = run_dir / "receipts"
+    jobs = []
+    for receipt_path in sorted(receipt_dir.glob("*.json")):
+        receipt = json.loads(receipt_path.read_text())
+        receipt["receipt_path"] = str(receipt_path)
+        receipt["receipt_sha256"] = sha256_path(receipt_path)
+        jobs.append(receipt)
+    if not jobs:
+        raise RuntimeError(f"no job receipts found under {receipt_dir}")
+    versions = dict(jobs[0].get("package_versions", {}))
+    device = str(jobs[0].get("device", "unknown"))
+    source_store = args.source_root.resolve() / "store.sqlite"
+    return _finalize(
+        run_dir,
+        source_store,
+        jobs,
+        device=device,
+        versions=versions,
+        source_before=SOURCE_STORE_SHA256,
+        compute_log=args.compute_log.resolve(),
+    )
 
 
 def verify(args: argparse.Namespace) -> int:
@@ -621,17 +698,64 @@ def verify(args: argparse.Namespace) -> int:
         raise RuntimeError("expected exactly 16 job receipts")
     if set(payload.get("rows", {})) != set(METHODS):
         raise RuntimeError("method row set drift")
+    receipt_hashes: dict[str, str] = {}
     for job in payload["jobs"]:
         receipt_path = Path(str(job["receipt_path"]))
-        if sha256_path(receipt_path) != job["receipt_sha256"]:
+        receipt_sha256 = sha256_path(receipt_path)
+        if receipt_sha256 != job["receipt_sha256"]:
             raise RuntimeError(f"receipt hash drift: {receipt_path}")
+        receipt = json.loads(receipt_path.read_text())
+        expected_job = {
+            **receipt,
+            "receipt_path": str(receipt_path),
+            "receipt_sha256": receipt_sha256,
+        }
+        if job != expected_job:
+            raise RuntimeError(f"results/receipt disagreement: {receipt_path}")
+        receipt_hashes[receipt_path.name] = receipt_sha256
+    expected_pairs = {
+        (method_key, role)
+        for method_key in METHODS
+        for role, _name, _digest in EXPECTED_STRUCTURES.values()
+    }
+    observed_pairs = [
+        (str(job["method_key"]), str(job["role"])) for job in payload["jobs"]
+    ]
+    observed_job_ids = [int(job["job_id"]) for job in payload["jobs"]]
+    if set(observed_pairs) != expected_pairs or len(set(observed_pairs)) != 16:
+        raise RuntimeError("results job matrix is not the exact 4 x 4 contract")
+    if len(set(observed_job_ids)) != 16:
+        raise RuntimeError("results job IDs are not unique")
+    if manifest.get("receipt_count") != 16:
+        raise RuntimeError("manifest receipt count drift")
+    if manifest.get("receipt_hashes") != receipt_hashes:
+        raise RuntimeError("manifest receipt hash map drift")
     if manifest["results_json"]["sha256"] != sha256_path(results_path):
         raise RuntimeError("results.json hash drift")
     if manifest["store_sqlite"]["sha256"] != sha256_path(store_path):
         raise RuntimeError("store.sqlite hash drift")
-    if sha256_path(args.source_root.resolve() / "store.sqlite") != SOURCE_STORE_SHA256:
+    run_log = manifest.get("run_log")
+    if run_log is not None and run_log.get("sha256") != sha256_path(
+        Path(str(run_log.get("path", "")))
+    ):
+        raise RuntimeError("run.log hash drift")
+    source_store = args.source_root.resolve() / "store.sqlite"
+    if sha256_path(source_store) != SOURCE_STORE_SHA256:
         raise RuntimeError("A2a source store drift after run")
+    if payload.get("source") != {
+        "store_path": str(source_store),
+        "store_sha256_before": SOURCE_STORE_SHA256,
+        "store_sha256_after": SOURCE_STORE_SHA256,
+        "immutable_sqlite_uri": True,
+    }:
+        raise RuntimeError("results source provenance drift")
+    if (
+        manifest.get("source_store_sha256_before") != SOURCE_STORE_SHA256
+        or manifest.get("source_store_sha256_after") != SOURCE_STORE_SHA256
+    ):
+        raise RuntimeError("manifest source provenance drift")
     connection = sqlite3.connect(f"{store_path.as_uri()}?mode=ro&immutable=1", uri=True)
+    connection.row_factory = sqlite3.Row
     try:
         structure_count = connection.execute(
             "SELECT COUNT(*) FROM structures"
@@ -641,10 +765,66 @@ def verify(args: argparse.Namespace) -> int:
             "SELECT COUNT(*) FROM jobs WHERE status = 'done'"
         ).fetchone()[0]
         result_count = connection.execute("SELECT COUNT(*) FROM results").fetchone()[0]
+        store_jobs = {
+            int(row["id"]): row
+            for row in connection.execute(
+                "SELECT j.id, j.kind, j.method, j.engine, j.status, j.detail, "
+                "s.geometry_hash FROM jobs j "
+                "JOIN structures s ON s.id = j.structure_id"
+            )
+        }
+        store_results: dict[int, dict[str, tuple[float, str]]] = {}
+        for row in connection.execute(
+            "SELECT job_id, key, value, units FROM results ORDER BY job_id, key"
+        ):
+            store_results.setdefault(int(row["job_id"]), {})[str(row["key"])] = (
+                float(row["value"]),
+                str(row["units"]),
+            )
     finally:
         connection.close()
     if structure_count != 4 or job_count != 16:
         raise RuntimeError("store row counts drift")
+    if set(store_jobs) != set(observed_job_ids):
+        raise RuntimeError("store job ID set drift")
+    if done_count != sum(job["status"] == "done" for job in payload["jobs"]):
+        raise RuntimeError("store done-job count drift")
+    expected_result_count = 0
+    for job in payload["jobs"]:
+        job_id = int(job["job_id"])
+        store_job = store_jobs.get(job_id)
+        if store_job is None:
+            raise RuntimeError(f"store job missing: {job_id}")
+        detail = json.loads(str(store_job["detail"]))
+        if (
+            store_job["kind"] != "sp"
+            or store_job["method"] != job["method"]
+            or store_job["status"] != job["status"]
+            or store_job["geometry_hash"] != job["geometry_hash"]
+            or detail.get("geometry_hash") != job["geometry_hash"]
+            or detail.get("receipt_sha256") != job["receipt_sha256"]
+        ):
+            raise RuntimeError(f"store/receipt job disagreement: {job_id}")
+        expected_results: dict[str, tuple[float, str]] = {}
+        if job["status"] == "done":
+            expected_results = {
+                "energy": (float(job["electronic_hartree"]), "hartree"),
+                "scf_energy": (float(job["scf_hartree"]), "hartree"),
+                "dispersion": (float(job["dispersion_hartree"]), "hartree"),
+                "scf_converged": (1.0, "boolean"),
+                "wall_time": (float(job["wall_seconds"]), "seconds"),
+            }
+            if job.get("cycles") is not None:
+                expected_results["scf_cycles"] = (float(job["cycles"]), "count")
+        if store_results.get(job_id, {}) != expected_results:
+            raise RuntimeError(f"store/result disagreement: {job_id}")
+        expected_result_count += len(expected_results)
+    if result_count != expected_result_count:
+        raise RuntimeError("store result count drift")
+    if payload.get("wall_seconds") != sum(
+        float(job["wall_seconds"]) for job in payload["jobs"]
+    ):
+        raise RuntimeError("summed wall time drift")
     recomputed = derive_rows(payload["jobs"])
     if recomputed != payload["rows"]:
         raise RuntimeError("derived comparison rows drift")
@@ -679,6 +859,10 @@ def parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--run-dir", type=Path, required=True)
     run_parser.add_argument("--gpu", action="store_true")
     run_parser.set_defaults(handler=run)
+    closeout_parser = subparsers.add_parser("closeout")
+    closeout_parser.add_argument("--run-dir", type=Path, required=True)
+    closeout_parser.add_argument("--compute-log", type=Path, required=True)
+    closeout_parser.set_defaults(handler=closeout)
     verify_parser = subparsers.add_parser("verify")
     verify_parser.add_argument("--run-dir", type=Path, required=True)
     verify_parser.set_defaults(handler=verify)

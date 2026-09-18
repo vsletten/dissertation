@@ -383,7 +383,11 @@ new dependency. Because A2a banked a gas-phase CC focal barrier for
 si-neutral, one bounded set of single points ranks it against r²SCAN-3c
 and B3LYP under POLICY §12 without any new CC — card
 `A2e-skala-functional-spike`; rationale and the wider MSR scan in
-`docs/scoping/msr-ai4science-scan.md`. Outcome to be recorded here.
+`docs/scoping/msr-ai4science-scan.md`. The exact-geometry spike converged all
+16 single points but put Skala-1.1/def2-TZVP and /def2-TZVPD at 143.632106 and
+145.076794 kJ/mol versus the 132.960133 kJ/mol focal point; both cross the
+pre-declared 8.4 kJ/mol rejection boundary for this route. This one reaction is
+not a general validation; see `docs/program/results/A2e-skala-functional-spike.md`.
 
 ---
 

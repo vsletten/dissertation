@@ -67,7 +67,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A2b1-wb97mv-reactant-scf-recovery](cards/A2b1-wb97mv-reactant-scf-recovery.md) | A | P1 | workstation | done | independently verified finite SCF failure; no retry authorized |
 | [A2c-al-acid-production-energetics](cards/A2c-al-acid-production-energetics.md) | A | P1 | workstation | blocked: A2b | A1b banked one-water Al-acid route |
 | [A2d-oss-neutral-n4-production-energetics](cards/A2d-oss-neutral-n4-production-energetics.md) | A | P1 | workstation | blocked: A2c | documented embedded pilot; deterministic rebuild |
-| [A2e-skala-functional-spike](cards/A2e-skala-functional-spike.md) | A | P1 | workstation | ready | A2a ✅; bounded Skala-1.1 single points vs the banked si-neutral CC focal barrier (Victor 2026-09-17); minutes of GPU, §12-bounded |
+| [A2e-skala-functional-spike](cards/A2e-skala-functional-spike.md) | A | P1 | workstation | done | 16/16 converged; Skala barriers 143.632/145.077 vs 132.960 kJ/mol focal — reject for this route |
 | [B3-conformance-decks](cards/B3-conformance-decks.md) | B | P1 | any | done | B2 ✅ |
 | [B4-ensembles-observables](cards/B4-ensembles-observables.md) | B | P1 | any | done | B2 ✅ |
 | [B5-execution-schedule](cards/B5-execution-schedule.md) | B | P1 | any | done | B2 ✅ |

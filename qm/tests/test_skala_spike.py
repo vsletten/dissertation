@@ -1,5 +1,6 @@
 import hashlib
 import json
+from argparse import Namespace
 
 import pytest
 
@@ -73,21 +74,26 @@ def test_derive_rows_recomputes_barrier_and_predeclared_verdict():
                     "method_key": method_key,
                     "role": role,
                     "status": "done",
-                    "energy_hartree": energy,
+                    "electronic_hartree": energy,
                 }
             )
 
     rows = spike.derive_rows(jobs)
 
     assert set(rows) == set(spike.METHODS)
-    for row in rows.values():
+    for key, row in rows.items():
         assert row["status"] == "complete"
         assert row["barrier_kj_mol"] == pytest.approx(
             spike.FOCAL_BARRIER_KJ_MOL, abs=1e-10
         )
-        assert row["comparison_to_focal"]["verdict"] == (
-            "adopt as a survey-tier single-point functional candidate"
-        )
+        if spike.METHODS[key]["family"] == "skala":
+            assert row["comparison_to_focal"]["verdict"] == (
+                "adopt as a survey-tier single-point functional candidate"
+            )
+        else:
+            assert row["comparison_to_focal"]["verdict"] == (
+                "comparator only; Skala verdict bands do not apply"
+            )
 
 
 def test_derive_rows_keeps_failures_honest():
@@ -139,3 +145,52 @@ def test_skala_cpu_tiny_molecule_runs_without_implicit_dispersion():
     assert settings["density_fit"] is False
     assert settings["dftd3"] is False
     assert settings["grid"] == "SkalaKS default"
+
+
+def test_verify_refuses_results_job_that_disagrees_with_receipt(monkeypatch, tmp_path):
+    run_dir = tmp_path / "run"
+    receipt_dir = run_dir / "receipts"
+    receipt_dir.mkdir(parents=True)
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    source_store = source_root / "store.sqlite"
+    source_store.write_bytes(b"source")
+    monkeypatch.setattr(spike, "SOURCE_STORE_SHA256", spike.sha256_path(source_store))
+
+    receipt = {
+        "schema": "a2e-skala-single-point-v1",
+        "job_id": 1,
+        "method_key": "skala-1.1-def2-tzvp",
+        "method": spike.METHODS["skala-1.1-def2-tzvp"]["method"],
+        "role": "reactant",
+        "status": "done",
+        "wall_seconds": 1.0,
+    }
+    receipt_path = receipt_dir / "one.json"
+    spike.atomic_json(receipt_path, receipt)
+    receipt_sha = spike.sha256_path(receipt_path)
+    result_job = {
+        **receipt,
+        "status": "failed",
+        "receipt_path": str(receipt_path),
+        "receipt_sha256": receipt_sha,
+    }
+    spike.atomic_json(
+        run_dir / "results.json",
+        {
+            "schema": "a2e-skala-functional-spike-v1",
+            "jobs": [result_job] * 16,
+            "rows": {key: {} for key in spike.METHODS},
+        },
+    )
+    (run_dir / "store.sqlite").write_bytes(b"store")
+    spike.atomic_json(
+        run_dir / "manifest.json",
+        {
+            "results_json": {"sha256": spike.sha256_path(run_dir / "results.json")},
+            "store_sqlite": {"sha256": spike.sha256_path(run_dir / "store.sqlite")},
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="results/receipt disagreement"):
+        spike.verify(Namespace(run_dir=run_dir, source_root=source_root))
