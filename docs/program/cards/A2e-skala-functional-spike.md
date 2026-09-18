@@ -62,8 +62,9 @@ language.
 - API: `from skala.gpu4pyscf import SkalaKS; ks = SkalaKS(mol, xc="skala-1.1");
   ks.kernel()`; CPU path `from skala.pyscf import SkalaKS`.
 - Run discipline: `.claude/skills/quarry-campaign/SKILL.md`, the QI2 GPU
-  lease, `qm/quarry/etiquette.py`, `qm/quarry/store.py` (new store, same
-  schema), fleet `POLICY.md` §12.
+  lease, `qm/quarry/etiquette.py`, `qm/quarry/store.py` (`Store` only for
+  the new writable quarry store, same schema; never against A2a), fleet
+  `POLICY.md` §12.
 
 ## Execution
 
@@ -73,9 +74,16 @@ language.
    python -c "import skala, torch, gpu4pyscf"` from `qm/`. Commit the lock.
    Do not change base dependencies; do not add torch to `dev`.
 2. **Provenance in.** Rehash the A2a `store.sqlite` and refuse to proceed if
-   it differs from the SHA-256 above. Load structures 1–4 by id and verify
-   each `geometry_hash` matches the list above. Open the A2a store
-   read-only; write nothing to it.
+   it differs from the SHA-256 above. Open that file only as a SQLite URI
+   with `mode=ro&immutable=1` (same pattern as
+   `qm/quarry/calc005_store.py`:
+   `sqlite3.connect(f"{path.as_uri()}?mode=ro&immutable=1", uri=True)`).
+   Do **not** construct `Store(a2a_path)` from `qm/quarry/store.py` against
+   A2a: `Store.__init__` opens a writable connection and runs the schema
+   script, which can alter the evidence store before the hash-after check.
+   Load structures 1–4 by `SELECT` on that read-only connection and verify
+   each `geometry_hash` matches the list above. Write jobs/results only to
+   the **new** quarry store from step 3.
 3. **Single points** (GPU-first; each structure × each method is one job in
    a **new** quarry store under a new run dir on the data volume; record
    energy in Hartree, SCF converged flag, cycle count, wall time, device,
@@ -133,6 +141,9 @@ language.
   18). Respect them — record, don't work around.
 - Do not hand-enqueue a mission-control pointer; the board feeder
   dispatches READY cards.
+- A2a `store.sqlite` is immutable evidence: open it with
+  `mode=ro&immutable=1`. `Store(path)` is writable and is only for the new
+  spike store.
 
 ## Progress
 
