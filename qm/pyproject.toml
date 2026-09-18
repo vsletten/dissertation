@@ -24,6 +24,11 @@ gpu = [
     # contractions (it warns at import) and leaves speed on the table.
     "cutensor-cu12",
 ]
+# Skala is a bounded workstation-only survey extra. Keep its ~3 GB Torch
+# dependency out of base/dev and CI environments.
+skala = [
+    "skala-cuda12x",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
