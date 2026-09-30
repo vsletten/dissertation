@@ -35,12 +35,16 @@ result as production-quality.
 
 Tooling prerequisite (recorded so the first unit does not fail validation):
 `petra/scripts/approximate_rate_closure.py` currently pins
-`thermo.temperature` to exactly 298.0 K, fixes the A9b campaign materializer
-at 298 K / pH 4, and does not encode pH catalysis. Executing the decided
-350–450 K / pH 3 survey therefore requires a separately scoped, validated
-temperature/pH-capable survey runner and deck contract (per Sourcery review
+`thermo.temperature` to exactly 298.0 K. The pH axis is already
+executable: `petra/scripts/reservoir_origin_contract.py` materializes
+validated pH 3/4/5 A9b decks and applies the P&K H⁺ order (n_H = 0.777,
+anchored at pH 4) to the terminal Si/Al release barriers, so a pH 3 deck
+can be generated and validated today at 298 K. Executing the decided
+350–450 K axis therefore requires a separately scoped, validated
+temperature-capable survey runner and deck contract (per Sourcery review
 of this card, 2026-09-30); the decision itself stands — do not substitute a
-298 K / pH 4 rerun for the decided survey.
+298 K-only rerun for the decided survey, and reuse the existing
+pH-capable reservoir contract rather than rebuilding it.
 
 ## Objective
 Confirm what existing research has already established; copy their setups. A3
