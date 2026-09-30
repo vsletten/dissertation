@@ -55,6 +55,8 @@ scoped published-family replication.
 
 ## Progress
 
+- 2026-09-30 (vsletten via PR #147; mission-control TASK-274, POLICY v19 §15) — RE-BLOCKED on A3-barrier-ladder (was `blocked: victor`): A2b closes on A3's decided 350–450 K / pH 3 regime survey — a re-ranked sensitive family banks the survey value, an insensitive or no-result outcome (A3 closes as a documented no-result within the §12 envelope) closes A2b as not needed at this tier. No allowed A3 terminal branch leaves A2b blocked indefinitely.
+
 - 2026-09-14 06:41 PDT (hermes-custom-build-001; profile=workstation) — BLOCKED ON PROGRAM DECISION: A9b completed all 232 stationary trajectories but observed zero biased original-lattice Si/Al releases, leaving every family response censored/unrankable and identifying no replication target. The accepted 32.2 kcal/mol B3LYP/def2-SVP/DF survey value remains banked, but A2b authorizes no new QM. Recommendation: first find an observable-release regime with the approximate deck at 350–450 K and/or pH 3, then rank sensitivity there; mechanism/deck revision or an accelerated rare-event method are the alternatives. Decision gate: Victor; escalation is the daily omnibus-supervisor digest to Victor's default-profile Telegram home channel, and aging is daily re-surfacing with no default compute until ruled.
 
 - 2026-09-13 20:52 PDT (hermes-macbot-zero; profile=laptop) — A9 closed with no defensible family ranking. A2b remains BLOCKED on `A9b-sensitivity-ranking`, authorizes no new QM, and corrects the banked 32.2 kcal/mol A9 anchor to its actual B3LYP/def2-SVP/DF provenance; older r2SCAN-3c stationary-point receipts remain historical mechanism evidence only.
