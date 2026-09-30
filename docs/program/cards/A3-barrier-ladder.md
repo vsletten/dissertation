@@ -24,11 +24,23 @@ POLICY v16 makes survey-tier and literature-replication values the banked
 numbers for this workstation platform test. The corrected
 `A9b-sensitivity-ranking` completed all 232 trajectories but observed zero
 biased original-lattice Si or Al releases, so all seven family responses are
-censored and it names neither a top-k nor an irrelevant set. A3 is blocked on
-Victor's program-level choice of a regime/method that produces observable
-release; do not infer a target or launch replication from non-observation. Do
+censored and it names neither a top-k nor an irrelevant set. The 2026-09-30
+ruling (mission-control TASK-274, POLICY v19 §15) decided the regime survey:
+run the approximate deck at 350–450 K and at pH 3 (POLICY §12 survey tier,
+≤4 h per unit) to locate observable original-lattice release; re-rank there;
+if no regime releases within the §12 envelope, close A3 as a documented
+no-result. Do not infer a target or launch replication from non-observation. Do
 not add a workstation higher-tier calibration or describe any workstation
 result as production-quality.
+
+Tooling prerequisite (recorded so the first unit does not fail validation):
+`petra/scripts/approximate_rate_closure.py` currently pins
+`thermo.temperature` to exactly 298.0 K, fixes the A9b campaign materializer
+at 298 K / pH 4, and does not encode pH catalysis. Executing the decided
+350–450 K / pH 3 survey therefore requires a separately scoped, validated
+temperature/pH-capable survey runner and deck contract (per Sourcery review
+of this card, 2026-09-30); the decision itself stands — do not substitute a
+298 K / pH 4 rerun for the decided survey.
 
 ## Objective
 Confirm what existing research has already established; copy their setups. A3
@@ -59,9 +71,10 @@ worker must:
      must not hunt a TS to satisfy this gate.
 4. Bank the survey-tier or literature-replication value, with the replication
    delta as its uncertainty. A9b's completed all-censored ranking identifies no
-   family that currently warrants bounded replication; Victor's program-level
-   decision must establish an observable-release regime or replacement method
-   before this step can resume.
+   family that currently warrants bounded replication; the decided 350–450 K /
+   pH 3 regime survey (2026-09-30 ruling, mission-control TASK-274) must
+   locate an observable-release regime, and any re-ranked sensitive family
+   resumed there, before this step can run.
 
 ## Context
 - qm/HANDOFF.md — the complete Phase-2 plan (read first)

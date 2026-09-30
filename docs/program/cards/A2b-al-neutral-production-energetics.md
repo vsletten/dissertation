@@ -21,9 +21,9 @@ Source evidence is immutable at
 `/mnt/data/vsletten/dissertation-data/task168-al-neutral-20260823/`.
 Use the immutable source store/geometry hashes to support the banked survey
 value. A9b's completed all-censored verdict identifies no supported replication
-target; Victor's program-level choice of an observable-release regime or
-replacement method now gates any later, separately scoped published-family
-replication.
+target; the decided 350–450 K / pH 3 regime survey on A3-barrier-ladder
+(2026-09-30 ruling, mission-control TASK-274) now gates any later, separately
+scoped published-family replication.
 
 ## Execution
 
@@ -31,9 +31,9 @@ replication.
    hashes from the accepted evidence.
 2. Record 32.2 kcal/mol as the banked A9 input with survey-tier provenance.
 3. Make no new QM call on this card. The completed `A9b-sensitivity-ranking`
-   ranks no family; a separate replication card is permitted only after Victor
-   chooses a route that produces a supported sensitive-family target within
-   POLICY v16's four-hour-per-unit envelope.
+   ranks no family; a separate replication card is permitted only after
+   A3-barrier-ladder's decided regime survey re-ranks a supported
+   sensitive-family target within POLICY v16's four-hour-per-unit envelope.
 
 ## Constraints
 
@@ -49,8 +49,8 @@ replication.
 - The accepted sequential mechanism remains unchanged and rejected saddles do
   not contribute.
 - A9 consumes the banked value; the completed A9b verdict supplies no supported
-  replication target, so this card remains blocked on Victor's program-level
-  choice.
+  replication target, so this card remains blocked on A3-barrier-ladder's
+  decided regime survey and its re-ranked sensitive-family targets.
 - No new higher-tier energy, SCF retry, or workstation quality claim is made.
 
 ## Progress
