@@ -1,11 +1,11 @@
 # A3-barrier-ladder — connectivity × protonation barrier ladder (Phase 2)
 
-- status: blocked
+- status: ready
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaigns; cluster-builder code is machine-any)
 - depends: A9b-sensitivity-ranking
-- blocked-on: victor
+- decided: 2026-09-30 — run the approximate deck at 350–450 K and at pH 3 (survey tier, ≤4 h per unit) to locate observable original-lattice release, then re-run the A9b sensitivity ranking in the first regime that releases; if none does within the platform envelope, close A3 as a documented no-result (reversible: yes; mission-control TASK-274)
 - claimed-by:
 
 ## Constraints
@@ -24,11 +24,27 @@ POLICY v16 makes survey-tier and literature-replication values the banked
 numbers for this workstation platform test. The corrected
 `A9b-sensitivity-ranking` completed all 232 trajectories but observed zero
 biased original-lattice Si or Al releases, so all seven family responses are
-censored and it names neither a top-k nor an irrelevant set. A3 is blocked on
-Victor's program-level choice of a regime/method that produces observable
-release; do not infer a target or launch replication from non-observation. Do
+censored and it names neither a top-k nor an irrelevant set. The 2026-09-30
+ruling (mission-control TASK-274, POLICY v19 §15) decided the regime survey:
+run the approximate deck at 350–450 K and at pH 3 (POLICY §12 survey tier,
+≤4 h per unit) to locate observable original-lattice release; re-rank there;
+if no regime releases within the §12 envelope, close A3 as a documented
+no-result. Do not infer a target or launch replication from non-observation. Do
 not add a workstation higher-tier calibration or describe any workstation
 result as production-quality.
+
+Tooling prerequisite (recorded so the first unit does not fail validation):
+`petra/scripts/approximate_rate_closure.py` currently pins
+`thermo.temperature` to exactly 298.0 K. The pH axis is already
+executable: `petra/scripts/reservoir_origin_contract.py` materializes
+validated pH 3/4/5 A9b decks and applies the P&K H⁺ order (n_H = 0.777,
+anchored at pH 4) to the terminal Si/Al release barriers, so a pH 3 deck
+can be generated and validated today at 298 K. Executing the decided
+350–450 K axis therefore requires a separately scoped, validated
+temperature-capable survey runner and deck contract (per Sourcery review
+of this card, 2026-09-30); the decision itself stands — do not substitute a
+298 K-only rerun for the decided survey, and reuse the existing
+pH-capable reservoir contract rather than rebuilding it.
 
 ## Objective
 Confirm what existing research has already established; copy their setups. A3
@@ -59,9 +75,10 @@ worker must:
      must not hunt a TS to satisfy this gate.
 4. Bank the survey-tier or literature-replication value, with the replication
    delta as its uncertainty. A9b's completed all-censored ranking identifies no
-   family that currently warrants bounded replication; Victor's program-level
-   decision must establish an observable-release regime or replacement method
-   before this step can resume.
+   family that currently warrants bounded replication; the decided 350–450 K /
+   pH 3 regime survey (2026-09-30 ruling, mission-control TASK-274) must
+   locate an observable-release regime, and any re-ranked sensitive family
+   resumed there, before this step can run.
 
 ## Context
 - qm/HANDOFF.md — the complete Phase-2 plan (read first)
@@ -187,6 +204,9 @@ OSS n=2–4. A3f closed the exact n=1 route; n=2–4 remains prohibited.
 - 2026-09-06 16:00 PDT (hermes-custom-build-001; profile=workstation) — An adversarial review round regression-closed stale approach/product reuse after TS incompatibility, quick-IRC frozen-coordinate drift, reduced lookalike Store schemas and inconsistent electronic barriers, bool/arbitrary-route acceptance, and missing physical all-rung Oaa builder coverage. Its 672-test count was superseded by the newer 16:19 closure. The failed first `uv run pytest` attempt used an uninstalled fresh worktree environment and collected 31 import errors; the required main-venv invocation then passed the complete suite.
 
 ## Progress
+
+- 2026-09-30 (vsletten via PR #147; mission-control TASK-274, POLICY v19 §15) — DECIDED (was blocked on Victor's program-level choice): run the approximate deck at 350–450 K and at pH 3 (POLICY §12 survey tier, ≤4 h per unit) to locate observable original-lattice release, then re-run the A9b sensitivity ranking in the first regime that releases. Tooling prerequisite recorded: the existing deck contract pins `thermo.temperature` to exactly 298.0 K and fixes the A9b materializer at 298 K / pH 4, so the first unit is a separately scoped, validated temperature/pH-capable survey runner and deck contract — not a 298 K / pH 4 rerun. If no regime releases within the §12 envelope, A3 closes as a documented no-result and A2b closes as not needed at this tier.
+
 - 2026-09-14 06:41 PDT (hermes-custom-build-001; profile=workstation) — BLOCKED ON PROGRAM DECISION: merged A9b completed 232/232 stationary 298 K / pH 4 trajectories but observed zero biased original-lattice Si or Al releases. Every family response is `censored_zero_biased_observations`; there is no supported top-k and no family is demonstrated irrelevant, so A3 authorizes no replication or QM. With survey/literature barriers of 27–32 kcal/mol and the current deck, mechanism, and reservoir, the platform cannot answer the sensitivity question in this regime. Recommendation: run the approximate deck at elevated temperature (350–450 K) and/or pH 3 to find an observable-release regime, then rank there; alternatives are a mechanism/deck revision or an accelerated rare-event method. Decision gate: Victor; escalation is the daily omnibus-supervisor digest to Victor's default-profile Telegram home channel, and aging is daily re-surfacing with no default compute until ruled.
 - 2026-09-13 20:52 PDT (hermes-macbot-zero; profile=laptop) — A9 closed with an honest all-censored result that ranks no family. A3 now blocks on `A9b-sensitivity-ranking`; it may not infer "irrelevant" from non-observation or spend a QM slot until that follow-up names a supported target.
 - 2026-09-13 12:10 PDT (hermes-custom-build-001; profile=workstation) — Retired the separately stale `agents/A3j-calc005-si-n1-verification` lock after proving merged board state marks A3j done, GitHub has no PR for that head, and the remote branch existed only at historical SHA `5fbe0952a14d08e881b28e2071ae0ec29863b34b`; deletion was read back as absent.
