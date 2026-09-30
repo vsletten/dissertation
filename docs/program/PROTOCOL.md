@@ -88,7 +88,8 @@ Your PR contains, atomically:
    its `## Progress` log, and a `## Result` section (what/where/surprises —
    enough for the next card's worker).
 3. For a `blocked` closeout, the card file updated: `status: blocked`,
-   `blocked: <card>` or `blocked: victor`, a dated entry in its `## Progress`
+   `blocked: <card>` (never `blocked: victor` — the worker decides; mission-control
+   POLICY §15), a dated entry in its `## Progress`
    log explaining the blocker, and a `## Result` section recording the
    completed work and blocking result.
 4. One line appended to [`STATUS.md`](STATUS.md) (newest first).

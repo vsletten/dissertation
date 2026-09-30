@@ -1,11 +1,11 @@
 # A3-barrier-ladder — connectivity × protonation barrier ladder (Phase 2)
 
-- status: blocked
+- status: ready
 - track: A (geochemistry)
 - priority: P1
 - machine: workstation (GPU campaigns; cluster-builder code is machine-any)
 - depends: A9b-sensitivity-ranking
-- blocked-on: victor
+- decided: 2026-09-30 — run the approximate deck at 350–450 K and at pH 3 (survey tier, ≤4 h per unit) to locate observable original-lattice release, then re-run the A9b sensitivity ranking in the first regime that releases; if none does within the platform envelope, close A3 as a documented no-result (reversible: yes; mission-control TASK-274)
 - claimed-by:
 
 ## Constraints

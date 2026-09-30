@@ -49,7 +49,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A9b-mechanism-reachability](cards/A9b-mechanism-reachability.md) | A | P0 | any | done | 260 live release paths + 60 boundary topology NO-GOs; finite biased sampler ✅ |
 | [A9b-reservoir-origin-contract](cards/A9b-reservoir-origin-contract.md) | A | P0 | any | done | A9 ✅; pH 3–5 open-flow contract + origin-safe release accounting |
 | [A9b-sensitivity-ranking](cards/A9b-sensitivity-ranking.md) | A | P0 | workstation | done | verified 29 × 8 campaign; all responses censored/unrankable; no irrelevant family |
-| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | blocked: victor | choose an observable-release regime or revise the model after A9b's all-censored result |
+| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | ready | decided 2026-09-30: run the approximate deck at 350–450 K and pH 3 to find observable release, re-rank there; none within §12 → close no-result |
 | [A3a-reactant-minimum-recovery](cards/A3a-reactant-minimum-recovery.md) | A | P1 | workstation | done | terminal microstate rejection; no minimum promoted |
 | [A3b-osa-neutral-n1-proton-microstate-stability](cards/A3b-osa-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; H52 became third mobile owner |
 | [A3c-osa-neutral-n1-mobile-proton-triad-conditioning](cards/A3c-osa-neutral-n1-mobile-proton-triad-conditioning.md) | A | P1 | workstation | done | verified triad-conditioning failure; owners retained, projected gradients red |
@@ -63,7 +63,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A7-kinetics-database](cards/A7-kinetics-database.md) | A | P2 | any | done | — |
 | [A2-production-energetics](cards/A2-production-energetics.md) | A | P1 | workstation | blocked: A9b-sensitivity-ranking | final banked survey/literature table after corrected ranking |
 | [A2a-si-neutral-production-path-rebuild](cards/A2a-si-neutral-production-path-rebuild.md) | A | P1 | workstation | done | exact r2SCAN-3c minima + A2 infrastructure ✅ |
-| [A2b-al-neutral-production-energetics](cards/A2b-al-neutral-production-energetics.md) | A | P1 | workstation | blocked: victor | banked 32.2 kcal/mol survey value; no supported replication target after A9b |
+| [A2b-al-neutral-production-energetics](cards/A2b-al-neutral-production-energetics.md) | A | P1 | workstation | blocked: A3-barrier-ladder | banked 32.2 kcal/mol survey value; closes on A3's re-ranking (sensitive → bank, insensitive → not needed) |
 | [A2b1-wb97mv-reactant-scf-recovery](cards/A2b1-wb97mv-reactant-scf-recovery.md) | A | P1 | workstation | done | independently verified finite SCF failure; no retry authorized |
 | [A2c-al-acid-production-energetics](cards/A2c-al-acid-production-energetics.md) | A | P1 | workstation | blocked: A2b | A1b banked one-water Al-acid route |
 | [A2d-oss-neutral-n4-production-energetics](cards/A2d-oss-neutral-n4-production-energetics.md) | A | P1 | workstation | blocked: A2c | documented embedded pilot; deterministic rebuild |

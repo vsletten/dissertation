@@ -6,7 +6,7 @@
 - machine: workstation (GPU campaign)
 - depends: A9b-sensitivity-ranking
 - claimed-by: hermes-custom-build-001
-- blocked-on: victor
+- blocked-on: A3-barrier-ladder (closes on A3's re-ranking: sensitive → bank the survey value, insensitive → not needed at this tier)
 
 ## Objective
 
