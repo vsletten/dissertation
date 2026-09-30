@@ -49,7 +49,7 @@ on main). Priority P0 > P1 > P2 within READY.
 | [A9b-mechanism-reachability](cards/A9b-mechanism-reachability.md) | A | P0 | any | done | 260 live release paths + 60 boundary topology NO-GOs; finite biased sampler ✅ |
 | [A9b-reservoir-origin-contract](cards/A9b-reservoir-origin-contract.md) | A | P0 | any | done | A9 ✅; pH 3–5 open-flow contract + origin-safe release accounting |
 | [A9b-sensitivity-ranking](cards/A9b-sensitivity-ranking.md) | A | P0 | workstation | done | verified 29 × 8 campaign; all responses censored/unrankable; no irrelevant family |
-| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | ready | decided 2026-09-30: run the approximate deck at 350–450 K and pH 3 to find observable release, re-rank there; none within §12 → close no-result |
+| [A3-barrier-ladder](cards/A3-barrier-ladder.md) | A | P1 | workstation | ready | decided 2026-09-30: run the approximate deck at 350–450 K and pH 3 to find observable release, re-rank there; none within §12 → close no-result; the current 298 K-only deck contract means the first unit is the validated T/pH survey runner (prerequisite recorded on the card) |
 | [A3a-reactant-minimum-recovery](cards/A3a-reactant-minimum-recovery.md) | A | P1 | workstation | done | terminal microstate rejection; no minimum promoted |
 | [A3b-osa-neutral-n1-proton-microstate-stability](cards/A3b-osa-neutral-n1-proton-microstate-stability.md) | A | P1 | workstation | done | verified inconclusive; H52 became third mobile owner |
 | [A3c-osa-neutral-n1-mobile-proton-triad-conditioning](cards/A3c-osa-neutral-n1-mobile-proton-triad-conditioning.md) | A | P1 | workstation | done | verified triad-conditioning failure; owners retained, projected gradients red |
