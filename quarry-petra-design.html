@@ -1,0 +1,340 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1"><style>:root{color-scheme:light}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}</style></head><body>
+<title>Quarry + Petra — From Ab Initio Barriers to Lattice Kinetics</title>
+<style>
+  :root {
+    --bg: #fbfaf7;
+    --ink: #26231e;
+    --muted: #6e6759;
+    --line: #e3dfd4;
+    --surface: #f3f1ea;
+    --code-bg: #f0eee6;
+    --accent: #14685a;
+    --accent-soft: #d3e4de;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #191b1e;
+      --ink: #e8e5de;
+      --muted: #9b968b;
+      --line: #31343a;
+      --surface: #202327;
+      --code-bg: #1e2125;
+      --accent: #55b59d;
+      --accent-soft: #1e3b34;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #191b1e;
+    --ink: #e8e5de;
+    --muted: #9b968b;
+    --line: #31343a;
+    --surface: #202327;
+    --code-bg: #1e2125;
+    --accent: #55b59d;
+    --accent-soft: #1e3b34;
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.65 -apple-system, "Segoe UI", "Noto Sans", Roboto, Ubuntu, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 52px 24px 72px; }
+  p, li, dd { max-width: 68ch; }
+  .eyebrow {
+    font-size: 0.78rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+    margin: 0 0 0.9rem;
+  }
+  h1 {
+    font-family: "Palatino Linotype", Palatino, "URW Palladio L", "Book Antiqua", Georgia, serif;
+    font-size: clamp(1.8rem, 4vw, 2.5rem);
+    line-height: 1.16;
+    font-weight: 600;
+    text-wrap: balance;
+    margin: 0 0 1rem;
+    max-width: 26ch;
+  }
+  .stand { font-size: 1.08rem; color: var(--muted); max-width: 62ch; margin: 0; }
+  .lattice { display: block; width: 100%; height: auto; color: var(--muted); margin: 2rem 0 0; }
+  section { border-top: 1px solid var(--line); margin-top: 2.75rem; padding-top: 2.1rem; }
+  h2 {
+    font-family: "Palatino Linotype", Palatino, "URW Palladio L", "Book Antiqua", Georgia, serif;
+    font-size: 1.42rem;
+    font-weight: 600;
+    line-height: 1.25;
+    text-wrap: balance;
+    margin: 0 0 1rem;
+  }
+  h3 { font-size: 1.02rem; margin: 1.8rem 0 0.5rem; }
+  a { color: var(--accent); }
+  code {
+    font-family: ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, "DejaVu Sans Mono", monospace;
+    font-size: 0.85em;
+    background: var(--code-bg);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+  }
+  .note {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    padding: 1.05rem 1.3rem;
+    margin: 1.4rem 0;
+  }
+  .note p { margin: 0.5rem 0; }
+  .note p:first-child { margin-top: 0; }
+  .note p:last-child { margin-bottom: 0; }
+  figure { margin: 2rem 0; }
+  .figwrap { overflow-x: auto; }
+  figure svg { display: block; max-width: 100%; height: auto; color: var(--ink); }
+  figcaption { font-size: 0.85rem; color: var(--muted); margin-top: 0.65rem; max-width: 68ch; }
+  ul { padding-left: 1.2rem; }
+  li { margin: 0.45rem 0; }
+  li strong { font-weight: 600; }
+  footer {
+    margin-top: 4rem;
+    border-top: 1px solid var(--line);
+    padding-top: 1.1rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Quarry + Petra · Science brief</p>
+    <h1>From ab initio barriers to exact lattice kinetics</h1>
+    <p class="stand">
+      The platform couples electronic-structure kinetics to stochastic lattice
+      dynamics. Quarry computes site-resolved transition-state-theory rate
+      constants on terminated aluminosilicate clusters; Petra propagates them
+      by rejection-free kinetic Monte Carlo on the declared crystal. It is the
+      classic QM → TST → KMC architecture rebuilt as one instrument — with the
+      software engineering explained along the way for readers who don't live
+      in it.
+    </p>
+    <svg class="lattice" viewBox="0 0 880 56" aria-hidden="true">
+      <defs>
+        <pattern id="lat" width="16" height="14" patternUnits="userSpaceOnUse">
+          <circle cx="8" cy="7" r="1.6" fill="currentColor" opacity="0.4"></circle>
+        </pattern>
+      </defs>
+      <rect x="0" y="0" width="880" height="56" fill="url(#lat)"></rect>
+      <g fill="var(--bg)">
+        <circle cx="568" cy="21" r="5"></circle><circle cx="616" cy="35" r="5"></circle>
+        <circle cx="664" cy="7" r="5"></circle><circle cx="680" cy="21" r="5"></circle>
+        <circle cx="696" cy="49" r="5"></circle><circle cx="728" cy="35" r="5"></circle>
+        <circle cx="744" cy="7" r="5"></circle><circle cx="776" cy="21" r="5"></circle>
+        <circle cx="792" cy="35" r="5"></circle><circle cx="808" cy="7" r="5"></circle>
+        <circle cx="824" cy="49" r="5"></circle><circle cx="840" cy="21" r="5"></circle>
+        <circle cx="856" cy="35" r="5"></circle>
+      </g>
+      <circle cx="520" cy="21" r="3.5" fill="var(--accent)"></circle>
+      <circle cx="520" cy="21" r="7.5" fill="none" stroke="var(--accent)" stroke-width="1.3"></circle>
+    </svg>
+  </header>
+
+  <section>
+    <h2>The rate side: Quarry</h2>
+    <p>
+      Barriers come from cluster calculations, tiered so that expensive theory
+      is spent only on structures that survive cheap theory: GFN2-xTB
+      pre-screening (with CREST for conformer and water-placement sampling) →
+      DFT geometry optimization with analytic frequencies → transition states
+      located by relaxed scans and CI-NEB, refined with Sella, and verified by
+      IRC → thermochemistry via quasi-RRHO → Eyring, with Wigner or Eckart
+      tunneling corrections. Eckart is not a nicety here: for the
+      low-temperature astrochemical applications below, tunneling <em>is</em>
+      the rate. A consumer GPU (RTX 4090 with GPU4PySCF) makes the
+      frequency-heavy TST workflow routine at cluster sizes the original
+      1990s-era work could not touch.
+    </p>
+    <figure>
+      <div class="figwrap">
+        <svg viewBox="0 0 920 195" role="img" aria-label="The tiered pipeline: cluster models, xTB screening, DFT optimization and frequencies, transition-state search with IRC, coupled-cluster calibration, then quasi-RRHO to Eyring rate constants, which are emitted as deck tables with provenance." style="min-width: 760px;">
+          <defs>
+            <marker id="parr" viewBox="0 0 8 6" refX="7" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+              <polygon points="0,0 8,3 0,6" fill="currentColor"></polygon>
+            </marker>
+          </defs>
+          <path d="M160,18 L755,18" stroke="currentColor" stroke-width="1" opacity="0.5" marker-end="url(#parr)"></path>
+          <text x="90" y="22" font-size="11.5" fill="currentColor" opacity="0.7" text-anchor="middle">cheap, many</text>
+          <text x="835" y="22" font-size="11.5" fill="currentColor" opacity="0.7" text-anchor="middle">expensive, few</text>
+          <g stroke="currentColor" stroke-opacity="0.45" fill="var(--surface)">
+            <rect x="15" y="40" width="130" height="64" rx="8"></rect>
+            <rect x="165" y="40" width="130" height="64" rx="8"></rect>
+            <rect x="315" y="40" width="130" height="64" rx="8"></rect>
+            <rect x="465" y="40" width="130" height="64" rx="8"></rect>
+            <rect x="615" y="40" width="130" height="64" rx="8"></rect>
+            <rect x="765" y="40" width="130" height="64" rx="8"></rect>
+          </g>
+          <g font-size="12.5" fill="currentColor" text-anchor="middle">
+            <text x="80" y="66" font-weight="600">Cluster models</text>
+            <text x="80" y="84" font-size="11.5" opacity="0.7">terminated, constrained</text>
+            <text x="230" y="66" font-weight="600">GFN2-xTB screen</text>
+            <text x="230" y="84" font-size="11.5" opacity="0.7">CREST sampling</text>
+            <text x="380" y="66" font-weight="600">DFT opt + freq</text>
+            <text x="380" y="84" font-size="11.5" opacity="0.7">analytic Hessians, GPU</text>
+            <text x="530" y="66" font-weight="600">TS + IRC</text>
+            <text x="530" y="84" font-size="11.5" opacity="0.7">scans · CI-NEB · Sella</text>
+            <text x="680" y="66" font-weight="600">CCSD(T) calibration</text>
+            <text x="680" y="84" font-size="11.5" opacity="0.7">DLPNO × canonical</text>
+            <text x="830" y="66" font-weight="600">quasi-RRHO → k(T)</text>
+            <text x="830" y="84" font-size="11.5" opacity="0.7">Eyring · tunneling</text>
+          </g>
+          <g stroke="currentColor" stroke-width="1.4" fill="none" marker-end="url(#parr)">
+            <path d="M145,72 L161,72"></path>
+            <path d="M295,72 L311,72"></path>
+            <path d="M445,72 L461,72"></path>
+            <path d="M595,72 L611,72"></path>
+            <path d="M745,72 L761,72"></path>
+            <path d="M830,104 L830,130"></path>
+          </g>
+          <rect x="740" y="132" width="180" height="42" rx="8" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.5"></rect>
+          <text x="830" y="157" font-size="12.5" fill="var(--accent)" text-anchor="middle" font-weight="600">deck tables, with provenance</text>
+        </svg>
+      </div>
+      <figcaption>
+        The tiered protocol. Every number that leaves the pipeline carries its
+        method, geometry hash, and date.
+      </figcaption>
+    </figure>
+    <p>
+      DFT barriers are spot-checked against DLPNO-CCSD(T), which is itself
+      cross-validated against canonical CCSD(T) run on an independent GPU
+      implementation — the two coupled-cluster engines agree to ~10⁻⁸ E<sub>h</sub>
+      on shared tests, with DLPNO within ~0.5 kJ/mol of canonical.
+    </p>
+    <div class="note">
+      <p>
+        <strong>Anchor result.</strong> Neutral Si–O–Si hydrolysis on a
+        disilicic-acid model (four-center water-attack mechanism):
+        ΔG‡(298 K) = 113.0 kJ/mol = 27.0 kcal/mol at B3LYP/def2-SVP, against
+        Xiao &amp; Lasaga's ~29 kcal/mol — one imaginary mode at the saddle,
+        proton delivered in the TS, IRC-connected. Stated caveats: double-ζ
+        basis, gas phase, quick-IRC on a soft mode. The production tier
+        (r²SCAN-3c geometries; ωB97M-V/def2-TZVPD + SMD single points; D4
+        dispersion) is specified and staged.
+      </p>
+      <p>
+        The target is not one number but the ladder: barriers resolved by
+        connectivity and protonation state for each bridging-site family
+        (Si–O–Si, Si–O–Al, Al–OH–Al), emitted as tabulated ΔEa versus
+        coordination.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>The dynamics side: Petra</h2>
+    <p>
+      Petra is a rejection-free (n-fold way / BKL) kinetic Monte Carlo engine:
+      exact sampling of the master equation, no rejected moves, stochastic
+      time steps from the total rate. The physics commitments that matter:
+    </p>
+    <ul>
+      <li><strong>Detailed balance is enforced, not assumed.</strong> Reverse rules are generated with k⁻ = k⁺·exp(ΔE/RT), and a load-time linter searches each site kind's state graph for closed thermodynamic cycles whose ΣΔE ≠ 0. The classic silent KMC sin — a model that pumps free energy out of nothing — becomes a loud warning with the offending cycle printed.</li>
+      <li><strong>Solution coupling via activities and chemical potentials.</strong> Attachment rates carry the standard a·exp(Δμ/RT) supersaturation factor; v1 treats the solution as an infinite reservoir with fixed activities.</li>
+      <li><strong>Environment dependence is data, and nonlinear by default.</strong> ΔEa versus neighbor count is a tabulated ladder (<code>by_count</code>), not a forced linear bond-count slope. Published per-connectivity barriers — quartz Q1/Q2/Q3, for instance — drop straight into a deck.</li>
+      <li><strong>Defects with elastic strain.</strong> Screw and edge dislocations are declared in the input; their analytic elastic fields enter local barriers with detailed-balance-consistent conventions. An etch-pit example drills a pit down a screw core, gated by ensemble tests.</li>
+      <li><strong>Ensembles are first-class.</strong> A run is (deck, seed); an ensemble is a seed sweep with real statistics — not the single-trajectory animation much of the lattice-modeling literature still publishes.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>What the engineering buys</h2>
+    <p>
+      Several design choices from the software side are worth translating,
+      because they are what make the platform usable as an instrument rather
+      than a codebase:
+    </p>
+    <ul>
+      <li><strong>The model is one document.</strong> Structure, state vocabulary, mechanism, kinetics, thermodynamic conditions, and run specification all live in a single human-readable input deck (TOML — an indented plain-text format). The engine contains no chemistry; a different mineral or mechanism is a different deck run by the same binary. Decks can be diffed, versioned, and shared like manuscripts. The predecessor — the 1999 dissertation code this generalizes — hard-coded all of it, so every model change was a software project.</li>
+      <li><strong>Exact reproducibility as law.</strong> The same deck and random seed produce the same trajectory, bit for bit, on every run. Replication means re-running a file, not re-implementing a method section.</li>
+      <li><strong>Numbers carry receipts.</strong> Every rate constant traces back to its calculation — method, geometry, date — in a lightweight provenance database that travels with the results.</li>
+      <li><strong>Verification you can inspect.</strong> The engine is gated against closed-form statistical mechanics (two-state equilibrium occupancies, Langmuir isotherms, waiting-time distributions); a paranoid mode recomputes all event bookkeeping from scratch and asserts agreement; and the kaolinite model is cross-checked site-by-site against an independently verified port of the original code.</li>
+      <li><strong>You can watch.</strong> The engine compiles to WebAssembly and runs in an ordinary browser: edit the deck, re-seed, play and scrub the trajectory.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Where it's pointed</h2>
+    <figure>
+      <div class="figwrap">
+        <svg viewBox="0 0 680 320" role="img" aria-label="A closed loop: Quarry's QM barriers are emitted into deck reaction tables; Petra runs KMC ensembles; observables are compared against experiment; discrepancies refine the barriers and decks." style="min-width: 560px;">
+          <defs>
+            <marker id="larr" viewBox="0 0 8 6" refX="7" refY="3" markerWidth="8" markerHeight="6" orient="auto">
+              <polygon points="0,0 8,3 0,6" fill="currentColor"></polygon>
+            </marker>
+          </defs>
+          <g stroke="currentColor" stroke-opacity="0.45" fill="var(--surface)">
+            <rect x="230" y="20" width="220" height="54" rx="8"></rect>
+            <rect x="440" y="130" width="210" height="54" rx="8"></rect>
+            <rect x="230" y="245" width="220" height="54" rx="8"></rect>
+            <rect x="30" y="130" width="210" height="54" rx="8"></rect>
+          </g>
+          <g font-size="12.5" fill="currentColor" text-anchor="middle">
+            <text x="340" y="43" font-weight="600">Quarry</text>
+            <text x="340" y="61" font-size="11.5" opacity="0.7">QM barriers → k(T)</text>
+            <text x="545" y="153" font-weight="600">Deck</text>
+            <text x="545" y="171" font-size="11.5" opacity="0.7">[[reactions]] tables</text>
+            <text x="340" y="268" font-weight="600">Petra</text>
+            <text x="340" y="286" font-size="11.5" opacity="0.7">KMC ensembles</text>
+            <text x="135" y="153" font-weight="600">Observables</text>
+            <text x="135" y="171" font-size="11.5" opacity="0.7">vs experiment</text>
+          </g>
+          <g stroke="currentColor" stroke-width="1.4" fill="none" marker-end="url(#larr)">
+            <path d="M450,47 L545,47 L545,126"></path>
+            <path d="M545,184 L545,272 L454,272"></path>
+            <path d="M230,272 L135,272 L135,188"></path>
+            <path d="M135,130 L135,47 L226,47"></path>
+          </g>
+          <g font-size="11.5" fill="currentColor" opacity="0.75">
+            <text x="497" y="38" text-anchor="middle">emit, with provenance</text>
+            <text x="556" y="232">compile &amp; run</text>
+            <text x="182" y="262" text-anchor="middle">rates · spectra · morphology</text>
+            <text x="143" y="95">refine barriers &amp; decks</text>
+          </g>
+          <text x="340" y="163" font-size="12" fill="currentColor" opacity="0.55" text-anchor="middle" font-style="italic">the closed loop</text>
+        </svg>
+      </div>
+      <figcaption>
+        The full circuit the platform is built to close — first for kaolinite,
+        then for anything a deck can declare.
+      </figcaption>
+    </figure>
+    <ul>
+      <li><strong>Kaolinite, closed-loop.</strong> Regenerate the dissertation model's rate table from computed k(T) and compare simulated dissolution kinetics against experimental activation energies (~29 kJ/mol acidic; 33–51 kJ/mol alkaline).</li>
+      <li><strong>The field–lab discrepancy.</strong> Quantitative attribution of how much of the 2–4 missing orders of magnitude in field weathering rates is intrinsic surface evolution — defect depletion, surface aging, rate-spectrum narrowing — which the defect and ensemble machinery makes addressable for the first time.</li>
+      <li><strong>Pitting corrosion.</strong> Ensemble pit-initiation-time statistics against published stainless-steel distributions. Localized attack at defects is the same mathematics as dissolution.</li>
+      <li><strong>Grain-surface astrochemistry.</strong> Tunneling-dominated rates at 10–50 K for ice-mantle chemistry, in a field whose community databases openly flag order-of-magnitude guessed rates and accept computed submissions.</li>
+      <li><strong>Ar release from muscovite.</strong> A lattice whose structure evolves (dehydroxylation, delamination) while Ar migrates with siting-specific barriers — toward synthetic ⁴⁰Ar/³⁹Ar step-heating spectra, testing a 1998 empirical interpretation by its own author.</li>
+    </ul>
+    <div class="note">
+      <p>
+        <strong>Honest limits.</strong> The engine is on-lattice: no explicit
+        solvent, no off-lattice relaxation (analytic defect strain fields are
+        the deliberate exception). Stiff fast-reversible pairs are detected and
+        reported but not yet accelerated. Current barriers are first-tier
+        (double-ζ, gas phase); the production protocol is staged. Barriers are
+        always inputs to the dynamics — Petra never computes them on the fly.
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      Quarry + Petra platform · science brief · August 2026. Companion briefs
+      cover the same platform for engineering and general audiences.
+    </p>
+  </footer>
+</div>
+
+</body></html>
